@@ -44,6 +44,38 @@ pub struct CoreError {
 	pub detail: Option<String>,
 }
 
+impl CoreError {
+	pub(crate) fn not_found(code: &'static str, message: &str) -> Self {
+		Self {
+			category: ErrorCategory::NotFound,
+			code,
+			retryable: false,
+			message: message.into(),
+			detail: None,
+		}
+	}
+
+	pub(crate) fn conflict(code: &'static str, message: String) -> Self {
+		Self {
+			category: ErrorCategory::Conflict,
+			code,
+			retryable: false,
+			message,
+			detail: None,
+		}
+	}
+
+	pub(crate) fn internal(code: &'static str, detail: String) -> Self {
+		Self {
+			category: ErrorCategory::Internal,
+			code,
+			retryable: false,
+			message: "an internal invariant failed".into(),
+			detail: Some(detail),
+		}
+	}
+}
+
 impl From<StoreError> for CoreError {
 	fn from(error: StoreError) -> Self {
 		match error {

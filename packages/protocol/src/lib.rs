@@ -9,6 +9,8 @@
 //! starts with a fixed preface and a restricted handshake (ADR-0090).
 
 mod control;
+mod conversation;
+mod event;
 mod frame;
 mod handshake;
 mod message;
@@ -16,6 +18,11 @@ mod message;
 pub use control::{
 	ControlError, MAX_NESTING_DEPTH, decode_control, encode_control,
 };
+pub use conversation::{
+	CommandRequest, CommandResponse, Conversation, ConversationList,
+	ConversationSnapshot, Retention, Run, RunLifecycle,
+};
+pub use event::{Actor, Event};
 pub use frame::{
 	Frame, FrameError, FrameKind, FrameLimits, FrameReader, FrameWriter,
 	MAX_CONTROL_FRAME, MAX_DATA_FRAME,

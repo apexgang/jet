@@ -275,6 +275,8 @@ version = "0.1.0"
 dependencies = [
  "jet-store",
  "pretty_assertions",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "uuid",
@@ -353,6 +355,7 @@ version = "0.1.0"
 dependencies = [
  "pretty_assertions",
  "rusqlite",
+ "serde",
  "tempfile",
  "thiserror",
  "uuid",

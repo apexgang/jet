@@ -3,6 +3,11 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::conversation::{
+	CommandRequest, CommandResponse, ConversationList, ConversationSnapshot,
+};
+use crate::event::Event;
+
 /// Correlates a client request with its server reply.
 pub type RequestId = u64;
 
@@ -17,6 +22,13 @@ pub enum ClientMessage {
 		/// The Query to run.
 		query: QueryRequest,
 	},
+	/// Execute a Command and return its durable outcome.
+	Command {
+		/// Correlation identifier echoed in the reply.
+		id: RequestId,
+		/// The Command to execute.
+		command: CommandRequest,
+	},
 }
 
 /// Control message sent by `jetd`.
@@ -29,6 +41,13 @@ pub enum ServerMessage {
 		id: RequestId,
 		/// The snapshot.
 		result: QueryResponse,
+	},
+	/// Durable Command outcome.
+	CommandResult {
+		/// Identifier of the request being answered.
+		id: RequestId,
+		/// The outcome.
+		result: CommandResponse,
 	},
 	/// A request failed, or the connection is being refused.
 	Error {
@@ -45,6 +64,18 @@ pub enum ServerMessage {
 pub enum QueryRequest {
 	/// Snapshot of the Plane's daemon status.
 	Status,
+	/// Every Conversation on the Plane.
+	Conversations,
+	/// One Conversation with all of its Runs.
+	Conversation {
+		/// The Conversation to read.
+		conversation_id: Uuid,
+	},
+	/// A page of journal Events strictly after a sequence.
+	Events {
+		/// The sequence to resume after; zero for the whole journal.
+		after: u64,
+	},
 }
 
 /// Query snapshots.
@@ -53,6 +84,15 @@ pub enum QueryRequest {
 pub enum QueryResponse {
 	/// Snapshot of the Plane's daemon status.
 	Status(PlaneStatus),
+	/// Every Conversation on the Plane.
+	Conversations(ConversationList),
+	/// One Conversation with all of its Runs.
+	Conversation(ConversationSnapshot),
+	/// One page of journal Events in sequence order.
+	Events {
+		/// The Events.
+		events: Vec<Event>,
+	},
 }
 
 /// Wire form of the Plane status snapshot.

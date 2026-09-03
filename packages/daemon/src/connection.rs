@@ -127,6 +127,9 @@ impl Connection {
 				ClientMessage::Query { id, query } => {
 					answer(core, actor, id, &query)
 				}
+				ClientMessage::Command { id, command } => {
+					execute(core, actor, id, &command)
+				}
 			};
 			if self.send(&reply).await.is_err() {
 				return;
@@ -189,10 +192,28 @@ fn answer(
 	id: RequestId,
 	query: &jet_protocol::QueryRequest,
 ) -> ServerMessage {
-	match core.query(actor, translate::query(query)) {
-		Ok(result) => ServerMessage::QueryResult {
+	match core
+		.query(actor, translate::query(query))
+		.and_then(translate::query_result)
+	{
+		Ok(result) => ServerMessage::QueryResult { id, result },
+		Err(error) => ServerMessage::Error {
+			id: Some(id),
+			error: translate::error(error),
+		},
+	}
+}
+
+fn execute(
+	core: &Core,
+	actor: &Actor,
+	id: RequestId,
+	command: &jet_protocol::CommandRequest,
+) -> ServerMessage {
+	match core.execute(actor, translate::command(command)) {
+		Ok(outcome) => ServerMessage::CommandResult {
 			id,
-			result: translate::query_result(result),
+			result: translate::command_outcome(outcome),
 		},
 		Err(error) => ServerMessage::Error {
 			id: Some(id),

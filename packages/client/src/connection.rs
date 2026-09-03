@@ -3,10 +3,10 @@
 use std::path::Path;
 
 use jet_protocol::{
-	CODEC_JSON_V1, ClientHello, ClientMessage, ControlError, Frame, FrameError,
-	FrameLimits, FrameReader, FrameWriter, PROTOCOL_VERSION, PlaneStatus,
-	QueryRequest, QueryResponse, RequestId, ServerHello, ServerMessage,
-	VersionRange, WireError, decode_control, encode_control,
+	CODEC_JSON_V1, ClientHello, ClientMessage, CommandRequest, CommandResponse,
+	ControlError, Frame, FrameError, FrameLimits, FrameReader, FrameWriter,
+	PROTOCOL_VERSION, QueryRequest, QueryResponse, RequestId, ServerHello,
+	ServerMessage, VersionRange, WireError, decode_control, encode_control,
 };
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
@@ -102,31 +102,50 @@ impl Client {
 		}
 	}
 
-	/// Runs the status Query and returns the Plane status snapshot.
-	///
-	/// # Errors
-	///
-	/// Returns [`ClientError::Remote`] when the daemon reports a stable
-	/// error, or the transport failure otherwise.
-	pub async fn status(&mut self) -> Result<PlaneStatus, ClientError> {
-		let id = self.next_id;
-		self.next_id += 1;
-		self.send(&ClientMessage::Query {
-			id,
-			query: QueryRequest::Status,
-		})
-		.await?;
+	/// Runs `query` and returns its snapshot.
+	pub(crate) async fn query(
+		&mut self,
+		query: QueryRequest,
+	) -> Result<QueryResponse, ClientError> {
+		let id = self.next_id();
+		self.send(&ClientMessage::Query { id, query }).await?;
 		match self.receive::<ServerMessage>().await? {
 			ServerMessage::QueryResult {
 				id: reply_id,
-				result: QueryResponse::Status(status),
-			} if reply_id == id => Ok(status),
+				result,
+			} if reply_id == id => Ok(result),
 			ServerMessage::Error {
 				id: reply_id,
 				error,
 			} if reply_id == Some(id) => Err(ClientError::Remote(error)),
 			other => Err(ClientError::Unexpected(format!("{other:?}"))),
 		}
+	}
+
+	/// Executes `command` and returns its durable outcome.
+	pub(crate) async fn command(
+		&mut self,
+		command: CommandRequest,
+	) -> Result<CommandResponse, ClientError> {
+		let id = self.next_id();
+		self.send(&ClientMessage::Command { id, command }).await?;
+		match self.receive::<ServerMessage>().await? {
+			ServerMessage::CommandResult {
+				id: reply_id,
+				result,
+			} if reply_id == id => Ok(result),
+			ServerMessage::Error {
+				id: reply_id,
+				error,
+			} if reply_id == Some(id) => Err(ClientError::Remote(error)),
+			other => Err(ClientError::Unexpected(format!("{other:?}"))),
+		}
+	}
+
+	fn next_id(&mut self) -> RequestId {
+		let id = self.next_id;
+		self.next_id += 1;
+		id
 	}
 
 	async fn send<T: serde::Serialize>(

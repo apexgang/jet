@@ -8,8 +8,14 @@
 //! system crash or power loss. SQL and migrations stay private; callers see
 //! typed records and stable errors.
 
+mod clock;
+mod conversation;
+mod journal;
 mod migrations;
 mod plane;
+mod records;
+mod run;
+mod transaction;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -17,6 +23,11 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 
 pub use plane::PlaneRecord;
+pub use records::{
+	ActorRecord, ConversationRecord, EventRecord, NewConversation, NewEvent,
+	NewRun, Retention, RunLifecycle, RunRecord,
+};
+pub use transaction::{ReadTransaction, WriteTransaction};
 
 /// Failure inside the store, without native SQLite strings in the category.
 #[derive(Debug, thiserror::Error)]
@@ -48,7 +59,8 @@ impl From<rusqlite::Error> for StoreError {
 	}
 }
 
-/// One open Plane store.
+/// One open Plane store. Current state and the Event journal are read and
+/// written through [`Store::read`] and [`Store::write`].
 #[derive(Debug)]
 pub struct Store {
 	connection: Mutex<Connection>,

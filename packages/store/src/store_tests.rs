@@ -1,6 +1,10 @@
 use pretty_assertions::assert_eq;
+use uuid::Uuid;
 
-use super::{PlaneRecord, Store};
+use super::{
+	ActorRecord, ConversationRecord, EventRecord, NewConversation, NewEvent,
+	NewRun, PlaneRecord, Retention, RunLifecycle, RunRecord, Store, StoreError,
+};
 
 #[test]
 fn plane_identity_and_start_count_survive_reopening_the_store() {
@@ -41,8 +45,162 @@ fn opening_a_store_in_a_missing_directory_is_reported_as_unavailable() {
 	let error = Store::open(&dir.path().join("missing").join("plane.sqlite3"))
 		.unwrap_err();
 
-	assert!(
-		matches!(error, super::StoreError::Unavailable(_)),
-		"{error:?}"
+	assert!(matches!(error, StoreError::Unavailable(_)), "{error:?}");
+}
+
+fn actor() -> ActorRecord {
+	ActorRecord::InteractiveClient {
+		client_id: Uuid::nil(),
+	}
+}
+
+fn event(conversation_id: Uuid, run_id: Option<Uuid>, kind: &str) -> NewEvent {
+	NewEvent {
+		event_id: Uuid::now_v7(),
+		actor: actor(),
+		conversation_id: Some(conversation_id),
+		run_id,
+		kind: kind.into(),
+		payload_version: 1,
+		payload: "{}".into(),
+	}
+}
+
+#[test]
+fn conversations_runs_and_events_survive_reopening_the_store() {
+	let dir = tempfile::tempdir().unwrap();
+	let path = dir.path().join("plane.sqlite3");
+	let conversation_id = Uuid::now_v7();
+	let run_id = Uuid::now_v7();
+
+	let first = Store::open(&path).unwrap();
+	let (conversation, run, created, ended) = first
+		.write(|tx| {
+			let conversation = tx.insert_conversation(NewConversation {
+				conversation_id,
+				retention: Retention::Retain,
+			})?;
+			assert_eq!(tx.runs(conversation_id)?, vec![]);
+			let created = tx.append_event(event(
+				conversation_id,
+				None,
+				"conversation.created",
+			))?;
+			tx.insert_run(NewRun {
+				run_id,
+				conversation_id,
+			})?;
+			let run =
+				tx.update_run_lifecycle(run_id, RunLifecycle::Completed)?;
+			let ended = tx.append_event(event(
+				conversation_id,
+				Some(run_id),
+				"run.lifecycle_changed",
+			))?;
+			Ok::<_, StoreError>((conversation, run, created, ended))
+		})
+		.unwrap();
+	drop(first);
+
+	let second = Store::open(&path).unwrap();
+	let (conversations, runs, events, cursor) = second
+		.read(|tx| {
+			Ok::<_, StoreError>((
+				tx.conversations()?,
+				tx.runs(conversation_id)?,
+				tx.events_after(0, 10)?,
+				tx.event_cursor()?,
+			))
+		})
+		.unwrap();
+	let later = second
+		.write(|tx| tx.append_event(event(conversation_id, None, "later")))
+		.unwrap();
+
+	assert_eq!(
+		conversation,
+		ConversationRecord {
+			conversation_id,
+			retention: Retention::Retain,
+			created_at_unix_ms: conversation.created_at_unix_ms,
+		}
 	);
+	assert_eq!(
+		run,
+		RunRecord {
+			run_id,
+			conversation_id,
+			lifecycle: RunLifecycle::Completed,
+			created_at_unix_ms: run.created_at_unix_ms,
+			ended_at_unix_ms: run.ended_at_unix_ms,
+		}
+	);
+	assert!(run.ended_at_unix_ms.is_some());
+	assert_eq!(conversations, vec![conversation]);
+	assert_eq!(runs, vec![run]);
+	assert_eq!(
+		events,
+		vec![
+			EventRecord {
+				sequence: 1,
+				..created
+			},
+			EventRecord {
+				sequence: 2,
+				..ended
+			}
+		]
+	);
+	assert_eq!(cursor, 2);
+	assert_eq!(later.sequence, 3);
+}
+
+#[test]
+fn a_failed_write_leaves_no_trace_of_its_changes() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = Store::open(&dir.path().join("plane.sqlite3")).unwrap();
+	let conversation_id = Uuid::now_v7();
+
+	let error = store
+		.write(|tx| {
+			tx.insert_conversation(NewConversation {
+				conversation_id,
+				retention: Retention::ForgetAfterFinalRun,
+			})?;
+			tx.append_event(event(
+				conversation_id,
+				None,
+				"conversation.created",
+			))?;
+			Err::<(), _>(StoreError::Integrity("rejected by the caller".into()))
+		})
+		.unwrap_err();
+
+	let (conversation, cursor) = store
+		.read(|tx| {
+			Ok::<_, StoreError>((
+				tx.conversation(conversation_id)?,
+				tx.event_cursor()?,
+			))
+		})
+		.unwrap();
+	assert!(matches!(error, StoreError::Integrity(_)), "{error:?}");
+	assert_eq!((conversation, cursor), (None, 0));
+}
+
+#[test]
+fn a_run_cannot_be_recorded_for_an_unknown_conversation() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = Store::open(&dir.path().join("plane.sqlite3")).unwrap();
+
+	let error = store
+		.write(|tx| {
+			tx.insert_run(NewRun {
+				run_id: Uuid::now_v7(),
+				conversation_id: Uuid::now_v7(),
+			})
+		})
+		.unwrap_err();
+
+	assert!(matches!(error, StoreError::Integrity(_)), "{error:?}");
 }
