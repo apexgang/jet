@@ -308,7 +308,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jet-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "jet-protocol",
  "serde",
@@ -319,7 +319,7 @@ dependencies = [
 
 [[package]]
 name = "jet-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "jet-store",
  "pretty_assertions",
@@ -333,25 +333,25 @@ dependencies = [
 
 [[package]]
 name = "jet-craft-claude"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "jet-craft-sdk",
 ]
 
 [[package]]
 name = "jet-craft-codex"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "jet-craft-sdk",
 ]
 
 [[package]]
 name = "jet-craft-sdk"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "jet-daemon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "jet-client",
@@ -371,11 +371,11 @@ dependencies = [
 
 [[package]]
 name = "jet-fueld"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "jet-protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pretty_assertions",
  "serde",
@@ -387,7 +387,7 @@ dependencies = [
 
 [[package]]
 name = "jet-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pretty_assertions",
  "rustix",
@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "jet-store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pretty_assertions",
  "rusqlite",
