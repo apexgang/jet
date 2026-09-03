@@ -27,9 +27,9 @@ pub struct CommandId(pub Uuid);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandEnvelope {
 	/// Actor-scoped identity of the Command.
-	pub command_id: CommandId,
+	command_id: CommandId,
 	/// Requested mutation.
-	pub command: Command,
+	command: Command,
 	request_digest: [u8; 32],
 }
 
