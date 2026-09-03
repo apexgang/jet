@@ -76,7 +76,7 @@ async fn status_is_answered_before_and_after_a_daemon_crash_and_restart() {
 			plane_id: before.plane_id,
 			daemon_starts: 2,
 			started_at_unix_ms: after.started_at_unix_ms,
-			core_version: "0.1.0".into(),
+			core_version: env!("CARGO_PKG_VERSION").into(),
 		}
 	);
 	assert!(after.started_at_unix_ms >= before.started_at_unix_ms);

@@ -17,8 +17,8 @@ fn a_second_daemon_is_refused_and_told_who_owns_the_plane() {
 	let home = JetHome::at(dir.path().join(".jet"));
 	home.prepare().unwrap();
 
-	let _first = LifetimeLock::acquire(&home, metadata(41)).unwrap();
-	let error = LifetimeLock::acquire(&home, metadata(42)).unwrap_err();
+	let _first = LifetimeLock::acquire(&home, &metadata(41)).unwrap();
+	let error = LifetimeLock::acquire(&home, &metadata(42)).unwrap_err();
 
 	assert_eq!(
 		error,
@@ -34,9 +34,9 @@ fn stale_metadata_from_a_released_lock_does_not_establish_ownership() {
 	let home = JetHome::at(dir.path().join(".jet"));
 	home.prepare().unwrap();
 
-	let first = LifetimeLock::acquire(&home, metadata(41)).unwrap();
+	let first = LifetimeLock::acquire(&home, &metadata(41)).unwrap();
 	drop(first);
-	let second = LifetimeLock::acquire(&home, metadata(42)).unwrap();
+	let second = LifetimeLock::acquire(&home, &metadata(42));
 
-	assert_eq!(second.metadata(), &metadata(42));
+	assert!(second.is_ok(), "{second:?}");
 }

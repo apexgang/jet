@@ -30,7 +30,7 @@ pub(crate) async fn run(
 		version: env!("CARGO_PKG_VERSION").into(),
 		channel,
 	};
-	let lock = match LifetimeLock::acquire(&home, metadata) {
+	let lock = match LifetimeLock::acquire(&home, &metadata) {
 		Ok(lock) => lock,
 		Err(LockError::Held { owner }) => {
 			report_owner(&home, owner.as_ref());
@@ -41,13 +41,10 @@ pub(crate) async fn run(
 			return ExitCode::from(EXIT_FAILURE);
 		}
 	};
-	let core = match Store::open(&home.store_path())
-		.map_err(Into::into)
-		.and_then(Core::start)
-	{
-		Ok(core) => Arc::new(core),
+	let store = match Store::open(&home.store_path()) {
+		Ok(store) => store,
 		Err(error) => {
-			eprintln!("jetd: cannot start the core: {error}");
+			eprintln!("jetd: cannot open the Plane store: {error}");
 			return ExitCode::from(EXIT_FAILURE);
 		}
 	};
@@ -58,6 +55,14 @@ pub(crate) async fn run(
 			return ExitCode::from(EXIT_FAILURE);
 		}
 	};
+	// The start is recorded only once the daemon can actually serve.
+	let core = match Core::start(store) {
+		Ok(core) => Arc::new(core),
+		Err(error) => {
+			eprintln!("jetd: cannot start the core: {error}");
+			return ExitCode::from(EXIT_FAILURE);
+		}
+	};
 	println!(
 		"{}",
 		serde_json::json!({
@@ -65,25 +70,25 @@ pub(crate) async fn run(
 			"socket": listener.socket_path().display().to_string(),
 		})
 	);
-	serve(&listener, &core).await;
+	let exit = serve(&listener, &core).await;
 	drop(listener);
 	drop(lock);
-	ExitCode::SUCCESS
+	exit
 }
 
-async fn serve(listener: &LocalListener, core: &Arc<Core>) {
+async fn serve(listener: &LocalListener, core: &Arc<Core>) -> ExitCode {
 	let Ok(mut terminate) = signal(SignalKind::terminate()) else {
 		eprintln!("jetd: cannot listen for SIGTERM");
-		return;
+		return ExitCode::from(EXIT_FAILURE);
 	};
 	let Ok(mut interrupt) = signal(SignalKind::interrupt()) else {
 		eprintln!("jetd: cannot listen for SIGINT");
-		return;
+		return ExitCode::from(EXIT_FAILURE);
 	};
 	loop {
 		tokio::select! {
-			_ = terminate.recv() => return,
-			_ = interrupt.recv() => return,
+			_ = terminate.recv() => return ExitCode::SUCCESS,
+			_ = interrupt.recv() => return ExitCode::SUCCESS,
 			accepted = listener.accept() => match accepted {
 				Ok(stream) => {
 					tokio::spawn(crate::connection::serve(Arc::clone(core), stream));
@@ -93,7 +98,7 @@ async fn serve(listener: &LocalListener, core: &Arc<Core>) {
 				}
 				Err(error) => {
 					eprintln!("jetd: accept failed: {error}");
-					return;
+					return ExitCode::from(EXIT_FAILURE);
 				}
 			},
 		}

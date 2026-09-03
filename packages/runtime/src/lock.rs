@@ -67,7 +67,6 @@ impl PartialEq for LockError {
 #[derive(Debug)]
 pub struct LifetimeLock {
 	file: File,
-	metadata: DaemonMetadata,
 }
 
 impl LifetimeLock {
@@ -79,7 +78,7 @@ impl LifetimeLock {
 	/// live process already holds the lock, or [`LockError::Io`] otherwise.
 	pub fn acquire(
 		home: &JetHome,
-		metadata: DaemonMetadata,
+		metadata: &DaemonMetadata,
 	) -> Result<Self, LockError> {
 		let mut file = OpenOptions::new()
 			.read(true)
@@ -100,18 +99,12 @@ impl LifetimeLock {
 		file.set_len(0)?;
 		file.rewind()?;
 		file.write_all(
-			serde_json::to_string(&metadata)
+			serde_json::to_string(metadata)
 				.map_err(std::io::Error::other)?
 				.as_bytes(),
 		)?;
 		file.sync_all()?;
-		Ok(Self { file, metadata })
-	}
-
-	/// The metadata recorded for this owner.
-	#[must_use]
-	pub fn metadata(&self) -> &DaemonMetadata {
-		&self.metadata
+		Ok(Self { file })
 	}
 }
 

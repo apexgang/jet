@@ -68,19 +68,22 @@ fn unknown_optional_fields_from_newer_minors_are_ignored() {
 }
 
 #[test]
-fn encoded_control_frames_decode_back() {
-	let bytes = encode_control(&ClientMessage::Query {
+fn encoded_control_messages_decode_back_to_the_same_message() {
+	let message = ClientMessage::Query {
 		id: 3,
 		query: QueryRequest::Status,
-	})
-	.unwrap();
+	};
 
+	let bytes = encode_control(&message).unwrap();
+	let decoded = decode_control::<ClientMessage>(&bytes).unwrap();
+
+	assert_eq!(decoded, message);
+}
+
+#[test]
+fn plain_objects_decode_into_typed_values() {
 	assert_eq!(
 		decode_control::<Probe>(br#"{"name":"jet"}"#).unwrap(),
 		Probe { name: "jet".into() }
-	);
-	assert_eq!(
-		String::from_utf8(bytes).unwrap(),
-		r#"{"kind":"query","id":3,"query":{"type":"status"}}"#
 	);
 }

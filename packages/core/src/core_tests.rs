@@ -1,7 +1,9 @@
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
-use super::{Actor, ClientId, Core, PlaneStatus, Query, QueryResult};
+use super::{
+	Actor, CORE_VERSION, ClientId, Core, PlaneStatus, Query, QueryResult,
+};
 use jet_store::Store;
 
 fn actor() -> Actor {
@@ -31,7 +33,7 @@ fn status_reports_the_persisted_plane_across_core_restarts() {
 			plane_id: before.plane_id,
 			daemon_starts: 2,
 			started_at: after.started_at,
-			core_version: "0.1.0",
+			core_version: CORE_VERSION,
 		}
 	);
 	assert!(after.started_at >= before.started_at);

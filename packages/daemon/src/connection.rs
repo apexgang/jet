@@ -1,6 +1,7 @@
 //! Serves one local Jet protocol connection: preface, handshake, requests.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use jet_core::{Actor, ClientId, Core};
 use jet_protocol::{
@@ -12,46 +13,68 @@ use jet_protocol::{
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::time::timeout;
 
 use crate::translate;
+
+/// How long a peer may take to complete the preface and handshake.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct Connection {
 	reader: FrameReader<OwnedReadHalf>,
 	writer: FrameWriter<OwnedWriteHalf>,
 }
 
-pub(crate) async fn serve(core: Arc<Core>, mut stream: UnixStream) {
+/// Why no message could be received on the connection.
+enum ReceiveError {
+	/// The peer closed the connection or the transport failed.
+	Disconnected,
+	/// The peer violated the protocol; the reply explains how.
+	Protocol(WireError),
+}
+
+pub(crate) async fn serve(core: Arc<Core>, stream: UnixStream) {
+	let Ok(Some((mut connection, actor))) =
+		timeout(HANDSHAKE_TIMEOUT, open(stream)).await
+	else {
+		return;
+	};
+	connection.serve_requests(&core, &actor).await;
+}
+
+async fn open(mut stream: UnixStream) -> Option<(Connection, Actor)> {
 	let mut preface = vec![0u8; PREFACE.len()];
 	if stream.read_exact(&mut preface).await.is_err() || preface != PREFACE {
-		return;
+		return None;
 	}
 	let (read, write) = stream.into_split();
 	let mut connection = Connection {
 		reader: FrameReader::new(read),
 		writer: FrameWriter::new(write),
 	};
-	let Some(actor) = connection.handshake().await else {
-		return;
-	};
-	connection.serve_requests(&core, &actor).await;
+	let actor = connection.handshake().await?;
+	Some((connection, actor))
 }
 
 impl Connection {
 	async fn handshake(&mut self) -> Option<Actor> {
 		let hello: ClientHello = match self.receive().await {
 			Ok(hello) => hello,
-			Err(error) => {
+			Err(ReceiveError::Disconnected) => return None,
+			Err(ReceiveError::Protocol(error)) => {
 				let _ = self.send(&ServerHello::Rejected { error }).await;
 				return None;
 			}
 		};
 		let rejection = if hello.codec != CODEC_JSON_V1 {
-			Some(incompatible(
+			Some(wire_error(
+				ErrorCategory::Incompatible,
 				"protocol.unsupported_codec",
 				format!("only the {CODEC_JSON_V1} codec is supported"),
 			))
 		} else if !hello.protocol.contains(PROTOCOL_VERSION) {
-			Some(incompatible(
+			Some(wire_error(
+				ErrorCategory::Incompatible,
 				"protocol.unsupported_version",
 				format!(
 					"only protocol version {PROTOCOL_VERSION} is supported"
@@ -80,8 +103,8 @@ impl Connection {
 		loop {
 			let message: ClientMessage = match self.receive().await {
 				Ok(message) => message,
-				Err(error) if error.code == "connection.closed" => return,
-				Err(error) => {
+				Err(ReceiveError::Disconnected) => return,
+				Err(ReceiveError::Protocol(error)) => {
 					let _ = self
 						.send(&ServerMessage::Error { id: None, error })
 						.await;
@@ -110,44 +133,40 @@ impl Connection {
 			.map_err(|_| ())
 	}
 
+	/// Receives one control message. Native decoder detail stays local so
+	/// only stable, safe messages reach the peer (ADR-0068).
 	async fn receive<T: serde::de::DeserializeOwned>(
 		&mut self,
-	) -> Result<T, WireError> {
+	) -> Result<T, ReceiveError> {
+		let invalid = |code: &str, message: &str| {
+			ReceiveError::Protocol(wire_error(
+				ErrorCategory::InvalidInput,
+				code,
+				message.into(),
+			))
+		};
 		match self.reader.read().await {
 			Ok(Frame::Control(payload)) => {
-				decode_control(&payload).map_err(|error| WireError {
-					category: ErrorCategory::InvalidInput,
-					code: "protocol.malformed".into(),
-					retryable: false,
-					message: format!("malformed control frame: {error}"),
+				decode_control(&payload).map_err(|_| {
+					invalid(
+						"protocol.malformed",
+						"the control frame is not a valid message",
+					)
 				})
 			}
-			Ok(Frame::Data(_)) => Err(WireError {
-				category: ErrorCategory::InvalidInput,
-				code: "protocol.unexpected_data_frame".into(),
-				retryable: false,
-				message: "no data stream is open on this connection".into(),
-			}),
-			Err(FrameError::Closed) => Err(WireError {
-				category: ErrorCategory::Unavailable,
-				code: "connection.closed".into(),
-				retryable: false,
-				message: "the client closed the connection".into(),
-			}),
+			Ok(Frame::Data(_)) => Err(invalid(
+				"protocol.unexpected_data_frame",
+				"no data stream is open on this connection",
+			)),
 			Err(FrameError::Oversized { .. } | FrameError::UnknownKind(_)) => {
-				Err(WireError {
-					category: ErrorCategory::InvalidInput,
-					code: "protocol.invalid_frame".into(),
-					retryable: false,
-					message: "the frame violated the protocol limits".into(),
-				})
+				Err(invalid(
+					"protocol.invalid_frame",
+					"the frame violated the protocol limits",
+				))
 			}
-			Err(FrameError::Io(_)) => Err(WireError {
-				category: ErrorCategory::Unavailable,
-				code: "connection.failed".into(),
-				retryable: true,
-				message: "the connection failed".into(),
-			}),
+			Err(FrameError::Closed | FrameError::Io(_)) => {
+				Err(ReceiveError::Disconnected)
+			}
 		}
 	}
 }
@@ -170,9 +189,13 @@ fn answer(
 	}
 }
 
-fn incompatible(code: &str, message: String) -> WireError {
+fn wire_error(
+	category: ErrorCategory,
+	code: &str,
+	message: String,
+) -> WireError {
 	WireError {
-		category: ErrorCategory::Incompatible,
+		category,
 		code: code.into(),
 		retryable: false,
 		message,
