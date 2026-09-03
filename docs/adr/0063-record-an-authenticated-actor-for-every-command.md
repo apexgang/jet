@@ -1,0 +1,3 @@
+# Record an authenticated Actor for every Command
+
+Every state-changing Command and attributable Event records an Actor and origin: interactive user client, Harness through a Jet Craft, Scheduled task, Auto-continue policy, Utility-model job, or internal recovery operation. A remote request also records the authenticated paired installation that carried it, without replacing the originating Actor. `jet-core` enforces authorization from these identities rather than relying on hidden GUI controls, allowing its Interface to exclude operations such as Project removal from Harness and automation authority while preserving a complete audit trail.

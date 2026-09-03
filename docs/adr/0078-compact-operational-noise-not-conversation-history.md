@@ -1,0 +1,3 @@
+# Compact operational noise, not Conversation history
+
+Snapshots accelerate queries but do not redefine retention. Semantic Conversation Events and Change checkpoints follow their Conversation's retention policy. Compaction may remove superseded projections, replay frames, and operational noise only after verified snapshot coverage and a grace period, while sequence tombstones preserve cursor correctness. A cursor older than retained replay returns an explicit expiration result and requires a fresh fenced snapshot; Jet never presents partial replay as continuous. Permanent semantic deletion continues exclusively through Jet Trash rules.

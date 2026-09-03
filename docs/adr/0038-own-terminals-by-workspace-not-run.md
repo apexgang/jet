@@ -1,0 +1,3 @@
+# Own terminals by Workspace, not Run
+
+A side-panel terminal is a reconnectable Workspace terminal, not a Harness Run or child of one. A terminal-role `jetfueld` keeps its PTY alive across GUI disconnections and `jetd` crashes or upgrades, using an eight-MiB rolling replay spool by default and emitting an explicit output-gap record whenever older bytes are displaced. It exists only while the terminal is open. The terminal appears separately in process views and ends only when explicitly closed or when its Workspace is removed. Its activity changes the normal Workspace diff and is attributed in the audit trail; terminal output is not copied into Conversation history unless the user explicitly saves it as an Artifact.

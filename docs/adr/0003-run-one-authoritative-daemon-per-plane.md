@@ -1,0 +1,3 @@
+# Run one authoritative daemon per Plane
+
+Each Plane runs one `jetd` daemon that owns its local processes and orchestration state. It holds an exclusive lifetime lock under owner-only `~/.jet/runtime` with validated process, version, and installation-channel metadata; another GUI- or Homebrew-managed daemon refuses to start and reports the active owner rather than competing for state or sockets. A crash releases the operating-system lock, and stale descriptive metadata never establishes ownership by itself. GUI clients connect to one or more local or remote daemons and render the same structured conversations, human-readable activity, and diffs regardless of location, avoiding a required central fleet coordinator while retaining a unified cross-Plane view.

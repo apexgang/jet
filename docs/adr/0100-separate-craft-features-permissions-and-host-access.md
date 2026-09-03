@@ -1,0 +1,3 @@
+# Separate Craft features, permissions, and host access
+
+The Craft specification distinguishes supported Harness features from Jet-enforced broker permissions and from disclosed same-user host access such as executables, filesystem areas, environment inputs, and network destinations. Installation rejects unknown required declarations and disables only the affected optional feature for unknown optional declarations. Any update that expands broker permissions or declared host access requires renewed confirmation, preventing capability presentation from being mistaken for portable OS containment.

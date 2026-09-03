@@ -1,0 +1,3 @@
+# Pin v1 Harness parity to a conformance matrix
+
+Jet publishes a v1 conformance matrix pinned to explicitly tested Codex and Claude Code versions. For each accepted feature and Harness, the matrix classifies delivery as native delegation, Jet-equivalent behavior, generic Presentation fallback, or unavailable because the Harness does not expose the capability; every feature-list item is a release blocker wherever that Harness supports it. Harness releases after the cutoff do not silently expand the v1 contract and may run only with a visible unverified-compatibility warning until tested and added to the matrix.

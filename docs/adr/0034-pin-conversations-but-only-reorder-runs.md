@@ -1,0 +1,3 @@
+# Pin Conversations but only reorder Runs
+
+Conversation order and pins live in a persisted Conversation layout. By default each Plane has one shared layout synchronized through `jetd`; a GUI setting may instead select a private layout associated with that installation's Client identity, whether connected locally or through Pairing. Pins in either layout protect a Conversation's history and Workspace from automatic cleanup. Disabling a Paired client retains its layout; before revocation, the GUI lists its private pins and requires the user to transfer them to the shared layout or discard them. Runs have no pin state: a GUI may reorder them for presentation, but that ordering remains GUI-local and does not affect execution priority or synchronized orchestration state.

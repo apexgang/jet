@@ -1,0 +1,3 @@
+# Publish Artifacts by hash after atomic write
+
+Artifact ingestion streams into a private temporary file with declared and actual size enforcement, computes SHA-256 while writing, synchronizes the file, and atomically renames it to its content address before database references commit. V1 defaults to at most 512 MiB per Artifact and 2 GiB of newly ingested Artifacts per Run, configurable by the user but always subordinate to Disk-pressure mode. Oversized Workspace files remain in place and receive metadata references instead of ingestion. Readers can verify hashes when corruption is suspected. Garbage collection uses reference marking plus a grace period, and ingestion or collection never follows user-controlled symbolic links.

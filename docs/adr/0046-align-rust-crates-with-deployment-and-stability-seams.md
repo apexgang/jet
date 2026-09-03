@@ -1,0 +1,3 @@
+# Align Rust crates with deployment and stability seams
+
+The Rust workspace starts with deep crates at deployment or stability seams rather than one crate per feature: `jet-core`, `jet-store`, `jet-protocol`, `jet-runtime`, `jet-client`, and `jet-craft-sdk`, plus the `jetd`, `jetfueld`, `jet-craft-codex`, and `jet-craft-claude` executables. Scheduling, retention, Git automation, search, pairing, approvals, and other features remain internal modules until a real reuse, deployment, or compatibility seam justifies extraction. This keeps Interfaces small, Implementation knowledge local, compile graphs understandable, and binary dependencies intentional.

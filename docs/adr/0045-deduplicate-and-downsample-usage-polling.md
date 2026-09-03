@@ -1,0 +1,3 @@
+# Deduplicate and downsample usage polling
+
+Each Plane's `jetd` deduplicates Provider-usage polling for its local Account bindings across connected clients: at most once per minute while an account panel or associated Run is active, every fifteen minutes otherwise, plus explicit manual refresh, with Provider limits and bounded failure backoff taking precedence. Jet stores changed raw snapshots and periodic heartbeats for ninety days, hourly aggregates for one year, and daily aggregates thereafter so long-term diagrams remain useful without unbounded high-resolution growth. Cross-Plane grouping and freshness selection occur in the GUI without creating an authoritative fleet record.

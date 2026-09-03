@@ -1,0 +1,3 @@
+# Separate Provider accounts from Plane bindings
+
+A Provider account is a federated logical vendor identity assembled by GUI clients from Plane-local Account bindings. Bindings group automatically only when the Provider supplies a stable account identity; otherwise the user links them explicitly using non-secret metadata. Every Plane remains authoritative for its own binding, policies, and credentials, and bulk edits are visible independent Commands rather than synchronization. Core-owned files and opaque Credential references live under `~/.jet`, while tokens, SSH keys, GitHub credentials, and other secret material remain in the platform credential store; Jet never copies Codex or Claude credentials between Planes.

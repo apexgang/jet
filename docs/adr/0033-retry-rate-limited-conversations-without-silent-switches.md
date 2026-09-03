@@ -1,0 +1,3 @@
+# Retry rate-limited Conversations without silent switches
+
+An Auto-continue policy resolves from a Conversation override, then the Home Plane's Account-binding default, then off. Jet honors a Provider-supplied reset time when available or applies the configured delay with bounded backoff and a maximum retry count. It retries the same Account binding and native Conversation without silently changing account, Model, or Harness. New user input cancels the pending Auto-continue entry while retaining the quota wait. Automatic Handoff and Auto-continue are mutually exclusive outcomes selected by the same rate-limit policy; a cross-Harness Handoff occurs only when that explicit outcome is enabled.
