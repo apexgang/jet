@@ -1,0 +1,19 @@
+[package]
+name = "jet-craft-codex"
+description = "Bundled Jet Craft for the Codex Harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+jet-craft-sdk.workspace = true
+[dev-dependencies]
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "jet-craft-codex"
+path = "src/main.rs"

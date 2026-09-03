@@ -1,0 +1,15 @@
+[package]
+name = "jet-craft-sdk"
+description = "SDK for building Jet Crafts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true

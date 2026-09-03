@@ -1,0 +1,5 @@
+interface:
+  display_name: "GitHub Merge"
+  short_description: "Update GitHub remote when work is complete"
+policy:
+  allow_implicit_invocation: false
