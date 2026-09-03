@@ -17,10 +17,13 @@ fn client_hello_has_the_agreed_wire_shape() {
 		protocol: VersionRange { min: 1, max: 1 },
 		codec: "json-v1".into(),
 		client_id: Uuid::nil(),
+		max_control_frame: 1_048_576,
+		max_data_frame: 262_144,
+		capabilities: vec![],
 	};
 	assert_eq!(
 		json(&hello),
-		r#"{"protocol":{"min":1,"max":1},"codec":"json-v1","client_id":"00000000-0000-0000-0000-000000000000"}"#
+		r#"{"protocol":{"min":1,"max":1},"codec":"json-v1","client_id":"00000000-0000-0000-0000-000000000000","max_control_frame":1048576,"max_data_frame":262144,"capabilities":[]}"#
 	);
 }
 
@@ -31,6 +34,7 @@ fn server_hello_variants_have_the_agreed_wire_shape() {
 		codec: "json-v1".into(),
 		max_control_frame: 1_048_576,
 		max_data_frame: 262_144,
+		capabilities: vec![],
 	};
 	let rejected = ServerHello::Rejected {
 		error: WireError {
@@ -43,7 +47,7 @@ fn server_hello_variants_have_the_agreed_wire_shape() {
 	assert_eq!(
 		(json(&welcome), json(&rejected)),
 		(
-			r#"{"kind":"welcome","protocol":1,"codec":"json-v1","max_control_frame":1048576,"max_data_frame":262144}"#.to_string(),
+			r#"{"kind":"welcome","protocol":1,"codec":"json-v1","max_control_frame":1048576,"max_data_frame":262144,"capabilities":[]}"#.to_string(),
 			r#"{"kind":"rejected","error":{"category":"incompatible","code":"protocol.unsupported_version","retryable":false,"message":"no common protocol version"}}"#.to_string(),
 		)
 	);

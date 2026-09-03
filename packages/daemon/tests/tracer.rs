@@ -9,8 +9,8 @@ use std::process::Stdio;
 use jet_client::Client;
 use jet_protocol::{
 	CODEC_JSON_V1, ClientHello, ErrorCategory, Frame, FrameReader, FrameWriter,
-	PREFACE, PlaneStatus, ServerHello, VersionRange, WireError, decode_control,
-	encode_control,
+	MAX_CONTROL_FRAME, MAX_DATA_FRAME, PREFACE, PROTOCOL_VERSION, PlaneStatus,
+	ServerHello, VersionRange, WireError, decode_control, encode_control,
 };
 use pretty_assertions::assert_eq;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -121,31 +121,64 @@ async fn sigterm_shuts_jetd_down_and_removes_its_socket() {
 	);
 }
 
+fn hello(codec: &str, max_control_frame: u32) -> ClientHello {
+	ClientHello {
+		protocol: VersionRange { min: 1, max: 1 },
+		codec: codec.into(),
+		client_id: Uuid::new_v4(),
+		max_control_frame,
+		max_data_frame: u32::try_from(MAX_DATA_FRAME).unwrap(),
+		capabilities: vec![],
+	}
+}
+
+async fn raw_handshake(daemon: &Daemon, hello: &ClientHello) -> ServerHello {
+	let mut stream = UnixStream::connect(&daemon.socket).await.unwrap();
+	stream.write_all(PREFACE).await.unwrap();
+	let (read, write) = stream.into_split();
+	let mut writer = FrameWriter::new(write);
+	let mut reader = FrameReader::new(read);
+	writer
+		.write(&Frame::Control(encode_control(hello).unwrap()))
+		.await
+		.unwrap();
+	let Frame::Control(reply) = reader.read().await.unwrap() else {
+		panic!("expected a control frame");
+	};
+	decode_control(&reply).unwrap()
+}
+
+#[tokio::test]
+async fn the_handshake_negotiates_the_smaller_frame_limits() {
+	let dir = tempfile::tempdir().unwrap();
+	let home = dir.path().join(".jet");
+	let daemon = start_jetd(&home).await;
+
+	let reply = raw_handshake(&daemon, &hello(CODEC_JSON_V1, 4096)).await;
+
+	assert_eq!(
+		reply,
+		ServerHello::Welcome {
+			protocol: PROTOCOL_VERSION,
+			codec: CODEC_JSON_V1.into(),
+			max_control_frame: 4096,
+			max_data_frame: u32::try_from(MAX_DATA_FRAME).unwrap(),
+			capabilities: vec![],
+		}
+	);
+}
+
 #[tokio::test]
 async fn an_unsupported_codec_is_rejected_during_the_handshake() {
 	let dir = tempfile::tempdir().unwrap();
 	let home = dir.path().join(".jet");
 	let daemon = start_jetd(&home).await;
 
-	let mut stream = UnixStream::connect(&daemon.socket).await.unwrap();
-	stream.write_all(PREFACE).await.unwrap();
-	let (read, write) = stream.into_split();
-	let mut writer = FrameWriter::new(write);
-	let mut reader = FrameReader::new(read);
-	let hello = ClientHello {
-		protocol: VersionRange { min: 1, max: 1 },
-		codec: "cbor-v1".into(),
-		client_id: Uuid::new_v4(),
-	};
-	writer
-		.write(&Frame::Control(encode_control(&hello).unwrap()))
-		.await
-		.unwrap();
-
-	let Frame::Control(reply) = reader.read().await.unwrap() else {
-		panic!("expected a control frame");
-	};
-	let reply: ServerHello = decode_control(&reply).unwrap();
+	let reply = raw_handshake(
+		&daemon,
+		&hello("cbor-v1", u32::try_from(MAX_CONTROL_FRAME).unwrap()),
+	)
+	.await;
 	assert_eq!(
 		reply,
 		ServerHello::Rejected {

@@ -2,8 +2,8 @@ use pretty_assertions::assert_eq;
 use tokio::io::{AsyncWriteExt, duplex};
 
 use super::{
-	Frame, FrameError, FrameKind, FrameReader, FrameWriter, MAX_CONTROL_FRAME,
-	MAX_DATA_FRAME,
+	Frame, FrameError, FrameKind, FrameLimits, FrameReader, FrameWriter,
+	MAX_CONTROL_FRAME, MAX_DATA_FRAME,
 };
 
 #[tokio::test]
@@ -94,6 +94,29 @@ async fn writer_refuses_oversized_frames() {
 			kind: FrameKind::Data,
 			declared: MAX_DATA_FRAME + 1,
 			limit: MAX_DATA_FRAME,
+		}
+	);
+}
+
+#[tokio::test]
+async fn writer_honors_negotiated_limits_below_the_protocol_maxima() {
+	let (client, _server) = duplex(64);
+	let mut writer = FrameWriter::new(client);
+	writer.set_limits(FrameLimits::default().negotiate(FrameLimits {
+		control: 16,
+		data: 8,
+	}));
+
+	let error = writer
+		.write(&Frame::Control(vec![b'{'; 17]))
+		.await
+		.unwrap_err();
+	assert_eq!(
+		error,
+		FrameError::Oversized {
+			kind: FrameKind::Control,
+			declared: 17,
+			limit: 16,
 		}
 	);
 }

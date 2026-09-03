@@ -40,6 +40,43 @@ impl FrameKind {
 	}
 }
 
+/// Per-kind send limits, negotiated down from the protocol maxima during
+/// the handshake.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameLimits {
+	/// Largest control frame payload that may be sent.
+	pub control: usize,
+	/// Largest data frame payload that may be sent.
+	pub data: usize,
+}
+
+impl Default for FrameLimits {
+	fn default() -> Self {
+		Self {
+			control: MAX_CONTROL_FRAME,
+			data: MAX_DATA_FRAME,
+		}
+	}
+}
+
+impl FrameLimits {
+	/// The limits both peers can honor: the smaller of each pair.
+	#[must_use]
+	pub fn negotiate(self, other: Self) -> Self {
+		Self {
+			control: self.control.min(other.control),
+			data: self.data.min(other.data),
+		}
+	}
+
+	fn for_kind(self, kind: FrameKind) -> usize {
+		match kind {
+			FrameKind::Control => self.control,
+			FrameKind::Data => self.data,
+		}
+	}
+}
+
 /// One decoded frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Frame {
@@ -176,12 +213,21 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
 #[derive(Debug)]
 pub struct FrameWriter<W> {
 	inner: W,
+	limits: FrameLimits,
 }
 
 impl<W: AsyncWrite + Unpin> FrameWriter<W> {
-	/// Wraps a writable stream.
+	/// Wraps a writable stream, sending up to the protocol maxima.
 	pub fn new(inner: W) -> Self {
-		Self { inner }
+		Self {
+			inner,
+			limits: FrameLimits::default(),
+		}
+	}
+
+	/// Applies the limits negotiated during the handshake.
+	pub fn set_limits(&mut self, limits: FrameLimits) {
+		self.limits = limits;
 	}
 
 	/// Writes one frame and flushes it.
@@ -189,22 +235,24 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
 	/// # Errors
 	///
 	/// Returns [`FrameError::Oversized`] without writing anything when the
-	/// payload exceeds its kind's limit, or the transport failure otherwise.
+	/// payload exceeds the negotiated limit for its kind, or the transport
+	/// failure otherwise.
 	pub async fn write(&mut self, frame: &Frame) -> Result<(), FrameError> {
 		let kind = frame.kind();
 		let payload = frame.payload();
-		if payload.len() > kind.limit() {
+		let limit = self.limits.for_kind(kind);
+		if payload.len() > limit {
 			return Err(FrameError::Oversized {
 				kind,
 				declared: payload.len(),
-				limit: kind.limit(),
+				limit,
 			});
 		}
 		let length = u32::try_from(payload.len()).map_err(|_| {
 			FrameError::Oversized {
 				kind,
 				declared: payload.len(),
-				limit: kind.limit(),
+				limit,
 			}
 		})?;
 		let mut buffer = Vec::with_capacity(HEADER_LEN + payload.len());

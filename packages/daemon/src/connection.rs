@@ -6,9 +6,9 @@ use std::time::Duration;
 use jet_core::{Actor, ClientId, Core};
 use jet_protocol::{
 	CODEC_JSON_V1, ClientHello, ClientMessage, ErrorCategory, Frame,
-	FrameError, FrameReader, FrameWriter, MAX_CONTROL_FRAME, MAX_DATA_FRAME,
-	PREFACE, PROTOCOL_VERSION, RequestId, ServerHello, ServerMessage,
-	WireError, decode_control, encode_control,
+	FrameError, FrameLimits, FrameReader, FrameWriter, PREFACE,
+	PROTOCOL_VERSION, RequestId, ServerHello, ServerMessage, WireError,
+	decode_control, encode_control,
 };
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixStream;
@@ -80,6 +80,12 @@ impl Connection {
 					"only protocol version {PROTOCOL_VERSION} is supported"
 				),
 			))
+		} else if hello.max_control_frame == 0 || hello.max_data_frame == 0 {
+			Some(wire_error(
+				ErrorCategory::InvalidInput,
+				"protocol.invalid_frame_limits",
+				"frame limits must be greater than zero".into(),
+			))
 		} else {
 			None
 		};
@@ -87,13 +93,19 @@ impl Connection {
 			let _ = self.send(&ServerHello::Rejected { error }).await;
 			return None;
 		}
+		let limits = FrameLimits::default().negotiate(FrameLimits {
+			control: hello.max_control_frame as usize,
+			data: hello.max_data_frame as usize,
+		});
 		let welcome = ServerHello::Welcome {
 			protocol: PROTOCOL_VERSION,
 			codec: CODEC_JSON_V1.into(),
-			max_control_frame: frame_limit(MAX_CONTROL_FRAME),
-			max_data_frame: frame_limit(MAX_DATA_FRAME),
+			max_control_frame: frame_limit(limits.control),
+			max_data_frame: frame_limit(limits.data),
+			capabilities: vec![],
 		};
 		self.send(&welcome).await.ok()?;
+		self.writer.set_limits(limits);
 		Some(Actor::InteractiveClient {
 			client_id: ClientId(hello.client_id),
 		})

@@ -17,15 +17,26 @@ fn a_second_daemon_is_refused_and_told_who_owns_the_plane() {
 	let home = JetHome::at(dir.path().join(".jet"));
 	home.prepare().unwrap();
 
-	let _first = LifetimeLock::acquire(&home, &metadata(41)).unwrap();
+	let owner = metadata(std::process::id());
+
+	let _first = LifetimeLock::acquire(&home, &owner).unwrap();
 	let error = LifetimeLock::acquire(&home, &metadata(42)).unwrap_err();
 
-	assert_eq!(
-		error,
-		LockError::Held {
-			owner: Some(metadata(41))
-		}
-	);
+	assert_eq!(error, LockError::Held { owner: Some(owner) });
+}
+
+#[test]
+fn metadata_naming_a_dead_process_is_not_reported_as_the_owner() {
+	let dir = tempfile::tempdir().unwrap();
+	let home = JetHome::at(dir.path().join(".jet"));
+	home.prepare().unwrap();
+	let mut exited = std::process::Command::new("true").spawn().unwrap();
+	exited.wait().unwrap();
+
+	let _first = LifetimeLock::acquire(&home, &metadata(exited.id())).unwrap();
+	let error = LifetimeLock::acquire(&home, &metadata(42)).unwrap_err();
+
+	assert_eq!(error, LockError::Held { owner: None });
 }
 
 #[test]

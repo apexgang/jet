@@ -9,6 +9,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, Write};
 
 use rustix::fs::FlockOperation;
+use rustix::process::Pid;
 use serde::{Deserialize, Serialize};
 
 use crate::JetHome;
@@ -116,10 +117,27 @@ impl Drop for LifetimeLock {
 	}
 }
 
+/// Reads the owner's metadata and validates it against the live system:
+/// the process it names must exist and the version must be present.
+/// Anything else is reported as unreadable rather than trusted.
 fn read_owner(file: &mut File) -> Option<DaemonMetadata> {
 	let mut contents = String::new();
 	file.read_to_string(&mut contents).ok()?;
-	serde_json::from_str(&contents).ok()
+	let metadata: DaemonMetadata = serde_json::from_str(&contents).ok()?;
+	if metadata.version.is_empty() || !process_exists(metadata.pid) {
+		return None;
+	}
+	Some(metadata)
+}
+
+fn process_exists(pid: u32) -> bool {
+	let Some(pid) = i32::try_from(pid).ok().and_then(Pid::from_raw) else {
+		return false;
+	};
+	match rustix::process::test_kill_process(pid) {
+		Ok(()) | Err(rustix::io::Errno::PERM) => true,
+		Err(_) => false,
+	}
 }
 
 #[cfg(test)]

@@ -4,9 +4,9 @@ use std::path::Path;
 
 use jet_protocol::{
 	CODEC_JSON_V1, ClientHello, ClientMessage, ControlError, Frame, FrameError,
-	FrameReader, FrameWriter, PROTOCOL_VERSION, PlaneStatus, QueryRequest,
-	QueryResponse, RequestId, ServerHello, ServerMessage, VersionRange,
-	WireError, decode_control, encode_control,
+	FrameLimits, FrameReader, FrameWriter, PROTOCOL_VERSION, PlaneStatus,
+	QueryRequest, QueryResponse, RequestId, ServerHello, ServerMessage,
+	VersionRange, WireError, decode_control, encode_control,
 };
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
@@ -64,6 +64,7 @@ impl Client {
 			writer: FrameWriter::new(write),
 			next_id: 1,
 		};
+		let accepted = FrameLimits::default();
 		let hello = ClientHello {
 			protocol: VersionRange {
 				min: PROTOCOL_VERSION,
@@ -71,12 +72,25 @@ impl Client {
 			},
 			codec: CODEC_JSON_V1.into(),
 			client_id,
+			max_control_frame: limit(accepted.control),
+			max_data_frame: limit(accepted.data),
+			capabilities: vec![],
 		};
 		client.send(&hello).await?;
 		match client.receive::<ServerHello>().await? {
 			ServerHello::Welcome {
-				protocol, codec, ..
-			} if protocol == PROTOCOL_VERSION && codec == CODEC_JSON_V1 => Ok(client),
+				protocol,
+				codec,
+				max_control_frame,
+				max_data_frame,
+				..
+			} if protocol == PROTOCOL_VERSION && codec == CODEC_JSON_V1 => {
+				client.writer.set_limits(FrameLimits {
+					control: max_control_frame as usize,
+					data: max_data_frame as usize,
+				});
+				Ok(client)
+			}
 			ServerHello::Welcome {
 				protocol, codec, ..
 			} => Err(ClientError::Unexpected(format!(
@@ -134,4 +148,8 @@ impl Client {
 			)),
 		}
 	}
+}
+
+fn limit(limit: usize) -> u32 {
+	u32::try_from(limit).unwrap_or(u32::MAX)
 }

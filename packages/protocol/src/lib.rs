@@ -17,8 +17,8 @@ pub use control::{
 	ControlError, MAX_NESTING_DEPTH, decode_control, encode_control,
 };
 pub use frame::{
-	Frame, FrameError, FrameKind, FrameReader, FrameWriter, MAX_CONTROL_FRAME,
-	MAX_DATA_FRAME,
+	Frame, FrameError, FrameKind, FrameLimits, FrameReader, FrameWriter,
+	MAX_CONTROL_FRAME, MAX_DATA_FRAME,
 };
 pub use handshake::{
 	CODEC_JSON_V1, ClientHello, PREFACE, PROTOCOL_VERSION, ServerHello,

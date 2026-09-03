@@ -38,6 +38,14 @@ pub struct ClientHello {
 	pub codec: String,
 	/// Durable Client identity of the connecting installation.
 	pub client_id: Uuid,
+	/// Largest control frame the client is willing to receive.
+	pub max_control_frame: u32,
+	/// Largest data frame the client is willing to receive.
+	pub max_data_frame: u32,
+	/// Protocol capability flags the client supports. No flags are defined
+	/// in v1; compatible minors may introduce them.
+	#[serde(default)]
+	pub capabilities: Vec<String>,
 }
 
 /// Server reply to a [`ClientHello`].
@@ -50,10 +58,13 @@ pub enum ServerHello {
 		protocol: u32,
 		/// Selected codec.
 		codec: String,
-		/// Largest control frame the server accepts.
+		/// Negotiated control frame limit both peers honor when sending.
 		max_control_frame: u32,
-		/// Largest data frame the server accepts.
+		/// Negotiated data frame limit both peers honor when sending.
 		max_data_frame: u32,
+		/// Protocol capability flags the server supports.
+		#[serde(default)]
+		capabilities: Vec<String>,
 	},
 	/// The server refuses the connection; it closes the stream afterwards.
 	Rejected {
