@@ -275,6 +275,8 @@ version = "0.1.0"
 dependencies = [
  "jet-store",
  "pretty_assertions",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "uuid",

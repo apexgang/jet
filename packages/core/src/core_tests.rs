@@ -19,12 +19,18 @@ fn status_reports_the_persisted_plane_across_core_restarts() {
 
 	let first = Core::start(Store::open(&path).unwrap()).unwrap();
 	let QueryResult::Status(before) =
-		first.query(&actor(), Query::Status).unwrap();
+		first.query(&actor(), Query::Status).unwrap()
+	else {
+		panic!("expected a status snapshot");
+	};
 	drop(first);
 
 	let second = Core::start(Store::open(&path).unwrap()).unwrap();
 	let QueryResult::Status(after) =
-		second.query(&actor(), Query::Status).unwrap();
+		second.query(&actor(), Query::Status).unwrap()
+	else {
+		panic!("expected a status snapshot");
+	};
 
 	assert_eq!(before.daemon_starts, 1);
 	assert_eq!(
