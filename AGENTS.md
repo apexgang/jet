@@ -11,3 +11,7 @@ Use the five default canonical triage labels. See `docs/agents/triage-labels.md`
 ### Domain docs
 
 This repository uses a single-context layout. See `docs/agents/domain.md`.
+
+### Jet backend
+
+When working on the Jet backend under `packages/`, read `packages/AGENTS.md`.
