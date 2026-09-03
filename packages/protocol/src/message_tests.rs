@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use super::{
 	ClientMessage, ErrorCategory, PlaneStatus, QueryRequest, QueryResponse,
-	ServerMessage, WireError,
+	RecoveryAction, ServerMessage, WireError,
 };
 use crate::conversation::{
 	CommandRequest, CommandResponse, ConflictState, Conversation,
@@ -48,6 +48,7 @@ fn server_hello_variants_have_the_agreed_wire_shape() {
 			retryable: false,
 			message: "no common protocol version".into(),
 			revision_conflict: None,
+			recovery_actions: vec![],
 		},
 	};
 	assert_eq!(
@@ -93,6 +94,7 @@ fn error_messages_carry_a_stable_error_body() {
 			retryable: true,
 			message: "the Plane store is unavailable".into(),
 			revision_conflict: None,
+			recovery_actions: vec![],
 		},
 	};
 	assert_eq!(
@@ -157,6 +159,9 @@ fn revision_preconditions_and_conflicts_have_the_agreed_wire_shape() {
 				current_revision: 3,
 				safe_state: ConflictState::Run { run },
 			}),
+			recovery_actions: vec![RecoveryAction::RefreshRun {
+				run_id: Uuid::nil(),
+			}],
 		},
 	};
 
@@ -164,7 +169,7 @@ fn revision_preconditions_and_conflicts_have_the_agreed_wire_shape() {
 		(json(&command), json(&conflict)),
 		(
 			r#"{"kind":"command","id":5,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"transition_run","run_id":"00000000-0000-0000-0000-000000000000","expected_revision":2,"lifecycle":"active"}}"#.to_string(),
-			r#"{"kind":"error","id":5,"error":{"category":"conflict","code":"run.revision_conflict","retryable":false,"message":"the Run changed since the Command was prepared","revision_conflict":{"current_revision":3,"safe_state":{"type":"run","run":{"run_id":"00000000-0000-0000-0000-000000000000","conversation_id":"00000000-0000-0000-0000-000000000000","revision":3,"lifecycle":"active","created_at_unix_ms":1,"ended_at_unix_ms":null}}}}}"#.to_string(),
+			r#"{"kind":"error","id":5,"error":{"category":"conflict","code":"run.revision_conflict","retryable":false,"message":"the Run changed since the Command was prepared","revision_conflict":{"current_revision":3,"safe_state":{"type":"run","run":{"run_id":"00000000-0000-0000-0000-000000000000","conversation_id":"00000000-0000-0000-0000-000000000000","revision":3,"lifecycle":"active","created_at_unix_ms":1,"ended_at_unix_ms":null}}},"recovery_actions":[{"type":"refresh_run","run_id":"00000000-0000-0000-0000-000000000000"}]}}"#.to_string(),
 		)
 	);
 }

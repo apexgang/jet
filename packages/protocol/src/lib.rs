@@ -34,5 +34,5 @@ pub use handshake::{
 };
 pub use message::{
 	ClientMessage, ErrorCategory, PlaneStatus, QueryRequest, QueryResponse,
-	RequestId, ServerMessage, WireError,
+	RecoveryAction, RequestId, ServerMessage, WireError,
 };

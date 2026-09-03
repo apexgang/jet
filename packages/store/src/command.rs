@@ -34,17 +34,9 @@ impl ReadTransaction<'_> {
 					let actor_kind: String = row.get(0)?;
 					let actor_id: String = row.get(1)?;
 					let command_id: String = row.get(2)?;
-					let digest: Vec<u8> = row.get(3)?;
-					let request_digest: [u8; 32] =
-						digest.try_into().map_err(|bytes: Vec<u8>| {
-							column_error(
-								3,
-								format!(
-									"command digest has {} bytes",
-									bytes.len()
-								),
-							)
-						})?;
+					let digest: Option<Vec<u8>> = row.get(3)?;
+					let request_digest =
+						digest.map(parse_digest).transpose()?;
 					Ok(CommandReceiptRecord {
 						actor: ActorRecord::parse(&actor_kind, &actor_id, 1)?,
 						command_id: parse_uuid(2, &command_id)?,
@@ -87,4 +79,30 @@ impl WriteTransaction<'_> {
 		)?;
 		Ok(())
 	}
+
+	/// Discards digests and outcomes whose retry window ended while keeping
+	/// their Actor-scoped identities as permanent expiry tombstones.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the receipts cannot be pruned.
+	pub fn prune_command_receipts_before(
+		&self,
+		cutoff_unix_ms: i64,
+	) -> Result<(), StoreError> {
+		self.transaction.execute(
+			"UPDATE command_receipts
+			 SET request_digest = NULL, outcome_version = NULL, outcome = NULL
+			 WHERE recorded_at_unix_ms < ?1 AND request_digest IS NOT NULL",
+			[cutoff_unix_ms],
+		)?;
+		Ok(())
+	}
+}
+
+fn parse_digest(bytes: Vec<u8>) -> rusqlite::Result<[u8; 32]> {
+	let length = bytes.len();
+	bytes.try_into().map_err(|_| {
+		column_error(3, format!("command digest has {length} bytes"))
+	})
 }

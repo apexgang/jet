@@ -3,7 +3,17 @@
 use jet_store::StoreError;
 use serde::{Deserialize, Serialize};
 
-use crate::{Revision, Run};
+use crate::{Revision, Run, RunId};
+
+/// Structured action a caller may take to recover from an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecoveryAction {
+	/// Refresh the current state of a Run before preparing another Command.
+	RefreshRun {
+		/// Run whose current state should be queried.
+		run_id: RunId,
+	},
+}
 
 /// Structured current state returned for a stale Revision precondition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +75,8 @@ pub struct CoreError {
 	pub detail: Option<String>,
 	/// Current resource state when an expected Revision was stale.
 	pub revision_conflict: Option<RevisionConflict>,
+	/// Structured actions that can safely recover from this error.
+	pub recovery_actions: Vec<RecoveryAction>,
 }
 
 impl CoreError {
@@ -76,6 +88,7 @@ impl CoreError {
 			message: message.into(),
 			detail: None,
 			revision_conflict: None,
+			recovery_actions: vec![],
 		}
 	}
 
@@ -87,6 +100,7 @@ impl CoreError {
 			message: message.into(),
 			detail: None,
 			revision_conflict: None,
+			recovery_actions: vec![],
 		}
 	}
 
@@ -98,6 +112,7 @@ impl CoreError {
 			message,
 			detail: None,
 			revision_conflict: None,
+			recovery_actions: vec![],
 		}
 	}
 
@@ -106,6 +121,11 @@ impl CoreError {
 		message: &str,
 		revision_conflict: RevisionConflict,
 	) -> Self {
+		let recovery_actions = match revision_conflict.safe_state {
+			ConflictState::Run(run) => {
+				vec![RecoveryAction::RefreshRun { run_id: run.run_id }]
+			}
+		};
 		Self {
 			category: ErrorCategory::Conflict,
 			code: code.into(),
@@ -113,6 +133,7 @@ impl CoreError {
 			message: message.into(),
 			detail: None,
 			revision_conflict: Some(revision_conflict),
+			recovery_actions,
 		}
 	}
 
@@ -124,6 +145,7 @@ impl CoreError {
 			message: "an internal invariant failed".into(),
 			detail: Some(detail),
 			revision_conflict: None,
+			recovery_actions: vec![],
 		}
 	}
 
@@ -142,6 +164,7 @@ impl From<StoreError> for CoreError {
 				message: "the Plane store is unavailable".into(),
 				detail: Some(detail),
 				revision_conflict: None,
+				recovery_actions: vec![],
 			},
 			StoreError::Integrity(detail) => Self {
 				category: ErrorCategory::Internal,
@@ -150,6 +173,7 @@ impl From<StoreError> for CoreError {
 				message: "the Plane store failed an integrity check".into(),
 				detail: Some(detail),
 				revision_conflict: None,
+				recovery_actions: vec![],
 			},
 		}
 	}

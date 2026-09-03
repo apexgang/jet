@@ -23,13 +23,16 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use jet_store::{ActorRecord, Store};
 use uuid::Uuid;
 
-pub use clock::{Clock, SystemClock};
+use clock::{Clock, SystemClock};
+
 pub use command::{Command, CommandEnvelope, CommandId, CommandOutcome};
 pub use conversation::{
 	Conversation, ConversationId, ConversationList, ConversationSnapshot,
 	Revision, Run, RunId,
 };
-pub use error::{ConflictState, CoreError, ErrorCategory, RevisionConflict};
+pub use error::{
+	ConflictState, CoreError, ErrorCategory, RecoveryAction, RevisionConflict,
+};
 pub use event::{EVENT_PAGE_LIMIT, Event, EventId, EventKind, EventSequence};
 pub use jet_store::{Retention, RunLifecycle};
 pub use query::{Query, QueryResult};
@@ -116,7 +119,7 @@ impl Core {
 	///
 	/// Returns [`CoreError`] with an `unavailable` or `internal` category
 	/// when the start cannot be committed.
-	pub fn start_with_clock(
+	pub(crate) fn start_with_clock(
 		store: Store,
 		clock: Arc<dyn Clock>,
 	) -> Result<Self, CoreError> {

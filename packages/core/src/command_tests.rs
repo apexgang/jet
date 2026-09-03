@@ -4,11 +4,12 @@ use std::time::{Duration, SystemTime};
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
+use crate::clock::Clock;
 use crate::{
-	Actor, ClientId, Clock, Command, CommandEnvelope, CommandId,
-	CommandOutcome, Conversation, ConversationId, ConversationSnapshot, Core,
-	CoreError, ErrorCategory, EventKind, EventSequence, Query, QueryResult,
-	Retention, Revision, Run, RunId, RunLifecycle,
+	Actor, ClientId, Command, CommandEnvelope, CommandId, CommandOutcome,
+	Conversation, ConversationId, ConversationSnapshot, Core, CoreError,
+	ErrorCategory, EventKind, EventSequence, Query, QueryResult, Retention,
+	Revision, Run, RunId, RunLifecycle,
 };
 use jet_store::Store;
 
@@ -28,7 +29,7 @@ fn request(command: Command) -> CommandEnvelope {
 
 fn request_with_id(command_id: CommandId, command: Command) -> CommandEnvelope {
 	let bytes = serde_json::to_vec(&command).unwrap();
-	CommandEnvelope::new(command_id, command, &bytes)
+	CommandEnvelope::new(command_id, command, &bytes).unwrap()
 }
 
 #[derive(Debug)]
@@ -218,6 +219,7 @@ fn a_second_run_is_refused_while_one_has_not_ended() {
 				.into(),
 			detail: None,
 			revision_conflict: None,
+			recovery_actions: vec![],
 		}
 	);
 	assert_eq!(snapshot(&core, conversation.conversation_id).runs.len(), 1);
@@ -254,6 +256,7 @@ fn a_run_lifecycle_only_moves_forward_and_never_leaves_a_terminal_state() {
 		message: message.into(),
 		detail: None,
 		revision_conflict: None,
+		recovery_actions: vec![],
 	};
 	assert_eq!(
 		(skipped, never_active, revived),
@@ -349,6 +352,7 @@ fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 			message: "the Command identity is older than thirty days".into(),
 			detail: None,
 			revision_conflict: None,
+			recovery_actions: vec![],
 		}
 	);
 	let QueryResult::Conversations(conversations) =
@@ -361,4 +365,53 @@ fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 	};
 	assert_eq!(within_window, CommandOutcome::ConversationCreated(original));
 	assert_eq!(conversations.conversations, vec![original]);
+}
+
+#[test]
+fn typed_command_content_is_bound_to_the_request_digest() {
+	let dir = tempfile::tempdir().unwrap();
+	let core = Core::start(Store::open(&dir.path().join("p.sqlite3")).unwrap())
+		.unwrap();
+	let command_id = command_id();
+	core.execute(
+		&actor(),
+		CommandEnvelope::new(
+			command_id,
+			Command::CreateConversation {
+				retention: Retention::Retain,
+			},
+			b"same adapter bytes",
+		)
+		.unwrap(),
+	)
+	.unwrap();
+
+	let error = core
+		.execute(
+			&actor(),
+			CommandEnvelope::new(
+				command_id,
+				Command::CreateConversation {
+					retention: Retention::ForgetAfterFinalRun,
+				},
+				b"same adapter bytes",
+			)
+			.unwrap(),
+		)
+		.unwrap_err();
+
+	assert_eq!(
+		error,
+		CoreError {
+			category: ErrorCategory::Conflict,
+			code: "command.identity_reused".into(),
+			retryable: false,
+			message:
+				"the Command identity was already used for different content"
+					.into(),
+			detail: None,
+			revision_conflict: None,
+			recovery_actions: vec![],
+		}
+	);
 }

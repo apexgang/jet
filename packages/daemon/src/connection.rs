@@ -266,14 +266,13 @@ fn execute(
 	command: &jet_protocol::CommandRequest,
 	request_bytes: &[u8],
 ) -> ServerMessage {
-	match core.execute(
-		actor,
-		CommandEnvelope::new(
-			CommandId(command_id),
-			translate::command(command),
-			request_bytes,
-		),
-	) {
+	match CommandEnvelope::new(
+		CommandId(command_id),
+		translate::command(command),
+		request_bytes,
+	)
+	.and_then(|envelope| core.execute(actor, envelope))
+	{
 		Ok(outcome) => ServerMessage::CommandResult {
 			id,
 			result: translate::command_outcome(outcome),
@@ -296,6 +295,7 @@ fn wire_error(
 		retryable: false,
 		message,
 		revision_conflict: None,
+		recovery_actions: vec![],
 	}
 }
 

@@ -230,6 +230,7 @@ async fn a_live_run_blocks_a_second_one_with_a_stable_conflict() {
 			message: "the Conversation already has a Run that has not ended"
 				.into(),
 			revision_conflict: None,
+			recovery_actions: vec![],
 		}
 	);
 }
@@ -253,6 +254,7 @@ async fn an_unknown_conversation_is_reported_as_not_found() {
 			retryable: false,
 			message: "the Conversation does not exist".into(),
 			revision_conflict: None,
+			recovery_actions: vec![],
 		}
 	);
 }

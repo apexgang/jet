@@ -149,6 +149,20 @@ pub struct WireError {
 	/// Current resource state when an expected Revision was stale.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub revision_conflict: Option<RevisionConflict>,
+	/// Structured actions that can safely recover from this error.
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub recovery_actions: Vec<RecoveryAction>,
+}
+
+/// Structured action a client may take to recover from an error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RecoveryAction {
+	/// Refresh current Run state before preparing another Command.
+	RefreshRun {
+		/// Run whose current state should be queried.
+		run_id: Uuid,
+	},
 }
 
 #[cfg(test)]

@@ -123,7 +123,8 @@ impl Client {
 		}
 	}
 
-	/// Moves a Run forward to `lifecycle`.
+	/// Moves a Run forward to `lifecycle` if its current Revision is
+	/// `expected_revision`.
 	///
 	/// # Errors
 	///

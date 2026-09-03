@@ -98,8 +98,7 @@ impl WriteTransaction<'_> {
 		let ended_at_unix_ms = lifecycle.is_terminal().then(clock::unix_ms_now);
 		self.transaction.execute(
 			"UPDATE runs
-			 SET revision = revision + 1,
-			     lifecycle = ?2,
+			 SET lifecycle = ?2,
 			     ended_at_unix_ms = COALESCE(?3, ended_at_unix_ms)
 			 WHERE run_id = ?1",
 			(run_id.to_string(), lifecycle.as_str(), ended_at_unix_ms),

@@ -7,9 +7,9 @@ mod support;
 use jet_protocol::{
 	Actor, CODEC_JSON_V1, ClientHello, CommandRequest, CommandResponse,
 	ConflictState, ErrorCategory, Frame, FrameReader, FrameWriter,
-	MAX_CONTROL_FRAME, MAX_DATA_FRAME, PREFACE, Retention, RevisionConflict,
-	RunLifecycle, ServerHello, ServerMessage, VersionRange, WireError,
-	decode_control, encode_control,
+	MAX_CONTROL_FRAME, MAX_DATA_FRAME, PREFACE, RecoveryAction, Retention,
+	RevisionConflict, RunLifecycle, ServerHello, ServerMessage, VersionRange,
+	WireError, decode_control, encode_control,
 };
 use pretty_assertions::assert_eq;
 use support::{connect, start_jetd};
@@ -132,6 +132,7 @@ async fn changed_content_cannot_reuse_an_actors_command_identity() {
 				"the Command identity was already used for different content"
 					.into(),
 			revision_conflict: None,
+			recovery_actions: vec![],
 		}
 	);
 }
@@ -161,11 +162,22 @@ async fn only_a_byte_equivalent_command_body_is_an_identical_retry() {
 	)
 	.await;
 
-	let ServerMessage::Error { id, error } = reply else {
-		panic!("expected the changed bytes to be rejected");
-	};
-	assert_eq!(id, Some(9));
-	assert_eq!(error.code, "command.identity_reused");
+	assert_eq!(
+		reply,
+		ServerMessage::Error {
+			id: Some(9),
+			error: WireError {
+				category: ErrorCategory::Conflict,
+				code: "command.identity_reused".into(),
+				retryable: false,
+				message:
+					"the Command identity was already used for different content"
+						.into(),
+				revision_conflict: None,
+				recovery_actions: vec![],
+			},
+		}
+	);
 }
 
 #[tokio::test]
@@ -270,6 +282,9 @@ async fn concurrent_commands_expose_one_authoritative_revision_order() {
 					run: current.clone(),
 				},
 			}),
+			recovery_actions: vec![RecoveryAction::RefreshRun {
+				run_id: current.run_id,
+			}],
 		}
 	);
 	let snapshot = setup

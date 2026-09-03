@@ -7,8 +7,8 @@ use jet_core::{
 	Actor, Command, CommandOutcome, ConflictState, Conversation,
 	ConversationId, ConversationList, ConversationSnapshot, CoreError,
 	ErrorCategory, Event, EventKind, EventSequence, PlaneStatus, Query,
-	QueryResult, Retention, Revision, RevisionConflict, Run, RunId,
-	RunLifecycle,
+	QueryResult, RecoveryAction, Retention, Revision, RevisionConflict, Run,
+	RunId, RunLifecycle,
 };
 use jet_protocol as wire;
 
@@ -202,6 +202,19 @@ pub(crate) fn error(error: CoreError) -> wire::WireError {
 		retryable: error.retryable,
 		message: error.message,
 		revision_conflict: error.revision_conflict.map(revision_conflict),
+		recovery_actions: error
+			.recovery_actions
+			.into_iter()
+			.map(recovery_action)
+			.collect(),
+	}
+}
+
+fn recovery_action(action: RecoveryAction) -> wire::RecoveryAction {
+	match action {
+		RecoveryAction::RefreshRun { run_id } => {
+			wire::RecoveryAction::RefreshRun { run_id: run_id.0 }
+		}
 	}
 }
 
