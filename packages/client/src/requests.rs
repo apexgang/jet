@@ -88,7 +88,10 @@ impl Client {
 		retention: Retention,
 	) -> Result<Conversation, ClientError> {
 		match self
-			.command(CommandRequest::CreateConversation { retention })
+			.execute_command(
+				Uuid::now_v7(),
+				CommandRequest::CreateConversation { retention },
+			)
 			.await?
 		{
 			CommandResponse::ConversationCreated(conversation) => {
@@ -109,7 +112,10 @@ impl Client {
 		conversation_id: Uuid,
 	) -> Result<Run, ClientError> {
 		match self
-			.command(CommandRequest::CreateRun { conversation_id })
+			.execute_command(
+				Uuid::now_v7(),
+				CommandRequest::CreateRun { conversation_id },
+			)
 			.await?
 		{
 			CommandResponse::RunCreated(run) => Ok(run),
@@ -117,7 +123,8 @@ impl Client {
 		}
 	}
 
-	/// Moves a Run forward to `lifecycle`.
+	/// Moves a Run forward to `lifecycle` if its current Revision is
+	/// `expected_revision`.
 	///
 	/// # Errors
 	///
@@ -126,10 +133,18 @@ impl Client {
 	pub async fn transition_run(
 		&mut self,
 		run_id: Uuid,
+		expected_revision: u64,
 		lifecycle: RunLifecycle,
 	) -> Result<Run, ClientError> {
 		match self
-			.command(CommandRequest::TransitionRun { run_id, lifecycle })
+			.execute_command(
+				Uuid::now_v7(),
+				CommandRequest::TransitionRun {
+					run_id,
+					expected_revision,
+					lifecycle,
+				},
+			)
 			.await?
 		{
 			CommandResponse::RunTransitioned(run) => Ok(run),

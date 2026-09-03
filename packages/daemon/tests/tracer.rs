@@ -155,6 +155,8 @@ async fn an_unsupported_codec_is_rejected_during_the_handshake() {
 				code: "protocol.unsupported_codec".into(),
 				retryable: false,
 				message: format!("only the {CODEC_JSON_V1} codec is supported"),
+				revision_conflict: None,
+				recovery_actions: vec![],
 			}
 		}
 	);

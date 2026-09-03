@@ -4,22 +4,38 @@
 use std::time::SystemTime;
 
 use jet_store::{ConversationRecord, Retention, RunLifecycle, RunRecord};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::event::EventSequence;
 use crate::system_time;
 
 /// Durable identity of one Conversation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConversationId(pub Uuid);
 
 /// Durable identity of one Run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RunId(pub Uuid);
+
+/// Monotonic version of a conflict-sensitive resource.
+#[derive(
+	Debug,
+	Clone,
+	Copy,
+	PartialEq,
+	Eq,
+	PartialOrd,
+	Ord,
+	Hash,
+	Serialize,
+	Deserialize,
+)]
+pub struct Revision(pub u64);
 
 /// A logical interaction between a user and a Harness. It exists before
 /// its first Run and outlives every Run it has had.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Conversation {
 	/// Durable identity.
 	pub conversation_id: ConversationId,
@@ -30,12 +46,14 @@ pub struct Conversation {
 }
 
 /// One bounded execution of a Conversation on this Plane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Run {
 	/// Durable identity.
 	pub run_id: RunId,
 	/// The Conversation this Run executes.
 	pub conversation_id: ConversationId,
+	/// Current version for conflict-sensitive Run Commands.
+	pub revision: Revision,
 	/// Current lifecycle state.
 	pub lifecycle: RunLifecycle,
 	/// When the Run was created.
@@ -81,6 +99,7 @@ impl From<RunRecord> for Run {
 		Self {
 			run_id: RunId(record.run_id),
 			conversation_id: ConversationId(record.conversation_id),
+			revision: Revision(record.revision),
 			lifecycle: record.lifecycle,
 			created_at: system_time(record.created_at_unix_ms),
 			ended_at: record.ended_at_unix_ms.map(system_time),

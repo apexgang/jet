@@ -52,8 +52,11 @@ async fn create_conversation_without_a_retention_choice(
 	));
 	writer
 		.write(&Frame::Control(
-			br#"{"kind":"command","id":1,"command":{"type":"create_conversation"}}"#
-				.to_vec(),
+			format!(
+				"{{\"kind\":\"command\",\"id\":1,\"command_id\":\"{}\",\"command\":{{\"type\":\"create_conversation\"}}}}",
+				Uuid::now_v7()
+			)
+			.into_bytes(),
 		))
 		.await
 		.unwrap();
@@ -109,15 +112,18 @@ async fn a_conversation_is_retained_with_its_terminal_runs_across_a_jetd_restart
 	let conversation =
 		create_conversation_without_a_retention_choice(&first, client_id).await;
 	let mut client = connect(&first, client_id).await;
-	let run = client
+	let mut run = client
 		.create_run(conversation.conversation_id)
 		.await
 		.unwrap();
 	for lifecycle in [RunLifecycle::Starting, RunLifecycle::Active] {
-		client.transition_run(run.run_id, lifecycle).await.unwrap();
+		run = client
+			.transition_run(run.run_id, run.revision, lifecycle)
+			.await
+			.unwrap();
 	}
 	let completed = client
-		.transition_run(run.run_id, RunLifecycle::Completed)
+		.transition_run(run.run_id, run.revision, RunLifecycle::Completed)
 		.await
 		.unwrap();
 	let second_run = client
@@ -125,7 +131,11 @@ async fn a_conversation_is_retained_with_its_terminal_runs_across_a_jetd_restart
 		.await
 		.unwrap();
 	let canceled = client
-		.transition_run(second_run.run_id, RunLifecycle::Canceled)
+		.transition_run(
+			second_run.run_id,
+			second_run.revision,
+			RunLifecycle::Canceled,
+		)
 		.await
 		.unwrap();
 	let before_restart = client
@@ -219,6 +229,8 @@ async fn a_live_run_blocks_a_second_one_with_a_stable_conflict() {
 			retryable: false,
 			message: "the Conversation already has a Run that has not ended"
 				.into(),
+			revision_conflict: None,
+			recovery_actions: vec![],
 		}
 	);
 }
@@ -241,6 +253,8 @@ async fn an_unknown_conversation_is_reported_as_not_found() {
 			code: "conversation.not_found".into(),
 			retryable: false,
 			message: "the Conversation does not exist".into(),
+			revision_conflict: None,
+			recovery_actions: vec![],
 		}
 	);
 }

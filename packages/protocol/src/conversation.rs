@@ -57,6 +57,8 @@ pub struct Run {
 	pub run_id: Uuid,
 	/// The Conversation it executes.
 	pub conversation_id: Uuid,
+	/// Monotonic version used by conflict-sensitive Commands.
+	pub revision: u64,
 	/// Current lifecycle state.
 	pub lifecycle: RunLifecycle,
 	/// When it was created, in signed Unix milliseconds.
@@ -104,6 +106,8 @@ pub enum CommandRequest {
 	TransitionRun {
 		/// The Run to move.
 		run_id: Uuid,
+		/// Revision observed when the Command was prepared.
+		expected_revision: u64,
 		/// The state to enter.
 		lifecycle: RunLifecycle,
 	},
@@ -119,4 +123,24 @@ pub enum CommandResponse {
 	RunCreated(Run),
 	/// The Run after its transition.
 	RunTransitioned(Run),
+}
+
+/// Structured state returned when a Revision precondition is stale.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RevisionConflict {
+	/// Revision that is authoritative now.
+	pub current_revision: u64,
+	/// Safe current state with which the caller can refresh.
+	pub safe_state: ConflictState,
+}
+
+/// Safe resource state attached to a Revision conflict.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ConflictState {
+	/// The current Run.
+	Run {
+		/// Complete safe Run state.
+		run: Run,
+	},
 }

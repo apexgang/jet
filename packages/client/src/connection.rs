@@ -123,12 +123,25 @@ impl Client {
 	}
 
 	/// Executes `command` and returns its durable outcome.
-	pub(crate) async fn command(
+	/// Executes `command` under an Actor-scoped identity. Retrying the same
+	/// identity and content returns the original durable outcome.
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the daemon rejects the Command,
+	/// or the transport failure otherwise.
+	pub async fn execute_command(
 		&mut self,
+		command_id: Uuid,
 		command: CommandRequest,
 	) -> Result<CommandResponse, ClientError> {
 		let id = self.next_id();
-		self.send(&ClientMessage::Command { id, command }).await?;
+		self.send(&ClientMessage::Command {
+			id,
+			command_id,
+			command,
+		})
+		.await?;
 		match self.receive::<ServerMessage>().await? {
 			ServerMessage::CommandResult {
 				id: reply_id,

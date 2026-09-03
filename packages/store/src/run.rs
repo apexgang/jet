@@ -10,8 +10,8 @@ use crate::records::{
 use crate::transaction::{ReadTransaction, WriteTransaction};
 use crate::{StoreError, clock};
 
-const COLUMNS: &str =
-	"run_id, conversation_id, lifecycle, created_at_unix_ms, ended_at_unix_ms";
+const COLUMNS: &str = "run_id, conversation_id, revision, lifecycle, created_at_unix_ms, \
+	ended_at_unix_ms";
 
 impl ReadTransaction<'_> {
 	/// The Run identified by `run_id`, if recorded.
@@ -61,17 +61,20 @@ impl WriteTransaction<'_> {
 		let record = RunRecord {
 			run_id: run.run_id,
 			conversation_id: run.conversation_id,
+			revision: 1,
 			lifecycle: RunLifecycle::Created,
 			created_at_unix_ms: clock::unix_ms_now(),
 			ended_at_unix_ms: None,
 		};
 		self.transaction.execute(
 			&format!(
-				"INSERT INTO runs ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5)"
+				"INSERT INTO runs ({COLUMNS})
+				 VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
 			),
 			(
 				record.run_id.to_string(),
 				record.conversation_id.to_string(),
+				i64::try_from(record.revision).unwrap_or(i64::MAX),
 				record.lifecycle.as_str(),
 				record.created_at_unix_ms,
 				record.ended_at_unix_ms,
@@ -109,18 +112,25 @@ impl WriteTransaction<'_> {
 fn read_row(row: &Row<'_>) -> rusqlite::Result<RunRecord> {
 	let run_id: String = row.get(0)?;
 	let conversation_id: String = row.get(1)?;
-	let lifecycle: String = row.get(2)?;
+	let lifecycle: String = row.get(3)?;
 	Ok(RunRecord {
 		run_id: parse_uuid(0, &run_id)?,
 		conversation_id: parse_uuid(1, &conversation_id)?,
+		revision: parse_revision(row.get(2)?)?,
 		lifecycle: parse_lifecycle(&lifecycle)?,
-		created_at_unix_ms: row.get(3)?,
-		ended_at_unix_ms: row.get(4)?,
+		created_at_unix_ms: row.get(4)?,
+		ended_at_unix_ms: row.get(5)?,
 	})
 }
 
 fn parse_lifecycle(text: &str) -> rusqlite::Result<RunLifecycle> {
 	RunLifecycle::parse(text).ok_or_else(|| {
-		column_error(2, format!("unknown run lifecycle {text:?}"))
+		column_error(3, format!("unknown run lifecycle {text:?}"))
+	})
+}
+
+fn parse_revision(revision: i64) -> rusqlite::Result<u64> {
+	u64::try_from(revision).map_err(|_| {
+		column_error(2, format!("run revision {revision} is negative"))
 	})
 }

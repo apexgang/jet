@@ -3,13 +3,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use jet_core::{Actor, ClientId, Core};
+use jet_core::{Actor, ClientId, CommandEnvelope, CommandId, Core};
 use jet_protocol::{
-	CODEC_JSON_V1, ClientHello, ClientMessage, ErrorCategory, Frame,
-	FrameError, FrameLimits, FrameReader, FrameWriter, PREFACE,
-	PROTOCOL_VERSION, RequestId, ServerHello, ServerMessage, WireError,
-	decode_control, encode_control,
+	CODEC_JSON_V1, ClientHello, ErrorCategory, Frame, FrameError, FrameLimits,
+	FrameReader, FrameWriter, PREFACE, PROTOCOL_VERSION, QueryRequest,
+	RequestId, ServerHello, ServerMessage, WireError, decode_control,
+	encode_control,
 };
+use serde::Deserialize;
+use serde_json::value::RawValue;
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
@@ -31,6 +33,25 @@ enum ReceiveError {
 	Disconnected,
 	/// The peer violated the protocol; the reply explains how.
 	Protocol(WireError),
+}
+
+#[derive(Deserialize)]
+struct IncomingClientMessage {
+	kind: IncomingMessageKind,
+	id: RequestId,
+	#[serde(default)]
+	query: Option<QueryRequest>,
+	#[serde(default)]
+	command_id: Option<uuid::Uuid>,
+	#[serde(default)]
+	command: Option<Box<RawValue>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum IncomingMessageKind {
+	Query,
+	Command,
 }
 
 pub(crate) async fn serve(core: Arc<Core>, stream: UnixStream) {
@@ -113,7 +134,7 @@ impl Connection {
 
 	async fn serve_requests(&mut self, core: &Core, actor: &Actor) {
 		loop {
-			let message: ClientMessage = match self.receive().await {
+			let message: IncomingClientMessage = match self.receive().await {
 				Ok(message) => message,
 				Err(ReceiveError::Disconnected) => return,
 				Err(ReceiveError::Protocol(error)) => {
@@ -124,12 +145,45 @@ impl Connection {
 				}
 			};
 			let reply = match message {
-				ClientMessage::Query { id, query } => {
-					answer(core, actor, id, &query)
-				}
-				ClientMessage::Command { id, command } => {
-					execute(core, actor, id, &command)
-				}
+				IncomingClientMessage {
+					kind: IncomingMessageKind::Query,
+					id,
+					query: Some(query),
+					command_id: None,
+					command: None,
+				} => answer(core, actor, id, &query),
+				IncomingClientMessage {
+					kind: IncomingMessageKind::Command,
+					id,
+					query: None,
+					command_id: Some(command_id),
+					command: Some(command),
+				} => match decode_control(command.get().as_bytes()) {
+					Ok(decoded) => execute(
+						core,
+						actor,
+						id,
+						command_id,
+						&decoded,
+						command.get().as_bytes(),
+					),
+					Err(_) => ServerMessage::Error {
+						id: Some(id),
+						error: wire_error(
+							ErrorCategory::InvalidInput,
+							"protocol.malformed",
+							"the control frame is not a valid message".into(),
+						),
+					},
+				},
+				IncomingClientMessage { id, .. } => ServerMessage::Error {
+					id: Some(id),
+					error: wire_error(
+						ErrorCategory::InvalidInput,
+						"protocol.malformed",
+						"the control frame is not a valid message".into(),
+					),
+				},
 			};
 			if self.send(&reply).await.is_err() {
 				return;
@@ -208,9 +262,17 @@ fn execute(
 	core: &Core,
 	actor: &Actor,
 	id: RequestId,
+	command_id: uuid::Uuid,
 	command: &jet_protocol::CommandRequest,
+	request_bytes: &[u8],
 ) -> ServerMessage {
-	match core.execute(actor, translate::command(command)) {
+	match CommandEnvelope::new(
+		CommandId(command_id),
+		translate::command(command),
+		request_bytes,
+	)
+	.and_then(|envelope| core.execute(actor, envelope))
+	{
 		Ok(outcome) => ServerMessage::CommandResult {
 			id,
 			result: translate::command_outcome(outcome),
@@ -232,6 +294,8 @@ fn wire_error(
 		code: code.into(),
 		retryable: false,
 		message,
+		revision_conflict: None,
+		recovery_actions: vec![],
 	}
 }
 

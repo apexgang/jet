@@ -19,8 +19,9 @@ pub use control::{
 	ControlError, MAX_NESTING_DEPTH, decode_control, encode_control,
 };
 pub use conversation::{
-	CommandRequest, CommandResponse, Conversation, ConversationList,
-	ConversationSnapshot, Retention, Run, RunLifecycle,
+	CommandRequest, CommandResponse, ConflictState, Conversation,
+	ConversationList, ConversationSnapshot, Retention, RevisionConflict, Run,
+	RunLifecycle,
 };
 pub use event::{Actor, Event};
 pub use frame::{
@@ -33,5 +34,5 @@ pub use handshake::{
 };
 pub use message::{
 	ClientMessage, ErrorCategory, PlaneStatus, QueryRequest, QueryResponse,
-	RequestId, ServerMessage, WireError,
+	RecoveryAction, RequestId, ServerMessage, WireError,
 };

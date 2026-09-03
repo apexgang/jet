@@ -8,6 +8,7 @@
 //! Domain types here never double as wire types (ADR-0049); `jetd`
 //! translates at the transport seam.
 
+mod clock;
 mod command;
 mod conversation;
 mod error;
@@ -16,17 +17,22 @@ mod lifecycle;
 mod query;
 mod status;
 
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use jet_store::{ActorRecord, Store};
 use uuid::Uuid;
 
-pub use command::{Command, CommandOutcome};
+use clock::{Clock, SystemClock};
+
+pub use command::{Command, CommandEnvelope, CommandId, CommandOutcome};
 pub use conversation::{
-	Conversation, ConversationId, ConversationList, ConversationSnapshot, Run,
-	RunId,
+	Conversation, ConversationId, ConversationList, ConversationSnapshot,
+	Revision, Run, RunId,
 };
-pub use error::{CoreError, ErrorCategory};
+pub use error::{
+	ConflictState, CoreError, ErrorCategory, RecoveryAction, RevisionConflict,
+};
 pub use event::{EVENT_PAGE_LIMIT, Event, EventId, EventKind, EventSequence};
 pub use jet_store::{Retention, RunLifecycle};
 pub use query::{Query, QueryResult};
@@ -92,6 +98,7 @@ impl Actor {
 #[derive(Debug)]
 pub struct Core {
 	store: Store,
+	clock: Arc<dyn Clock>,
 	started_at: SystemTime,
 }
 
@@ -103,10 +110,25 @@ impl Core {
 	/// Returns [`CoreError`] with an `unavailable` or `internal` category
 	/// when the start cannot be committed.
 	pub fn start(store: Store) -> Result<Self, CoreError> {
+		Self::start_with_clock(store, Arc::new(SystemClock))
+	}
+
+	/// Starts the core with an injected wall clock.
+	///
+	/// # Errors
+	///
+	/// Returns [`CoreError`] with an `unavailable` or `internal` category
+	/// when the start cannot be committed.
+	pub(crate) fn start_with_clock(
+		store: Store,
+		clock: Arc<dyn Clock>,
+	) -> Result<Self, CoreError> {
 		store.record_daemon_start()?;
+		let started_at = clock.now();
 		Ok(Self {
 			store,
-			started_at: SystemTime::now(),
+			clock,
+			started_at,
 		})
 	}
 }
@@ -114,6 +136,14 @@ impl Core {
 /// Converts a stored wall-clock stamp back into a [`SystemTime`].
 fn system_time(unix_ms: i64) -> SystemTime {
 	UNIX_EPOCH + Duration::from_millis(u64::try_from(unix_ms).unwrap_or(0))
+}
+
+fn unix_ms(time: SystemTime) -> i64 {
+	match time.duration_since(UNIX_EPOCH) {
+		Ok(elapsed) => i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX),
+		Err(behind) => i64::try_from(behind.duration().as_millis())
+			.map_or(i64::MIN, |ms| -ms),
+	}
 }
 
 #[cfg(test)]

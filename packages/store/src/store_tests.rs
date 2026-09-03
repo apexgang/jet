@@ -2,8 +2,9 @@ use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
 use super::{
-	ActorRecord, ConversationRecord, EventRecord, NewConversation, NewEvent,
-	NewRun, PlaneRecord, Retention, RunLifecycle, RunRecord, Store, StoreError,
+	ActorRecord, CommandReceiptRecord, ConversationRecord, EventRecord,
+	NewCommandReceipt, NewConversation, NewEvent, NewRun, PlaneRecord,
+	Retention, RunLifecycle, RunRecord, Store, StoreError,
 };
 
 #[test]
@@ -130,6 +131,7 @@ fn conversations_runs_and_events_survive_reopening_the_store() {
 		RunRecord {
 			run_id,
 			conversation_id,
+			revision: 2,
 			lifecycle: RunLifecycle::Completed,
 			created_at_unix_ms: run.created_at_unix_ms,
 			ended_at_unix_ms: run.ended_at_unix_ms,
@@ -203,4 +205,42 @@ fn a_run_cannot_be_recorded_for_an_unknown_conversation() {
 		.unwrap_err();
 
 	assert!(matches!(error, StoreError::Integrity(_)), "{error:?}");
+}
+
+#[test]
+fn expired_command_receipts_keep_only_an_identity_tombstone() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = Store::open(&dir.path().join("plane.sqlite3")).unwrap();
+	let actor = actor();
+	let command_id = Uuid::now_v7();
+	store
+		.write(|tx| {
+			tx.insert_command_receipt(&NewCommandReceipt {
+				actor,
+				command_id,
+				request_digest: [7; 32],
+				recorded_at_unix_ms: 10,
+				outcome_version: 1,
+				outcome: r#"{"Ok":{}}"#.into(),
+			})?;
+			tx.prune_command_receipts_before(11)
+		})
+		.unwrap();
+
+	let receipt = store
+		.read(|tx| tx.command_receipt(actor, command_id))
+		.unwrap()
+		.unwrap();
+
+	assert_eq!(
+		receipt,
+		CommandReceiptRecord {
+			actor,
+			command_id,
+			request_digest: None,
+			recorded_at_unix_ms: 10,
+			outcome_version: None,
+			outcome: None,
+		}
+	);
 }
