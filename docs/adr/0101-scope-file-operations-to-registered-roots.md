@@ -1,0 +1,3 @@
+# Scope file operations to registered roots
+
+Ordinary file Commands identify a Project or Workspace and a strictly validated relative path; `jetd` rejects absolute paths, parent traversal, NULs, invalid platform forms, and symbolic-link resolution that escapes the registered root. Canonical absolute paths enter the system only through explicit interactive Path grants such as Project registration or sound import, with preview before mutation, and those Commands are absent from Harness, Craft, Scheduled-task, and automatic surfaces. OS process invocation uses argument arrays rather than shell interpolation. This enforces ASVS 2.2.1, 2.2.2, 5.3.2, and 1.2.5 at the trusted core Interface.

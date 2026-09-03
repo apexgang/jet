@@ -1,0 +1,3 @@
+# Run Jet Crafts only while needed
+
+An installed Jet Craft does not imply a resident process. `jetd` starts a process for an artifact digest when its first pinned Run or management request needs it, multiplexes Runs pinned to that digest, and asks it to exit after five idle minutes. Updating may temporarily leave old and new digests resident when both own active Runs. A crashed process restarts on bounded backoff at the same digest and recovers active execution streams from `jetfueld` source offsets, bounding idle memory without giving up process isolation, update correctness, or Run survival.

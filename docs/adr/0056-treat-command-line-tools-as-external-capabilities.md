@@ -1,0 +1,3 @@
+# Treat command-line tools as external capabilities
+
+The core invokes detected `git`, `ssh`, and Tailscale command-line capabilities through argument arrays without shell interpolation and never bundles or installs them itself. The Homebrew package checks the host and declares or installs missing formula dependencies, while CI provisions the same capabilities explicitly. Jet uses one minimal in-process HTTPS implementation for GitHub discovery, downloads, and pull-request operations rather than making `gh` a core runtime requirement; packaging may still install or expose `gh` for user workflows.

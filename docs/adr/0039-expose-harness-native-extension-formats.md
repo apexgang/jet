@@ -1,0 +1,3 @@
+# Expose Harness-native extension formats
+
+The Jet GUI provides a common surface to browse, inspect, install, update, and remove skills and MCP servers, but Jet does not invent a universal extension package or operate a Jet marketplace in v1. Each Jet Craft exposes its Harness-native formats, scopes, official catalogs, configured native marketplaces, explicit user-added Git sources, permissions, compatibility, and lifecycle actions through the Craft protocol and remains authoritative for the resulting installation on a selected Plane. Before mutation, the GUI shows the source, publisher, version, files, components, requested permissions, trust status, Harness, Plane, and installation scope. A possible Jet marketplace is deferred beyond v1.

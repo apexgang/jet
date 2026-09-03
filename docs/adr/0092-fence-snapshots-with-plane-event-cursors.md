@@ -1,0 +1,3 @@
+# Fence snapshots with Plane Event cursors
+
+A snapshot or first result page is read with its Plane Event high-water cursor in the same SQLite read transaction, after which the client subscribes strictly beyond that cursor. This closes the snapshot-to-subscription race without holding long read transactions across GUI pagination. Later pages use opaque, expiring keyset cursors bound to the query; when their assumptions become stale, `jetd` returns an explicit restart result instead of mixing inconsistent pages. If an Event cursor precedes retained replay, `jetd` returns stable `cursor_expired` metadata containing the minimum available cursor and current snapshot Revision, and the client obtains a new fenced snapshot before subscribing again.

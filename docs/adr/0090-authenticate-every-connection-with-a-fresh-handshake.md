@@ -1,0 +1,3 @@
+# Authenticate every connection with a fresh handshake
+
+Every Jet-protocol connection begins with a fixed preface and a restricted JSON handshake that negotiates protocol ranges, codec, frame limits, and capabilities before exposing Plane state. Every GUI installation presents its durable Client identity. Local authorization still requires the socket owner and peer identity; remote clients must additionally sign a fresh server challenge with their Paired-client key. Jet issues no reusable bearer session token: reconnection authenticates again and recovers continuity from the Client identity, Event cursor, and Command identities.

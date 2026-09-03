@@ -1,0 +1,3 @@
+# Serialize concurrent user turns
+
+Every admitted user, Scheduled-task, or Auto-continue input receives an authoritative Conversation sequence. User turns are never replaced. Scheduled-task and Auto-continue inputs each occupy one replaceable pending slot, and a replacement receives a new sequence. After the active turn, `jetd` executes the admitted entry with the lowest sequence. Every client sees each entry's Actor and queue position; a client may withdraw its own queued user turn, while interrupting active work is a separate explicit Command. New user input cancels a pending Auto-continue entry.

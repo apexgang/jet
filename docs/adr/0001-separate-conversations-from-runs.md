@@ -1,0 +1,3 @@
+# Separate conversations from runs
+
+Jet models a logical conversation separately from each live run and its managed processes. Conversation and live views are presentation choices independent of retention. Retention is the default; a Conversation may opt into forgetting after its final Run, but automatic forgetting waits until it has no active Run, pending turn, enabled schedule, shared or private pin, dirty Workspace, unpushed work, or unresolved Effect. Manual deletion remains available through its confirmation flow. This supports both durable history and a live process-oriented view without equating a resumable harness conversation with an operating-system process.
