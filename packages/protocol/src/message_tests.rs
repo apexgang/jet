@@ -6,8 +6,8 @@ use super::{
 	ServerMessage, WireError,
 };
 use crate::conversation::{
-	CommandRequest, CommandResponse, Conversation, ConversationSnapshot,
-	Retention, Run, RunLifecycle,
+	CommandRequest, CommandResponse, ConflictState, Conversation,
+	ConversationSnapshot, Retention, RevisionConflict, Run, RunLifecycle,
 };
 use crate::event::{Actor, Event};
 use crate::handshake::{ClientHello, ServerHello, VersionRange};
@@ -47,6 +47,7 @@ fn server_hello_variants_have_the_agreed_wire_shape() {
 			code: "protocol.unsupported_version".into(),
 			retryable: false,
 			message: "no common protocol version".into(),
+			revision_conflict: None,
 		},
 	};
 	assert_eq!(
@@ -91,6 +92,7 @@ fn error_messages_carry_a_stable_error_body() {
 			code: "store.unavailable".into(),
 			retryable: true,
 			message: "the Plane store is unavailable".into(),
+			revision_conflict: None,
 		},
 	};
 	assert_eq!(
@@ -103,6 +105,7 @@ fn error_messages_carry_a_stable_error_body() {
 fn conversation_commands_and_results_have_the_agreed_wire_shape() {
 	let command = ClientMessage::Command {
 		id: 2,
+		command_id: Uuid::nil(),
 		command: CommandRequest::CreateConversation {
 			retention: Retention::Retain,
 		},
@@ -118,8 +121,50 @@ fn conversation_commands_and_results_have_the_agreed_wire_shape() {
 	assert_eq!(
 		(json(&command), json(&result)),
 		(
-			r#"{"kind":"command","id":2,"command":{"type":"create_conversation","retention":"retain"}}"#.to_string(),
+			r#"{"kind":"command","id":2,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"create_conversation","retention":"retain"}}"#.to_string(),
 			r#"{"kind":"command_result","id":2,"result":{"type":"conversation_created","conversation_id":"00000000-0000-0000-0000-000000000000","retention":"retain","created_at_unix_ms":1700000000000}}"#.to_string(),
+		)
+	);
+}
+
+#[test]
+fn revision_preconditions_and_conflicts_have_the_agreed_wire_shape() {
+	let run = Run {
+		run_id: Uuid::nil(),
+		conversation_id: Uuid::nil(),
+		revision: 3,
+		lifecycle: RunLifecycle::Active,
+		created_at_unix_ms: 1,
+		ended_at_unix_ms: None,
+	};
+	let command = ClientMessage::Command {
+		id: 5,
+		command_id: Uuid::nil(),
+		command: CommandRequest::TransitionRun {
+			run_id: Uuid::nil(),
+			expected_revision: 2,
+			lifecycle: RunLifecycle::Active,
+		},
+	};
+	let conflict = ServerMessage::Error {
+		id: Some(5),
+		error: WireError {
+			category: ErrorCategory::Conflict,
+			code: "run.revision_conflict".into(),
+			retryable: false,
+			message: "the Run changed since the Command was prepared".into(),
+			revision_conflict: Some(RevisionConflict {
+				current_revision: 3,
+				safe_state: ConflictState::Run { run },
+			}),
+		},
+	};
+
+	assert_eq!(
+		(json(&command), json(&conflict)),
+		(
+			r#"{"kind":"command","id":5,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"transition_run","run_id":"00000000-0000-0000-0000-000000000000","expected_revision":2,"lifecycle":"active"}}"#.to_string(),
+			r#"{"kind":"error","id":5,"error":{"category":"conflict","code":"run.revision_conflict","retryable":false,"message":"the Run changed since the Command was prepared","revision_conflict":{"current_revision":3,"safe_state":{"type":"run","run":{"run_id":"00000000-0000-0000-0000-000000000000","conversation_id":"00000000-0000-0000-0000-000000000000","revision":3,"lifecycle":"active","created_at_unix_ms":1,"ended_at_unix_ms":null}}}}}"#.to_string(),
 		)
 	);
 }
@@ -129,7 +174,7 @@ fn a_create_conversation_command_retains_by_default() {
 	use crate::decode_control;
 
 	let command: ClientMessage = decode_control(
-		br#"{"kind":"command","id":2,"command":{"type":"create_conversation"}}"#,
+		br#"{"kind":"command","id":2,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"create_conversation"}}"#,
 	)
 	.unwrap();
 
@@ -137,6 +182,7 @@ fn a_create_conversation_command_retains_by_default() {
 		command,
 		ClientMessage::Command {
 			id: 2,
+			command_id: Uuid::nil(),
 			command: CommandRequest::CreateConversation {
 				retention: Retention::Retain,
 			},
@@ -156,6 +202,7 @@ fn conversation_snapshots_and_events_have_the_agreed_wire_shape() {
 		runs: vec![Run {
 			run_id: Uuid::nil(),
 			conversation_id: Uuid::nil(),
+			revision: 4,
 			lifecycle: RunLifecycle::Completed,
 			created_at_unix_ms: 2,
 			ended_at_unix_ms: Some(3),
@@ -178,7 +225,7 @@ fn conversation_snapshots_and_events_have_the_agreed_wire_shape() {
 	assert_eq!(
 		(json(&snapshot), json(&events)),
 		(
-			r#"{"type":"conversation","cursor":3,"conversation":{"conversation_id":"00000000-0000-0000-0000-000000000000","retention":"forget_after_final_run","created_at_unix_ms":1},"runs":[{"run_id":"00000000-0000-0000-0000-000000000000","conversation_id":"00000000-0000-0000-0000-000000000000","lifecycle":"completed","created_at_unix_ms":2,"ended_at_unix_ms":3}]}"#.to_string(),
+			r#"{"type":"conversation","cursor":3,"conversation":{"conversation_id":"00000000-0000-0000-0000-000000000000","retention":"forget_after_final_run","created_at_unix_ms":1},"runs":[{"run_id":"00000000-0000-0000-0000-000000000000","conversation_id":"00000000-0000-0000-0000-000000000000","revision":4,"lifecycle":"completed","created_at_unix_ms":2,"ended_at_unix_ms":3}]}"#.to_string(),
 			r#"{"type":"events","events":[{"sequence":3,"event_id":"00000000-0000-0000-0000-000000000000","actor":{"type":"interactive_client","client_id":"00000000-0000-0000-0000-000000000000"},"recorded_at_unix_ms":3,"conversation_id":"00000000-0000-0000-0000-000000000000","run_id":null,"kind":"run.lifecycle_changed","payload":{"from":"active","to":"completed"}}]}"#.to_string(),
 		)
 	);

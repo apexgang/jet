@@ -4,10 +4,11 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_core::{
-	Actor, Command, CommandOutcome, Conversation, ConversationId,
-	ConversationList, ConversationSnapshot, CoreError, ErrorCategory, Event,
-	EventKind, EventSequence, PlaneStatus, Query, QueryResult, Retention, Run,
-	RunId, RunLifecycle,
+	Actor, Command, CommandOutcome, ConflictState, Conversation,
+	ConversationId, ConversationList, ConversationSnapshot, CoreError,
+	ErrorCategory, Event, EventKind, EventSequence, PlaneStatus, Query,
+	QueryResult, Retention, Revision, RevisionConflict, Run, RunId,
+	RunLifecycle,
 };
 use jet_protocol as wire;
 
@@ -57,12 +58,15 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 				conversation_id: ConversationId(conversation_id),
 			}
 		}
-		wire::CommandRequest::TransitionRun { run_id, lifecycle } => {
-			Command::TransitionRun {
-				run_id: RunId(run_id),
-				lifecycle: lifecycle_from_wire(lifecycle),
-			}
-		}
+		wire::CommandRequest::TransitionRun {
+			run_id,
+			expected_revision,
+			lifecycle,
+		} => Command::TransitionRun {
+			run_id: RunId(run_id),
+			expected_revision: Revision(expected_revision),
+			lifecycle: lifecycle_from_wire(lifecycle),
+		},
 	}
 }
 
@@ -120,6 +124,7 @@ fn run(run: &Run) -> wire::Run {
 	wire::Run {
 		run_id: run.run_id.0,
 		conversation_id: run.conversation_id.0,
+		revision: run.revision.0,
 		lifecycle: lifecycle(run.lifecycle),
 		created_at_unix_ms: unix_ms(run.created_at),
 		ended_at_unix_ms: run.ended_at.map(unix_ms),
@@ -193,9 +198,21 @@ fn lifecycle_from_wire(lifecycle: wire::RunLifecycle) -> RunLifecycle {
 pub(crate) fn error(error: CoreError) -> wire::WireError {
 	wire::WireError {
 		category: category(error.category),
-		code: error.code.into(),
+		code: error.code,
 		retryable: error.retryable,
 		message: error.message,
+		revision_conflict: error.revision_conflict.map(revision_conflict),
+	}
+}
+
+fn revision_conflict(conflict: RevisionConflict) -> wire::RevisionConflict {
+	wire::RevisionConflict {
+		current_revision: conflict.current_revision.0,
+		safe_state: match conflict.safe_state {
+			ConflictState::Run(current) => {
+				wire::ConflictState::Run { run: run(&current) }
+			}
+		},
 	}
 }
 

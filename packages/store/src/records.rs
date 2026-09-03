@@ -111,6 +111,66 @@ pub enum ActorRecord {
 	},
 }
 
+impl ActorRecord {
+	pub(crate) fn columns(self) -> (&'static str, Uuid) {
+		match self {
+			Self::InteractiveClient { client_id } => {
+				("interactive_client", client_id)
+			}
+		}
+	}
+
+	pub(crate) fn parse(
+		kind: &str,
+		id: &str,
+		index: usize,
+	) -> rusqlite::Result<Self> {
+		match kind {
+			"interactive_client" => Ok(Self::InteractiveClient {
+				client_id: parse_uuid(index, id)?,
+			}),
+			_ => Err(column_error(
+				index,
+				format!("unknown actor {kind:?} with id {id:?}"),
+			)),
+		}
+	}
+}
+
+/// A durable receipt for one accepted Actor-scoped Command identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandReceiptRecord {
+	/// The authenticated Actor that submitted the Command.
+	pub actor: ActorRecord,
+	/// The Actor-scoped Command identity.
+	pub command_id: Uuid,
+	/// SHA-256 digest of the request content.
+	pub request_digest: [u8; 32],
+	/// When the Command was accepted.
+	pub recorded_at_unix_ms: i64,
+	/// Version of the private outcome encoding.
+	pub outcome_version: u32,
+	/// Encoded authoritative outcome.
+	pub outcome: String,
+}
+
+/// A Command receipt to record in the accepting state transaction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewCommandReceipt {
+	/// The authenticated Actor that submitted the Command.
+	pub actor: ActorRecord,
+	/// The Actor-scoped Command identity.
+	pub command_id: Uuid,
+	/// SHA-256 digest of the request content.
+	pub request_digest: [u8; 32],
+	/// When the Command was accepted.
+	pub recorded_at_unix_ms: i64,
+	/// Version of the private outcome encoding.
+	pub outcome_version: u32,
+	/// Encoded authoritative outcome.
+	pub outcome: String,
+}
+
 /// A Conversation to insert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NewConversation {
@@ -147,6 +207,8 @@ pub struct RunRecord {
 	pub run_id: Uuid,
 	/// The Conversation this Run executes.
 	pub conversation_id: Uuid,
+	/// Monotonic version for conflict-sensitive Run Commands.
+	pub revision: u64,
 	/// Current lifecycle state.
 	pub lifecycle: RunLifecycle,
 	/// When the Run was recorded.

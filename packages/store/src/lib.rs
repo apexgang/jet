@@ -9,6 +9,7 @@
 //! typed records and stable errors.
 
 mod clock;
+mod command;
 mod conversation;
 mod journal;
 mod migrations;
@@ -24,8 +25,9 @@ use rusqlite::Connection;
 
 pub use plane::PlaneRecord;
 pub use records::{
-	ActorRecord, ConversationRecord, EventRecord, NewConversation, NewEvent,
-	NewRun, Retention, RunLifecycle, RunRecord,
+	ActorRecord, CommandReceiptRecord, ConversationRecord, EventRecord,
+	NewCommandReceipt, NewConversation, NewEvent, NewRun, Retention,
+	RunLifecycle, RunRecord,
 };
 pub use transaction::{ReadTransaction, WriteTransaction};
 

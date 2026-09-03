@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::conversation::{
 	CommandRequest, CommandResponse, ConversationList, ConversationSnapshot,
+	RevisionConflict,
 };
 use crate::event::Event;
 
@@ -26,6 +27,8 @@ pub enum ClientMessage {
 	Command {
 		/// Correlation identifier echoed in the reply.
 		id: RequestId,
+		/// Actor-scoped identity used to deduplicate retries.
+		command_id: Uuid,
 		/// The Command to execute.
 		command: CommandRequest,
 	},
@@ -143,6 +146,9 @@ pub struct WireError {
 	pub retryable: bool,
 	/// Safe human-readable description free of native error strings.
 	pub message: String,
+	/// Current resource state when an expected Revision was stale.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub revision_conflict: Option<RevisionConflict>,
 }
 
 #[cfg(test)]

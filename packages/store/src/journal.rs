@@ -1,15 +1,13 @@
 //! The append-only Event journal (ADR-0020, ADR-0096). Sequence numbers are
 //! total and monotonic within this Plane only (ADR-0069).
 
-use rusqlite::Row;
-use uuid::Uuid;
-
 use crate::records::{
 	ActorRecord, EventRecord, NewEvent, column_error, parse_optional_uuid,
 	parse_uuid,
 };
 use crate::transaction::{ReadTransaction, WriteTransaction};
 use crate::{StoreError, clock};
+use rusqlite::Row;
 
 const COLUMNS: &str = "sequence, event_id, actor_kind, actor_id, \
 	recorded_at_unix_ms, conversation_id, run_id, kind, payload_version, \
@@ -69,7 +67,7 @@ impl WriteTransaction<'_> {
 		event: NewEvent,
 	) -> Result<EventRecord, StoreError> {
 		let recorded_at_unix_ms = clock::unix_ms_now();
-		let (actor_kind, actor_id) = actor_columns(event.actor);
+		let (actor_kind, actor_id) = event.actor.columns();
 		self.transaction.execute(
 			"INSERT INTO events (event_id, actor_kind, actor_id,
 				recorded_at_unix_ms, conversation_id, run_id, kind,
@@ -78,7 +76,7 @@ impl WriteTransaction<'_> {
 			(
 				event.event_id.to_string(),
 				actor_kind,
-				actor_id.map(|id| id.to_string()),
+				actor_id.to_string(),
 				recorded_at_unix_ms,
 				event.conversation_id.map(|id| id.to_string()),
 				event.run_id.map(|id| id.to_string()),
@@ -120,26 +118,11 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<EventRecord> {
 	})
 }
 
-fn actor_columns(actor: ActorRecord) -> (&'static str, Option<Uuid>) {
-	match actor {
-		ActorRecord::InteractiveClient { client_id } => {
-			("interactive_client", Some(client_id))
-		}
-	}
-}
-
 fn parse_actor(kind: &str, id: Option<&str>) -> rusqlite::Result<ActorRecord> {
-	match (kind, id) {
-		("interactive_client", Some(client_id)) => {
-			Ok(ActorRecord::InteractiveClient {
-				client_id: parse_uuid(3, client_id)?,
-			})
-		}
-		(kind, id) => Err(column_error(
-			2,
-			format!("unknown actor {kind:?} with id {id:?}"),
-		)),
-	}
+	let Some(id) = id else {
+		return Err(column_error(2, format!("actor {kind:?} has no identity")));
+	};
+	ActorRecord::parse(kind, id, 3)
 }
 
 fn sequence_column(sequence: u64) -> Result<i64, StoreError> {

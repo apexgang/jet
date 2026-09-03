@@ -130,6 +130,7 @@ fn conversations_runs_and_events_survive_reopening_the_store() {
 		RunRecord {
 			run_id,
 			conversation_id,
+			revision: 2,
 			lifecycle: RunLifecycle::Completed,
 			created_at_unix_ms: run.created_at_unix_ms,
 			ended_at_unix_ms: run.ended_at_unix_ms,

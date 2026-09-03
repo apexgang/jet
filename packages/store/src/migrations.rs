@@ -39,6 +39,18 @@ const MIGRATIONS: &[&str] = &[
 		payload TEXT NOT NULL CHECK (length(payload) <= 65536)
 	);
 	CREATE INDEX events_by_conversation ON events (conversation_id, sequence);",
+	// 3: Durable Command receipts for Actor-scoped idempotency (ADR-0093).
+	"ALTER TABLE runs ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+	CREATE TABLE command_receipts (
+		actor_kind TEXT NOT NULL,
+		actor_id TEXT NOT NULL,
+		command_id TEXT NOT NULL,
+		request_digest BLOB NOT NULL CHECK (length(request_digest) = 32),
+		recorded_at_unix_ms INTEGER NOT NULL,
+		outcome_version INTEGER NOT NULL,
+		outcome TEXT NOT NULL CHECK (length(outcome) <= 65536),
+		PRIMARY KEY (actor_kind, actor_id, command_id)
+	)",
 ];
 
 pub(crate) fn apply(connection: &mut Connection) -> Result<(), StoreError> {
