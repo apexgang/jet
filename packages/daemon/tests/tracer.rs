@@ -3,57 +3,25 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
+mod support;
 
-use jet_client::Client;
 use jet_protocol::{
 	CODEC_JSON_V1, ClientHello, ErrorCategory, Frame, FrameReader, FrameWriter,
 	MAX_CONTROL_FRAME, MAX_DATA_FRAME, PREFACE, PROTOCOL_VERSION, PlaneStatus,
 	ServerHello, VersionRange, WireError, decode_control, encode_control,
 };
 use pretty_assertions::assert_eq;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use support::{Daemon, jetd, start_jetd};
+use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
-use tokio::process::{Child, Command};
 use uuid::Uuid;
 
-struct Daemon {
-	child: Child,
-	socket: PathBuf,
-}
-
-fn jetd(home: &Path) -> Command {
-	let mut command = Command::new(env!("CARGO_BIN_EXE_jetd"));
-	command
-		.arg("run")
-		.arg("--home")
-		.arg(home)
-		.stdin(Stdio::null())
-		.stdout(Stdio::piped())
-		.stderr(Stdio::piped())
-		.kill_on_drop(true);
-	command
-}
-
-async fn start_jetd(home: &Path) -> Daemon {
-	let mut child = jetd(home).spawn().unwrap();
-	let stdout = child.stdout.take().unwrap();
-	let mut lines = BufReader::new(stdout).lines();
-	let ready = lines.next_line().await.unwrap().expect("jetd exited early");
-	let ready: serde_json::Value = serde_json::from_str(&ready).unwrap();
-	assert_eq!(ready["event"], "ready");
-	Daemon {
-		child,
-		socket: PathBuf::from(ready["socket"].as_str().unwrap()),
-	}
-}
-
 async fn status(daemon: &Daemon, client_id: Uuid) -> PlaneStatus {
-	let mut client = Client::connect_local(&daemon.socket, client_id)
+	support::connect(daemon, client_id)
 		.await
-		.unwrap();
-	client.status().await.unwrap()
+		.status()
+		.await
+		.unwrap()
 }
 
 #[tokio::test]

@@ -3,19 +3,81 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use jet_core::{CoreError, ErrorCategory, PlaneStatus, Query, QueryResult};
+use jet_core::{
+	Actor, Command, CommandOutcome, Conversation, ConversationId,
+	ConversationList, ConversationSnapshot, CoreError, ErrorCategory, Event,
+	EventKind, EventSequence, PlaneStatus, Query, QueryResult, Retention, Run,
+	RunId, RunLifecycle,
+};
 use jet_protocol as wire;
 
 pub(crate) fn query(request: &wire::QueryRequest) -> Query {
-	match request {
+	match *request {
 		wire::QueryRequest::Status => Query::Status,
+		wire::QueryRequest::Conversations => Query::Conversations,
+		wire::QueryRequest::Conversation { conversation_id } => {
+			Query::Conversation {
+				conversation_id: ConversationId(conversation_id),
+			}
+		}
+		wire::QueryRequest::Events { after } => Query::Events {
+			after: EventSequence(after),
+		},
 	}
 }
 
-pub(crate) fn query_result(result: QueryResult) -> wire::QueryResponse {
-	match result {
+pub(crate) fn query_result(
+	result: QueryResult,
+) -> Result<wire::QueryResponse, CoreError> {
+	Ok(match result {
 		QueryResult::Status(status) => {
 			wire::QueryResponse::Status(plane_status(&status))
+		}
+		QueryResult::Conversations(list) => {
+			wire::QueryResponse::Conversations(conversation_list(&list))
+		}
+		QueryResult::Conversation(snapshot) => {
+			wire::QueryResponse::Conversation(conversation_snapshot(&snapshot))
+		}
+		QueryResult::Events(events) => wire::QueryResponse::Events {
+			events: events.iter().map(event).collect::<Result<_, _>>()?,
+		},
+	})
+}
+
+pub(crate) fn command(request: &wire::CommandRequest) -> Command {
+	match *request {
+		wire::CommandRequest::CreateConversation { retention } => {
+			Command::CreateConversation {
+				retention: retention_from_wire(retention),
+			}
+		}
+		wire::CommandRequest::CreateRun { conversation_id } => {
+			Command::CreateRun {
+				conversation_id: ConversationId(conversation_id),
+			}
+		}
+		wire::CommandRequest::TransitionRun { run_id, lifecycle } => {
+			Command::TransitionRun {
+				run_id: RunId(run_id),
+				lifecycle: lifecycle_from_wire(lifecycle),
+			}
+		}
+	}
+}
+
+pub(crate) fn command_outcome(
+	outcome: CommandOutcome,
+) -> wire::CommandResponse {
+	match outcome {
+		CommandOutcome::ConversationCreated(created) => {
+			wire::CommandResponse::ConversationCreated(conversation(&created))
+		}
+		CommandOutcome::RunCreated(created) => {
+			wire::CommandResponse::RunCreated(run(&created))
+		}
+		CommandOutcome::RunTransitioned(transitioned) => {
+			wire::CommandResponse::RunTransitioned(run(&transitioned))
 		}
 	}
 }
@@ -26,6 +88,105 @@ fn plane_status(status: &PlaneStatus) -> wire::PlaneStatus {
 		daemon_starts: status.daemon_starts,
 		started_at_unix_ms: unix_ms(status.started_at),
 		core_version: status.core_version.into(),
+	}
+}
+
+fn conversation_list(list: &ConversationList) -> wire::ConversationList {
+	wire::ConversationList {
+		cursor: list.cursor.0,
+		conversations: list.conversations.iter().map(conversation).collect(),
+	}
+}
+
+fn conversation_snapshot(
+	snapshot: &ConversationSnapshot,
+) -> wire::ConversationSnapshot {
+	wire::ConversationSnapshot {
+		cursor: snapshot.cursor.0,
+		conversation: conversation(&snapshot.conversation),
+		runs: snapshot.runs.iter().map(run).collect(),
+	}
+}
+
+fn conversation(conversation: &Conversation) -> wire::Conversation {
+	wire::Conversation {
+		conversation_id: conversation.conversation_id.0,
+		retention: retention(conversation.retention),
+		created_at_unix_ms: unix_ms(conversation.created_at),
+	}
+}
+
+fn run(run: &Run) -> wire::Run {
+	wire::Run {
+		run_id: run.run_id.0,
+		conversation_id: run.conversation_id.0,
+		lifecycle: lifecycle(run.lifecycle),
+		created_at_unix_ms: unix_ms(run.created_at),
+		ended_at_unix_ms: run.ended_at.map(unix_ms),
+	}
+}
+
+fn event(event: &Event) -> Result<wire::Event, CoreError> {
+	let (kind, payload) = EventKind::encode(&event.kind)?;
+	Ok(wire::Event {
+		sequence: event.sequence.0,
+		event_id: event.event_id.0,
+		actor: actor(&event.actor),
+		recorded_at_unix_ms: unix_ms(event.recorded_at),
+		conversation_id: event.conversation_id.map(|id| id.0),
+		run_id: event.run_id.map(|id| id.0),
+		kind,
+		payload,
+	})
+}
+
+fn actor(actor: &Actor) -> wire::Actor {
+	match actor {
+		Actor::InteractiveClient { client_id } => {
+			wire::Actor::InteractiveClient {
+				client_id: client_id.0,
+			}
+		}
+	}
+}
+
+fn retention(retention: Retention) -> wire::Retention {
+	match retention {
+		Retention::Retain => wire::Retention::Retain,
+		Retention::ForgetAfterFinalRun => wire::Retention::ForgetAfterFinalRun,
+	}
+}
+
+fn retention_from_wire(retention: wire::Retention) -> Retention {
+	match retention {
+		wire::Retention::Retain => Retention::Retain,
+		wire::Retention::ForgetAfterFinalRun => Retention::ForgetAfterFinalRun,
+	}
+}
+
+fn lifecycle(lifecycle: RunLifecycle) -> wire::RunLifecycle {
+	match lifecycle {
+		RunLifecycle::Created => wire::RunLifecycle::Created,
+		RunLifecycle::Starting => wire::RunLifecycle::Starting,
+		RunLifecycle::Active => wire::RunLifecycle::Active,
+		RunLifecycle::Stopping => wire::RunLifecycle::Stopping,
+		RunLifecycle::Completed => wire::RunLifecycle::Completed,
+		RunLifecycle::Failed => wire::RunLifecycle::Failed,
+		RunLifecycle::Canceled => wire::RunLifecycle::Canceled,
+		RunLifecycle::Lost => wire::RunLifecycle::Lost,
+	}
+}
+
+fn lifecycle_from_wire(lifecycle: wire::RunLifecycle) -> RunLifecycle {
+	match lifecycle {
+		wire::RunLifecycle::Created => RunLifecycle::Created,
+		wire::RunLifecycle::Starting => RunLifecycle::Starting,
+		wire::RunLifecycle::Active => RunLifecycle::Active,
+		wire::RunLifecycle::Stopping => RunLifecycle::Stopping,
+		wire::RunLifecycle::Completed => RunLifecycle::Completed,
+		wire::RunLifecycle::Failed => RunLifecycle::Failed,
+		wire::RunLifecycle::Canceled => RunLifecycle::Canceled,
+		wire::RunLifecycle::Lost => RunLifecycle::Lost,
 	}
 }
 

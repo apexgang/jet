@@ -5,6 +5,11 @@ use super::{
 	ClientMessage, ErrorCategory, PlaneStatus, QueryRequest, QueryResponse,
 	ServerMessage, WireError,
 };
+use crate::conversation::{
+	CommandRequest, CommandResponse, Conversation, ConversationSnapshot,
+	Retention, Run, RunLifecycle,
+};
+use crate::event::{Actor, Event};
 use crate::handshake::{ClientHello, ServerHello, VersionRange};
 
 fn json(value: &impl serde::Serialize) -> String {
@@ -91,5 +96,90 @@ fn error_messages_carry_a_stable_error_body() {
 	assert_eq!(
 		json(&error),
 		r#"{"kind":"error","id":4,"error":{"category":"unavailable","code":"store.unavailable","retryable":true,"message":"the Plane store is unavailable"}}"#
+	);
+}
+
+#[test]
+fn conversation_commands_and_results_have_the_agreed_wire_shape() {
+	let command = ClientMessage::Command {
+		id: 2,
+		command: CommandRequest::CreateConversation {
+			retention: Retention::Retain,
+		},
+	};
+	let result = ServerMessage::CommandResult {
+		id: 2,
+		result: CommandResponse::ConversationCreated(Conversation {
+			conversation_id: Uuid::nil(),
+			retention: Retention::Retain,
+			created_at_unix_ms: 1_700_000_000_000,
+		}),
+	};
+	assert_eq!(
+		(json(&command), json(&result)),
+		(
+			r#"{"kind":"command","id":2,"command":{"type":"create_conversation","retention":"retain"}}"#.to_string(),
+			r#"{"kind":"command_result","id":2,"result":{"type":"conversation_created","conversation_id":"00000000-0000-0000-0000-000000000000","retention":"retain","created_at_unix_ms":1700000000000}}"#.to_string(),
+		)
+	);
+}
+
+#[test]
+fn a_create_conversation_command_retains_by_default() {
+	use crate::decode_control;
+
+	let command: ClientMessage = decode_control(
+		br#"{"kind":"command","id":2,"command":{"type":"create_conversation"}}"#,
+	)
+	.unwrap();
+
+	assert_eq!(
+		command,
+		ClientMessage::Command {
+			id: 2,
+			command: CommandRequest::CreateConversation {
+				retention: Retention::Retain,
+			},
+		}
+	);
+}
+
+#[test]
+fn conversation_snapshots_and_events_have_the_agreed_wire_shape() {
+	let snapshot = QueryResponse::Conversation(ConversationSnapshot {
+		cursor: 3,
+		conversation: Conversation {
+			conversation_id: Uuid::nil(),
+			retention: Retention::ForgetAfterFinalRun,
+			created_at_unix_ms: 1,
+		},
+		runs: vec![Run {
+			run_id: Uuid::nil(),
+			conversation_id: Uuid::nil(),
+			lifecycle: RunLifecycle::Completed,
+			created_at_unix_ms: 2,
+			ended_at_unix_ms: Some(3),
+		}],
+	});
+	let events = QueryResponse::Events {
+		events: vec![Event {
+			sequence: 3,
+			event_id: Uuid::nil(),
+			actor: Actor::InteractiveClient {
+				client_id: Uuid::nil(),
+			},
+			recorded_at_unix_ms: 3,
+			conversation_id: Some(Uuid::nil()),
+			run_id: None,
+			kind: "run.lifecycle_changed".into(),
+			payload: serde_json::json!({"from": "active", "to": "completed"}),
+		}],
+	};
+	assert_eq!(
+		(json(&snapshot), json(&events)),
+		(
+			r#"{"type":"conversation","cursor":3,"conversation":{"conversation_id":"00000000-0000-0000-0000-000000000000","retention":"forget_after_final_run","created_at_unix_ms":1},"runs":[{"run_id":"00000000-0000-0000-0000-000000000000","conversation_id":"00000000-0000-0000-0000-000000000000","lifecycle":"completed","created_at_unix_ms":2,"ended_at_unix_ms":3}]}"#.to_string(),
+			r#"{"type":"events","events":[{"sequence":3,"event_id":"00000000-0000-0000-0000-000000000000","actor":{"type":"interactive_client","client_id":"00000000-0000-0000-0000-000000000000"},"recorded_at_unix_ms":3,"conversation_id":"00000000-0000-0000-0000-000000000000","run_id":null,"kind":"run.lifecycle_changed","payload":{"from":"active","to":"completed"}}]}"#.to_string(),
+		)
 	);
 }
