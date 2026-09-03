@@ -1,1 +1,1 @@
-/Users/heeka/dev/jet/AGENTS.md
+AGENTS.md
