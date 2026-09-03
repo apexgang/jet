@@ -54,6 +54,19 @@ pub enum Actor {
 }
 
 impl Actor {
+	/// Checks that the Actor may drive and read this Plane's Conversations.
+	/// Every authenticated local Actor may in this slice; remote and
+	/// automation Actors arrive with their own rules (ADR-0063).
+	#[expect(
+		clippy::unnecessary_wraps,
+		reason = "the first non-local Actor turns this into a real check"
+	)]
+	fn authorize(&self) -> Result<(), CoreError> {
+		match self {
+			Self::InteractiveClient { .. } => Ok(()),
+		}
+	}
+
 	fn record(&self) -> ActorRecord {
 		match self {
 			Self::InteractiveClient { client_id } => {

@@ -1,6 +1,10 @@
 use pretty_assertions::assert_eq;
+use uuid::Uuid;
 
-use super::{PlaneRecord, Store};
+use super::{
+	ActorRecord, ConversationRecord, EventRecord, NewConversation, NewEvent,
+	NewRun, PlaneRecord, Retention, RunLifecycle, RunRecord, Store, StoreError,
+};
 
 #[test]
 fn plane_identity_and_start_count_survive_reopening_the_store() {
@@ -41,18 +45,8 @@ fn opening_a_store_in_a_missing_directory_is_reported_as_unavailable() {
 	let error = Store::open(&dir.path().join("missing").join("plane.sqlite3"))
 		.unwrap_err();
 
-	assert!(
-		matches!(error, super::StoreError::Unavailable(_)),
-		"{error:?}"
-	);
+	assert!(matches!(error, StoreError::Unavailable(_)), "{error:?}");
 }
-
-use uuid::Uuid;
-
-use super::{
-	ActorRecord, ConversationRecord, EventRecord, NewConversation, NewEvent,
-	NewRun, Retention, RunLifecycle, RunRecord, StoreError,
-};
 
 fn actor() -> ActorRecord {
 	ActorRecord::InteractiveClient {

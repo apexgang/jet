@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::conversation::{ConversationId, RunId};
-use crate::error::{CoreError, ErrorCategory};
+use crate::error::CoreError;
 use crate::{Actor, system_time};
 
 /// Most Events one `Query::Events` page returns.
@@ -27,9 +27,18 @@ pub struct EventId(pub Uuid);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventSequence(pub u64);
 
-impl EventSequence {
-	/// The position before the first Event.
-	pub const ORIGIN: Self = Self(0);
+/// What an Event is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EventSubject {
+	/// The Conversation as a whole.
+	Conversation(ConversationId),
+	/// One Run of a Conversation.
+	Run {
+		/// The Run's Conversation.
+		conversation_id: ConversationId,
+		/// The Run itself.
+		run_id: RunId,
+	},
 }
 
 /// One journal entry.
@@ -84,14 +93,20 @@ impl EventKind {
 	/// which indicates a programming error.
 	pub fn encode(&self) -> Result<(String, serde_json::Value), CoreError> {
 		let encoded = serde_json::to_value(self).map_err(|error| {
-			internal("event.unencodable", error.to_string())
+			CoreError::internal("event.unencodable", error.to_string())
 		})?;
 		let serde_json::Value::Object(mut fields) = encoded else {
-			return Err(internal("event.unencodable", "not an object".into()));
+			return Err(CoreError::internal(
+				"event.unencodable",
+				"not an object".into(),
+			));
 		};
 		let Some(serde_json::Value::String(kind)) = fields.remove("kind")
 		else {
-			return Err(internal("event.unencodable", "no kind".into()));
+			return Err(CoreError::internal(
+				"event.unencodable",
+				"no kind".into(),
+			));
 		};
 		let payload = fields.remove("payload").unwrap_or_else(|| {
 			serde_json::Value::Object(serde_json::Map::new())
@@ -101,27 +116,39 @@ impl EventKind {
 
 	fn decode(record: &EventRecord) -> Result<Self, CoreError> {
 		if record.payload_version != PAYLOAD_VERSION {
-			return Err(internal(
+			return Err(CoreError::internal(
 				"event.unsupported_payload",
 				format!("payload version {}", record.payload_version),
 			));
 		}
 		let payload: serde_json::Value = serde_json::from_str(&record.payload)
-			.map_err(|error| internal("event.malformed", error.to_string()))?;
+			.map_err(|error| {
+				CoreError::internal("event.malformed", error.to_string())
+			})?;
 		serde_json::from_value(serde_json::json!({
 			"kind": record.kind,
 			"payload": payload,
 		}))
-		.map_err(|error| internal("event.malformed", error.to_string()))
+		.map_err(|error| {
+			CoreError::internal("event.malformed", error.to_string())
+		})
 	}
 
 	pub(crate) fn to_record(
 		&self,
 		actor: &Actor,
-		conversation_id: ConversationId,
-		run_id: Option<RunId>,
+		subject: EventSubject,
 	) -> Result<NewEvent, CoreError> {
 		let (kind, payload) = self.encode()?;
+		let (conversation_id, run_id) = match subject {
+			EventSubject::Conversation(conversation_id) => {
+				(conversation_id, None)
+			}
+			EventSubject::Run {
+				conversation_id,
+				run_id,
+			} => (conversation_id, Some(run_id)),
+		};
 		Ok(NewEvent {
 			event_id: Uuid::now_v7(),
 			actor: actor.record(),
@@ -148,15 +175,5 @@ impl TryFrom<EventRecord> for Event {
 			run_id: record.run_id.map(RunId),
 			kind,
 		})
-	}
-}
-
-fn internal(code: &'static str, detail: String) -> CoreError {
-	CoreError {
-		category: ErrorCategory::Internal,
-		code,
-		retryable: false,
-		message: "a journal Event could not be encoded or decoded".into(),
-		detail: Some(detail),
 	}
 }

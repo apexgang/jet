@@ -1,12 +1,24 @@
 //! The Run lifecycle progression (ADR-0065): `created`, `starting`,
-//! `active`, `stopping`, then exactly one terminal result. A Run may jump
-//! from any live state to any terminal result, but never skips a live
-//! state and never leaves a terminal one.
+//! `active`, `stopping`, then exactly one terminal result. A Run never
+//! skips a live state and never leaves a terminal one. It may fail, be
+//! canceled, or be lost from any live state, but it only completes after
+//! it has been active.
 
 use jet_store::RunLifecycle;
 
 pub(crate) fn may_transition(from: RunLifecycle, to: RunLifecycle) -> bool {
-	!from.is_terminal() && (to.is_terminal() || successor(from) == Some(to))
+	match to {
+		RunLifecycle::Created
+		| RunLifecycle::Starting
+		| RunLifecycle::Active
+		| RunLifecycle::Stopping => successor(from) == Some(to),
+		RunLifecycle::Completed => {
+			matches!(from, RunLifecycle::Active | RunLifecycle::Stopping)
+		}
+		RunLifecycle::Failed | RunLifecycle::Canceled | RunLifecycle::Lost => {
+			!from.is_terminal()
+		}
+	}
 }
 
 fn successor(lifecycle: RunLifecycle) -> Option<RunLifecycle> {
@@ -19,18 +31,5 @@ fn successor(lifecycle: RunLifecycle) -> Option<RunLifecycle> {
 		| RunLifecycle::Failed
 		| RunLifecycle::Canceled
 		| RunLifecycle::Lost => None,
-	}
-}
-
-pub(crate) fn name(lifecycle: RunLifecycle) -> &'static str {
-	match lifecycle {
-		RunLifecycle::Created => "created",
-		RunLifecycle::Starting => "starting",
-		RunLifecycle::Active => "active",
-		RunLifecycle::Stopping => "stopping",
-		RunLifecycle::Completed => "completed",
-		RunLifecycle::Failed => "failed",
-		RunLifecycle::Canceled => "canceled",
-		RunLifecycle::Lost => "lost",
 	}
 }

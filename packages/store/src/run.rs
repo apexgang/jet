@@ -72,7 +72,7 @@ impl WriteTransaction<'_> {
 			(
 				record.run_id.to_string(),
 				record.conversation_id.to_string(),
-				lifecycle_column(record.lifecycle),
+				record.lifecycle.as_str(),
 				record.created_at_unix_ms,
 				record.ended_at_unix_ms,
 			),
@@ -80,8 +80,8 @@ impl WriteTransaction<'_> {
 		Ok(record)
 	}
 
-	/// Moves `run_id` to `lifecycle`, stamping its end when the state is
-	/// terminal, and returns the updated Run.
+	/// Moves `run_id` to `lifecycle`, stamping its end the first time the
+	/// state is terminal, and returns the updated Run.
 	///
 	/// # Errors
 	///
@@ -94,13 +94,11 @@ impl WriteTransaction<'_> {
 	) -> Result<RunRecord, StoreError> {
 		let ended_at_unix_ms = lifecycle.is_terminal().then(clock::unix_ms_now);
 		self.transaction.execute(
-			"UPDATE runs SET lifecycle = ?2, ended_at_unix_ms = ?3
+			"UPDATE runs
+			 SET lifecycle = ?2,
+			     ended_at_unix_ms = COALESCE(?3, ended_at_unix_ms)
 			 WHERE run_id = ?1",
-			(
-				run_id.to_string(),
-				lifecycle_column(lifecycle),
-				ended_at_unix_ms,
-			),
+			(run_id.to_string(), lifecycle.as_str(), ended_at_unix_ms),
 		)?;
 		self.run(run_id)?.ok_or_else(|| {
 			StoreError::Integrity(format!("run {run_id} does not exist"))
@@ -121,31 +119,8 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<RunRecord> {
 	})
 }
 
-fn lifecycle_column(lifecycle: RunLifecycle) -> &'static str {
-	match lifecycle {
-		RunLifecycle::Created => "created",
-		RunLifecycle::Starting => "starting",
-		RunLifecycle::Active => "active",
-		RunLifecycle::Stopping => "stopping",
-		RunLifecycle::Completed => "completed",
-		RunLifecycle::Failed => "failed",
-		RunLifecycle::Canceled => "canceled",
-		RunLifecycle::Lost => "lost",
-	}
-}
-
 fn parse_lifecycle(text: &str) -> rusqlite::Result<RunLifecycle> {
-	match text {
-		"created" => Ok(RunLifecycle::Created),
-		"starting" => Ok(RunLifecycle::Starting),
-		"active" => Ok(RunLifecycle::Active),
-		"stopping" => Ok(RunLifecycle::Stopping),
-		"completed" => Ok(RunLifecycle::Completed),
-		"failed" => Ok(RunLifecycle::Failed),
-		"canceled" => Ok(RunLifecycle::Canceled),
-		"lost" => Ok(RunLifecycle::Lost),
-		other => {
-			Err(column_error(2, format!("unknown run lifecycle {other:?}")))
-		}
-	}
+	RunLifecycle::parse(text).ok_or_else(|| {
+		column_error(2, format!("unknown run lifecycle {text:?}"))
+	})
 }

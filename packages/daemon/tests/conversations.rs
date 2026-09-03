@@ -9,10 +9,10 @@ mod support;
 use jet_client::ClientError;
 use jet_protocol::{
 	CODEC_JSON_V1, ClientHello, CommandResponse, Conversation,
-	ConversationSnapshot, ErrorCategory, Frame, FrameReader, FrameWriter,
-	MAX_CONTROL_FRAME, MAX_DATA_FRAME, PREFACE, Retention, RunLifecycle,
-	ServerHello, ServerMessage, VersionRange, WireError, decode_control,
-	encode_control,
+	ConversationList, ConversationSnapshot, ErrorCategory, Frame, FrameReader,
+	FrameWriter, MAX_CONTROL_FRAME, MAX_DATA_FRAME, PREFACE, Retention,
+	RunLifecycle, ServerHello, ServerMessage, VersionRange, WireError,
+	decode_control, encode_control,
 };
 use pretty_assertions::assert_eq;
 use support::{Daemon, connect, start_jetd};
@@ -70,6 +70,35 @@ async fn create_conversation_without_a_retention_choice(
 }
 
 #[tokio::test]
+async fn a_conversation_is_queryable_before_any_run_and_retained_by_default() {
+	let dir = tempfile::tempdir().unwrap();
+	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	let client_id = Uuid::new_v4();
+
+	let conversation =
+		create_conversation_without_a_retention_choice(&daemon, client_id)
+			.await;
+	let snapshot = connect(&daemon, client_id)
+		.await
+		.conversation(conversation.conversation_id)
+		.await
+		.unwrap();
+
+	assert_eq!(
+		snapshot,
+		ConversationSnapshot {
+			cursor: 1,
+			conversation: Conversation {
+				conversation_id: conversation.conversation_id,
+				retention: Retention::Retain,
+				created_at_unix_ms: conversation.created_at_unix_ms,
+			},
+			runs: vec![],
+		}
+	);
+}
+
+#[tokio::test]
 async fn a_conversation_is_retained_with_its_terminal_runs_across_a_jetd_restart()
  {
 	let dir = tempfile::tempdir().unwrap();
@@ -80,26 +109,22 @@ async fn a_conversation_is_retained_with_its_terminal_runs_across_a_jetd_restart
 	let conversation =
 		create_conversation_without_a_retention_choice(&first, client_id).await;
 	let mut client = connect(&first, client_id).await;
-	let empty = client
-		.conversation(conversation.conversation_id)
-		.await
-		.unwrap();
 	let run = client
 		.create_run(conversation.conversation_id)
 		.await
 		.unwrap();
-	for lifecycle in [
-		RunLifecycle::Starting,
-		RunLifecycle::Active,
-		RunLifecycle::Completed,
-	] {
+	for lifecycle in [RunLifecycle::Starting, RunLifecycle::Active] {
 		client.transition_run(run.run_id, lifecycle).await.unwrap();
 	}
+	let completed = client
+		.transition_run(run.run_id, RunLifecycle::Completed)
+		.await
+		.unwrap();
 	let second_run = client
 		.create_run(conversation.conversation_id)
 		.await
 		.unwrap();
-	client
+	let canceled = client
 		.transition_run(second_run.run_id, RunLifecycle::Canceled)
 		.await
 		.unwrap();
@@ -117,40 +142,29 @@ async fn a_conversation_is_retained_with_its_terminal_runs_across_a_jetd_restart
 		.await
 		.unwrap();
 	let journal_after_restart = client.events_after(0).await.unwrap();
+	let listed = client.conversations().await.unwrap();
 	let third_run = client
 		.create_run(conversation.conversation_id)
 		.await
 		.unwrap();
-	let newest = client.events_after(7).await.unwrap();
+	let newest = client.events_after(after_restart.cursor).await.unwrap();
 
+	assert_eq!(after_restart, before_restart);
 	assert_eq!(
-		empty,
+		after_restart,
 		ConversationSnapshot {
-			cursor: 1,
-			conversation: Conversation {
-				conversation_id: conversation.conversation_id,
-				retention: Retention::Retain,
-				created_at_unix_ms: conversation.created_at_unix_ms,
-			},
-			runs: vec![],
+			cursor: 7,
+			conversation: conversation.clone(),
+			runs: vec![completed.clone(), canceled],
 		}
 	);
-	assert_eq!(after_restart, before_restart);
-	assert_eq!(after_restart.cursor, 7);
+	assert!(completed.ended_at_unix_ms.is_some());
 	assert_eq!(
-		after_restart
-			.runs
-			.iter()
-			.map(|run| (
-				run.run_id,
-				run.lifecycle,
-				run.ended_at_unix_ms.is_some()
-			))
-			.collect::<Vec<_>>(),
-		vec![
-			(run.run_id, RunLifecycle::Completed, true),
-			(second_run.run_id, RunLifecycle::Canceled, true),
-		]
+		listed,
+		ConversationList {
+			cursor: 7,
+			conversations: vec![conversation],
+		}
 	);
 	assert_eq!(journal_after_restart, journal_before_restart);
 	assert_eq!(

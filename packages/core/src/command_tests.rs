@@ -84,7 +84,7 @@ fn a_conversation_exists_and_is_queryable_before_any_run() {
 		}
 	);
 	assert_eq!(
-		event_kinds(&core, EventSequence::ORIGIN),
+		event_kinds(&core, EventSequence(0)),
 		vec![(
 			1,
 			EventKind::ConversationCreated {
@@ -138,7 +138,16 @@ fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
 			(8, EventKind::RunCreated {}),
 		]
 	);
-	assert_eq!(third_run.lifecycle, RunLifecycle::Created);
+	assert_eq!(
+		third_run,
+		Run {
+			run_id: third_run.run_id,
+			conversation_id,
+			lifecycle: RunLifecycle::Created,
+			created_at: third_run.created_at,
+			ended_at: None,
+		}
+	);
 }
 
 #[test]
@@ -192,6 +201,7 @@ fn a_run_lifecycle_only_moves_forward_and_never_leaves_a_terminal_state() {
 	};
 
 	let skipped = refused(RunLifecycle::Active);
+	let never_active = refused(RunLifecycle::Completed);
 	transition(&core, run.run_id, RunLifecycle::Failed);
 	let revived = refused(RunLifecycle::Active);
 
@@ -203,9 +213,10 @@ fn a_run_lifecycle_only_moves_forward_and_never_leaves_a_terminal_state() {
 		detail: None,
 	};
 	assert_eq!(
-		(skipped, revived),
+		(skipped, never_active, revived),
 		(
 			invalid("a created Run cannot move to active"),
+			invalid("a created Run cannot move to completed"),
 			invalid("a failed Run cannot move to active"),
 		)
 	);

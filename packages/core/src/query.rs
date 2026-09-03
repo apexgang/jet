@@ -3,7 +3,6 @@
 
 use jet_store::ReadTransaction;
 
-use crate::command::not_found;
 use crate::conversation::{
 	ConversationId, ConversationList, ConversationSnapshot,
 };
@@ -56,10 +55,7 @@ impl Core {
 		actor: &Actor,
 		query: Query,
 	) -> Result<QueryResult, CoreError> {
-		// Every authenticated local Actor may read Plane state.
-		match actor {
-			Actor::InteractiveClient { .. } => {}
-		}
+		actor.authorize()?;
 		match query {
 			Query::Status => {
 				let plane = self.store.plane()?;
@@ -100,7 +96,7 @@ fn conversation(
 	conversation_id: ConversationId,
 ) -> Result<QueryResult, CoreError> {
 	let Some(record) = tx.conversation(conversation_id.0)? else {
-		return Err(not_found(
+		return Err(CoreError::not_found(
 			"conversation.not_found",
 			"the Conversation does not exist",
 		));

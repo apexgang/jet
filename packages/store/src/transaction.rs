@@ -17,6 +17,12 @@ pub struct ReadTransaction<'a> {
 /// One atomic set of changes, readable while it is being built.
 pub struct WriteTransaction<'a>(ReadTransaction<'a>);
 
+impl WriteTransaction<'_> {
+	fn commit(self) -> Result<(), StoreError> {
+		Ok(self.0.transaction.commit()?)
+	}
+}
+
 impl<'a> Deref for WriteTransaction<'a> {
 	type Target = ReadTransaction<'a>;
 
@@ -60,11 +66,7 @@ impl Store {
 			.map_err(StoreError::from)?;
 		let transaction = WriteTransaction(ReadTransaction { transaction });
 		let result = work(&transaction)?;
-		transaction
-			.0
-			.transaction
-			.commit()
-			.map_err(StoreError::from)?;
+		transaction.commit()?;
 		Ok(result)
 	}
 }

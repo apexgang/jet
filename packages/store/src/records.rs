@@ -52,6 +52,55 @@ impl RunLifecycle {
 	}
 }
 
+impl RunLifecycle {
+	/// The durable spelling, also used in messages and JSON.
+	#[must_use]
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Created => "created",
+			Self::Starting => "starting",
+			Self::Active => "active",
+			Self::Stopping => "stopping",
+			Self::Completed => "completed",
+			Self::Failed => "failed",
+			Self::Canceled => "canceled",
+			Self::Lost => "lost",
+		}
+	}
+
+	pub(crate) fn parse(text: &str) -> Option<Self> {
+		[
+			Self::Created,
+			Self::Starting,
+			Self::Active,
+			Self::Stopping,
+			Self::Completed,
+			Self::Failed,
+			Self::Canceled,
+			Self::Lost,
+		]
+		.into_iter()
+		.find(|lifecycle| lifecycle.as_str() == text)
+	}
+}
+
+impl Retention {
+	/// The durable spelling, also used in messages and JSON.
+	#[must_use]
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Retain => "retain",
+			Self::ForgetAfterFinalRun => "forget_after_final_run",
+		}
+	}
+
+	pub(crate) fn parse(text: &str) -> Option<Self> {
+		[Self::Retain, Self::ForgetAfterFinalRun]
+			.into_iter()
+			.find(|retention| retention.as_str() == text)
+	}
+}
+
 /// Who caused an Event (ADR-0063).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActorRecord {

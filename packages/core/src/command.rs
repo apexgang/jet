@@ -8,8 +8,8 @@ use jet_store::{
 use uuid::Uuid;
 
 use crate::conversation::{Conversation, ConversationId, Run, RunId};
-use crate::error::{CoreError, ErrorCategory};
-use crate::event::EventKind;
+use crate::error::CoreError;
+use crate::event::{EventKind, EventSubject};
 use crate::{Actor, Core, lifecycle};
 
 /// A state-changing request.
@@ -59,10 +59,7 @@ impl Core {
 		actor: &Actor,
 		command: Command,
 	) -> Result<CommandOutcome, CoreError> {
-		// Every authenticated local Actor may drive Conversations.
-		match actor {
-			Actor::InteractiveClient { .. } => {}
-		}
+		actor.authorize()?;
 		self.store.write(|tx| match command {
 			Command::CreateConversation { retention } => {
 				create_conversation(tx, actor, retention)
@@ -91,8 +88,7 @@ fn create_conversation(
 	let event = EventKind::ConversationCreated { retention };
 	tx.append_event(event.to_record(
 		actor,
-		conversation.conversation_id,
-		None,
+		EventSubject::Conversation(conversation.conversation_id),
 	)?)?;
 	Ok(CommandOutcome::ConversationCreated(conversation))
 }
@@ -103,7 +99,7 @@ fn create_run(
 	conversation_id: ConversationId,
 ) -> Result<CommandOutcome, CoreError> {
 	if tx.conversation(conversation_id.0)?.is_none() {
-		return Err(not_found(
+		return Err(CoreError::not_found(
 			"conversation.not_found",
 			"the Conversation does not exist",
 		));
@@ -113,7 +109,7 @@ fn create_run(
 		.iter()
 		.any(|run| !run.lifecycle.is_terminal());
 	if busy {
-		return Err(conflict(
+		return Err(CoreError::conflict(
 			"run.conversation_busy",
 			"the Conversation already has a Run that has not ended".into(),
 		));
@@ -126,8 +122,10 @@ fn create_run(
 		.into();
 	tx.append_event(EventKind::RunCreated {}.to_record(
 		actor,
-		conversation_id,
-		Some(run.run_id),
+		EventSubject::Run {
+			conversation_id,
+			run_id: run.run_id,
+		},
 	)?)?;
 	Ok(CommandOutcome::RunCreated(run))
 }
@@ -139,15 +137,18 @@ fn transition_run(
 	lifecycle: RunLifecycle,
 ) -> Result<CommandOutcome, CoreError> {
 	let Some(current) = tx.run(run_id.0)? else {
-		return Err(not_found("run.not_found", "the Run does not exist"));
+		return Err(CoreError::not_found(
+			"run.not_found",
+			"the Run does not exist",
+		));
 	};
 	if !lifecycle::may_transition(current.lifecycle, lifecycle) {
-		return Err(conflict(
+		return Err(CoreError::conflict(
 			"run.invalid_transition",
 			format!(
 				"a {} Run cannot move to {}",
-				lifecycle::name(current.lifecycle),
-				lifecycle::name(lifecycle)
+				current.lifecycle.as_str(),
+				lifecycle.as_str()
 			),
 		));
 	}
@@ -158,30 +159,12 @@ fn transition_run(
 	};
 	tx.append_event(event.to_record(
 		actor,
-		run.conversation_id,
-		Some(run_id),
+		EventSubject::Run {
+			conversation_id: run.conversation_id,
+			run_id,
+		},
 	)?)?;
 	Ok(CommandOutcome::RunTransitioned(run))
-}
-
-pub(crate) fn not_found(code: &'static str, message: &str) -> CoreError {
-	CoreError {
-		category: ErrorCategory::NotFound,
-		code,
-		retryable: false,
-		message: message.into(),
-		detail: None,
-	}
-}
-
-fn conflict(code: &'static str, message: String) -> CoreError {
-	CoreError {
-		category: ErrorCategory::Conflict,
-		code,
-		retryable: false,
-		message,
-		detail: None,
-	}
 }
 
 #[cfg(test)]

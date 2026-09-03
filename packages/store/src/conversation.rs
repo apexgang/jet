@@ -70,7 +70,7 @@ impl WriteTransaction<'_> {
 			),
 			(
 				record.conversation_id.to_string(),
-				retention_column(record.retention),
+				record.retention.as_str(),
 				record.created_at_unix_ms,
 			),
 		)?;
@@ -88,20 +88,8 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<ConversationRecord> {
 	})
 }
 
-fn retention_column(retention: Retention) -> &'static str {
-	match retention {
-		Retention::Retain => "retain",
-		Retention::ForgetAfterFinalRun => "forget_after_final_run",
-	}
-}
-
 fn parse_retention(text: &str) -> rusqlite::Result<Retention> {
-	match text {
-		"retain" => Ok(Retention::Retain),
-		"forget_after_final_run" => Ok(Retention::ForgetAfterFinalRun),
-		other => Err(column_error(
-			1,
-			format!("unknown retention value {other:?}"),
-		)),
-	}
+	Retention::parse(text).ok_or_else(|| {
+		column_error(1, format!("unknown retention value {text:?}"))
+	})
 }
