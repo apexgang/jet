@@ -6,10 +6,11 @@ use std::time::Duration;
 
 use jet_core::{Actor, ClientId, CommandEnvelope, CommandId, Core};
 use jet_protocol::{
-	CODEC_JSON_V1, ClientHello, ClientMessage, CommandRequest, ErrorCategory,
-	Frame, FrameError, FrameLimits, FrameReader, FrameWriter, PREFACE,
-	PROTOCOL_MINOR, PROTOCOL_VERSION, QueryRequest, RequestId, ServerHello,
-	ServerMessage, WireError, decode_control, encode_control, raw_command,
+	CODEC_JSON_V1, CONNECTION_STREAM, ClientHello, ClientMessage,
+	CommandRequest, ErrorCategory, Frame, FrameError, FrameLimits, FrameReader,
+	FrameWriter, MULTIPLEXED_STREAMS_MINOR, PREFACE, PROTOCOL_MINOR,
+	PROTOCOL_VERSION, QueryRequest, RequestId, ServerHello, ServerMessage,
+	StreamId, WireError, decode_control, encode_control, raw_command,
 };
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixStream;
@@ -72,7 +73,8 @@ async fn open(mut stream: UnixStream) -> Option<(Connection, Actor, u32)> {
 impl Connection {
 	async fn handshake(&mut self) -> Option<(Actor, u32)> {
 		let hello: ClientHello = match self.receive().await {
-			Ok(hello) => hello,
+			Ok((stream_id, hello)) if stream_id.is_connection() => hello,
+			Ok(_) => return None,
 			Err(ReceiveError::Disconnected) => return None,
 			Err(ReceiveError::Protocol(error)) => {
 				let _ = self.send(&ServerHello::Rejected { error }).await;
@@ -122,6 +124,10 @@ impl Connection {
 		};
 		self.send(&welcome).await.ok()?;
 		self.writer.set_limits(limits);
+		if minor >= MULTIPLEXED_STREAMS_MINOR {
+			self.reader.enable_multiplexing();
+			self.writer.enable_multiplexing();
+		}
 		Some((
 			Actor::InteractiveClient {
 				client_id: ClientId(hello.client_id),
@@ -141,7 +147,7 @@ impl Connection {
 		draining: &mut watch::Receiver<bool>,
 	) {
 		loop {
-			let payload = tokio::select! {
+			let (stream_id, payload) = tokio::select! {
 				biased;
 				_ = draining.changed() => {
 					let _ = self
@@ -163,6 +169,20 @@ impl Connection {
 					}
 				},
 			};
+			if minor >= MULTIPLEXED_STREAMS_MINOR && stream_id.is_connection() {
+				let _ = self
+					.send(&ServerMessage::Error {
+						id: None,
+						error: wire_error(
+							ErrorCategory::InvalidInput,
+							"protocol.invalid_stream",
+							"requests must use a numbered application stream"
+								.into(),
+						),
+					})
+					.await;
+				return;
+			}
 			let reply = match decode(&payload) {
 				Ok(ClientMessage::Query { id, query }) => {
 					answer(core, actor, minor, id, &query)
@@ -194,7 +214,7 @@ impl Connection {
 					return;
 				}
 			};
-			if self.send(&reply).await.is_err() {
+			if self.send_on(stream_id, &reply).await.is_err() {
 				return;
 			}
 		}
@@ -204,36 +224,56 @@ impl Connection {
 		&mut self,
 		message: &T,
 	) -> Result<(), SendError> {
+		self.send_on(CONNECTION_STREAM, message).await
+	}
+
+	async fn send_on<T: serde::Serialize>(
+		&mut self,
+		stream_id: StreamId,
+		message: &T,
+	) -> Result<(), SendError> {
 		let payload = encode_control(message)?;
-		self.writer.write(&Frame::Control(payload)).await?;
+		let frame = if stream_id.is_connection() {
+			Frame::control(payload)
+		} else {
+			Frame::stream_control(stream_id, payload)
+		};
+		self.writer.write(&frame).await?;
 		Ok(())
 	}
 
 	/// Receives one decoded control message.
 	async fn receive<T: serde::de::DeserializeOwned>(
 		&mut self,
-	) -> Result<T, ReceiveError> {
-		let payload = self.receive_control().await?;
-		decode(&payload)
+	) -> Result<(StreamId, T), ReceiveError> {
+		let (stream_id, payload) = self.receive_control().await?;
+		Ok((stream_id, decode(&payload)?))
 	}
 
 	/// Receives the payload of one control frame. Native decoder detail
 	/// stays local so only stable, safe messages reach the peer (ADR-0068).
-	async fn receive_control(&mut self) -> Result<Vec<u8>, ReceiveError> {
+	async fn receive_control(
+		&mut self,
+	) -> Result<(StreamId, Vec<u8>), ReceiveError> {
 		match self.reader.read().await {
-			Ok(Frame::Control(payload)) => Ok(payload),
-			Ok(Frame::Data(_)) => Err(ReceiveError::Protocol(wire_error(
+			Ok(Frame::Control { stream_id, payload }) => {
+				Ok((stream_id, payload))
+			}
+			Ok(Frame::Data { .. }) => Err(ReceiveError::Protocol(wire_error(
 				ErrorCategory::InvalidInput,
 				"protocol.unexpected_data_frame",
 				"no data stream is open on this connection".into(),
 			))),
-			Err(FrameError::Oversized { .. } | FrameError::UnknownKind(_)) => {
-				Err(ReceiveError::Protocol(wire_error(
-					ErrorCategory::InvalidInput,
-					"protocol.invalid_frame",
-					"the frame violated the protocol limits".into(),
-				)))
-			}
+			Err(
+				FrameError::Oversized { .. }
+				| FrameError::UnknownKind(_)
+				| FrameError::InvalidStream { .. }
+				| FrameError::MultiplexingDisabled(_),
+			) => Err(ReceiveError::Protocol(wire_error(
+				ErrorCategory::InvalidInput,
+				"protocol.invalid_frame",
+				"the frame violated the protocol limits".into(),
+			))),
 			Err(FrameError::Closed | FrameError::Io(_)) => {
 				Err(ReceiveError::Disconnected)
 			}

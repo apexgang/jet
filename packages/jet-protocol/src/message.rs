@@ -211,6 +211,12 @@ pub enum RecoveryAction {
 		/// Run whose current state should be queried.
 		run_id: Uuid,
 	},
+	/// Reconnect and resume the semantic Event stream after this cursor.
+	ResumeEvents {
+		/// Last Event cursor the disconnected client received completely.
+		#[serde(with = "crate::decimal")]
+		after: u64,
+	},
 }
 
 /// Stable metadata explaining why a snapshot must be restarted.

@@ -1,9 +1,10 @@
 //! Length-prefixed frames carrying JSON control or raw binary data.
 //!
-//! Wire layout of one frame: one kind byte, a big-endian `u32` payload
-//! length, then the payload. Readers validate the declared length against
-//! the per-kind limit before allocating anything for the payload.
+//! Wire layout of one frame: one kind byte, a big-endian `u32` stream ID, a
+//! big-endian `u32` payload length, then the payload. Readers validate the
+//! kind, stream, and declared length before allocating the payload.
 
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Upper bound of one JSON control frame payload (1 MiB).
@@ -11,7 +12,40 @@ pub const MAX_CONTROL_FRAME: usize = 1024 * 1024;
 /// Upper bound of one raw binary data frame payload (256 KiB).
 pub const MAX_DATA_FRAME: usize = 256 * 1024;
 
-const HEADER_LEN: usize = 5;
+const LEGACY_HEADER_LEN: usize = 5;
+const STREAM_HEADER_LEN: usize = 9;
+
+/// The typed number of one multiplexed stream on a connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StreamId(u32);
+
+impl StreamId {
+	/// Creates an application stream ID. Zero is reserved for connection-level
+	/// handshake and error control.
+	#[must_use]
+	pub const fn new(value: u32) -> Option<Self> {
+		if value == 0 { None } else { Some(Self(value)) }
+	}
+
+	/// Returns the on-wire numeric value.
+	#[must_use]
+	pub const fn get(self) -> u32 {
+		self.0
+	}
+
+	/// Whether this is the reserved connection-level control stream.
+	#[must_use]
+	pub const fn is_connection(self) -> bool {
+		self.0 == 0
+	}
+
+	const fn from_wire(value: u32) -> Self {
+		Self(value)
+	}
+}
+
+/// Reserved stream for handshake and connection-level control.
+pub const CONNECTION_STREAM: StreamId = StreamId(0);
 
 /// The kind byte that leads every frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,22 +115,68 @@ impl FrameLimits {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Frame {
 	/// Strict JSON control payload.
-	Control(Vec<u8>),
+	Control {
+		/// Numbered logical stream carrying the message.
+		stream_id: StreamId,
+		/// Encoded JSON bytes.
+		payload: Vec<u8>,
+	},
 	/// Raw binary data payload.
-	Data(Vec<u8>),
+	Data {
+		/// Numbered terminal or Artifact stream carrying the bytes.
+		stream_id: StreamId,
+		/// Unencoded terminal or Artifact bytes.
+		payload: Vec<u8>,
+	},
 }
 
 impl Frame {
-	fn kind(&self) -> FrameKind {
-		match self {
-			Self::Control(_) => FrameKind::Control,
-			Self::Data(_) => FrameKind::Data,
+	/// Creates connection-level control, including handshake messages.
+	#[must_use]
+	pub fn control(payload: Vec<u8>) -> Self {
+		Self::Control {
+			stream_id: CONNECTION_STREAM,
+			payload,
 		}
 	}
 
-	fn payload(&self) -> &[u8] {
+	/// Creates control on a numbered Command, Query, Event, terminal, or
+	/// Artifact stream.
+	#[must_use]
+	pub fn stream_control(stream_id: StreamId, payload: Vec<u8>) -> Self {
+		Self::Control { stream_id, payload }
+	}
+
+	/// Creates raw binary data on a numbered terminal or Artifact stream.
+	#[must_use]
+	pub fn data(stream_id: StreamId, payload: Vec<u8>) -> Self {
+		Self::Data { stream_id, payload }
+	}
+
+	/// Returns the numbered stream carrying this frame.
+	#[must_use]
+	pub fn stream_id(&self) -> StreamId {
 		match self {
-			Self::Control(bytes) | Self::Data(bytes) => bytes,
+			Self::Control { stream_id, .. } | Self::Data { stream_id, .. } => {
+				*stream_id
+			}
+		}
+	}
+
+	fn kind(&self) -> FrameKind {
+		match self {
+			Self::Control { .. } => FrameKind::Control,
+			Self::Data { .. } => FrameKind::Data,
+		}
+	}
+
+	/// Returns the JSON or raw binary payload.
+	#[must_use]
+	pub fn payload(&self) -> &[u8] {
+		match self {
+			Self::Control { payload, .. } | Self::Data { payload, .. } => {
+				payload
+			}
 		}
 	}
 }
@@ -119,6 +199,17 @@ pub enum FrameError {
 	/// The kind byte is not defined by this protocol version.
 	#[error("unknown frame kind {0}")]
 	UnknownKind(u8),
+	/// Raw binary data used the reserved connection-level control stream.
+	#[error("{kind:?} frame cannot use stream {stream_id:?}")]
+	InvalidStream {
+		/// Kind of the offending frame.
+		kind: FrameKind,
+		/// Invalid stream ID from its envelope.
+		stream_id: StreamId,
+	},
+	/// A numbered stream was used before stream multiplexing was negotiated.
+	#[error("stream {0:?} used before multiplexing was negotiated")]
+	MultiplexingDisabled(StreamId),
 	/// The peer closed the stream between frames.
 	#[error("peer closed the connection")]
 	Closed,
@@ -131,12 +222,23 @@ pub enum FrameError {
 #[derive(Debug)]
 pub struct FrameReader<R> {
 	inner: R,
+	multiplexed: bool,
 }
 
 impl<R: AsyncRead + Unpin> FrameReader<R> {
 	/// Wraps a readable stream.
 	pub fn new(inner: R) -> Self {
-		Self { inner }
+		Self {
+			inner,
+			multiplexed: false,
+		}
+	}
+
+	/// Switches from the legacy handshake envelope to the negotiated stream
+	/// envelope. Both peers call this only after agreeing on the protocol
+	/// minor that introduced multiplexing.
+	pub fn enable_multiplexing(&mut self) {
+		self.multiplexed = true;
 	}
 
 	/// Reads the next frame, validating its declared size before allocation.
@@ -147,19 +249,46 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
 	/// frame boundary, and the other variants for malformed or oversized
 	/// headers or transport failures.
 	pub async fn read(&mut self) -> Result<Frame, FrameError> {
-		let mut header = [0u8; HEADER_LEN];
-		match self.inner.read_exact(&mut header).await {
+		let mut kind = [0u8; 1];
+		match self.inner.read_exact(&mut kind).await {
 			Ok(_) => {}
 			Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
 				return Err(FrameError::Closed);
 			}
 			Err(error) => return Err(error.into()),
 		}
-		let kind = FrameKind::from_byte(header[0])
-			.ok_or(FrameError::UnknownKind(header[0]))?;
-		let declared =
-			u32::from_be_bytes([header[1], header[2], header[3], header[4]])
-				as usize;
+		let kind = FrameKind::from_byte(kind[0])
+			.ok_or(FrameError::UnknownKind(kind[0]))?;
+		let (stream_id, declared) = if self.multiplexed {
+			let mut envelope = [0u8; STREAM_HEADER_LEN - 1];
+			self.inner.read_exact(&mut envelope).await?;
+			(
+				StreamId::from_wire(u32::from_be_bytes([
+					envelope[0],
+					envelope[1],
+					envelope[2],
+					envelope[3],
+				])),
+				u32::from_be_bytes([
+					envelope[4],
+					envelope[5],
+					envelope[6],
+					envelope[7],
+				]) as usize,
+			)
+		} else {
+			let mut length = [0u8; LEGACY_HEADER_LEN - 1];
+			self.inner.read_exact(&mut length).await?;
+			(CONNECTION_STREAM, u32::from_be_bytes(length) as usize)
+		};
+		// ASVS 1.5.2, 2.2.1, and 15.3.5: validate the envelope's
+		// security-sensitive kind/stream combination before allocation.
+		if self.multiplexed
+			&& kind == FrameKind::Data
+			&& stream_id.is_connection()
+		{
+			return Err(FrameError::InvalidStream { kind, stream_id });
+		}
 		if declared > kind.limit() {
 			return Err(FrameError::Oversized {
 				kind,
@@ -170,8 +299,8 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
 		let mut payload = vec![0u8; declared];
 		self.inner.read_exact(&mut payload).await?;
 		Ok(match kind {
-			FrameKind::Control => Frame::Control(payload),
-			FrameKind::Data => Frame::Data(payload),
+			FrameKind::Control => Frame::Control { stream_id, payload },
+			FrameKind::Data => Frame::Data { stream_id, payload },
 		})
 	}
 }
@@ -181,6 +310,7 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
 pub struct FrameWriter<W> {
 	inner: W,
 	limits: FrameLimits,
+	multiplexed: bool,
 }
 
 impl<W: AsyncWrite + Unpin> FrameWriter<W> {
@@ -189,12 +319,18 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
 		Self {
 			inner,
 			limits: FrameLimits::default(),
+			multiplexed: false,
 		}
 	}
 
 	/// Applies the limits negotiated during the handshake.
 	pub fn set_limits(&mut self, limits: FrameLimits) {
 		self.limits = limits;
+	}
+
+	/// Switches subsequent frames to the negotiated stream envelope.
+	pub fn enable_multiplexing(&mut self) {
+		self.multiplexed = true;
 	}
 
 	/// Writes one frame and flushes it.
@@ -206,8 +342,18 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
 	/// failure otherwise.
 	pub async fn write(&mut self, frame: &Frame) -> Result<(), FrameError> {
 		let kind = frame.kind();
+		let stream_id = frame.stream_id();
 		let payload = frame.payload();
 		let limit = self.limits.for_kind(kind);
+		if !self.multiplexed && !stream_id.is_connection() {
+			return Err(FrameError::MultiplexingDisabled(stream_id));
+		}
+		if self.multiplexed
+			&& kind == FrameKind::Data
+			&& stream_id.is_connection()
+		{
+			return Err(FrameError::InvalidStream { kind, stream_id });
+		}
 		if payload.len() > limit {
 			return Err(FrameError::Oversized {
 				kind,
@@ -222,8 +368,16 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
 				limit,
 			}
 		})?;
-		let mut buffer = Vec::with_capacity(HEADER_LEN + payload.len());
+		let header_len = if self.multiplexed {
+			STREAM_HEADER_LEN
+		} else {
+			LEGACY_HEADER_LEN
+		};
+		let mut buffer = Vec::with_capacity(header_len + payload.len());
 		buffer.push(kind as u8);
+		if self.multiplexed {
+			buffer.extend_from_slice(&stream_id.get().to_be_bytes());
+		}
 		buffer.extend_from_slice(&length.to_be_bytes());
 		buffer.extend_from_slice(payload);
 		self.inner.write_all(&buffer).await?;

@@ -10,7 +10,7 @@ use jet_client::Client;
 use jet_protocol::{
 	CODEC_JSON_V1, ClientHello, Frame, FrameReader, FrameWriter,
 	MAX_CONTROL_FRAME, MAX_DATA_FRAME, PREFACE, PROTOCOL_MINOR, ServerHello,
-	VersionRange, decode_control, encode_control,
+	StreamId, VersionRange, decode_control, encode_control,
 };
 use pretty_assertions::assert_eq;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -73,6 +73,7 @@ pub fn hello(client_id: Uuid) -> ClientHello {
 pub struct RawConnection {
 	reader: FrameReader<OwnedReadHalf>,
 	writer: FrameWriter<OwnedWriteHalf>,
+	multiplexed: bool,
 }
 
 impl RawConnection {
@@ -81,14 +82,27 @@ impl RawConnection {
 	}
 
 	pub async fn send_bytes(&mut self, payload: Vec<u8>) {
-		self.writer.write(&Frame::Control(payload)).await.unwrap();
+		let frame = if self.multiplexed {
+			Frame::stream_control(StreamId::new(1).unwrap(), payload)
+		} else {
+			Frame::control(payload)
+		};
+		self.writer.write(&frame).await.unwrap();
 	}
 
 	pub async fn receive<T: serde::de::DeserializeOwned>(&mut self) -> T {
-		let Frame::Control(reply) = self.reader.read().await.unwrap() else {
+		let Frame::Control { payload: reply, .. } =
+			self.reader.read().await.unwrap()
+		else {
 			panic!("expected a control frame");
 		};
 		decode_control(&reply).unwrap()
+	}
+
+	fn enable_multiplexing(&mut self) {
+		self.reader.enable_multiplexing();
+		self.writer.enable_multiplexing();
+		self.multiplexed = true;
 	}
 }
 
@@ -100,6 +114,7 @@ pub async fn open_raw(daemon: &Daemon) -> RawConnection {
 	RawConnection {
 		reader: FrameReader::new(read),
 		writer: FrameWriter::new(write),
+		multiplexed: false,
 	}
 }
 
@@ -111,6 +126,15 @@ pub async fn handshake_raw(
 	let mut connection = open_raw(daemon).await;
 	connection.send(hello).await;
 	let reply = connection.receive().await;
+	if matches!(
+		&reply,
+		ServerHello::Welcome {
+			minor,
+			..
+		} if *minor >= jet_protocol::MULTIPLEXED_STREAMS_MINOR
+	) {
+		connection.enable_multiplexing();
+	}
 	(connection, reply)
 }
 

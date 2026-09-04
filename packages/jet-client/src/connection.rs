@@ -3,11 +3,12 @@
 use std::path::Path;
 
 use jet_protocol::{
-	CODEC_JSON_V1, ClientHello, ClientMessage, CommandRequest, CommandResponse,
-	ControlError, Frame, FrameError, FrameLimits, FrameReader, FrameWriter,
+	CODEC_JSON_V1, CONNECTION_STREAM, ClientHello, ClientMessage,
+	CommandRequest, CommandResponse, ControlError, Frame, FrameError,
+	FrameLimits, FrameReader, FrameWriter, MULTIPLEXED_STREAMS_MINOR,
 	PROTOCOL_MINOR, PROTOCOL_VERSION, QueryRequest, QueryResponse, RequestId,
-	ServerHello, ServerMessage, VersionRange, WireError, decode_control,
-	encode_control,
+	ServerHello, ServerMessage, StreamId, VersionRange, WireError,
+	decode_control, encode_control,
 };
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
@@ -68,6 +69,7 @@ pub struct Client {
 	reader: FrameReader<OwnedReadHalf>,
 	writer: FrameWriter<OwnedWriteHalf>,
 	next_id: RequestId,
+	next_stream_id: u32,
 	minor: u32,
 }
 
@@ -92,6 +94,7 @@ impl Client {
 			reader: FrameReader::new(read),
 			writer: FrameWriter::new(write),
 			next_id: 1,
+			next_stream_id: 1,
 			minor: 0,
 		};
 		let accepted = FrameLimits::default();
@@ -107,8 +110,14 @@ impl Client {
 			max_data_frame: limit(accepted.data),
 			capabilities: vec![],
 		};
-		client.send(&hello).await?;
-		match client.receive::<ServerHello>().await? {
+		client.send_on(CONNECTION_STREAM, &hello).await?;
+		let (stream_id, hello) = client.receive::<ServerHello>().await?;
+		if !stream_id.is_connection() {
+			return Err(ClientError::Unexpected(
+				"handshake reply arrived on an application stream".into(),
+			));
+		}
+		match hello {
 			ServerHello::Welcome {
 				protocol,
 				minor,
@@ -133,6 +142,10 @@ impl Client {
 					control: max_control_frame as usize,
 					data: max_data_frame as usize,
 				}));
+				if minor >= MULTIPLEXED_STREAMS_MINOR {
+					client.reader.enable_multiplexing();
+					client.writer.enable_multiplexing();
+				}
 				client.minor = minor;
 				Ok(client)
 			}
@@ -166,8 +179,12 @@ impl Client {
 		query: QueryRequest,
 	) -> Result<QueryResponse, ClientError> {
 		let id = self.next_id();
-		self.send(&ClientMessage::Query { id, query }).await?;
-		match self.receive::<ServerMessage>().await? {
+		let stream_id = self.request_stream();
+		self.send_on(stream_id, &ClientMessage::Query { id, query })
+			.await?;
+		let (reply_stream, reply) = self.receive::<ServerMessage>().await?;
+		validate_reply_stream(stream_id, reply_stream, &reply)?;
+		match reply {
 			ServerMessage::QueryResult {
 				id: reply_id,
 				result,
@@ -197,13 +214,19 @@ impl Client {
 		command: CommandRequest,
 	) -> Result<CommandResponse, ClientError> {
 		let id = self.next_id();
-		self.send(&ClientMessage::Command {
-			id,
-			command_id,
-			command,
-		})
+		let stream_id = self.request_stream();
+		self.send_on(
+			stream_id,
+			&ClientMessage::Command {
+				id,
+				command_id,
+				command,
+			},
+		)
 		.await?;
-		match self.receive::<ServerMessage>().await? {
+		let (reply_stream, reply) = self.receive::<ServerMessage>().await?;
+		validate_reply_stream(stream_id, reply_stream, &reply)?;
+		match reply {
 			ServerMessage::CommandResult {
 				id: reply_id,
 				result,
@@ -224,24 +247,62 @@ impl Client {
 		id
 	}
 
-	async fn send<T: serde::Serialize>(
+	fn request_stream(&mut self) -> StreamId {
+		if self.minor < MULTIPLEXED_STREAMS_MINOR {
+			return CONNECTION_STREAM;
+		}
+		let stream_id = StreamId::new(self.next_stream_id)
+			.expect("application stream IDs are never zero");
+		self.next_stream_id = self.next_stream_id.wrapping_add(1);
+		if self.next_stream_id == 0 {
+			self.next_stream_id = 1;
+		}
+		stream_id
+	}
+
+	async fn send_on<T: serde::Serialize>(
 		&mut self,
+		stream_id: StreamId,
 		message: &T,
 	) -> Result<(), ClientError> {
 		let payload = encode_control(message)?;
-		self.writer.write(&Frame::Control(payload)).await?;
+		let frame = if stream_id.is_connection() {
+			Frame::control(payload)
+		} else {
+			Frame::stream_control(stream_id, payload)
+		};
+		self.writer.write(&frame).await?;
 		Ok(())
 	}
 
 	async fn receive<T: serde::de::DeserializeOwned>(
 		&mut self,
-	) -> Result<T, ClientError> {
+	) -> Result<(StreamId, T), ClientError> {
 		match self.reader.read().await? {
-			Frame::Control(payload) => Ok(decode_control(&payload)?),
-			Frame::Data(_) => Err(ClientError::Unexpected(
+			Frame::Control { stream_id, payload } => {
+				Ok((stream_id, decode_control(&payload)?))
+			}
+			Frame::Data { .. } => Err(ClientError::Unexpected(
 				"data frame before any stream was opened".into(),
 			)),
 		}
+	}
+}
+
+fn validate_reply_stream(
+	expected: StreamId,
+	received: StreamId,
+	reply: &ServerMessage,
+) -> Result<(), ClientError> {
+	if received == expected
+		|| (received.is_connection()
+			&& matches!(reply, ServerMessage::Error { id: None, .. }))
+	{
+		Ok(())
+	} else {
+		Err(ClientError::Unexpected(format!(
+			"reply arrived on stream {received:?} while waiting on {expected:?}"
+		)))
 	}
 }
 

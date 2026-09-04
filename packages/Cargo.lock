@@ -381,6 +381,7 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "tokio",
  "uuid",
