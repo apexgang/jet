@@ -140,8 +140,8 @@ impl Frame {
 		}
 	}
 
-	/// Creates control on a numbered Command, Query, Event, terminal, or
-	/// Artifact stream.
+	/// Creates control on the connection stream or a numbered Command, Query,
+	/// Event, terminal, or Artifact stream.
 	#[must_use]
 	pub fn stream_control(stream_id: StreamId, payload: Vec<u8>) -> Self {
 		Self::Control { stream_id, payload }
@@ -170,9 +170,9 @@ impl Frame {
 		}
 	}
 
-	/// Returns the JSON or raw binary payload.
+	/// Returns the JSON or raw binary payload within the protocol crate.
 	#[must_use]
-	pub fn payload(&self) -> &[u8] {
+	pub(crate) fn payload(&self) -> &[u8] {
 		match self {
 			Self::Control { payload, .. } | Self::Data { payload, .. } => {
 				payload

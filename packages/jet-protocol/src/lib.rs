@@ -19,6 +19,7 @@ mod handshake;
 mod message;
 mod stream;
 mod stream_control;
+mod stream_error;
 
 pub use artifact::{
 	ArtifactError, ArtifactVerifier, DigestError, Sha256Digest,

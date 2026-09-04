@@ -6,11 +6,11 @@ use std::time::Duration;
 
 use jet_core::{Actor, ClientId, CommandEnvelope, CommandId, Core};
 use jet_protocol::{
-	CODEC_JSON_V1, CONNECTION_STREAM, ClientHello, ClientMessage,
-	CommandRequest, ErrorCategory, Frame, FrameError, FrameLimits, FrameReader,
-	FrameWriter, MULTIPLEXED_STREAMS_MINOR, PREFACE, PROTOCOL_MINOR,
-	PROTOCOL_VERSION, QueryRequest, RequestId, ServerHello, ServerMessage,
-	StreamId, WireError, decode_control, encode_control, raw_command,
+	CODEC_JSON_V1, CONNECTION_STREAM, ClientHello, CommandRequest,
+	ErrorCategory, Frame, FrameError, FrameLimits, FrameReader, FrameWriter,
+	MULTIPLEXED_STREAMS_MINOR, PREFACE, PROTOCOL_MINOR, PROTOCOL_VERSION,
+	QueryRequest, RequestId, ServerHello, ServerMessage, StreamId, WireError,
+	decode_control, encode_control,
 };
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixStream;
@@ -44,15 +44,15 @@ type SendError = Box<dyn std::error::Error + Send + Sync>;
 pub(crate) async fn serve(
 	core: Arc<Core>,
 	stream: UnixStream,
-	mut draining: watch::Receiver<bool>,
+	draining: watch::Receiver<bool>,
 ) {
-	let Ok(Some((mut connection, actor, minor))) =
+	let Ok(Some((connection, actor, minor))) =
 		timeout(HANDSHAKE_TIMEOUT, open(stream)).await
 	else {
 		return;
 	};
 	connection
-		.serve_requests(&core, &actor, minor, &mut draining)
+		.serve_requests(core, actor, minor, draining)
 		.await;
 }
 
@@ -140,84 +140,17 @@ impl Connection {
 	/// already received is answered before the drain is honored, so an
 	/// accepted Command is never left without its reply (ADR-0088).
 	async fn serve_requests(
-		&mut self,
-		core: &Core,
-		actor: &Actor,
+		self,
+		core: Arc<Core>,
+		actor: Actor,
 		minor: u32,
-		draining: &mut watch::Receiver<bool>,
+		draining: watch::Receiver<bool>,
 	) {
-		loop {
-			let (stream_id, payload) = tokio::select! {
-				biased;
-				_ = draining.changed() => {
-					let _ = self
-						.send(&ServerMessage::Error {
-							id: None,
-							error: draining_error(),
-						})
-						.await;
-					return;
-				}
-				received = self.receive_control() => match received {
-					Ok(payload) => payload,
-					Err(ReceiveError::Disconnected) => return,
-					Err(ReceiveError::Protocol(error)) => {
-						let _ = self
-							.send(&ServerMessage::Error { id: None, error })
-							.await;
-						return;
-					}
-				},
-			};
-			if minor >= MULTIPLEXED_STREAMS_MINOR && stream_id.is_connection() {
-				let _ = self
-					.send(&ServerMessage::Error {
-						id: None,
-						error: wire_error(
-							ErrorCategory::InvalidInput,
-							"protocol.invalid_stream",
-							"requests must use a numbered application stream"
-								.into(),
-						),
-					})
-					.await;
-				return;
-			}
-			let reply = match decode(&payload) {
-				Ok(ClientMessage::Query { id, query }) => {
-					answer(core, actor, minor, id, &query)
-				}
-				Ok(ClientMessage::Command {
-					id,
-					command_id,
-					command,
-				}) => match raw_command(&payload) {
-					Ok(raw) => execute(
-						core,
-						actor,
-						minor,
-						id,
-						command_id,
-						&command,
-						raw.get().as_bytes(),
-					),
-					Err(_) => ServerMessage::Error {
-						id: Some(id),
-						error: malformed(),
-					},
-				},
-				Err(ReceiveError::Disconnected) => return,
-				Err(ReceiveError::Protocol(error)) => {
-					let _ = self
-						.send(&ServerMessage::Error { id: None, error })
-						.await;
-					return;
-				}
-			};
-			if self.send_on(stream_id, &reply).await.is_err() {
-				return;
-			}
-		}
+		let Self { reader, writer } = self;
+		crate::connection_session::serve(
+			reader, writer, core, actor, minor, draining,
+		)
+		.await;
 	}
 
 	async fn send<T: serde::Serialize>(
@@ -233,11 +166,7 @@ impl Connection {
 		message: &T,
 	) -> Result<(), SendError> {
 		let payload = encode_control(message)?;
-		let frame = if stream_id.is_connection() {
-			Frame::control(payload)
-		} else {
-			Frame::stream_control(stream_id, payload)
-		};
+		let frame = Frame::stream_control(stream_id, payload);
 		self.writer.write(&frame).await?;
 		Ok(())
 	}
@@ -287,7 +216,7 @@ fn decode<T: serde::de::DeserializeOwned>(
 	decode_control(payload).map_err(|_| ReceiveError::Protocol(malformed()))
 }
 
-fn answer(
+pub(super) fn answer(
 	core: &Core,
 	actor: &Actor,
 	minor: u32,
@@ -306,7 +235,8 @@ fn answer(
 			),
 		};
 	}
-	let result = blocking(|| core.query(actor, translate::query(query, minor)))
+	let result = core
+		.query(actor, translate::query(query, minor))
 		.and_then(|result| translate::query_result(result, minor));
 	match result {
 		Ok(result) => ServerMessage::QueryResult { id, result },
@@ -317,7 +247,7 @@ fn answer(
 	}
 }
 
-fn execute(
+pub(super) fn execute(
 	core: &Core,
 	actor: &Actor,
 	minor: u32,
@@ -331,7 +261,7 @@ fn execute(
 		translate::command(command),
 		request_bytes,
 	)
-	.and_then(|envelope| blocking(|| core.execute(actor, envelope)));
+	.and_then(|envelope| core.execute(actor, envelope));
 	match outcome {
 		Ok(outcome) => ServerMessage::CommandResult {
 			id,
@@ -344,14 +274,7 @@ fn execute(
 	}
 }
 
-/// Runs core work, which does synchronous SQLite I/O with full durability
-/// (ADR-0057), off the async scheduler so accepting connections and
-/// handling signals stay responsive.
-fn blocking<T>(work: impl FnOnce() -> T) -> T {
-	tokio::task::block_in_place(work)
-}
-
-fn draining_error() -> WireError {
+pub(super) fn draining_error() -> WireError {
 	WireError {
 		category: ErrorCategory::Unavailable,
 		code: "daemon.draining".into(),
@@ -363,7 +286,7 @@ fn draining_error() -> WireError {
 	}
 }
 
-fn malformed() -> WireError {
+pub(super) fn malformed() -> WireError {
 	wire_error(
 		ErrorCategory::InvalidInput,
 		"protocol.malformed",
@@ -371,7 +294,7 @@ fn malformed() -> WireError {
 	)
 }
 
-fn wire_error(
+pub(super) fn wire_error(
 	category: ErrorCategory,
 	code: &str,
 	message: String,

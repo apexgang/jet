@@ -16,7 +16,7 @@ impl Client {
 	///
 	/// Returns [`ClientError::Remote`] when the daemon reports a stable
 	/// error, or the transport failure otherwise.
-	pub async fn status(&mut self) -> Result<PlaneStatus, ClientError> {
+	pub async fn status(&self) -> Result<PlaneStatus, ClientError> {
 		match self.query(QueryRequest::Status).await? {
 			QueryResponse::Status(status)
 				if self.negotiated_minor()
@@ -41,9 +41,7 @@ impl Client {
 	///
 	/// Returns [`ClientError::Remote`] when the daemon reports a stable
 	/// error, or the transport failure otherwise.
-	pub async fn conversations(
-		&mut self,
-	) -> Result<ConversationList, ClientError> {
+	pub async fn conversations(&self) -> Result<ConversationList, ClientError> {
 		match self.query(QueryRequest::Conversations).await? {
 			QueryResponse::Conversations(list) => Ok(list),
 			other @ (QueryResponse::Status(_)
@@ -60,7 +58,7 @@ impl Client {
 	/// Returns [`ClientError::Remote`] with restart metadata when the cursor
 	/// expired or the snapshot changed, or the transport failure otherwise.
 	pub async fn next_conversations(
-		&mut self,
+		&self,
 		cursor: PageCursor,
 	) -> Result<ConversationList, ClientError> {
 		self.require_minor(jet_protocol::FENCED_READS_MINOR)?;
@@ -84,7 +82,7 @@ impl Client {
 	/// or the daemon reports another stable error, or the transport failure
 	/// otherwise.
 	pub async fn conversation(
-		&mut self,
+		&self,
 		conversation_id: Uuid,
 	) -> Result<ConversationSnapshot, ClientError> {
 		match self
@@ -107,7 +105,7 @@ impl Client {
 	/// Returns [`ClientError::Remote`] when the daemon reports a stable
 	/// error, or the transport failure otherwise.
 	pub async fn events_after(
-		&mut self,
+		&self,
 		sequence: u64,
 	) -> Result<EventPage, ClientError> {
 		match self.query(QueryRequest::Events { after: sequence }).await? {
@@ -126,7 +124,7 @@ impl Client {
 	/// Returns [`ClientError::Remote`] when the daemon reports a stable
 	/// error, or the transport failure otherwise.
 	pub async fn create_conversation(
-		&mut self,
+		&self,
 		command_id: Uuid,
 		retention: RetentionPolicy,
 	) -> Result<Conversation, ClientError> {
@@ -153,7 +151,7 @@ impl Client {
 	/// Returns [`ClientError::Remote`] when the Conversation does not exist
 	/// or already has a live Run, or the transport failure otherwise.
 	pub async fn create_run(
-		&mut self,
+		&self,
 		command_id: Uuid,
 		conversation_id: Uuid,
 	) -> Result<Run, ClientError> {
@@ -179,7 +177,7 @@ impl Client {
 	/// Returns [`ClientError::Remote`] when the Run does not exist or the
 	/// transition is not allowed, or the transport failure otherwise.
 	pub async fn transition_run(
-		&mut self,
+		&self,
 		command_id: Uuid,
 		run_id: Uuid,
 		expected_revision: u64,

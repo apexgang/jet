@@ -37,7 +37,7 @@ async fn status_is_answered_before_and_after_a_daemon_crash_and_restart() {
 	let client_id = Uuid::new_v4();
 
 	let mut first = start_jetd(&home).await;
-	let mut client = support::connect(&first, client_id).await;
+	let client = support::connect(&first, client_id).await;
 	client
 		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
 		.await

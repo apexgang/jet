@@ -8,6 +8,7 @@
 //! already owns the Plane, `1` for any other failure.
 
 mod connection;
+mod connection_session;
 mod daemon;
 mod translate;
 

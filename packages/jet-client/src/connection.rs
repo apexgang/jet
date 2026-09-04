@@ -1,6 +1,9 @@
 //! One authenticated Jet protocol connection.
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use jet_protocol::{
 	CODEC_JSON_V1, CONNECTION_STREAM, ClientHello, ClientMessage,
@@ -13,7 +16,12 @@ use jet_protocol::{
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::sync::{Mutex, Semaphore, mpsc, oneshot};
+use tokio::task::JoinHandle;
 use uuid::Uuid;
+
+/// Keeps one client from allocating an unbounded pending-reply registry.
+const MAX_IN_FLIGHT_REQUESTS: usize = 256;
 
 /// Failure while connecting to or talking with `jetd`.
 #[derive(Debug, thiserror::Error)]
@@ -61,16 +69,31 @@ pub enum ClientError {
 	/// The daemon sent something this client cannot use here.
 	#[error("unexpected message from jetd: {0}")]
 	Unexpected(String),
+	/// The connection ended before a pending request received its reply.
+	#[error("connection closed before jetd replied")]
+	Closed,
 }
 
 /// A connected, handshaken Jet protocol client.
 #[derive(Debug)]
 pub struct Client {
-	reader: FrameReader<OwnedReadHalf>,
-	writer: FrameWriter<OwnedWriteHalf>,
-	next_id: RequestId,
-	next_stream_id: u32,
+	outbound: mpsc::Sender<WriteRequest>,
+	pending: PendingReplies,
+	reader_task: JoinHandle<()>,
+	writer_task: JoinHandle<()>,
+	legacy_request: Semaphore,
+	in_flight: Semaphore,
+	next_id: AtomicU64,
+	next_stream_id: AtomicU32,
 	minor: u32,
+}
+
+type PendingReplies =
+	Arc<Mutex<HashMap<StreamId, oneshot::Sender<ServerMessage>>>>;
+
+struct WriteRequest {
+	frame: Frame,
+	finished: oneshot::Sender<Result<(), FrameError>>,
 }
 
 impl Client {
@@ -90,13 +113,8 @@ impl Client {
 		let mut stream = UnixStream::connect(socket).await?;
 		stream.write_all(jet_protocol::PREFACE).await?;
 		let (read, write) = stream.into_split();
-		let mut client = Self {
-			reader: FrameReader::new(read),
-			writer: FrameWriter::new(write),
-			next_id: 1,
-			next_stream_id: 1,
-			minor: 0,
-		};
+		let mut reader = FrameReader::new(read);
+		let mut writer = FrameWriter::new(write);
 		let accepted = FrameLimits::default();
 		let hello = ClientHello {
 			protocol: VersionRange {
@@ -110,8 +128,8 @@ impl Client {
 			max_data_frame: limit(accepted.data),
 			capabilities: vec![],
 		};
-		client.send_on(CONNECTION_STREAM, &hello).await?;
-		let (stream_id, hello) = client.receive::<ServerHello>().await?;
+		write_message(&mut writer, CONNECTION_STREAM, &hello).await?;
+		let (stream_id, hello) = receive_handshake(&mut reader).await?;
 		if !stream_id.is_connection() {
 			return Err(ClientError::Unexpected(
 				"handshake reply arrived on an application stream".into(),
@@ -138,16 +156,30 @@ impl Client {
 				}
 				// The peer's limits never raise this side above the protocol
 				// maxima (ADR-0089).
-				client.writer.set_limits(accepted.negotiate(FrameLimits {
+				writer.set_limits(accepted.negotiate(FrameLimits {
 					control: max_control_frame as usize,
 					data: max_data_frame as usize,
 				}));
 				if minor >= MULTIPLEXED_STREAMS_MINOR {
-					client.reader.enable_multiplexing();
-					client.writer.enable_multiplexing();
+					reader.enable_multiplexing();
+					writer.enable_multiplexing();
 				}
-				client.minor = minor;
-				Ok(client)
+				let pending = PendingReplies::default();
+				let (outbound, writes) = mpsc::channel(MAX_IN_FLIGHT_REQUESTS);
+				let reader_task =
+					tokio::spawn(read_replies(reader, Arc::clone(&pending)));
+				let writer_task = tokio::spawn(write_frames(writer, writes));
+				Ok(Self {
+					outbound,
+					pending,
+					reader_task,
+					writer_task,
+					legacy_request: Semaphore::new(1),
+					in_flight: Semaphore::new(MAX_IN_FLIGHT_REQUESTS),
+					next_id: AtomicU64::new(1),
+					next_stream_id: AtomicU32::new(1),
+					minor,
+				})
 			}
 			ServerHello::Rejected { error } => {
 				Err(ClientError::Rejected(error))
@@ -175,15 +207,14 @@ impl Client {
 
 	/// Runs `query` and returns its snapshot.
 	pub(crate) async fn query(
-		&mut self,
+		&self,
 		query: QueryRequest,
 	) -> Result<QueryResponse, ClientError> {
 		let id = self.next_id();
 		let stream_id = self.request_stream();
-		self.send_on(stream_id, &ClientMessage::Query { id, query })
+		let reply = self
+			.exchange(stream_id, &ClientMessage::Query { id, query })
 			.await?;
-		let (reply_stream, reply) = self.receive::<ServerMessage>().await?;
-		validate_reply_stream(stream_id, reply_stream, &reply)?;
 		match reply {
 			ServerMessage::QueryResult {
 				id: reply_id,
@@ -209,23 +240,22 @@ impl Client {
 	/// Returns [`ClientError::Remote`] when the daemon rejects the Command,
 	/// or the transport failure otherwise.
 	pub async fn execute_command(
-		&mut self,
+		&self,
 		command_id: Uuid,
 		command: CommandRequest,
 	) -> Result<CommandResponse, ClientError> {
 		let id = self.next_id();
 		let stream_id = self.request_stream();
-		self.send_on(
-			stream_id,
-			&ClientMessage::Command {
-				id,
-				command_id,
-				command,
-			},
-		)
-		.await?;
-		let (reply_stream, reply) = self.receive::<ServerMessage>().await?;
-		validate_reply_stream(stream_id, reply_stream, &reply)?;
+		let reply = self
+			.exchange(
+				stream_id,
+				&ClientMessage::Command {
+					id,
+					command_id,
+					command,
+				},
+			)
+			.await?;
 		match reply {
 			ServerMessage::CommandResult {
 				id: reply_id,
@@ -241,68 +271,161 @@ impl Client {
 		}
 	}
 
-	fn next_id(&mut self) -> RequestId {
-		let id = self.next_id;
-		self.next_id += 1;
-		id
+	fn next_id(&self) -> RequestId {
+		loop {
+			let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+			if id != 0 {
+				return id;
+			}
+		}
 	}
 
-	fn request_stream(&mut self) -> StreamId {
+	fn request_stream(&self) -> StreamId {
 		if self.minor < MULTIPLEXED_STREAMS_MINOR {
 			return CONNECTION_STREAM;
 		}
-		let stream_id = StreamId::new(self.next_stream_id)
-			.expect("application stream IDs are never zero");
-		self.next_stream_id = self.next_stream_id.wrapping_add(1);
-		if self.next_stream_id == 0 {
-			self.next_stream_id = 1;
+		loop {
+			let id = self.next_stream_id.fetch_add(1, Ordering::Relaxed);
+			if let Some(stream_id) = StreamId::new(id) {
+				return stream_id;
+			}
 		}
-		stream_id
+	}
+
+	async fn exchange<T: serde::Serialize>(
+		&self,
+		stream_id: StreamId,
+		message: &T,
+	) -> Result<ServerMessage, ClientError> {
+		// ASVS 15.2.2 and 15.4.4: bound both the pending-reply registry and
+		// the writer channel before encoding another untrusted exchange.
+		let _permit = self
+			.in_flight
+			.acquire()
+			.await
+			.map_err(|_| ClientError::Closed)?;
+		let _legacy = if stream_id.is_connection() {
+			Some(
+				self.legacy_request
+					.acquire()
+					.await
+					.map_err(|_| ClientError::Closed)?,
+			)
+		} else {
+			None
+		};
+		let (reply, receive) = oneshot::channel();
+		{
+			let mut pending = self.pending.lock().await;
+			if pending.contains_key(&stream_id) {
+				return Err(ClientError::Unexpected(format!(
+					"stream {stream_id:?} was reused while still active"
+				)));
+			}
+			pending.insert(stream_id, reply);
+		}
+		if let Err(error) = self.send_on(stream_id, message).await {
+			self.pending.lock().await.remove(&stream_id);
+			return Err(error);
+		}
+		receive.await.map_err(|_| ClientError::Closed)
 	}
 
 	async fn send_on<T: serde::Serialize>(
-		&mut self,
+		&self,
 		stream_id: StreamId,
 		message: &T,
 	) -> Result<(), ClientError> {
-		let payload = encode_control(message)?;
-		let frame = if stream_id.is_connection() {
-			Frame::control(payload)
-		} else {
-			Frame::stream_control(stream_id, payload)
-		};
-		self.writer.write(&frame).await?;
+		let frame = Frame::stream_control(stream_id, encode_control(message)?);
+		let (finished, written) = oneshot::channel();
+		self.outbound
+			.send(WriteRequest { frame, finished })
+			.await
+			.map_err(|_| ClientError::Closed)?;
+		written.await.map_err(|_| ClientError::Closed)??;
 		Ok(())
-	}
-
-	async fn receive<T: serde::de::DeserializeOwned>(
-		&mut self,
-	) -> Result<(StreamId, T), ClientError> {
-		match self.reader.read().await? {
-			Frame::Control { stream_id, payload } => {
-				Ok((stream_id, decode_control(&payload)?))
-			}
-			Frame::Data { .. } => Err(ClientError::Unexpected(
-				"data frame before any stream was opened".into(),
-			)),
-		}
 	}
 }
 
-fn validate_reply_stream(
-	expected: StreamId,
-	received: StreamId,
-	reply: &ServerMessage,
+impl Drop for Client {
+	fn drop(&mut self) {
+		self.reader_task.abort();
+		self.writer_task.abort();
+	}
+}
+
+async fn write_message<T: serde::Serialize>(
+	writer: &mut FrameWriter<OwnedWriteHalf>,
+	stream_id: StreamId,
+	message: &T,
 ) -> Result<(), ClientError> {
-	if received == expected
-		|| (received.is_connection()
-			&& matches!(reply, ServerMessage::Error { id: None, .. }))
-	{
-		Ok(())
-	} else {
-		Err(ClientError::Unexpected(format!(
-			"reply arrived on stream {received:?} while waiting on {expected:?}"
-		)))
+	let payload = encode_control(message)?;
+	writer
+		.write(&Frame::stream_control(stream_id, payload))
+		.await?;
+	Ok(())
+}
+
+async fn receive_handshake<T: serde::de::DeserializeOwned>(
+	reader: &mut FrameReader<OwnedReadHalf>,
+) -> Result<(StreamId, T), ClientError> {
+	match reader.read().await? {
+		Frame::Control { stream_id, payload } => {
+			Ok((stream_id, decode_control(&payload)?))
+		}
+		Frame::Data { .. } => Err(ClientError::Unexpected(
+			"data frame arrived during the handshake".into(),
+		)),
+	}
+}
+
+async fn read_replies(
+	mut reader: FrameReader<OwnedReadHalf>,
+	pending: PendingReplies,
+) {
+	loop {
+		let Frame::Control { stream_id, payload } = (match reader.read().await {
+			Ok(frame) => frame,
+			Err(_) => break,
+		}) else {
+			break;
+		};
+		let Ok(reply) = decode_control::<ServerMessage>(&payload) else {
+			break;
+		};
+		if stream_id.is_connection()
+			&& matches!(reply, ServerMessage::Error { id: None, .. })
+		{
+			let waiters: Vec<_> = pending
+				.lock()
+				.await
+				.drain()
+				.map(|(_, reply)| reply)
+				.collect();
+			for waiter in waiters {
+				let _ = waiter.send(reply.clone());
+			}
+			break;
+		}
+		let Some(waiter) = pending.lock().await.remove(&stream_id) else {
+			break;
+		};
+		let _ = waiter.send(reply);
+	}
+	pending.lock().await.clear();
+}
+
+async fn write_frames(
+	mut writer: FrameWriter<OwnedWriteHalf>,
+	mut writes: mpsc::Receiver<WriteRequest>,
+) {
+	while let Some(WriteRequest { frame, finished }) = writes.recv().await {
+		let result = writer.write(&frame).await;
+		let failed = result.is_err();
+		let _ = finished.send(result);
+		if failed {
+			return;
+		}
 	}
 }
 

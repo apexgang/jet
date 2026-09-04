@@ -84,7 +84,7 @@ async fn a_conversation_is_retained_with_its_terminal_runs_across_a_jetd_restart
 	let mut first = start_jetd(&home).await;
 	let conversation =
 		create_conversation_without_a_retention_choice(&first, client_id).await;
-	let mut client = connect(&first, client_id).await;
+	let client = connect(&first, client_id).await;
 	let mut run = client
 		.create_run(Uuid::now_v7(), conversation.conversation_id)
 		.await
@@ -125,7 +125,7 @@ async fn a_conversation_is_retained_with_its_terminal_runs_across_a_jetd_restart
 	first.child.kill().await.unwrap();
 
 	let second = start_jetd(&home).await;
-	let mut client = connect(&second, client_id).await;
+	let client = connect(&second, client_id).await;
 	let after_restart = client
 		.conversation(conversation.conversation_id)
 		.await
@@ -200,7 +200,7 @@ async fn a_conversation_is_retained_with_its_terminal_runs_across_a_jetd_restart
 async fn a_live_run_blocks_a_second_one_with_a_stable_conflict() {
 	let dir = tempfile::tempdir().unwrap();
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
-	let mut client = connect(&daemon, Uuid::new_v4()).await;
+	let client = connect(&daemon, Uuid::new_v4()).await;
 	let conversation = client
 		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
 		.await
@@ -237,7 +237,7 @@ async fn a_live_run_blocks_a_second_one_with_a_stable_conflict() {
 async fn an_unknown_conversation_is_reported_as_not_found() {
 	let dir = tempfile::tempdir().unwrap();
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
-	let mut client = connect(&daemon, Uuid::new_v4()).await;
+	let client = connect(&daemon, Uuid::new_v4()).await;
 
 	let error = client.conversation(Uuid::now_v7()).await.unwrap_err();
 
@@ -262,7 +262,7 @@ async fn an_unknown_conversation_is_reported_as_not_found() {
 async fn an_empty_journal_page_still_carries_the_cursor() {
 	let dir = tempfile::tempdir().unwrap();
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
-	let mut client = connect(&daemon, Uuid::new_v4()).await;
+	let client = connect(&daemon, Uuid::new_v4()).await;
 	client
 		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
 		.await
@@ -283,7 +283,7 @@ async fn an_empty_journal_page_still_carries_the_cursor() {
 async fn an_event_cursor_ahead_of_the_plane_requires_a_fresh_snapshot() {
 	let dir = tempfile::tempdir().unwrap();
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
-	let mut client = connect(&daemon, Uuid::new_v4()).await;
+	let client = connect(&daemon, Uuid::new_v4()).await;
 
 	let error = client.events_after(1).await.unwrap_err();
 	let ClientError::Remote(error) = error else {
@@ -307,7 +307,7 @@ async fn an_expired_event_cursor_requires_a_fresh_fenced_snapshot() {
 	let home = dir.path().join(".jet");
 	let client_id = Uuid::new_v4();
 	let mut first = start_jetd(&home).await;
-	let mut client = connect(&first, client_id).await;
+	let client = connect(&first, client_id).await;
 	let conversation = client
 		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
 		.await
@@ -336,7 +336,7 @@ async fn an_expired_event_cursor_requires_a_fresh_fenced_snapshot() {
 	drop(store);
 
 	let second = start_jetd(&home).await;
-	let mut client = connect(&second, client_id).await;
+	let client = connect(&second, client_id).await;
 	let expired = client.events_after(0).await.unwrap_err();
 	let snapshot = client.conversations().await.unwrap();
 	let resumed = client.events_after(snapshot.cursor).await.unwrap();
@@ -372,7 +372,7 @@ async fn a_concurrent_write_stales_pagination_and_replays_after_the_fence() {
 	let home = dir.path().join(".jet");
 	let client_id = Uuid::new_v4();
 	let daemon = start_jetd(&home).await;
-	let mut client = connect(&daemon, client_id).await;
+	let client = connect(&daemon, client_id).await;
 	for _ in 0..=CONVERSATION_PAGE_LIMIT {
 		client
 			.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)

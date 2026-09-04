@@ -50,7 +50,7 @@ async fn an_identical_retry_returns_the_durable_original_result() {
 	first.child.kill().await.unwrap();
 
 	let second = start_jetd(&home).await;
-	let mut client = connect(&second, client_id).await;
+	let client = connect(&second, client_id).await;
 	let retried = client.execute_command(command_id, command).await.unwrap();
 	let actors = client
 		.events_after(0)
@@ -70,7 +70,7 @@ async fn an_identical_retry_returns_the_durable_original_result() {
 async fn changed_content_cannot_reuse_an_actors_command_identity() {
 	let dir = tempfile::tempdir().unwrap();
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
-	let mut client = connect(&daemon, Uuid::new_v4()).await;
+	let client = connect(&daemon, Uuid::new_v4()).await;
 	let command_id = Uuid::now_v7();
 	client
 		.execute_command(
@@ -165,8 +165,8 @@ async fn command_identities_are_scoped_to_the_authenticated_actor() {
 	let command = CommandRequest::CreateConversation {
 		retention: RetentionPolicy::Retain,
 	};
-	let mut first = connect(&daemon, first_actor).await;
-	let mut second = connect(&daemon, second_actor).await;
+	let first = connect(&daemon, first_actor).await;
+	let second = connect(&daemon, second_actor).await;
 
 	let first_result = first
 		.execute_command(command_id, command.clone())
@@ -202,7 +202,7 @@ async fn concurrent_commands_expose_one_authoritative_revision_order() {
 	let dir = tempfile::tempdir().unwrap();
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
 	let client_id = Uuid::new_v4();
-	let mut setup = connect(&daemon, client_id).await;
+	let setup = connect(&daemon, client_id).await;
 	let conversation = setup
 		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
 		.await
@@ -211,8 +211,8 @@ async fn concurrent_commands_expose_one_authoritative_revision_order() {
 		.create_run(Uuid::now_v7(), conversation.conversation_id)
 		.await
 		.unwrap();
-	let mut first = connect(&daemon, client_id).await;
-	let mut second = connect(&daemon, client_id).await;
+	let first = connect(&daemon, client_id).await;
+	let second = connect(&daemon, client_id).await;
 
 	let (first_result, second_result) = tokio::join!(
 		first.execute_command(
@@ -295,7 +295,7 @@ async fn concurrent_commands_expose_one_authoritative_revision_order() {
 async fn retrying_a_rejected_command_returns_its_original_conflict() {
 	let dir = tempfile::tempdir().unwrap();
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
-	let mut client = connect(&daemon, Uuid::new_v4()).await;
+	let client = connect(&daemon, Uuid::new_v4()).await;
 	let conversation = client
 		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
 		.await
