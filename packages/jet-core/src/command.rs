@@ -3,8 +3,9 @@
 //! acknowledged only after that commit (ADR-0020, ADR-0071).
 
 use jet_store::{
-	CommandReceiptRecord, NewCommandReceipt, NewConversation, NewRun,
-	RetentionPolicy, RunLifecycle, WriteTransaction,
+	CommandReceiptRecord, EffectKindRecord, EffectSafetyRecord,
+	NewCommandReceipt, NewConversation, NewEffect, NewRun, RetentionPolicy,
+	RunLifecycle, WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -134,7 +135,13 @@ impl Core {
 				return replay(receipt, request_digest, recorded_at_unix_ms);
 			}
 
-			let result = execute_new(tx, actor, command, recorded_at_unix_ms);
+			let result = execute_new(
+				tx,
+				actor,
+				command_id,
+				command,
+				recorded_at_unix_ms,
+			);
 			if let Err(error) = &result
 				&& !error.is_authoritative_result()
 			{
@@ -206,6 +213,7 @@ fn invalid_receipt(missing: &str) -> CoreError {
 fn execute_new(
 	tx: &WriteTransaction<'_>,
 	actor: &Actor,
+	command_id: CommandId,
 	command: Command,
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
@@ -223,6 +231,7 @@ fn execute_new(
 		} => transition_run(
 			tx,
 			actor,
+			command_id,
 			run_id,
 			expected_revision,
 			lifecycle,
@@ -304,6 +313,7 @@ fn create_run(
 fn transition_run(
 	tx: &WriteTransaction<'_>,
 	actor: &Actor,
+	command_id: CommandId,
 	run_id: RunId,
 	expected_revision: Revision,
 	lifecycle: RunLifecycle,
@@ -351,6 +361,21 @@ fn transition_run(
 		},
 		now_unix_ms,
 	)?)?;
+	if lifecycle == RunLifecycle::Starting {
+		let effect_id = Uuid::now_v7();
+		// ASVS 2.3.3: the Effect is inserted in the same authoritative
+		// transaction as the Run state and Event before acknowledgement.
+		tx.insert_effect(&NewEffect {
+			effect_id,
+			command_id: command_id.0,
+			run_id: Some(run_id.0),
+			kind: EffectKindRecord::StartRun,
+			safety: EffectSafetyRecord::Idempotent {
+				external_key: effect_id,
+				max_attempts: 3,
+			},
+		})?;
+	}
 	Ok(CommandOutcome::RunTransitioned(run))
 }
 

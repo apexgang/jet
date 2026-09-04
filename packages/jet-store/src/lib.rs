@@ -11,6 +11,7 @@
 mod clock;
 mod command;
 mod conversation;
+mod effect;
 mod journal;
 mod migrations;
 mod plane;
@@ -25,9 +26,10 @@ use rusqlite::Connection;
 
 pub use plane::PlaneRecord;
 pub use records::{
-	ActorRecord, CommandReceiptRecord, ConversationRecord, EventRecord,
-	NewCommandReceipt, NewConversation, NewEvent, NewRun, RetentionPolicy,
-	RunLifecycle, RunRecord,
+	ActorRecord, CommandReceiptRecord, ConversationRecord, EffectKindRecord,
+	EffectRecord, EffectSafetyRecord, EffectStateRecord, EventRecord,
+	NewCommandReceipt, NewConversation, NewEffect, NewEvent, NewRun,
+	RetentionPolicy, RunLifecycle, RunRecord,
 };
 pub use transaction::{ReadTransaction, WriteTransaction};
 
