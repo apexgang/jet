@@ -7,7 +7,7 @@ Jet is a multi-platform app for running and managing AI coding agent conversatio
 In the packages directory where the Jet backend Rust code lives:
 
 - All crates sit directly under the `packages` directory.
-- Crate names start with `jet-`. For example, the `core` folder crate should be named `jet-core`.
+- Crate names start with `jet-`, and each crate sits in a folder named exactly like the crate. For example, `packages/jet-core` holds the `jet-core` crate.
 - Keep all project dependencies in the workspace's `Cargo.toml`. Reference workspace dependencies inside crates.
 - When using `format!` and you can inline variables into `{}`, always do that.
 - Always collapse `if` statements per https://rust-lang.github.io/rust-clippy/master/index.html#collapsible_if.
@@ -35,7 +35,7 @@ In the packages directory where the Jet backend Rust code lives:
 Run `just fmt` (in the `packages` directory) automatically after you have finished making code changes anywhere in this repository; do not ask for approval to run it. Additionally, run the tests:
 
 1. Do not run `cargo test` directly. Use `just test` so test execution follows the repo defaults.
-2. Run the test for the specific project that was changed. For example, if changes were made in `packages/jet-cli`, run `just test -p jet-cli`.
+2. Run the test for the specific project that was changed. For example, if changes were made in `packages/jet-store`, run `just test -p jet-store`.
 3. Once those pass, if any changes were made in common, core, or protocol, run the complete test suite with `just test`. Avoid `--all-features` for routine local runs because it expands the build matrix and can significantly increase `target/` disk usage; use it only when you specifically need full feature coverage. Project-specific or individual tests can be run without asking the user, but do ask the user before running the complete test suite.
 4. Never run the release profile to check and test changes. Always use `jet-dev`.
 

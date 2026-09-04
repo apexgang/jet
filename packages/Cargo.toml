@@ -1,16 +1,16 @@
 [workspace]
 resolver = "3"
 members = [
-	"client",
-	"core",
-	"craft-claude",
-	"craft-codex",
-	"craft-sdk",
-	"daemon",
-	"fueld",
-	"protocol",
-	"runtime",
-	"store",
+	"jet-client",
+	"jet-core",
+	"jet-craft-claude",
+	"jet-craft-codex",
+	"jet-craft-sdk",
+	"jet-daemon",
+	"jet-fueld",
+	"jet-protocol",
+	"jet-runtime",
+	"jet-store",
 ]
 
 [workspace.package]
@@ -21,12 +21,12 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-jet-client = { path = "client" }
-jet-core = { path = "core" }
-jet-craft-sdk = { path = "craft-sdk" }
-jet-protocol = { path = "protocol" }
-jet-runtime = { path = "runtime" }
-jet-store = { path = "store" }
+jet-client = { path = "jet-client" }
+jet-core = { path = "jet-core" }
+jet-craft-sdk = { path = "jet-craft-sdk" }
+jet-protocol = { path = "jet-protocol" }
+jet-runtime = { path = "jet-runtime" }
+jet-store = { path = "jet-store" }
 
 clap = { version = "4", features = ["derive"] }
 pretty_assertions = "1"
