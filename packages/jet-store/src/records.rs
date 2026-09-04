@@ -168,6 +168,135 @@ pub struct NewCommandReceipt {
 	pub outcome: String,
 }
 
+/// Closed durable spelling of external work understood by this release.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectKindRecord {
+	/// Start one Run's managed processes.
+	StartRun,
+}
+
+impl EffectKindRecord {
+	pub(crate) fn as_str(self) -> &'static str {
+		match self {
+			Self::StartRun => "run.start",
+		}
+	}
+
+	pub(crate) fn parse(text: &str) -> Option<Self> {
+		match text {
+			"run.start" => Some(Self::StartRun),
+			_ => None,
+		}
+	}
+}
+
+/// Durable lifecycle of one external-work Effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectStateRecord {
+	/// Committed but never handed to its Adapter.
+	Pending,
+	/// Handed to its Adapter without a durably recorded outcome yet.
+	InFlight,
+	/// External work completed successfully.
+	Completed,
+	/// External work returned a definite failure.
+	Failed,
+	/// Reconciliation could not establish a safe outcome.
+	OutcomeUnknown,
+}
+
+/// Evidence that determines whether an interrupted Effect may be repeated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectSafetyRecord {
+	/// The operation cannot mutate external state.
+	ReadOnly {
+		/// Maximum number of attempts allowed by policy.
+		max_attempts: u32,
+	},
+	/// The target deduplicates attempts under one stable external key.
+	Idempotent {
+		/// Key supplied unchanged to the external target on every attempt.
+		external_key: Uuid,
+		/// Maximum number of attempts allowed by policy.
+		max_attempts: u32,
+	},
+	/// The operation may mutate state and cannot be safely deduplicated.
+	Ambiguous,
+}
+
+impl EffectSafetyRecord {
+	pub(crate) fn columns(self) -> (&'static str, Option<Uuid>, u32) {
+		match self {
+			Self::ReadOnly { max_attempts } => {
+				("read_only", None, max_attempts)
+			}
+			Self::Idempotent {
+				external_key,
+				max_attempts,
+			} => ("idempotent", Some(external_key), max_attempts),
+			Self::Ambiguous => ("ambiguous", None, 1),
+		}
+	}
+}
+
+impl EffectStateRecord {
+	pub(crate) fn as_str(self) -> &'static str {
+		match self {
+			Self::Pending => "pending",
+			Self::InFlight => "in_flight",
+			Self::Completed => "completed",
+			Self::Failed => "failed",
+			Self::OutcomeUnknown => "outcome_unknown",
+		}
+	}
+
+	pub(crate) fn parse(text: &str) -> Option<Self> {
+		[
+			Self::Pending,
+			Self::InFlight,
+			Self::Completed,
+			Self::Failed,
+			Self::OutcomeUnknown,
+		]
+		.into_iter()
+		.find(|state| state.as_str() == text)
+	}
+}
+
+/// A newly committed request for external work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewEffect {
+	/// Globally unique identity reused for every attempt.
+	pub effect_id: Uuid,
+	/// Actor-scoped Command identity that initiated the Effect.
+	pub command_id: Uuid,
+	/// Run affected by the work.
+	pub run_id: Option<Uuid>,
+	/// Closed Effect kind understood by the core.
+	pub kind: EffectKindRecord,
+	/// Evidence and retry bound governing interrupted attempts.
+	pub safety: EffectSafetyRecord,
+}
+
+/// One durable external-work Effect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectRecord {
+	/// Globally unique identity reused for every attempt.
+	pub effect_id: Uuid,
+	/// Actor-scoped Command identity that initiated the Effect.
+	pub command_id: Uuid,
+	/// Run affected by the work.
+	pub run_id: Option<Uuid>,
+	/// Closed Effect kind understood by the core.
+	pub kind: EffectKindRecord,
+	/// Evidence and retry bound governing interrupted attempts.
+	pub safety: EffectSafetyRecord,
+	/// Durable lifecycle state.
+	pub state: EffectStateRecord,
+	/// Number of times the Effect was handed to its Adapter.
+	pub attempt_count: u32,
+}
+
 /// A Conversation to insert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NewConversation {

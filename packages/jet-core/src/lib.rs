@@ -11,6 +11,8 @@
 mod clock;
 mod command;
 mod conversation;
+#[allow(dead_code, reason = "wired to the Harness by follow-up issue #20")]
+mod effect;
 mod error;
 mod event;
 mod lifecycle;
@@ -104,6 +106,8 @@ pub struct Core {
 	store: Store,
 	clock: Arc<dyn Clock>,
 	started_at: SystemTime,
+	#[allow(dead_code, reason = "used by Effect reconciliation in issue #20")]
+	effect_reconciliation: std::sync::Mutex<()>,
 }
 
 impl Core {
@@ -133,6 +137,7 @@ impl Core {
 			store,
 			clock,
 			started_at,
+			effect_reconciliation: std::sync::Mutex::new(()),
 		})
 	}
 
@@ -159,3 +164,7 @@ fn unix_ms(time: SystemTime) -> i64 {
 #[cfg(test)]
 #[path = "core_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "effect_tests.rs"]
+mod effect_tests;
