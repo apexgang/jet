@@ -4,6 +4,7 @@ use rusqlite::{Connection, OptionalExtension};
 use uuid::Uuid;
 
 use crate::StoreError;
+use crate::transaction::ReadTransaction;
 
 /// Durable identity and daemon lifecycle counters of the Plane.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +13,17 @@ pub struct PlaneRecord {
 	pub plane_id: Uuid,
 	/// Number of authoritative `jetd` starts recorded so far.
 	pub daemon_starts: u64,
+}
+
+impl ReadTransaction<'_> {
+	/// Reads the Plane record inside this transaction's consistent snapshot.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the Plane row cannot be read.
+	pub fn plane(&self) -> Result<PlaneRecord, StoreError> {
+		read(&self.transaction)
+	}
 }
 
 pub(crate) fn ensure_present(

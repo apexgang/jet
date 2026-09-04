@@ -311,7 +311,9 @@ name = "jet-client"
 version = "0.2.0"
 dependencies = [
  "jet-protocol",
+ "pretty_assertions",
  "serde",
+ "tempfile",
  "thiserror",
  "tokio",
  "uuid",

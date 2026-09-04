@@ -14,6 +14,10 @@ use crate::system_time;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConversationId(pub Uuid);
 
+/// Opaque token for continuing one fenced keyset snapshot page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PageCursor(pub Uuid);
+
 /// Durable identity of one Run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RunId(pub Uuid);
@@ -62,14 +66,16 @@ pub struct Run {
 	pub ended_at: Option<SystemTime>,
 }
 
-/// Every Conversation on the Plane, fenced by the journal position it was
-/// read at (ADR-0092).
+/// One bounded page of Conversations, fenced by the journal position at
+/// which its first page was read (ADR-0092).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConversationList {
 	/// Newest Event sequence visible when the list was read.
 	pub cursor: EventSequence,
 	/// Conversations in creation order.
 	pub conversations: Vec<Conversation>,
+	/// Opaque continuation token when another page belongs to this snapshot.
+	pub next_page: Option<PageCursor>,
 }
 
 /// One Conversation with all of its Runs, fenced by the journal position

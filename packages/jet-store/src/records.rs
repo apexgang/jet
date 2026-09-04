@@ -15,6 +15,42 @@ pub enum RetentionPolicy {
 	ForgetAfterFinalRun,
 }
 
+/// Whether an Event is durable Conversation history or compactable
+/// operational noise (ADR-0078).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventClass {
+	/// Semantic history follows its Conversation's retention policy.
+	Semantic,
+	/// Superseded operational noise may be removed after snapshot coverage.
+	Operational,
+}
+
+/// Opaque evidence that a durable snapshot covers Events through a sequence.
+///
+/// Only a write transaction over the durable normalized projection can mint
+/// this value; compaction callers cannot substitute an asserted integer
+/// (ADR-0078).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerifiedSnapshotCoverage {
+	pub(crate) plane_id: Uuid,
+	pub(crate) sequence: u64,
+}
+
+impl VerifiedSnapshotCoverage {
+	pub(crate) fn parts(self) -> (Uuid, u64) {
+		(self.plane_id, self.sequence)
+	}
+}
+
+impl EventClass {
+	pub(crate) fn as_str(self) -> &'static str {
+		match self {
+			Self::Semantic => "semantic",
+			Self::Operational => "operational",
+		}
+	}
+}
+
 /// Mutually exclusive lifecycle of one Run (ADR-0065).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -319,6 +355,19 @@ pub struct ConversationRecord {
 	pub created_at_unix_ms: i64,
 }
 
+/// Opaque-to-callers key for continuing a Conversation keyset page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConversationPageKey(pub(crate) i64);
+
+/// Where a Conversation page begins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationPageStart {
+	/// Read the first page of the snapshot.
+	First,
+	/// Continue strictly after a key returned by the previous page.
+	After(ConversationPageKey),
+}
+
 /// A Run to insert in the `created` lifecycle state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NewRun {
@@ -367,6 +416,8 @@ pub struct NewEvent {
 	pub payload_version: u32,
 	/// Bounded JSON payload.
 	pub payload: String,
+	/// Retention class governing whether compaction may remove this Event.
+	pub class: EventClass,
 }
 
 /// One journal row (ADR-0096).

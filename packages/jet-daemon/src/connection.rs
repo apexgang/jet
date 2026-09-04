@@ -45,17 +45,17 @@ pub(crate) async fn serve(
 	stream: UnixStream,
 	mut draining: watch::Receiver<bool>,
 ) {
-	let Ok(Some((mut connection, actor))) =
+	let Ok(Some((mut connection, actor, minor))) =
 		timeout(HANDSHAKE_TIMEOUT, open(stream)).await
 	else {
 		return;
 	};
 	connection
-		.serve_requests(&core, &actor, &mut draining)
+		.serve_requests(&core, &actor, minor, &mut draining)
 		.await;
 }
 
-async fn open(mut stream: UnixStream) -> Option<(Connection, Actor)> {
+async fn open(mut stream: UnixStream) -> Option<(Connection, Actor, u32)> {
 	let mut preface = vec![0u8; PREFACE.len()];
 	if stream.read_exact(&mut preface).await.is_err() || preface != PREFACE {
 		return None;
@@ -65,12 +65,12 @@ async fn open(mut stream: UnixStream) -> Option<(Connection, Actor)> {
 		reader: FrameReader::new(read),
 		writer: FrameWriter::new(write),
 	};
-	let actor = connection.handshake().await?;
-	Some((connection, actor))
+	let (actor, minor) = connection.handshake().await?;
+	Some((connection, actor, minor))
 }
 
 impl Connection {
-	async fn handshake(&mut self) -> Option<Actor> {
+	async fn handshake(&mut self) -> Option<(Actor, u32)> {
 		let hello: ClientHello = match self.receive().await {
 			Ok(hello) => hello,
 			Err(ReceiveError::Disconnected) => return None,
@@ -111,10 +111,6 @@ impl Connection {
 			data: hello.max_data_frame as usize,
 		});
 		// Both peers send only the fields of the smaller minor (ADR-0019).
-		#[expect(
-			clippy::unnecessary_min_or_max,
-			reason = "v1 has no minors yet; the negotiation stays general"
-		)]
 		let minor = hello.minor.min(PROTOCOL_MINOR);
 		let welcome = ServerHello::Welcome {
 			protocol: PROTOCOL_VERSION,
@@ -126,9 +122,12 @@ impl Connection {
 		};
 		self.send(&welcome).await.ok()?;
 		self.writer.set_limits(limits);
-		Some(Actor::InteractiveClient {
-			client_id: ClientId(hello.client_id),
-		})
+		Some((
+			Actor::InteractiveClient {
+				client_id: ClientId(hello.client_id),
+			},
+			minor,
+		))
 	}
 
 	/// Answers requests until the peer leaves or the daemon drains. A request
@@ -138,6 +137,7 @@ impl Connection {
 		&mut self,
 		core: &Core,
 		actor: &Actor,
+		minor: u32,
 		draining: &mut watch::Receiver<bool>,
 	) {
 		loop {
@@ -165,7 +165,7 @@ impl Connection {
 			};
 			let reply = match decode(&payload) {
 				Ok(ClientMessage::Query { id, query }) => {
-					answer(core, actor, id, &query)
+					answer(core, actor, minor, id, &query)
 				}
 				Ok(ClientMessage::Command {
 					id,
@@ -175,6 +175,7 @@ impl Connection {
 					Ok(raw) => execute(
 						core,
 						actor,
+						minor,
 						id,
 						command_id,
 						&command,
@@ -249,16 +250,29 @@ fn decode<T: serde::de::DeserializeOwned>(
 fn answer(
 	core: &Core,
 	actor: &Actor,
+	minor: u32,
 	id: RequestId,
 	query: &QueryRequest,
 ) -> ServerMessage {
-	let result = blocking(|| core.query(actor, translate::query(query)))
-		.and_then(translate::query_result);
+	if minor < jet_protocol::FENCED_READS_MINOR
+		&& matches!(query, QueryRequest::NextConversations { .. })
+	{
+		return ServerMessage::Error {
+			id: Some(id),
+			error: wire_error(
+				ErrorCategory::Incompatible,
+				"protocol.unsupported_minor",
+				"Conversation pagination requires protocol minor 1".into(),
+			),
+		};
+	}
+	let result = blocking(|| core.query(actor, translate::query(query, minor)))
+		.and_then(|result| translate::query_result(result, minor));
 	match result {
 		Ok(result) => ServerMessage::QueryResult { id, result },
 		Err(error) => ServerMessage::Error {
 			id: Some(id),
-			error: translate::error(error),
+			error: translate::error(error, minor),
 		},
 	}
 }
@@ -266,6 +280,7 @@ fn answer(
 fn execute(
 	core: &Core,
 	actor: &Actor,
+	minor: u32,
 	id: RequestId,
 	command_id: uuid::Uuid,
 	command: &CommandRequest,
@@ -284,7 +299,7 @@ fn execute(
 		},
 		Err(error) => ServerMessage::Error {
 			id: Some(id),
-			error: translate::error(error),
+			error: translate::error(error, minor),
 		},
 	}
 }
@@ -303,6 +318,7 @@ fn draining_error() -> WireError {
 		retryable: true,
 		message: "jetd is shutting down; reconnect later and retry with the same Command identity".into(),
 		revision_conflict: None,
+		restart: None,
 		recovery_actions: vec![],
 	}
 }
@@ -326,6 +342,7 @@ fn wire_error(
 		retryable: false,
 		message,
 		revision_conflict: None,
+		restart: None,
 		recovery_actions: vec![],
 	}
 }

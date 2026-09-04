@@ -40,6 +40,16 @@ pub enum ClientError {
 		/// The selected codec.
 		codec: String,
 	},
+	/// The connected daemon negotiated an older minor than a request needs.
+	#[error(
+		"feature requires protocol minor {required_minor}, but the connection negotiated {negotiated_minor}"
+	)]
+	FeatureUnavailable {
+		/// First minor that supports the requested feature.
+		required_minor: u32,
+		/// Minor selected during the handshake.
+		negotiated_minor: u32,
+	},
 	/// The daemon answered a request with a stable error.
 	#[error("request failed: {0:?}")]
 	Remote(WireError),
@@ -58,6 +68,7 @@ pub struct Client {
 	reader: FrameReader<OwnedReadHalf>,
 	writer: FrameWriter<OwnedWriteHalf>,
 	next_id: RequestId,
+	minor: u32,
 }
 
 impl Client {
@@ -81,6 +92,7 @@ impl Client {
 			reader: FrameReader::new(read),
 			writer: FrameWriter::new(write),
 			next_id: 1,
+			minor: 0,
 		};
 		let accepted = FrameLimits::default();
 		let hello = ClientHello {
@@ -121,12 +133,31 @@ impl Client {
 					control: max_control_frame as usize,
 					data: max_data_frame as usize,
 				}));
+				client.minor = minor;
 				Ok(client)
 			}
 			ServerHello::Rejected { error } => {
 				Err(ClientError::Rejected(error))
 			}
 		}
+	}
+
+	pub(crate) fn require_minor(
+		&self,
+		required_minor: u32,
+	) -> Result<(), ClientError> {
+		if self.minor >= required_minor {
+			Ok(())
+		} else {
+			Err(ClientError::FeatureUnavailable {
+				required_minor,
+				negotiated_minor: self.minor,
+			})
+		}
+	}
+
+	pub(crate) fn negotiated_minor(&self) -> u32 {
+		self.minor
 	}
 
 	/// Runs `query` and returns its snapshot.
@@ -247,3 +278,7 @@ fn remote_error(
 fn limit(limit: usize) -> u32 {
 	u32::try_from(limit).unwrap_or(u32::MAX)
 }
+
+#[cfg(test)]
+#[path = "connection_tests.rs"]
+mod tests;

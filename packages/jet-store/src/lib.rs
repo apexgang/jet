@@ -24,12 +24,15 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 
+pub use conversation::CONVERSATION_PAGE_LIMIT;
+pub use journal::EVENT_COMPACTION_BATCH_LIMIT;
 pub use plane::PlaneRecord;
 pub use records::{
-	ActorRecord, CommandReceiptRecord, ConversationRecord, EffectKindRecord,
-	EffectRecord, EffectSafetyRecord, EffectStateRecord, EventRecord,
+	ActorRecord, CommandReceiptRecord, ConversationPageKey,
+	ConversationPageStart, ConversationRecord, EffectKindRecord, EffectRecord,
+	EffectSafetyRecord, EffectStateRecord, EventClass, EventRecord,
 	NewCommandReceipt, NewConversation, NewEffect, NewEvent, NewRun,
-	RetentionPolicy, RunLifecycle, RunRecord,
+	RetentionPolicy, RunLifecycle, RunRecord, VerifiedSnapshotCoverage,
 };
 pub use transaction::{ReadTransaction, WriteTransaction};
 
@@ -42,6 +45,24 @@ pub enum StoreError {
 	/// The database is reachable but a statement or its data is broken.
 	#[error("store integrity failure: {0}")]
 	Integrity(String),
+	/// Required Event replay is no longer retained.
+	#[error(
+		"Event cursor expired before {minimum_available_cursor}; current snapshot revision is {current_snapshot_revision}"
+	)]
+	CursorExpired {
+		/// Oldest cursor from which continuous replay remains possible.
+		minimum_available_cursor: u64,
+		/// Current Event high-water cursor for a replacement snapshot.
+		current_snapshot_revision: u64,
+	},
+	/// The requested Event cursor is ahead of this Plane's journal.
+	#[error(
+		"Event cursor is ahead of the current snapshot revision {current_snapshot_revision}"
+	)]
+	CursorAhead {
+		/// Current Event high-water cursor for a replacement snapshot.
+		current_snapshot_revision: u64,
+	},
 }
 
 impl From<rusqlite::Error> for StoreError {

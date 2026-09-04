@@ -16,6 +16,7 @@ mod effect;
 mod error;
 mod event;
 mod lifecycle;
+mod pagination;
 mod query;
 mod status;
 #[cfg(test)]
@@ -32,10 +33,11 @@ use clock::{Clock, SystemClock};
 pub use command::{Command, CommandEnvelope, CommandId, CommandOutcome};
 pub use conversation::{
 	Conversation, ConversationId, ConversationList, ConversationSnapshot,
-	Revision, Run, RunId,
+	PageCursor, Revision, Run, RunId,
 };
 pub use error::{
-	ConflictState, CoreError, ErrorCategory, RecoveryAction, RevisionConflict,
+	ConflictState, CoreError, ErrorCategory, RecoveryAction, RestartMetadata,
+	RevisionConflict,
 };
 pub use event::{
 	Event, EventId, EventKind, EventPage, EventPayload, EventSequence,
@@ -108,6 +110,7 @@ pub struct Core {
 	started_at: SystemTime,
 	#[allow(dead_code, reason = "used by Effect reconciliation in issue #20")]
 	effect_reconciliation: std::sync::Mutex<()>,
+	conversation_pages: pagination::ConversationPages,
 }
 
 impl Core {
@@ -138,6 +141,7 @@ impl Core {
 			clock,
 			started_at,
 			effect_reconciliation: std::sync::Mutex::new(()),
+			conversation_pages: pagination::ConversationPages::default(),
 		})
 	}
 

@@ -2,7 +2,9 @@
 
 use std::time::SystemTime;
 
-use jet_store::{EventRecord, NewEvent, RetentionPolicy, RunLifecycle};
+use jet_store::{
+	EventClass, EventRecord, NewEvent, RetentionPolicy, RunLifecycle,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -24,7 +26,18 @@ pub struct EventId(pub Uuid);
 /// `sequence` it is total and monotonic; as a snapshot `cursor` it is the
 /// newest position the snapshot saw, so a subscription resumes strictly
 /// after it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+	Debug,
+	Clone,
+	Copy,
+	PartialEq,
+	Eq,
+	PartialOrd,
+	Ord,
+	Hash,
+	Serialize,
+	Deserialize,
+)]
 pub struct EventSequence(pub u64);
 
 /// What an Event is about.
@@ -206,6 +219,7 @@ impl EventKind {
 			kind,
 			payload_version,
 			payload: payload.to_string(),
+			class: EventClass::Semantic,
 		})
 	}
 }

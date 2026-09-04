@@ -105,6 +105,7 @@ async fn changed_content_cannot_reuse_an_actors_command_identity() {
 				"the Command identity was already used for different content"
 					.into(),
 			revision_conflict: None,
+			restart: None,
 			recovery_actions: vec![],
 		}
 	);
@@ -147,6 +148,7 @@ async fn only_a_byte_equivalent_command_body_is_an_identical_retry() {
 					"the Command identity was already used for different content"
 						.into(),
 				revision_conflict: None,
+				restart: None,
 				recovery_actions: vec![],
 			},
 		}
@@ -258,6 +260,7 @@ async fn concurrent_commands_expose_one_authoritative_revision_order() {
 					run: current.clone(),
 				},
 			}),
+			restart: None,
 			recovery_actions: vec![RecoveryAction::RefreshRun {
 				run_id: current.run_id,
 			}],

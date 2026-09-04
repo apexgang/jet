@@ -51,6 +51,7 @@ fn server_hello_variants_have_the_agreed_wire_shape() {
 			retryable: false,
 			message: "no common protocol version".into(),
 			revision_conflict: None,
+			restart: None,
 			recovery_actions: vec![],
 		},
 	};
@@ -72,6 +73,7 @@ fn status_query_and_result_have_the_agreed_wire_shape() {
 	let result = ServerMessage::QueryResult {
 		id: 1,
 		result: QueryResponse::Status(PlaneStatus {
+			cursor: Some(0),
 			plane_id: Uuid::nil(),
 			daemon_starts: 2,
 			started_at_unix_ms: 1_700_000_000_000,
@@ -82,9 +84,26 @@ fn status_query_and_result_have_the_agreed_wire_shape() {
 		(json(&query), json(&result)),
 		(
 			r#"{"kind":"query","id":1,"query":{"type":"status"}}"#.to_string(),
-			r#"{"kind":"query_result","id":1,"result":{"type":"status","plane_id":"00000000-0000-0000-0000-000000000000","daemon_starts":2,"started_at_unix_ms":1700000000000,"core_version":"0.1.0"}}"#.to_string(),
+			r#"{"kind":"query_result","id":1,"result":{"type":"status","cursor":"0","plane_id":"00000000-0000-0000-0000-000000000000","daemon_starts":2,"started_at_unix_ms":1700000000000,"core_version":"0.1.0"}}"#.to_string(),
 		)
 	);
+}
+
+#[test]
+fn a_minor_zero_status_without_a_fence_remains_readable() {
+	let message = decode_control::<ServerMessage>(
+		br#"{"kind":"query_result","id":1,"result":{"type":"status","plane_id":"00000000-0000-0000-0000-000000000000","daemon_starts":2,"started_at_unix_ms":1700000000000,"core_version":"0.1.0"}}"#,
+	)
+	.unwrap();
+
+	let ServerMessage::QueryResult {
+		result: QueryResponse::Status(status),
+		..
+	} = message
+	else {
+		panic!("expected a status result");
+	};
+	assert_eq!(status.cursor, None);
 }
 
 #[test]
@@ -97,6 +116,7 @@ fn error_messages_carry_a_stable_error_body() {
 			retryable: true,
 			message: "the Plane store is unavailable".into(),
 			revision_conflict: None,
+			restart: None,
 			recovery_actions: vec![],
 		},
 	};
@@ -162,6 +182,7 @@ fn revision_preconditions_and_conflicts_have_the_agreed_wire_shape() {
 				current_revision: 3,
 				safe_state: ConflictState::Run { run },
 			}),
+			restart: None,
 			recovery_actions: vec![RecoveryAction::RefreshRun {
 				run_id: Uuid::nil(),
 			}],

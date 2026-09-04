@@ -12,27 +12,38 @@ use jet_core::{
 };
 use jet_protocol as wire;
 
-pub(crate) fn query(request: &wire::QueryRequest) -> Query {
-	match *request {
+pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
+	match request {
 		wire::QueryRequest::Status => Query::Status,
+		wire::QueryRequest::Conversations
+			if minor < wire::FENCED_READS_MINOR =>
+		{
+			Query::LegacyConversations
+		}
 		wire::QueryRequest::Conversations => Query::Conversations,
+		wire::QueryRequest::NextConversations { cursor } => {
+			Query::NextConversations {
+				cursor: jet_core::PageCursor(cursor.0),
+			}
+		}
 		wire::QueryRequest::Conversation { conversation_id } => {
 			Query::Conversation {
-				conversation_id: ConversationId(conversation_id),
+				conversation_id: ConversationId(*conversation_id),
 			}
 		}
 		wire::QueryRequest::Events { after } => Query::Events {
-			after: EventSequence(after),
+			after: EventSequence(*after),
 		},
 	}
 }
 
 pub(crate) fn query_result(
 	result: QueryResult,
+	minor: u32,
 ) -> Result<wire::QueryResponse, CoreError> {
 	Ok(match result {
 		QueryResult::Status(status) => {
-			wire::QueryResponse::Status(plane_status(&status))
+			wire::QueryResponse::Status(plane_status(&status, minor))
 		}
 		QueryResult::Conversations(list) => {
 			wire::QueryResponse::Conversations(conversation_list(&list))
@@ -86,8 +97,9 @@ pub(crate) fn command_outcome(
 	}
 }
 
-fn plane_status(status: &PlaneStatus) -> wire::PlaneStatus {
+fn plane_status(status: &PlaneStatus, minor: u32) -> wire::PlaneStatus {
 	wire::PlaneStatus {
+		cursor: (minor >= wire::FENCED_READS_MINOR).then_some(status.cursor.0),
 		plane_id: status.plane_id.0,
 		daemon_starts: status.daemon_starts,
 		started_at_unix_ms: unix_ms(status.started_at),
@@ -99,6 +111,10 @@ fn conversation_list(list: &ConversationList) -> wire::ConversationList {
 	wire::ConversationList {
 		cursor: list.cursor.0,
 		conversations: list.conversations.iter().map(conversation).collect(),
+		next_page: list
+			.next_page
+			.as_ref()
+			.map(|cursor| wire::PageCursor(cursor.0)),
 	}
 }
 
@@ -211,26 +227,56 @@ fn lifecycle_from_wire(lifecycle: wire::RunLifecycle) -> RunLifecycle {
 	}
 }
 
-pub(crate) fn error(error: CoreError) -> wire::WireError {
+pub(crate) fn error(error: CoreError, minor: u32) -> wire::WireError {
+	let restart = (minor >= wire::FENCED_READS_MINOR)
+		.then(|| error.recovery_actions.iter().find_map(restart_metadata))
+		.flatten();
 	wire::WireError {
 		category: category(error.category),
 		code: error.code,
 		retryable: error.retryable,
 		message: error.message,
 		revision_conflict: error.revision_conflict.map(revision_conflict),
+		restart,
 		recovery_actions: error
 			.recovery_actions
 			.into_iter()
-			.map(recovery_action)
+			.filter_map(recovery_action)
 			.collect(),
 	}
 }
 
-fn recovery_action(action: RecoveryAction) -> wire::RecoveryAction {
+fn recovery_action(action: RecoveryAction) -> Option<wire::RecoveryAction> {
 	match action {
 		RecoveryAction::RefreshRun { run_id } => {
-			wire::RecoveryAction::RefreshRun { run_id: run_id.0 }
+			Some(wire::RecoveryAction::RefreshRun { run_id: run_id.0 })
 		}
+		RecoveryAction::RestartSnapshot { .. } => None,
+	}
+}
+
+fn restart_metadata(action: &RecoveryAction) -> Option<wire::RestartMetadata> {
+	match action {
+		RecoveryAction::RefreshRun { .. } => None,
+		RecoveryAction::RestartSnapshot { metadata } => Some(match metadata {
+			jet_core::RestartMetadata::CursorExpired {
+				minimum_available_cursor,
+				current_snapshot_revision,
+			} => wire::RestartMetadata::CursorExpired {
+				minimum_available_cursor: minimum_available_cursor.0,
+				current_snapshot_revision: current_snapshot_revision.0,
+			},
+			jet_core::RestartMetadata::CursorAhead {
+				current_snapshot_revision,
+			} => wire::RestartMetadata::CursorAhead {
+				current_snapshot_revision: current_snapshot_revision.0,
+			},
+			jet_core::RestartMetadata::PaginationStale {
+				current_snapshot_revision,
+			} => wire::RestartMetadata::PaginationStale {
+				current_snapshot_revision: current_snapshot_revision.0,
+			},
+		}),
 	}
 }
 

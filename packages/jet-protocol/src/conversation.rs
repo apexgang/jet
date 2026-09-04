@@ -3,6 +3,11 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Opaque token for continuing one fenced keyset snapshot page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct PageCursor(pub Uuid);
+
 /// Whether Jet keeps a Conversation after its final Run.
 #[derive(
 	Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
@@ -69,7 +74,7 @@ pub struct Run {
 	pub ended_at_unix_ms: Option<i64>,
 }
 
-/// Every Conversation on the Plane, fenced by a journal cursor.
+/// One bounded page of Conversations, fenced by a journal cursor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationList {
 	/// Newest Event sequence visible when the list was read, carried as a
@@ -78,6 +83,9 @@ pub struct ConversationList {
 	pub cursor: u64,
 	/// Conversations in creation order.
 	pub conversations: Vec<Conversation>,
+	/// Opaque continuation token when another page belongs to this snapshot.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub next_page: Option<PageCursor>,
 }
 
 /// One Conversation with all of its Runs, fenced by a journal cursor.

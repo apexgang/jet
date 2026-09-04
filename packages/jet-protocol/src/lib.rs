@@ -22,8 +22,8 @@ pub use control::{
 };
 pub use conversation::{
 	CommandRequest, CommandResponse, ConflictState, Conversation,
-	ConversationList, ConversationSnapshot, RetentionPolicy, RevisionConflict,
-	Run, RunLifecycle,
+	ConversationList, ConversationSnapshot, PageCursor, RetentionPolicy,
+	RevisionConflict, Run, RunLifecycle,
 };
 pub use event::{Actor, Event};
 pub use frame::{
@@ -31,11 +31,11 @@ pub use frame::{
 	MAX_CONTROL_FRAME, MAX_DATA_FRAME,
 };
 pub use handshake::{
-	CODEC_JSON_V1, ClientHello, PREFACE, PROTOCOL_MINOR, PROTOCOL_VERSION,
-	ServerHello, VersionRange,
+	CODEC_JSON_V1, ClientHello, FENCED_READS_MINOR, PREFACE, PROTOCOL_MINOR,
+	PROTOCOL_VERSION, ServerHello, VersionRange,
 };
 pub use message::{
 	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,
-	QueryResponse, RecoveryAction, RequestId, ServerMessage, WireError,
-	raw_command,
+	QueryResponse, RecoveryAction, RequestId, RestartMetadata, ServerMessage,
+	WireError, raw_command,
 };
