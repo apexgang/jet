@@ -388,6 +388,42 @@ async fn compaction_stops_before_operational_events_inside_the_grace_period() {
 	);
 }
 
+/// Compaction is the one statement that reuses a numbered parameter: it
+/// mentions the coverage bound three times and the grace cutoff twice. The
+/// two are interchangeable on the data the other compaction tests use, so
+/// this one is shaped so that binding them the other way round removes a
+/// different number of Events.
+#[tokio::test]
+async fn compaction_binds_the_coverage_bound_apart_from_the_grace_cutoff() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = Store::open(&dir.path().join("plane.sqlite3"))
+		.await
+		.unwrap();
+	let conversation_id = Uuid::now_v7();
+	store
+		.write(async |tx| {
+			for _ in 0..3 {
+				tx.append_event(operational_event(conversation_id, 1))
+					.await?;
+			}
+			Ok::<_, StoreError>(())
+		})
+		.await
+		.unwrap();
+
+	// Coverage 3 with cutoff 2 removes all three; swapping them would bound
+	// the sequence by 2 and remove only two.
+	let removed = store
+		.write(async |tx| {
+			let coverage = tx.verified_projection_coverage().await?;
+			tx.compact_operational_events(coverage, 2).await
+		})
+		.await
+		.unwrap();
+
+	assert_eq!(removed, 3);
+}
+
 #[tokio::test]
 async fn snapshot_coverage_cannot_compact_another_plane() {
 	let dir = tempfile::tempdir().unwrap();

@@ -15,7 +15,7 @@ use crate::connection::{
 	answer, draining_error, execute, malformed, wire_error,
 };
 
-/// Bounds decoded requests waiting behind synchronous durable core work.
+/// Bounds decoded requests waiting behind durable core work.
 const MAX_PENDING_REQUESTS: usize = 16;
 /// Bounds replies waiting to enter the byte-bounded priority scheduler.
 const MAX_PENDING_REPLIES: usize = 16;
