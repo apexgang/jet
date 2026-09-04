@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use jet_protocol::{
 	CODEC_JSON_V1, CONNECTION_STREAM, ClientHello, ClientMessage,
@@ -16,7 +16,7 @@ use jet_protocol::{
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::{Mutex, Semaphore, mpsc, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -82,14 +82,19 @@ pub struct Client {
 	reader_task: JoinHandle<()>,
 	writer_task: JoinHandle<()>,
 	legacy_request: Semaphore,
-	in_flight: Semaphore,
+	in_flight: Arc<Semaphore>,
 	next_id: AtomicU64,
 	next_stream_id: AtomicU32,
 	minor: u32,
 }
 
-type PendingReplies =
-	Arc<Mutex<HashMap<StreamId, oneshot::Sender<ServerMessage>>>>;
+type PendingReplies = Arc<Mutex<HashMap<StreamId, PendingReply>>>;
+
+#[derive(Debug)]
+struct PendingReply {
+	reply: oneshot::Sender<ServerMessage>,
+	_permit: OwnedSemaphorePermit,
+}
 
 struct WriteRequest {
 	frame: Frame,
@@ -175,7 +180,7 @@ impl Client {
 					reader_task,
 					writer_task,
 					legacy_request: Semaphore::new(1),
-					in_flight: Semaphore::new(MAX_IN_FLIGHT_REQUESTS),
+					in_flight: Arc::new(Semaphore::new(MAX_IN_FLIGHT_REQUESTS)),
 					next_id: AtomicU64::new(1),
 					next_stream_id: AtomicU32::new(1),
 					minor,
@@ -299,12 +304,11 @@ impl Client {
 	) -> Result<ServerMessage, ClientError> {
 		// ASVS 15.2.2 and 15.4.4: bound both the pending-reply registry and
 		// the writer channel before encoding another untrusted exchange.
-		let _permit = self
-			.in_flight
-			.acquire()
+		let permit = Arc::clone(&self.in_flight)
+			.acquire_owned()
 			.await
 			.map_err(|_| ClientError::Closed)?;
-		let _legacy = if stream_id.is_connection() {
+		let _legacy_request_permit = if stream_id.is_connection() {
 			Some(
 				self.legacy_request
 					.acquire()
@@ -316,16 +320,28 @@ impl Client {
 		};
 		let (reply, receive) = oneshot::channel();
 		{
-			let mut pending = self.pending.lock().await;
+			let mut pending = self
+				.pending
+				.lock()
+				.expect("the pending-reply registry must not be poisoned");
 			if pending.contains_key(&stream_id) {
 				return Err(ClientError::Unexpected(format!(
 					"stream {stream_id:?} was reused while still active"
 				)));
 			}
-			pending.insert(stream_id, reply);
+			pending.insert(
+				stream_id,
+				PendingReply {
+					reply,
+					_permit: permit,
+				},
+			);
 		}
 		if let Err(error) = self.send_on(stream_id, message).await {
-			self.pending.lock().await.remove(&stream_id);
+			self.pending
+				.lock()
+				.expect("the pending-reply registry must not be poisoned")
+				.remove(&stream_id);
 			return Err(error);
 		}
 		receive.await.map_err(|_| ClientError::Closed)
@@ -398,21 +414,28 @@ async fn read_replies(
 		{
 			let waiters: Vec<_> = pending
 				.lock()
-				.await
+				.expect("the pending-reply registry must not be poisoned")
 				.drain()
-				.map(|(_, reply)| reply)
+				.map(|(_, pending)| pending.reply)
 				.collect();
 			for waiter in waiters {
 				let _ = waiter.send(reply.clone());
 			}
 			break;
 		}
-		let Some(waiter) = pending.lock().await.remove(&stream_id) else {
+		let Some(waiter) = pending
+			.lock()
+			.expect("the pending-reply registry must not be poisoned")
+			.remove(&stream_id)
+		else {
 			break;
 		};
-		let _ = waiter.send(reply);
+		let _ = waiter.reply.send(reply);
 	}
-	pending.lock().await.clear();
+	pending
+		.lock()
+		.expect("the pending-reply registry must not be poisoned")
+		.clear();
 }
 
 async fn write_frames(

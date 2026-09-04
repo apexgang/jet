@@ -180,6 +180,14 @@ impl OutboundQueue {
 			.binary
 			.iter()
 			.any(|frame| frame.stream_id() == stream_id)
+			|| self
+				.control
+				.iter()
+				.any(|frame| frame.stream_id() == stream_id)
+			|| self
+				.events
+				.iter()
+				.any(|event| event.frame.stream_id() == stream_id)
 		{
 			return Err(StreamQueueError::StreamBusy(stream_id));
 		}
@@ -227,6 +235,9 @@ impl OutboundQueue {
 		else {
 			return Err(StreamQueueError::ExpectedControl);
 		};
+		if payload.is_empty() {
+			return Err(StreamQueueError::EmptyControl);
+		}
 		let next = self.control_bytes.saturating_add(payload.len());
 		if payload.len() > MAX_CONTROL_FRAME || next > self.limits.control_bytes
 		{
@@ -258,6 +269,9 @@ impl OutboundQueue {
 		else {
 			return Err(StreamQueueError::ExpectedControl);
 		};
+		if payload.is_empty() {
+			return Err(StreamQueueError::EmptyControl);
+		}
 		if stream_id.is_connection() {
 			return Err(StreamQueueError::ConnectionStream);
 		}
@@ -302,6 +316,9 @@ impl OutboundQueue {
 				declared: payload.len(),
 				limit: MAX_DATA_FRAME,
 			});
+		}
+		if payload.is_empty() {
+			return Err(StreamQueueError::EmptyData);
 		}
 		let requested = u64::try_from(payload.len())
 			.map_err(|_| StreamQueueError::OffsetOverflow(stream_id))?;

@@ -60,6 +60,31 @@ fn binary_streams_cannot_advance_past_receiver_credit() {
 }
 
 #[test]
+fn empty_frames_cannot_grow_any_outbound_queue() {
+	let mut queue = OutboundQueue::new(0);
+	queue
+		.open_binary(stream(1), BinaryStreamKind::Artifact)
+		.unwrap();
+
+	assert_eq!(
+		queue
+			.queue_control(Frame::stream_control(stream(2), vec![]))
+			.unwrap_err(),
+		StreamQueueError::EmptyControl
+	);
+	assert_eq!(
+		queue
+			.queue_event(1, Frame::stream_control(stream(3), vec![]))
+			.unwrap_err(),
+		StreamQueueError::EmptyControl
+	);
+	assert_eq!(
+		queue.queue_data(stream(1), vec![]).unwrap_err(),
+		StreamQueueError::EmptyData
+	);
+}
+
+#[test]
 fn open_binary_streams_are_bounded_and_ids_can_be_reused_after_close() {
 	let limits = OutboundLimits {
 		open_streams: 1,
@@ -132,6 +157,34 @@ fn bounded_binary_queue_reports_terminal_gaps_but_backpressures_artifacts() {
 		queue.queue_data(stream(2), vec![6, 7]).unwrap(),
 		DataQueueOutcome::Queued
 	);
+}
+
+#[test]
+fn a_stream_id_cannot_be_reused_until_its_gap_control_is_written() {
+	let limits = OutboundLimits {
+		binary_bytes: 0,
+		..OutboundLimits::default()
+	};
+	let mut queue = OutboundQueue::with_limits(0, limits);
+	queue
+		.open_binary(stream(1), BinaryStreamKind::Terminal)
+		.unwrap();
+	queue.grant_credit(stream(1), 1).unwrap();
+	assert!(matches!(
+		queue.queue_data(stream(1), vec![1]).unwrap(),
+		DataQueueOutcome::TerminalGap { .. }
+	));
+
+	assert_eq!(
+		queue.close_binary(stream(1)).unwrap_err(),
+		StreamQueueError::StreamBusy(stream(1))
+	);
+	assert!(queue.next_frame().is_some());
+	queue.confirm_written();
+	queue.close_binary(stream(1)).unwrap();
+	queue
+		.open_binary(stream(1), BinaryStreamKind::Artifact)
+		.unwrap();
 }
 
 #[test]
@@ -335,13 +388,21 @@ async fn slow_consumer_error_is_sent_before_pending_event_with_written_cursor()
 		panic!("expected a connection-level slow-consumer error");
 	};
 	assert_eq!(stream_id, crate::CONNECTION_STREAM);
-	let ServerMessage::Error { id: None, error } =
-		decode_control(&payload).unwrap()
-	else {
-		panic!("expected a connection-level error");
-	};
 	assert_eq!(
-		error.recovery_actions,
-		vec![RecoveryAction::ResumeEvents { after: 41 }]
+		decode_control::<ServerMessage>(&payload).unwrap(),
+		ServerMessage::Error {
+			id: None,
+			error: WireError {
+				category: ErrorCategory::Unavailable,
+				code: "protocol.slow_consumer".into(),
+				retryable: true,
+				message: "the Event consumer exceeded its bounded window; reconnect and replay after the supplied cursor".into(),
+				revision_conflict: None,
+				restart: None,
+				recovery_actions: vec![RecoveryAction::ResumeEvents {
+					after: 41,
+				}],
+			},
+		}
 	);
 }

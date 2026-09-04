@@ -8,6 +8,12 @@ pub enum StreamQueueError {
 	/// A frame of the wrong kind was passed to a control queue.
 	#[error("only control frames may enter a control queue")]
 	ExpectedControl,
+	/// Empty JSON control cannot be a message and would evade byte quotas.
+	#[error("control frames must not be empty")]
+	EmptyControl,
+	/// Empty binary frames carry no progress and would evade byte quotas.
+	#[error("data frames must not be empty")]
+	EmptyData,
 	/// Application streams must not use the reserved connection stream.
 	#[error("the connection stream cannot carry application traffic")]
 	ConnectionStream,
