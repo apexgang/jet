@@ -1,4 +1,6 @@
-//! Connection preface and restricted handshake messages (ADR-0090).
+//! Connection preface and restricted handshake messages (ADR-0090). The
+//! handshake negotiates protocol major and minor, codec, frame limits, and
+//! capabilities before any Plane state is exposed (ADR-0019).
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -9,6 +11,10 @@ use crate::message::WireError;
 pub const PREFACE: &[u8] = b"jet-protocol\n";
 /// The only protocol major this crate speaks.
 pub const PROTOCOL_VERSION: u32 = 1;
+/// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
+/// additive: a peer negotiated to a lower minor never sees fields it does
+/// not know (ADR-0019).
+pub const PROTOCOL_MINOR: u32 = 0;
 /// The only v1 codec; other codecs are reserved for later negotiation.
 pub const CODEC_JSON_V1: &str = "json-v1";
 
@@ -34,6 +40,8 @@ impl VersionRange {
 pub struct ClientHello {
 	/// Protocol majors the client can speak.
 	pub protocol: VersionRange,
+	/// Newest minor of the `max` major the client speaks (ADR-0019).
+	pub minor: u32,
 	/// Requested codec name.
 	pub codec: String,
 	/// Durable Client identity of the connecting installation.
@@ -56,6 +64,9 @@ pub enum ServerHello {
 	Welcome {
 		/// Selected protocol major.
 		protocol: u32,
+		/// Selected minor of that major: the smaller of the two peers' newest
+		/// minors, so neither side sends fields the other cannot read.
+		minor: u32,
 		/// Selected codec.
 		codec: String,
 		/// Negotiated control frame limit both peers honor when sending.

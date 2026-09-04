@@ -1,23 +1,19 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
+use jet_store::NewEvent;
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
 use crate::clock::Clock;
+use crate::test_support::{actor, start_core};
 use crate::{
-	Actor, ClientId, Command, CommandEnvelope, CommandId, CommandOutcome,
-	Conversation, ConversationId, ConversationSnapshot, Core, CoreError,
-	ErrorCategory, EventKind, EventSequence, Query, QueryResult, Retention,
-	Revision, Run, RunId, RunLifecycle,
+	Command, CommandEnvelope, CommandId, CommandOutcome, Conversation,
+	ConversationId, ConversationSnapshot, Core, CoreError, ErrorCategory,
+	EventKind, EventPage, EventPayload, EventSequence, Query, QueryResult,
+	Retention, Revision, Run, RunId, RunLifecycle,
 };
 use jet_store::Store;
-
-fn actor() -> Actor {
-	Actor::InteractiveClient {
-		client_id: ClientId(Uuid::nil()),
-	}
-}
 
 fn command_id() -> CommandId {
 	CommandId(Uuid::now_v7())
@@ -49,27 +45,27 @@ impl Clock for ManualClock {
 }
 
 fn create_conversation(core: &Core, retention: Retention) -> Conversation {
-	match core
+	let outcome = core
 		.execute(&actor(), request(Command::CreateConversation { retention }))
-		.unwrap()
-	{
-		CommandOutcome::ConversationCreated(conversation) => conversation,
-		other => panic!("unexpected outcome {other:?}"),
-	}
+		.unwrap();
+	let CommandOutcome::ConversationCreated(conversation) = outcome else {
+		panic!("unexpected outcome {outcome:?}");
+	};
+	conversation
 }
 
 fn create_run(core: &Core, conversation_id: ConversationId) -> Run {
-	match core
+	let outcome = core
 		.execute(&actor(), request(Command::CreateRun { conversation_id }))
-		.unwrap()
-	{
-		CommandOutcome::RunCreated(run) => run,
-		other => panic!("unexpected outcome {other:?}"),
-	}
+		.unwrap();
+	let CommandOutcome::RunCreated(run) = outcome else {
+		panic!("unexpected outcome {outcome:?}");
+	};
+	run
 }
 
 fn transition(core: &Core, run: Run, lifecycle: RunLifecycle) -> Run {
-	match core
+	let outcome = core
 		.execute(
 			&actor(),
 			request(Command::TransitionRun {
@@ -78,41 +74,58 @@ fn transition(core: &Core, run: Run, lifecycle: RunLifecycle) -> Run {
 				lifecycle,
 			}),
 		)
-		.unwrap()
-	{
-		CommandOutcome::RunTransitioned(run) => run,
-		other => panic!("unexpected outcome {other:?}"),
-	}
+		.unwrap();
+	let CommandOutcome::RunTransitioned(run) = outcome else {
+		panic!("unexpected outcome {outcome:?}");
+	};
+	run
 }
 
 fn snapshot(
 	core: &Core,
 	conversation_id: ConversationId,
 ) -> ConversationSnapshot {
-	match core
+	let result = core
 		.query(&actor(), Query::Conversation { conversation_id })
-		.unwrap()
-	{
-		QueryResult::Conversation(snapshot) => snapshot,
-		other => panic!("unexpected result {other:?}"),
-	}
+		.unwrap();
+	let QueryResult::Conversation(snapshot) = result else {
+		panic!("unexpected result {result:?}");
+	};
+	snapshot
+}
+
+fn events_after(core: &Core, after: EventSequence) -> EventPage {
+	let result = core.query(&actor(), Query::Events { after }).unwrap();
+	let QueryResult::Events(page) = result else {
+		panic!("unexpected result {result:?}");
+	};
+	page
 }
 
 fn event_kinds(core: &Core, after: EventSequence) -> Vec<(u64, EventKind)> {
-	match core.query(&actor(), Query::Events { after }).unwrap() {
-		QueryResult::Events(events) => events
-			.into_iter()
-			.map(|event| (event.sequence.0, event.kind))
-			.collect(),
-		other => panic!("unexpected result {other:?}"),
+	events_after(core, after)
+		.events
+		.into_iter()
+		.map(|event| (event.sequence.0, event.kind))
+		.collect()
+}
+
+fn not_found(code: &str, message: &str) -> CoreError {
+	CoreError {
+		category: ErrorCategory::NotFound,
+		code: code.into(),
+		retryable: false,
+		message: message.into(),
+		detail: None,
+		revision_conflict: None,
+		recovery_actions: vec![],
 	}
 }
 
 #[test]
 fn a_conversation_exists_and_is_queryable_before_any_run() {
 	let dir = tempfile::tempdir().unwrap();
-	let core = Core::start(Store::open(&dir.path().join("p.sqlite3")).unwrap())
-		.unwrap();
+	let core = start_core(&dir.path().join("p.sqlite3"));
 
 	let conversation = create_conversation(&core, Retention::Retain);
 
@@ -139,7 +152,7 @@ fn a_conversation_exists_and_is_queryable_before_any_run() {
 fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("p.sqlite3");
-	let first = Core::start(Store::open(&path).unwrap()).unwrap();
+	let first = start_core(&path);
 	let conversation = create_conversation(&first, Retention::Retain);
 	let conversation_id = conversation.conversation_id;
 
@@ -151,7 +164,7 @@ fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
 	let canceled = transition(&first, second_run, RunLifecycle::Canceled);
 	drop(first);
 
-	let second = Core::start(Store::open(&path).unwrap()).unwrap();
+	let second = start_core(&path);
 	let restored = snapshot(&second, conversation_id);
 	let third_run = create_run(&second, conversation_id);
 	let kinds = event_kinds(&second, EventSequence(6));
@@ -194,11 +207,10 @@ fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
 #[test]
 fn a_second_run_is_refused_while_one_has_not_ended() {
 	let dir = tempfile::tempdir().unwrap();
-	let core = Core::start(Store::open(&dir.path().join("p.sqlite3")).unwrap())
-		.unwrap();
+	let core = start_core(&dir.path().join("p.sqlite3"));
 	let conversation = create_conversation(&core, Retention::Retain);
 	let run = create_run(&core, conversation.conversation_id);
-	transition(&core, run, RunLifecycle::Starting);
+	let starting = transition(&core, run, RunLifecycle::Starting);
 
 	let error = core
 		.execute(
@@ -222,14 +234,16 @@ fn a_second_run_is_refused_while_one_has_not_ended() {
 			recovery_actions: vec![],
 		}
 	);
-	assert_eq!(snapshot(&core, conversation.conversation_id).runs.len(), 1);
+	assert_eq!(
+		snapshot(&core, conversation.conversation_id).runs,
+		vec![starting]
+	);
 }
 
 #[test]
 fn a_run_lifecycle_only_moves_forward_and_never_leaves_a_terminal_state() {
 	let dir = tempfile::tempdir().unwrap();
-	let core = Core::start(Store::open(&dir.path().join("p.sqlite3")).unwrap())
-		.unwrap();
+	let core = start_core(&dir.path().join("p.sqlite3"));
 	let conversation = create_conversation(&core, Retention::Retain);
 	let run = create_run(&core, conversation.conversation_id);
 	let refused = |run: Run, lifecycle: RunLifecycle| {
@@ -271,8 +285,7 @@ fn a_run_lifecycle_only_moves_forward_and_never_leaves_a_terminal_state() {
 #[test]
 fn an_unknown_conversation_or_run_is_not_found() {
 	let dir = tempfile::tempdir().unwrap();
-	let core = Core::start(Store::open(&dir.path().join("p.sqlite3")).unwrap())
-		.unwrap();
+	let core = start_core(&dir.path().join("p.sqlite3"));
 	let conversation_id = ConversationId(Uuid::now_v7());
 	let run_id = RunId(Uuid::now_v7());
 
@@ -294,23 +307,17 @@ fn an_unknown_conversation_or_run_is_not_found() {
 		.unwrap_err();
 
 	assert_eq!(
-		(queried.code, run_created.code, transitioned.code),
+		(queried, run_created, transitioned),
 		(
-			"conversation.not_found".to_string(),
-			"conversation.not_found".to_string(),
-			"run.not_found".to_string()
-		)
-	);
-	assert_eq!(
-		(
-			queried.category,
-			run_created.category,
-			transitioned.category
-		),
-		(
-			ErrorCategory::NotFound,
-			ErrorCategory::NotFound,
-			ErrorCategory::NotFound
+			not_found(
+				"conversation.not_found",
+				"the Conversation does not exist"
+			),
+			not_found(
+				"conversation.not_found",
+				"the Conversation does not exist"
+			),
+			not_found("run.not_found", "the Run does not exist"),
 		)
 	);
 }
@@ -318,9 +325,8 @@ fn an_unknown_conversation_or_run_is_not_found() {
 #[test]
 fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 	let dir = tempfile::tempdir().unwrap();
-	let clock = Arc::new(ManualClock(Mutex::new(
-		SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
-	)));
+	let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+	let clock = Arc::new(ManualClock(Mutex::new(start)));
 	let core = Core::start_with_clock(
 		Store::open(&dir.path().join("p.sqlite3")).unwrap(),
 		clock.clone(),
@@ -363,15 +369,23 @@ fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 	let CommandOutcome::ConversationCreated(original) = original else {
 		panic!("expected the original Conversation");
 	};
-	assert_eq!(within_window, CommandOutcome::ConversationCreated(original));
-	assert_eq!(conversations.conversations, vec![original]);
+	assert_eq!(
+		(within_window, conversations.conversations),
+		(
+			CommandOutcome::ConversationCreated(original),
+			vec![Conversation {
+				conversation_id: original.conversation_id,
+				retention: Retention::Retain,
+				created_at: start,
+			}]
+		)
+	);
 }
 
 #[test]
 fn typed_command_content_is_bound_to_the_request_digest() {
 	let dir = tempfile::tempdir().unwrap();
-	let core = Core::start(Store::open(&dir.path().join("p.sqlite3")).unwrap())
-		.unwrap();
+	let core = start_core(&dir.path().join("p.sqlite3"));
 	let command_id = command_id();
 	core.execute(
 		&actor(),
@@ -413,5 +427,46 @@ fn typed_command_content_is_bound_to_the_request_digest() {
 			revision_conflict: None,
 			recovery_actions: vec![],
 		}
+	);
+}
+
+#[test]
+fn events_written_by_a_newer_core_are_served_without_interpretation() {
+	let dir = tempfile::tempdir().unwrap();
+	let core = start_core(&dir.path().join("p.sqlite3"));
+	let conversation = create_conversation(&core, Retention::Retain);
+	let future = EventPayload {
+		kind: "run.teleported".into(),
+		payload_version: 7,
+		payload: serde_json::json!({"to": "another Plane"}),
+	};
+	core.store
+		.write(|tx| {
+			tx.append_event(NewEvent {
+				event_id: Uuid::now_v7(),
+				actor: actor().record(),
+				recorded_at_unix_ms: 0,
+				conversation_id: Some(conversation.conversation_id.0),
+				run_id: None,
+				kind: future.kind.clone(),
+				payload_version: future.payload_version,
+				payload: future.payload.to_string(),
+			})
+		})
+		.unwrap();
+
+	let page = events_after(&core, EventSequence(1));
+
+	let kinds: Vec<_> = page.events.iter().map(|event| &event.kind).collect();
+	assert_eq!(
+		(page.cursor, kinds),
+		(
+			EventSequence(2),
+			vec![&EventKind::Unrecognized(future.clone())]
+		)
+	);
+	assert_eq!(
+		EventKind::Unrecognized(future.clone()).encode().unwrap(),
+		future
 	);
 }

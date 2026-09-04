@@ -16,6 +16,8 @@ mod event;
 mod lifecycle;
 mod query;
 mod status;
+#[cfg(test)]
+mod test_support;
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -33,13 +35,15 @@ pub use conversation::{
 pub use error::{
 	ConflictState, CoreError, ErrorCategory, RecoveryAction, RevisionConflict,
 };
-pub use event::{EVENT_PAGE_LIMIT, Event, EventId, EventKind, EventSequence};
+pub use event::{
+	Event, EventId, EventKind, EventPage, EventPayload, EventSequence,
+};
 pub use jet_store::{Retention, RunLifecycle};
 pub use query::{Query, QueryResult};
 pub use status::PlaneStatus;
 
 /// Version of the running core, reported in status snapshots.
-pub const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Durable identity of one Jet installation (see `Client identity`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -130,6 +134,12 @@ impl Core {
 			clock,
 			started_at,
 		})
+	}
+
+	/// The core clock's current time as the store records it. Every stamp
+	/// written by one Command comes from this one reading.
+	pub(crate) fn now_unix_ms(&self) -> i64 {
+		unix_ms(self.clock.now())
 	}
 }
 

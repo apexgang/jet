@@ -5,16 +5,12 @@
 mod support;
 
 use jet_protocol::{
-	Actor, CODEC_JSON_V1, ClientHello, CommandRequest, CommandResponse,
-	ConflictState, ErrorCategory, Frame, FrameReader, FrameWriter,
-	MAX_CONTROL_FRAME, MAX_DATA_FRAME, PREFACE, RecoveryAction, Retention,
-	RevisionConflict, RunLifecycle, ServerHello, ServerMessage, VersionRange,
-	WireError, decode_control, encode_control,
+	Actor, CommandRequest, CommandResponse, ConflictState,
+	ConversationSnapshot, ErrorCategory, RecoveryAction, Retention,
+	RevisionConflict, RunLifecycle, ServerMessage, WireError,
 };
 use pretty_assertions::assert_eq;
-use support::{connect, start_jetd};
-use tokio::io::AsyncWriteExt;
-use tokio::net::UnixStream;
+use support::{connect, connect_raw, start_jetd};
 use uuid::Uuid;
 
 async fn raw_command(
@@ -23,45 +19,16 @@ async fn raw_command(
 	command_id: Uuid,
 	command: &str,
 ) -> ServerMessage {
-	let mut stream = UnixStream::connect(&daemon.socket).await.unwrap();
-	stream.write_all(PREFACE).await.unwrap();
-	let (read, write) = stream.into_split();
-	let mut writer = FrameWriter::new(write);
-	let mut reader = FrameReader::new(read);
-	writer
-		.write(&Frame::Control(
-			encode_control(&ClientHello {
-				protocol: VersionRange { min: 1, max: 1 },
-				codec: CODEC_JSON_V1.into(),
-				client_id,
-				max_control_frame: u32::try_from(MAX_CONTROL_FRAME).unwrap(),
-				max_data_frame: u32::try_from(MAX_DATA_FRAME).unwrap(),
-				capabilities: vec![],
-			})
-			.unwrap(),
-		))
-		.await
-		.unwrap();
-	let Frame::Control(welcome) = reader.read().await.unwrap() else {
-		panic!("expected a control frame");
-	};
-	assert!(matches!(
-		decode_control::<ServerHello>(&welcome).unwrap(),
-		ServerHello::Welcome { .. }
-	));
-	writer
-		.write(&Frame::Control(
+	let mut connection = connect_raw(daemon, client_id).await;
+	connection
+		.send_bytes(
 			format!(
 				"{{\"kind\":\"command\",\"id\":9,\"command_id\":\"{command_id}\",\"command\":{command}}}"
 			)
 			.into_bytes(),
-		))
-		.await
-		.unwrap();
-	let Frame::Control(reply) = reader.read().await.unwrap() else {
-		panic!("expected a control frame");
-	};
-	decode_control(&reply).unwrap()
+		)
+		.await;
+	connection.receive().await
 }
 
 #[tokio::test]
@@ -85,12 +52,18 @@ async fn an_identical_retry_returns_the_durable_original_result() {
 	let second = start_jetd(&home).await;
 	let mut client = connect(&second, client_id).await;
 	let retried = client.execute_command(command_id, command).await.unwrap();
-	let events = client.events_after(0).await.unwrap();
+	let actors = client
+		.events_after(0)
+		.await
+		.unwrap()
+		.events
+		.into_iter()
+		.map(|event| event.actor)
+		.collect::<Vec<_>>();
 
 	assert_eq!(retried, original);
 	assert!(matches!(original, CommandResponse::ConversationCreated(_)));
-	assert_eq!(events.len(), 1);
-	assert_eq!(events[0].actor, Actor::InteractiveClient { client_id });
+	assert_eq!(actors, vec![Actor::InteractiveClient { client_id }]);
 }
 
 #[tokio::test]
@@ -203,6 +176,7 @@ async fn command_identities_are_scoped_to_the_authenticated_actor() {
 		.events_after(0)
 		.await
 		.unwrap()
+		.events
 		.into_iter()
 		.map(|event| event.actor)
 		.collect::<Vec<_>>();
@@ -227,10 +201,12 @@ async fn concurrent_commands_expose_one_authoritative_revision_order() {
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
 	let client_id = Uuid::new_v4();
 	let mut setup = connect(&daemon, client_id).await;
-	let conversation =
-		setup.create_conversation(Retention::Retain).await.unwrap();
+	let conversation = setup
+		.create_conversation(Uuid::now_v7(), Retention::Retain)
+		.await
+		.unwrap();
 	let run = setup
-		.create_run(conversation.conversation_id)
+		.create_run(Uuid::now_v7(), conversation.conversation_id)
 		.await
 		.unwrap();
 	let mut first = connect(&daemon, client_id).await;
@@ -291,16 +267,24 @@ async fn concurrent_commands_expose_one_authoritative_revision_order() {
 		.conversation(conversation.conversation_id)
 		.await
 		.unwrap();
-	assert_eq!(snapshot.runs, vec![current]);
+	let sequences = setup
+		.events_after(0)
+		.await
+		.unwrap()
+		.events
+		.into_iter()
+		.map(|event| event.sequence)
+		.collect::<Vec<_>>();
 	assert_eq!(
-		setup
-			.events_after(0)
-			.await
-			.unwrap()
-			.into_iter()
-			.map(|event| event.sequence)
-			.collect::<Vec<_>>(),
-		vec![1, 2, 3]
+		(snapshot, sequences),
+		(
+			ConversationSnapshot {
+				cursor: 3,
+				conversation,
+				runs: vec![current],
+			},
+			vec![1, 2, 3]
+		)
 	);
 }
 
@@ -309,14 +293,21 @@ async fn retrying_a_rejected_command_returns_its_original_conflict() {
 	let dir = tempfile::tempdir().unwrap();
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
 	let mut client = connect(&daemon, Uuid::new_v4()).await;
-	let conversation =
-		client.create_conversation(Retention::Retain).await.unwrap();
+	let conversation = client
+		.create_conversation(Uuid::now_v7(), Retention::Retain)
+		.await
+		.unwrap();
 	let run = client
-		.create_run(conversation.conversation_id)
+		.create_run(Uuid::now_v7(), conversation.conversation_id)
 		.await
 		.unwrap();
 	let starting = client
-		.transition_run(run.run_id, run.revision, RunLifecycle::Starting)
+		.transition_run(
+			Uuid::now_v7(),
+			run.run_id,
+			run.revision,
+			RunLifecycle::Starting,
+		)
 		.await
 		.unwrap();
 	let command_id = Uuid::now_v7();
@@ -335,6 +326,7 @@ async fn retrying_a_rejected_command_returns_its_original_conflict() {
 	};
 	let active = client
 		.transition_run(
+			Uuid::now_v7(),
 			starting.run_id,
 			starting.revision,
 			RunLifecycle::Active,

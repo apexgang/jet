@@ -7,7 +7,7 @@ use crate::conversation::{
 	ConversationId, ConversationList, ConversationSnapshot,
 };
 use crate::error::CoreError;
-use crate::event::{EVENT_PAGE_LIMIT, Event, EventSequence};
+use crate::event::{EVENT_PAGE_LIMIT, Event, EventPage, EventSequence};
 use crate::status::PlaneStatus;
 use crate::{Actor, CORE_VERSION, Core, PlaneId};
 
@@ -23,9 +23,10 @@ pub enum Query {
 		/// The Conversation to read.
 		conversation_id: ConversationId,
 	},
-	/// Up to [`EVENT_PAGE_LIMIT`] journal Events strictly after a position.
+	/// One page of journal Events strictly after a position, with the
+	/// journal cursor the page was read at.
 	Events {
-		/// The position to resume after; [`EventSequence::ORIGIN`] for all.
+		/// The position to resume after; zero for the whole journal.
 		after: EventSequence,
 	},
 }
@@ -40,7 +41,7 @@ pub enum QueryResult {
 	/// One Conversation with all of its Runs.
 	Conversation(ConversationSnapshot),
 	/// One page of journal Events in sequence order.
-	Events(Vec<Event>),
+	Events(EventPage),
 }
 
 impl Core {
@@ -80,12 +81,13 @@ impl Core {
 				self.store.read(|tx| conversation(tx, conversation_id))
 			}
 			Query::Events { after } => self.store.read(|tx| {
-				let events = tx.events_after(after.0, EVENT_PAGE_LIMIT)?;
-				let events: Vec<Event> = events
+				let cursor = EventSequence(tx.event_cursor()?);
+				let events = tx
+					.events_after(after.0, EVENT_PAGE_LIMIT)?
 					.into_iter()
 					.map(Event::try_from)
 					.collect::<Result<_, _>>()?;
-				Ok(QueryResult::Events(events))
+				Ok(QueryResult::Events(EventPage { cursor, events }))
 			}),
 		}
 	}

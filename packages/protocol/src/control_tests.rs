@@ -37,7 +37,7 @@ fn nesting_at_the_limit_is_accepted_and_brackets_in_strings_are_ignored() {
 
 	let value =
 		decode_control::<serde_json::Value>(at_limit.as_bytes()).unwrap();
-	assert_eq!(value.to_string().len(), at_limit.len());
+	assert_eq!(value.to_string(), at_limit);
 }
 
 #[test]

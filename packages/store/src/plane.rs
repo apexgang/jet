@@ -29,7 +29,7 @@ pub(crate) fn ensure_present(
 		transaction.execute(
 			"INSERT INTO plane (singleton, plane_id, daemon_starts)
 			 VALUES (1, ?1, 0)",
-			[Uuid::new_v4().to_string()],
+			[Uuid::now_v7().to_string()],
 		)?;
 	}
 	transaction.commit()?;

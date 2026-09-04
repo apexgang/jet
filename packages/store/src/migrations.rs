@@ -1,4 +1,13 @@
-//! Forward-only schema migrations tracked in `schema_migrations`.
+//! Forward-only schema migrations tracked in `schema_migrations`
+//! (ADR-0073).
+//!
+//! Each migration commits in its own transaction, so a failure leaves the
+//! store at the previous version, and an older `jetd` opens a newer store
+//! by skipping versions it does not know. Schema changes are expand-only
+//! until the rollback window of the release that introduced them has
+//! passed. The verified Recovery snapshot that precedes a migration
+//! (ADR-0097) arrives with the recovery work; until then a pre-existing
+//! store is migrated in place.
 
 use rusqlite::Connection;
 

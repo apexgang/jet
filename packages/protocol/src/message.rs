@@ -1,8 +1,10 @@
 //! Control messages exchanged after the handshake.
 
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use uuid::Uuid;
 
+use crate::control::{ControlError, decode_control};
 use crate::conversation::{
 	CommandRequest, CommandResponse, ConversationList, ConversationSnapshot,
 	RevisionConflict,
@@ -32,6 +34,24 @@ pub enum ClientMessage {
 		/// The Command to execute.
 		command: CommandRequest,
 	},
+}
+
+/// The exact bytes of the `command` object inside an encoded
+/// [`ClientMessage::Command`] frame. `jetd` digests them before interpreting
+/// the Command, so only a byte-equivalent retry reuses a durable outcome
+/// (ADR-0093). Decode the typed message first; this reads nothing else.
+///
+/// # Errors
+///
+/// Returns [`ControlError::Malformed`] when the frame has no `command`
+/// object.
+pub fn raw_command(frame: &[u8]) -> Result<Box<RawValue>, ControlError> {
+	#[derive(Deserialize)]
+	struct CommandBytes {
+		command: Box<RawValue>,
+	}
+	let CommandBytes { command } = decode_control(frame)?;
+	Ok(command)
 }
 
 /// Control message sent by `jetd`.
@@ -76,7 +96,9 @@ pub enum QueryRequest {
 	},
 	/// A page of journal Events strictly after a sequence.
 	Events {
-		/// The sequence to resume after; zero for the whole journal.
+		/// The sequence to resume after, carried as a decimal string
+		/// (ADR-0089); `"0"` for the whole journal.
+		#[serde(with = "crate::decimal")]
 		after: u64,
 	},
 }
@@ -92,10 +114,20 @@ pub enum QueryResponse {
 	/// One Conversation with all of its Runs.
 	Conversation(ConversationSnapshot),
 	/// One page of journal Events in sequence order.
-	Events {
-		/// The Events.
-		events: Vec<Event>,
-	},
+	Events(EventPage),
+}
+
+/// One page of journal Events, fenced by the journal position it was read
+/// at (ADR-0092). The page is the last one when its final Event's sequence
+/// equals `cursor`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventPage {
+	/// Newest Event sequence in the journal when the page was read, carried
+	/// as a decimal string (ADR-0089).
+	#[serde(with = "crate::decimal")]
+	pub cursor: u64,
+	/// The Events strictly after the requested position, in sequence order.
+	pub events: Vec<Event>,
 }
 
 /// Wire form of the Plane status snapshot.

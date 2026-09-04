@@ -5,8 +5,9 @@ use std::path::Path;
 use jet_protocol::{
 	CODEC_JSON_V1, ClientHello, ClientMessage, CommandRequest, CommandResponse,
 	ControlError, Frame, FrameError, FrameLimits, FrameReader, FrameWriter,
-	PROTOCOL_VERSION, QueryRequest, QueryResponse, RequestId, ServerHello,
-	ServerMessage, VersionRange, WireError, decode_control, encode_control,
+	PROTOCOL_MINOR, PROTOCOL_VERSION, QueryRequest, QueryResponse, RequestId,
+	ServerHello, ServerMessage, VersionRange, WireError, decode_control,
+	encode_control,
 };
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
@@ -28,9 +29,24 @@ pub enum ClientError {
 	/// The daemon refused the handshake.
 	#[error("handshake rejected: {0:?}")]
 	Rejected(WireError),
-	/// The daemon answered a request with an error.
+	/// The daemon accepted the handshake with a protocol this client does
+	/// not speak (ADR-0019).
+	#[error("incompatible protocol {protocol}.{minor} with codec {codec}")]
+	Incompatible {
+		/// The selected protocol major.
+		protocol: u32,
+		/// The selected minor of that major.
+		minor: u32,
+		/// The selected codec.
+		codec: String,
+	},
+	/// The daemon answered a request with a stable error.
 	#[error("request failed: {0:?}")]
 	Remote(WireError),
+	/// The daemon ended the connection with a stable error instead of
+	/// answering, for example while draining before shutdown (ADR-0088).
+	#[error("connection ended by jetd: {0:?}")]
+	Disconnected(WireError),
 	/// The daemon sent something this client cannot use here.
 	#[error("unexpected message from jetd: {0}")]
 	Unexpected(String),
@@ -51,7 +67,9 @@ impl Client {
 	/// # Errors
 	///
 	/// Returns [`ClientError::Rejected`] when the daemon refuses the
-	/// handshake, or the transport or framing failure otherwise.
+	/// handshake, [`ClientError::Incompatible`] when it selects a protocol
+	/// this client does not speak, or the transport or framing failure
+	/// otherwise.
 	pub async fn connect_local(
 		socket: &Path,
 		client_id: Uuid,
@@ -70,6 +88,7 @@ impl Client {
 				min: PROTOCOL_VERSION,
 				max: PROTOCOL_VERSION,
 			},
+			minor: PROTOCOL_MINOR,
 			codec: CODEC_JSON_V1.into(),
 			client_id,
 			max_control_frame: limit(accepted.control),
@@ -80,22 +99,30 @@ impl Client {
 		match client.receive::<ServerHello>().await? {
 			ServerHello::Welcome {
 				protocol,
+				minor,
 				codec,
 				max_control_frame,
 				max_data_frame,
-				..
-			} if protocol == PROTOCOL_VERSION && codec == CODEC_JSON_V1 => {
-				client.writer.set_limits(FrameLimits {
+				capabilities: _,
+			} => {
+				if protocol != PROTOCOL_VERSION
+					|| minor > PROTOCOL_MINOR
+					|| codec != CODEC_JSON_V1
+				{
+					return Err(ClientError::Incompatible {
+						protocol,
+						minor,
+						codec,
+					});
+				}
+				// The peer's limits never raise this side above the protocol
+				// maxima (ADR-0089).
+				client.writer.set_limits(accepted.negotiate(FrameLimits {
 					control: max_control_frame as usize,
 					data: max_data_frame as usize,
-				});
+				}));
 				Ok(client)
 			}
-			ServerHello::Welcome {
-				protocol, codec, ..
-			} => Err(ClientError::Unexpected(format!(
-				"negotiated protocol {protocol} with codec {codec}"
-			))),
 			ServerHello::Rejected { error } => {
 				Err(ClientError::Rejected(error))
 			}
@@ -113,18 +140,21 @@ impl Client {
 			ServerMessage::QueryResult {
 				id: reply_id,
 				result,
-			} if reply_id == id => Ok(result),
+			} => expect_reply_to(id, reply_id, result),
 			ServerMessage::Error {
 				id: reply_id,
 				error,
-			} if reply_id == Some(id) => Err(ClientError::Remote(error)),
-			other => Err(ClientError::Unexpected(format!("{other:?}"))),
+			} => Err(remote_error(id, reply_id, error)),
+			other @ ServerMessage::CommandResult { .. } => {
+				Err(ClientError::Unexpected(format!("{other:?}")))
+			}
 		}
 	}
 
-	/// Executes `command` and returns its durable outcome.
-	/// Executes `command` under an Actor-scoped identity. Retrying the same
-	/// identity and content returns the original durable outcome.
+	/// Executes `command` under the Actor-scoped identity `command_id`.
+	/// Retrying the same identity with the same content returns the original
+	/// durable outcome; the caller must therefore keep `command_id` across
+	/// retries (ADR-0093).
 	///
 	/// # Errors
 	///
@@ -146,12 +176,14 @@ impl Client {
 			ServerMessage::CommandResult {
 				id: reply_id,
 				result,
-			} if reply_id == id => Ok(result),
+			} => expect_reply_to(id, reply_id, result),
 			ServerMessage::Error {
 				id: reply_id,
 				error,
-			} if reply_id == Some(id) => Err(ClientError::Remote(error)),
-			other => Err(ClientError::Unexpected(format!("{other:?}"))),
+			} => Err(remote_error(id, reply_id, error)),
+			other @ ServerMessage::QueryResult { .. } => {
+				Err(ClientError::Unexpected(format!("{other:?}")))
+			}
 		}
 	}
 
@@ -179,6 +211,36 @@ impl Client {
 				"data frame before any stream was opened".into(),
 			)),
 		}
+	}
+}
+
+/// Accepts `result` only when it answers request `id`.
+fn expect_reply_to<T: std::fmt::Debug>(
+	id: RequestId,
+	reply_id: RequestId,
+	result: T,
+) -> Result<T, ClientError> {
+	if reply_id == id {
+		Ok(result)
+	} else {
+		Err(ClientError::Unexpected(format!(
+			"reply to request {reply_id} while waiting for {id}: {result:?}"
+		)))
+	}
+}
+
+/// Classifies an error frame received while waiting for the reply to `id`.
+fn remote_error(
+	id: RequestId,
+	reply_id: Option<RequestId>,
+	error: WireError,
+) -> ClientError {
+	match reply_id {
+		Some(reply_id) if reply_id == id => ClientError::Remote(error),
+		Some(reply_id) => ClientError::Unexpected(format!(
+			"error for request {reply_id} while waiting for {id}: {error:?}"
+		)),
+		None => ClientError::Disconnected(error),
 	}
 }
 

@@ -2,22 +2,18 @@
 //! boundary: a real `jetd`, a real temporary SQLite store, and only the
 //! wire vocabulary.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::too_many_lines)]
 
 mod support;
 
 use jet_client::ClientError;
 use jet_protocol::{
-	CODEC_JSON_V1, ClientHello, CommandResponse, Conversation,
-	ConversationList, ConversationSnapshot, ErrorCategory, Frame, FrameReader,
-	FrameWriter, MAX_CONTROL_FRAME, MAX_DATA_FRAME, PREFACE, Retention,
-	RunLifecycle, ServerHello, ServerMessage, VersionRange, WireError,
-	decode_control, encode_control,
+	CommandResponse, Conversation, ConversationList, ConversationSnapshot,
+	ErrorCategory, EventPage, Retention, RunLifecycle, ServerMessage,
+	WireError,
 };
 use pretty_assertions::assert_eq;
-use support::{Daemon, connect, start_jetd};
-use tokio::io::AsyncWriteExt;
-use tokio::net::UnixStream;
+use support::{Daemon, connect, connect_raw, start_jetd};
 use uuid::Uuid;
 
 /// Creates a Conversation with a raw command frame that says nothing about
@@ -26,44 +22,17 @@ async fn create_conversation_without_a_retention_choice(
 	daemon: &Daemon,
 	client_id: Uuid,
 ) -> Conversation {
-	let mut stream = UnixStream::connect(&daemon.socket).await.unwrap();
-	stream.write_all(PREFACE).await.unwrap();
-	let (read, write) = stream.into_split();
-	let mut writer = FrameWriter::new(write);
-	let mut reader = FrameReader::new(read);
-	let hello = ClientHello {
-		protocol: VersionRange { min: 1, max: 1 },
-		codec: CODEC_JSON_V1.into(),
-		client_id,
-		max_control_frame: u32::try_from(MAX_CONTROL_FRAME).unwrap(),
-		max_data_frame: u32::try_from(MAX_DATA_FRAME).unwrap(),
-		capabilities: vec![],
-	};
-	writer
-		.write(&Frame::Control(encode_control(&hello).unwrap()))
-		.await
-		.unwrap();
-	let Frame::Control(welcome) = reader.read().await.unwrap() else {
-		panic!("expected a control frame");
-	};
-	assert!(matches!(
-		decode_control::<ServerHello>(&welcome).unwrap(),
-		ServerHello::Welcome { .. }
-	));
-	writer
-		.write(&Frame::Control(
+	let mut connection = connect_raw(daemon, client_id).await;
+	connection
+		.send_bytes(
 			format!(
 				"{{\"kind\":\"command\",\"id\":1,\"command_id\":\"{}\",\"command\":{{\"type\":\"create_conversation\"}}}}",
 				Uuid::now_v7()
 			)
 			.into_bytes(),
-		))
-		.await
-		.unwrap();
-	let Frame::Control(reply) = reader.read().await.unwrap() else {
-		panic!("expected a control frame");
-	};
-	match decode_control::<ServerMessage>(&reply).unwrap() {
+		)
+		.await;
+	match connection.receive::<ServerMessage>().await {
 		ServerMessage::CommandResult {
 			id: 1,
 			result: CommandResponse::ConversationCreated(conversation),
@@ -113,25 +82,31 @@ async fn a_conversation_is_retained_with_its_terminal_runs_across_a_jetd_restart
 		create_conversation_without_a_retention_choice(&first, client_id).await;
 	let mut client = connect(&first, client_id).await;
 	let mut run = client
-		.create_run(conversation.conversation_id)
+		.create_run(Uuid::now_v7(), conversation.conversation_id)
 		.await
 		.unwrap();
 	for lifecycle in [RunLifecycle::Starting, RunLifecycle::Active] {
 		run = client
-			.transition_run(run.run_id, run.revision, lifecycle)
+			.transition_run(Uuid::now_v7(), run.run_id, run.revision, lifecycle)
 			.await
 			.unwrap();
 	}
 	let completed = client
-		.transition_run(run.run_id, run.revision, RunLifecycle::Completed)
+		.transition_run(
+			Uuid::now_v7(),
+			run.run_id,
+			run.revision,
+			RunLifecycle::Completed,
+		)
 		.await
 		.unwrap();
 	let second_run = client
-		.create_run(conversation.conversation_id)
+		.create_run(Uuid::now_v7(), conversation.conversation_id)
 		.await
 		.unwrap();
 	let canceled = client
 		.transition_run(
+			Uuid::now_v7(),
 			second_run.run_id,
 			second_run.revision,
 			RunLifecycle::Canceled,
@@ -154,7 +129,7 @@ async fn a_conversation_is_retained_with_its_terminal_runs_across_a_jetd_restart
 	let journal_after_restart = client.events_after(0).await.unwrap();
 	let listed = client.conversations().await.unwrap();
 	let third_run = client
-		.create_run(conversation.conversation_id)
+		.create_run(Uuid::now_v7(), conversation.conversation_id)
 		.await
 		.unwrap();
 	let newest = client.events_after(after_restart.cursor).await.unwrap();
@@ -178,26 +153,41 @@ async fn a_conversation_is_retained_with_its_terminal_runs_across_a_jetd_restart
 	);
 	assert_eq!(journal_after_restart, journal_before_restart);
 	assert_eq!(
-		journal_after_restart
-			.iter()
-			.map(|event| (event.sequence, event.kind.as_str()))
-			.collect::<Vec<_>>(),
-		vec![
-			(1, "conversation.created"),
-			(2, "run.created"),
-			(3, "run.lifecycle_changed"),
-			(4, "run.lifecycle_changed"),
-			(5, "run.lifecycle_changed"),
-			(6, "run.created"),
-			(7, "run.lifecycle_changed"),
-		]
+		(
+			journal_after_restart.cursor,
+			journal_after_restart
+				.events
+				.iter()
+				.map(|event| (event.sequence, event.kind.as_str()))
+				.collect::<Vec<_>>()
+		),
+		(
+			7,
+			vec![
+				(1, "conversation.created"),
+				(2, "run.created"),
+				(3, "run.lifecycle_changed"),
+				(4, "run.lifecycle_changed"),
+				(5, "run.lifecycle_changed"),
+				(6, "run.created"),
+				(7, "run.lifecycle_changed"),
+			]
+		)
 	);
 	assert_eq!(
-		newest
-			.iter()
-			.map(|event| (event.sequence, event.kind.as_str(), event.run_id))
-			.collect::<Vec<_>>(),
-		vec![(8, "run.created", Some(third_run.run_id))]
+		(
+			newest.cursor,
+			newest
+				.events
+				.iter()
+				.map(|event| (
+					event.sequence,
+					event.kind.as_str(),
+					event.run_id
+				))
+				.collect::<Vec<_>>()
+		),
+		(8, vec![(8, "run.created", Some(third_run.run_id))])
 	);
 }
 
@@ -206,15 +196,17 @@ async fn a_live_run_blocks_a_second_one_with_a_stable_conflict() {
 	let dir = tempfile::tempdir().unwrap();
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
 	let mut client = connect(&daemon, Uuid::new_v4()).await;
-	let conversation =
-		client.create_conversation(Retention::Retain).await.unwrap();
+	let conversation = client
+		.create_conversation(Uuid::now_v7(), Retention::Retain)
+		.await
+		.unwrap();
 	client
-		.create_run(conversation.conversation_id)
+		.create_run(Uuid::now_v7(), conversation.conversation_id)
 		.await
 		.unwrap();
 
 	let error = client
-		.create_run(conversation.conversation_id)
+		.create_run(Uuid::now_v7(), conversation.conversation_id)
 		.await
 		.unwrap_err();
 
@@ -255,6 +247,27 @@ async fn an_unknown_conversation_is_reported_as_not_found() {
 			message: "the Conversation does not exist".into(),
 			revision_conflict: None,
 			recovery_actions: vec![],
+		}
+	);
+}
+
+#[tokio::test]
+async fn an_empty_journal_page_still_carries_the_cursor() {
+	let dir = tempfile::tempdir().unwrap();
+	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	let mut client = connect(&daemon, Uuid::new_v4()).await;
+	client
+		.create_conversation(Uuid::now_v7(), Retention::Retain)
+		.await
+		.unwrap();
+
+	let page = client.events_after(1).await.unwrap();
+
+	assert_eq!(
+		page,
+		EventPage {
+			cursor: 1,
+			events: vec![],
 		}
 	);
 }

@@ -2,7 +2,7 @@
 
 use jet_protocol::{
 	CommandRequest, CommandResponse, Conversation, ConversationList,
-	ConversationSnapshot, Event, PlaneStatus, QueryRequest, QueryResponse,
+	ConversationSnapshot, EventPage, PlaneStatus, QueryRequest, QueryResponse,
 	Retention, Run, RunLifecycle,
 };
 use uuid::Uuid;
@@ -19,7 +19,9 @@ impl Client {
 	pub async fn status(&mut self) -> Result<PlaneStatus, ClientError> {
 		match self.query(QueryRequest::Status).await? {
 			QueryResponse::Status(status) => Ok(status),
-			other => Err(unexpected(&other)),
+			other @ (QueryResponse::Conversations(_)
+			| QueryResponse::Conversation(_)
+			| QueryResponse::Events(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -35,7 +37,9 @@ impl Client {
 	) -> Result<ConversationList, ClientError> {
 		match self.query(QueryRequest::Conversations).await? {
 			QueryResponse::Conversations(list) => Ok(list),
-			other => Err(unexpected(&other)),
+			other @ (QueryResponse::Status(_)
+			| QueryResponse::Conversation(_)
+			| QueryResponse::Events(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -56,12 +60,15 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Conversation(snapshot) => Ok(snapshot),
-			other => Err(unexpected(&other)),
+			other @ (QueryResponse::Status(_)
+			| QueryResponse::Conversations(_)
+			| QueryResponse::Events(_)) => Err(unexpected(&other)),
 		}
 	}
 
 	/// Reads one page of journal Events strictly after `sequence`; zero
-	/// starts from the beginning of the journal.
+	/// starts from the beginning of the journal. The page's cursor tells
+	/// whether later pages exist (ADR-0092).
 	///
 	/// # Errors
 	///
@@ -70,14 +77,17 @@ impl Client {
 	pub async fn events_after(
 		&mut self,
 		sequence: u64,
-	) -> Result<Vec<Event>, ClientError> {
+	) -> Result<EventPage, ClientError> {
 		match self.query(QueryRequest::Events { after: sequence }).await? {
-			QueryResponse::Events { events } => Ok(events),
-			other => Err(unexpected(&other)),
+			QueryResponse::Events(page) => Ok(page),
+			other @ (QueryResponse::Status(_)
+			| QueryResponse::Conversations(_)
+			| QueryResponse::Conversation(_)) => Err(unexpected(&other)),
 		}
 	}
 
-	/// Creates a Conversation with no Runs.
+	/// Creates a Conversation with no Runs under the Command identity
+	/// `command_id`, which a retry must reuse (ADR-0093).
 	///
 	/// # Errors
 	///
@@ -85,11 +95,12 @@ impl Client {
 	/// error, or the transport failure otherwise.
 	pub async fn create_conversation(
 		&mut self,
+		command_id: Uuid,
 		retention: Retention,
 	) -> Result<Conversation, ClientError> {
 		match self
 			.execute_command(
-				Uuid::now_v7(),
+				command_id,
 				CommandRequest::CreateConversation { retention },
 			)
 			.await?
@@ -97,11 +108,13 @@ impl Client {
 			CommandResponse::ConversationCreated(conversation) => {
 				Ok(conversation)
 			}
-			other => Err(unexpected(&other)),
+			other @ (CommandResponse::RunCreated(_)
+			| CommandResponse::RunTransitioned(_)) => Err(unexpected(&other)),
 		}
 	}
 
-	/// Records a new Run of a Conversation that has no live Run.
+	/// Records a new Run of a Conversation that has no live Run under the
+	/// Command identity `command_id`, which a retry must reuse (ADR-0093).
 	///
 	/// # Errors
 	///
@@ -109,22 +122,25 @@ impl Client {
 	/// or already has a live Run, or the transport failure otherwise.
 	pub async fn create_run(
 		&mut self,
+		command_id: Uuid,
 		conversation_id: Uuid,
 	) -> Result<Run, ClientError> {
 		match self
 			.execute_command(
-				Uuid::now_v7(),
+				command_id,
 				CommandRequest::CreateRun { conversation_id },
 			)
 			.await?
 		{
 			CommandResponse::RunCreated(run) => Ok(run),
-			other => Err(unexpected(&other)),
+			other @ (CommandResponse::ConversationCreated(_)
+			| CommandResponse::RunTransitioned(_)) => Err(unexpected(&other)),
 		}
 	}
 
 	/// Moves a Run forward to `lifecycle` if its current Revision is
-	/// `expected_revision`.
+	/// `expected_revision`, under the Command identity `command_id`, which a
+	/// retry must reuse (ADR-0093).
 	///
 	/// # Errors
 	///
@@ -132,13 +148,14 @@ impl Client {
 	/// transition is not allowed, or the transport failure otherwise.
 	pub async fn transition_run(
 		&mut self,
+		command_id: Uuid,
 		run_id: Uuid,
 		expected_revision: u64,
 		lifecycle: RunLifecycle,
 	) -> Result<Run, ClientError> {
 		match self
 			.execute_command(
-				Uuid::now_v7(),
+				command_id,
 				CommandRequest::TransitionRun {
 					run_id,
 					expected_revision,
@@ -148,7 +165,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::RunTransitioned(run) => Ok(run),
-			other => Err(unexpected(&other)),
+			other @ (CommandResponse::ConversationCreated(_)
+			| CommandResponse::RunCreated(_)) => Err(unexpected(&other)),
 		}
 	}
 }

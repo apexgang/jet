@@ -4,11 +4,11 @@
 use rusqlite::{OptionalExtension, Row};
 use uuid::Uuid;
 
+use crate::StoreError;
 use crate::records::{
 	NewRun, RunLifecycle, RunRecord, column_error, parse_uuid,
 };
 use crate::transaction::{ReadTransaction, WriteTransaction};
-use crate::{StoreError, clock};
 
 const COLUMNS: &str = "run_id, conversation_id, revision, lifecycle, created_at_unix_ms, \
 	ended_at_unix_ms";
@@ -63,7 +63,7 @@ impl WriteTransaction<'_> {
 			conversation_id: run.conversation_id,
 			revision: 1,
 			lifecycle: RunLifecycle::Created,
-			created_at_unix_ms: clock::unix_ms_now(),
+			created_at_unix_ms: run.created_at_unix_ms,
 			ended_at_unix_ms: None,
 		};
 		self.transaction.execute(
@@ -83,8 +83,8 @@ impl WriteTransaction<'_> {
 		Ok(record)
 	}
 
-	/// Moves `run_id` to `lifecycle`, stamping its end the first time the
-	/// state is terminal, and returns the updated Run.
+	/// Moves `run_id` to `lifecycle`, stamping its end with `now_unix_ms` the
+	/// first time the state is terminal, and returns the updated Run.
 	///
 	/// # Errors
 	///
@@ -94,8 +94,9 @@ impl WriteTransaction<'_> {
 		&self,
 		run_id: Uuid,
 		lifecycle: RunLifecycle,
+		now_unix_ms: i64,
 	) -> Result<RunRecord, StoreError> {
-		let ended_at_unix_ms = lifecycle.is_terminal().then(clock::unix_ms_now);
+		let ended_at_unix_ms = lifecycle.is_terminal().then_some(now_unix_ms);
 		self.transaction.execute(
 			"UPDATE runs
 			 SET lifecycle = ?2,

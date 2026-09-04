@@ -14,20 +14,22 @@ mod translate;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, ValueEnum};
 use jet_runtime::{InstallationChannel, JetHome};
 
 #[derive(Parser)]
 #[command(name = "jetd", version, about)]
 struct Cli {
 	#[command(subcommand)]
-	command: Command,
+	subcommand: Subcommand,
 }
 
-#[derive(Subcommand)]
-enum Command {
-	/// Run the daemon in the foreground until SIGTERM or SIGINT.
-	Run {
+/// What `jetd` was asked to do. Named apart from the domain's `Command`,
+/// an authenticated state change.
+#[derive(clap::Subcommand)]
+enum Subcommand {
+	/// Serve the Plane in the foreground until SIGTERM or SIGINT.
+	Serve {
 		/// Jet home directory; defaults to `~/.jet`.
 		#[arg(long)]
 		home: Option<PathBuf>,
@@ -56,9 +58,9 @@ impl From<Channel> for InstallationChannel {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-	let Cli { command } = Cli::parse();
-	match command {
-		Command::Run { home, channel } => {
+	let Cli { subcommand } = Cli::parse();
+	match subcommand {
+		Subcommand::Serve { home, channel } => {
 			let Some(home) =
 				home.map(JetHome::at).or_else(JetHome::for_current_user)
 			else {

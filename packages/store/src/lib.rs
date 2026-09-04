@@ -80,6 +80,7 @@ impl Store {
 		connection.pragma_update(None, "journal_mode", "WAL")?;
 		connection.pragma_update(None, "synchronous", "FULL")?;
 		connection.pragma_update(None, "foreign_keys", "ON")?;
+		verify_durability(&connection)?;
 		migrations::apply(&mut connection)?;
 		plane::ensure_present(&mut connection)?;
 		Ok(Self {
@@ -112,6 +113,29 @@ impl Store {
 			.unwrap_or_else(std::sync::PoisonError::into_inner)
 	}
 }
+
+/// SQLite answers a refused `PRAGMA` with the mode it kept rather than an
+/// error, so the durability settings are read back before any acknowledged
+/// commit relies on them (ADR-0057, ADR-0071).
+fn verify_durability(connection: &Connection) -> Result<(), StoreError> {
+	let journal_mode: String =
+		connection
+			.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
+	let synchronous: i64 =
+		connection.pragma_query_value(None, "synchronous", |row| row.get(0))?;
+	if journal_mode.eq_ignore_ascii_case("wal")
+		&& synchronous == SYNCHRONOUS_FULL
+	{
+		Ok(())
+	} else {
+		Err(StoreError::Unavailable(format!(
+			"the store runs with journal_mode {journal_mode} and synchronous {synchronous} instead of wal and full"
+		)))
+	}
+}
+
+/// SQLite's numeric value for `synchronous = FULL`.
+const SYNCHRONOUS_FULL: i64 = 2;
 
 #[cfg(test)]
 #[path = "store_tests.rs"]

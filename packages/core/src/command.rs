@@ -123,7 +123,7 @@ impl Core {
 			request_digest,
 		} = envelope;
 		let actor_record = actor.record();
-		let recorded_at_unix_ms = crate::unix_ms(self.clock.now());
+		let recorded_at_unix_ms = self.now_unix_ms();
 		self.store.write(|tx| {
 			tx.prune_command_receipts_before(
 				recorded_at_unix_ms.saturating_sub(COMMAND_RETENTION_MS),
@@ -134,12 +134,16 @@ impl Core {
 				return replay(receipt, request_digest, recorded_at_unix_ms);
 			}
 
-			let result = execute_new(tx, actor, command);
+			let result = execute_new(tx, actor, command, recorded_at_unix_ms);
 			if let Err(error) = &result
 				&& !error.is_authoritative_result()
 			{
 				return Err(error.clone());
 			}
+			// An authoritative error is raised before the Command writes any
+			// state, so committing its receipt commits nothing else. A Command
+			// that must fail authoritatively after writing wraps its writes in
+			// a savepoint first.
 			tx.insert_command_receipt(&NewCommandReceipt {
 				actor: actor_record,
 				command_id: command_id.0,
@@ -172,18 +176,17 @@ fn replay(
 	if original_digest != request_digest {
 		return Err(CoreError::conflict(
 			"command.identity_reused",
-			"the Command identity was already used for different content"
-				.into(),
+			"the Command identity was already used for different content",
 		));
 	}
 	let Some(outcome_version) = receipt.outcome_version else {
 		return Err(invalid_receipt("outcome version"));
 	};
 	if outcome_version != OUTCOME_VERSION {
-		return Err(CoreError::internal(
+		return Ok(Err(CoreError::incompatible(
 			"command.outcome_incompatible",
-			format!("unsupported Command outcome version {outcome_version}"),
-		));
+			"the Command outcome was recorded by an incompatible core; submit the Command again under a new identity",
+		)));
 	}
 	let Some(outcome) = receipt.outcome else {
 		return Err(invalid_receipt("outcome"));
@@ -204,19 +207,27 @@ fn execute_new(
 	tx: &WriteTransaction<'_>,
 	actor: &Actor,
 	command: Command,
+	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
 	match command {
 		Command::CreateConversation { retention } => {
-			create_conversation(tx, actor, retention)
+			create_conversation(tx, actor, retention, now_unix_ms)
 		}
 		Command::CreateRun { conversation_id } => {
-			create_run(tx, actor, conversation_id)
+			create_run(tx, actor, conversation_id, now_unix_ms)
 		}
 		Command::TransitionRun {
 			run_id,
 			expected_revision,
 			lifecycle,
-		} => transition_run(tx, actor, run_id, expected_revision, lifecycle),
+		} => transition_run(
+			tx,
+			actor,
+			run_id,
+			expected_revision,
+			lifecycle,
+			now_unix_ms,
+		),
 	}
 }
 
@@ -232,17 +243,20 @@ fn create_conversation(
 	tx: &WriteTransaction<'_>,
 	actor: &Actor,
 	retention: Retention,
+	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
 	let conversation: Conversation = tx
 		.insert_conversation(NewConversation {
 			conversation_id: Uuid::now_v7(),
 			retention,
+			created_at_unix_ms: now_unix_ms,
 		})?
 		.into();
 	let event = EventKind::ConversationCreated { retention };
 	tx.append_event(event.to_record(
 		actor,
 		EventSubject::Conversation(conversation.conversation_id),
+		now_unix_ms,
 	)?)?;
 	Ok(CommandOutcome::ConversationCreated(conversation))
 }
@@ -251,6 +265,7 @@ fn create_run(
 	tx: &WriteTransaction<'_>,
 	actor: &Actor,
 	conversation_id: ConversationId,
+	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
 	if tx.conversation(conversation_id.0)?.is_none() {
 		return Err(CoreError::not_found(
@@ -265,13 +280,14 @@ fn create_run(
 	if busy {
 		return Err(CoreError::conflict(
 			"run.conversation_busy",
-			"the Conversation already has a Run that has not ended".into(),
+			"the Conversation already has a Run that has not ended",
 		));
 	}
 	let run: Run = tx
 		.insert_run(NewRun {
 			run_id: Uuid::now_v7(),
 			conversation_id: conversation_id.0,
+			created_at_unix_ms: now_unix_ms,
 		})?
 		.into();
 	tx.append_event(EventKind::RunCreated {}.to_record(
@@ -280,6 +296,7 @@ fn create_run(
 			conversation_id,
 			run_id: run.run_id,
 		},
+		now_unix_ms,
 	)?)?;
 	Ok(CommandOutcome::RunCreated(run))
 }
@@ -290,6 +307,7 @@ fn transition_run(
 	run_id: RunId,
 	expected_revision: Revision,
 	lifecycle: RunLifecycle,
+	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
 	let Some(current) = tx.run(run_id.0)? else {
 		return Err(CoreError::not_found(
@@ -318,7 +336,9 @@ fn transition_run(
 			),
 		));
 	}
-	let run: Run = tx.update_run_lifecycle(run_id.0, lifecycle)?.into();
+	let run: Run = tx
+		.update_run_lifecycle(run_id.0, lifecycle, now_unix_ms)?
+		.into();
 	let event = EventKind::RunLifecycleChanged {
 		from: current.lifecycle,
 		to: lifecycle,
@@ -329,6 +349,7 @@ fn transition_run(
 			conversation_id: run.conversation_id,
 			run_id,
 		},
+		now_unix_ms,
 	)?)?;
 	Ok(CommandOutcome::RunTransitioned(run))
 }

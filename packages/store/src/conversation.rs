@@ -3,11 +3,11 @@
 use rusqlite::{OptionalExtension, Row};
 use uuid::Uuid;
 
+use crate::StoreError;
 use crate::records::{
 	ConversationRecord, NewConversation, Retention, column_error, parse_uuid,
 };
 use crate::transaction::{ReadTransaction, WriteTransaction};
-use crate::{StoreError, clock};
 
 const COLUMNS: &str = "conversation_id, retention, created_at_unix_ms";
 
@@ -62,7 +62,7 @@ impl WriteTransaction<'_> {
 		let record = ConversationRecord {
 			conversation_id: conversation.conversation_id,
 			retention: conversation.retention,
-			created_at_unix_ms: clock::unix_ms_now(),
+			created_at_unix_ms: conversation.created_at_unix_ms,
 		};
 		self.transaction.execute(
 			&format!(

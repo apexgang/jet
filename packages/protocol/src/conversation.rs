@@ -57,7 +57,9 @@ pub struct Run {
 	pub run_id: Uuid,
 	/// The Conversation it executes.
 	pub conversation_id: Uuid,
-	/// Monotonic version used by conflict-sensitive Commands.
+	/// Monotonic version used by conflict-sensitive Commands, carried as a
+	/// decimal string (ADR-0089).
+	#[serde(with = "crate::decimal")]
 	pub revision: u64,
 	/// Current lifecycle state.
 	pub lifecycle: RunLifecycle,
@@ -70,7 +72,9 @@ pub struct Run {
 /// Every Conversation on the Plane, fenced by a journal cursor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationList {
-	/// Newest Event sequence visible when the list was read.
+	/// Newest Event sequence visible when the list was read, carried as a
+	/// decimal string (ADR-0089).
+	#[serde(with = "crate::decimal")]
 	pub cursor: u64,
 	/// Conversations in creation order.
 	pub conversations: Vec<Conversation>,
@@ -79,7 +83,9 @@ pub struct ConversationList {
 /// One Conversation with all of its Runs, fenced by a journal cursor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationSnapshot {
-	/// Newest Event sequence visible when the snapshot was read.
+	/// Newest Event sequence visible when the snapshot was read, carried as
+	/// a decimal string (ADR-0089).
+	#[serde(with = "crate::decimal")]
 	pub cursor: u64,
 	/// The Conversation itself.
 	pub conversation: Conversation,
@@ -106,7 +112,9 @@ pub enum CommandRequest {
 	TransitionRun {
 		/// The Run to move.
 		run_id: Uuid,
-		/// Revision observed when the Command was prepared.
+		/// Revision observed when the Command was prepared, carried as a
+		/// decimal string (ADR-0089).
+		#[serde(with = "crate::decimal")]
 		expected_revision: u64,
 		/// The state to enter.
 		lifecycle: RunLifecycle,
@@ -128,7 +136,9 @@ pub enum CommandResponse {
 /// Structured state returned when a Revision precondition is stale.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RevisionConflict {
-	/// Revision that is authoritative now.
+	/// Revision that is authoritative now, carried as a decimal string
+	/// (ADR-0089).
+	#[serde(with = "crate::decimal")]
 	pub current_revision: u64,
 	/// Safe current state with which the caller can refresh.
 	pub safe_state: ConflictState,

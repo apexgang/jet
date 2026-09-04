@@ -51,18 +51,6 @@ pub enum LockError {
 	Io(#[from] std::io::Error),
 }
 
-impl PartialEq for LockError {
-	fn eq(&self, other: &Self) -> bool {
-		match (self, other) {
-			(Self::Held { owner }, Self::Held { owner: other_owner }) => {
-				owner == other_owner
-			}
-			(Self::Io(a), Self::Io(b)) => a.kind() == b.kind(),
-			(Self::Held { .. } | Self::Io(_), _) => false,
-		}
-	}
-}
-
 /// An exclusive claim on one Plane, released when dropped or when the
 /// process exits.
 #[derive(Debug)]

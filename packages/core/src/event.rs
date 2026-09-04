@@ -11,7 +11,7 @@ use crate::error::CoreError;
 use crate::{Actor, system_time};
 
 /// Most Events one `Query::Events` page returns.
-pub const EVENT_PAGE_LIMIT: usize = 256;
+pub(crate) const EVENT_PAGE_LIMIT: usize = 256;
 
 /// Schema version of every payload this core writes.
 const PAYLOAD_VERSION: u32 = 1;
@@ -60,8 +60,31 @@ pub struct Event {
 	pub kind: EventKind,
 }
 
-/// What an Event records. The serde form is the journal and wire form: an
-/// indexed `kind` name beside a versioned JSON `payload`.
+/// One page of journal Events, fenced by the journal position it was read
+/// at (ADR-0092). The page is the last one when its final Event's sequence
+/// equals `cursor`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventPage {
+	/// Newest Event sequence in the journal when the page was read.
+	pub cursor: EventSequence,
+	/// The Events strictly after the requested position, in sequence order.
+	pub events: Vec<Event>,
+}
+
+/// The journal form of an Event's content: an indexed kind name beside a
+/// versioned JSON payload (ADR-0096). `jetd` forwards it without
+/// interpretation; the wire schema of each kind is this JSON.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventPayload {
+	/// Indexed kind name such as `run.lifecycle_changed`.
+	pub kind: String,
+	/// Schema version of `payload` for this `kind`.
+	pub payload_version: u32,
+	/// Kind-specific JSON payload.
+	pub payload: serde_json::Value,
+}
+
+/// What an Event records.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum EventKind {
@@ -82,64 +105,89 @@ pub enum EventKind {
 		/// The state it entered.
 		to: RunLifecycle,
 	},
+	/// An Event this core cannot interpret: a kind or payload version
+	/// written by a newer core that shared the store (ADR-0073). It is
+	/// retained and forwarded as recorded so a previous release still serves
+	/// the whole journal and clients render it generically (ADR-0094).
+	#[serde(skip)]
+	Unrecognized(EventPayload),
 }
 
 impl EventKind {
-	/// Splits the kind into its indexed name and JSON payload.
+	/// The journal form of this kind.
 	///
 	/// # Errors
 	///
 	/// Returns an `internal` [`CoreError`] if the kind cannot be encoded,
 	/// which indicates a programming error.
-	pub fn encode(&self) -> Result<(String, serde_json::Value), CoreError> {
-		let encoded = serde_json::to_value(self).map_err(|error| {
-			CoreError::internal("event.unencodable", error.to_string())
-		})?;
-		let serde_json::Value::Object(mut fields) = encoded else {
-			return Err(CoreError::internal(
-				"event.unencodable",
-				"not an object".into(),
-			));
-		};
-		let Some(serde_json::Value::String(kind)) = fields.remove("kind")
-		else {
-			return Err(CoreError::internal(
-				"event.unencodable",
-				"no kind".into(),
-			));
-		};
-		let payload = fields.remove("payload").unwrap_or_else(|| {
-			serde_json::Value::Object(serde_json::Map::new())
-		});
-		Ok((kind, payload))
+	pub fn encode(&self) -> Result<EventPayload, CoreError> {
+		match self {
+			Self::Unrecognized(payload) => Ok(payload.clone()),
+			Self::ConversationCreated { .. }
+			| Self::RunCreated {}
+			| Self::RunLifecycleChanged { .. } => {
+				let encoded = serde_json::to_value(self).map_err(|error| {
+					CoreError::internal("event.unencodable", error.to_string())
+				})?;
+				let serde_json::Value::Object(mut fields) = encoded else {
+					return Err(CoreError::internal(
+						"event.unencodable",
+						"not an object",
+					));
+				};
+				let Some(serde_json::Value::String(kind)) =
+					fields.remove("kind")
+				else {
+					return Err(CoreError::internal(
+						"event.unencodable",
+						"no kind",
+					));
+				};
+				let payload = fields.remove("payload").unwrap_or_else(|| {
+					serde_json::Value::Object(serde_json::Map::new())
+				});
+				Ok(EventPayload {
+					kind,
+					payload_version: PAYLOAD_VERSION,
+					payload,
+				})
+			}
+		}
 	}
 
+	/// Interprets a journal row. Only a payload that is not JSON is an
+	/// integrity failure; a kind or version this core does not know becomes
+	/// [`EventKind::Unrecognized`].
 	fn decode(record: &EventRecord) -> Result<Self, CoreError> {
-		if record.payload_version != PAYLOAD_VERSION {
-			return Err(CoreError::internal(
-				"event.unsupported_payload",
-				format!("payload version {}", record.payload_version),
-			));
-		}
 		let payload: serde_json::Value = serde_json::from_str(&record.payload)
 			.map_err(|error| {
 				CoreError::internal("event.malformed", error.to_string())
 			})?;
-		serde_json::from_value(serde_json::json!({
-			"kind": record.kind,
-			"payload": payload,
+		if record.payload_version == PAYLOAD_VERSION
+			&& let Ok(kind) = serde_json::from_value(serde_json::json!({
+				"kind": record.kind,
+				"payload": payload,
+			})) {
+			return Ok(kind);
+		}
+		Ok(Self::Unrecognized(EventPayload {
+			kind: record.kind.clone(),
+			payload_version: record.payload_version,
+			payload,
 		}))
-		.map_err(|error| {
-			CoreError::internal("event.malformed", error.to_string())
-		})
 	}
 
 	pub(crate) fn to_record(
 		&self,
 		actor: &Actor,
 		subject: EventSubject,
+		recorded_at_unix_ms: i64,
 	) -> Result<NewEvent, CoreError> {
-		let (kind, payload) = self.encode()?;
+		let EventPayload {
+			kind,
+			payload_version,
+			payload,
+		} = self.encode()?;
 		let (conversation_id, run_id) = match subject {
 			EventSubject::Conversation(conversation_id) => {
 				(conversation_id, None)
@@ -152,10 +200,11 @@ impl EventKind {
 		Ok(NewEvent {
 			event_id: Uuid::now_v7(),
 			actor: actor.record(),
+			recorded_at_unix_ms,
 			conversation_id: Some(conversation_id.0),
 			run_id: run_id.map(|id| id.0),
 			kind,
-			payload_version: PAYLOAD_VERSION,
+			payload_version,
 			payload: payload.to_string(),
 		})
 	}

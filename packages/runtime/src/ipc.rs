@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tokio::net::{UnixListener, UnixStream};
 
@@ -61,7 +61,7 @@ impl LocalListener {
 
 	/// Path of the bound socket.
 	#[must_use]
-	pub fn socket_path(&self) -> &PathBuf {
+	pub fn socket_path(&self) -> &Path {
 		&self.path
 	}
 

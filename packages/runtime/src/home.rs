@@ -53,20 +53,17 @@ impl JetHome {
 	}
 
 	/// Owner-only directory for the lock and socket.
-	#[must_use]
-	pub fn runtime_dir(&self) -> PathBuf {
+	pub(crate) fn runtime_dir(&self) -> PathBuf {
 		self.root.join(RUNTIME_DIR)
 	}
 
 	/// Path of the daemon lifetime lock.
-	#[must_use]
-	pub fn lock_path(&self) -> PathBuf {
+	pub(crate) fn lock_path(&self) -> PathBuf {
 		self.runtime_dir().join(LOCK_FILE)
 	}
 
 	/// Path of the local Jet protocol socket.
-	#[must_use]
-	pub fn socket_path(&self) -> PathBuf {
+	pub(crate) fn socket_path(&self) -> PathBuf {
 		self.runtime_dir().join(SOCKET_FILE)
 	}
 

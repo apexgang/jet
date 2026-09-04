@@ -80,7 +80,10 @@ pub struct CoreError {
 }
 
 impl CoreError {
-	pub(crate) fn invalid_input(code: &'static str, message: &str) -> Self {
+	pub(crate) fn invalid_input(
+		code: &'static str,
+		message: impl Into<String>,
+	) -> Self {
 		Self {
 			category: ErrorCategory::InvalidInput,
 			code: code.into(),
@@ -92,7 +95,10 @@ impl CoreError {
 		}
 	}
 
-	pub(crate) fn not_found(code: &'static str, message: &str) -> Self {
+	pub(crate) fn not_found(
+		code: &'static str,
+		message: impl Into<String>,
+	) -> Self {
 		Self {
 			category: ErrorCategory::NotFound,
 			code: code.into(),
@@ -104,12 +110,15 @@ impl CoreError {
 		}
 	}
 
-	pub(crate) fn conflict(code: &'static str, message: String) -> Self {
+	pub(crate) fn conflict(
+		code: &'static str,
+		message: impl Into<String>,
+	) -> Self {
 		Self {
 			category: ErrorCategory::Conflict,
 			code: code.into(),
 			retryable: false,
-			message,
+			message: message.into(),
 			detail: None,
 			revision_conflict: None,
 			recovery_actions: vec![],
@@ -118,7 +127,7 @@ impl CoreError {
 
 	pub(crate) fn revision_conflict(
 		code: &'static str,
-		message: &str,
+		message: impl Into<String>,
 		revision_conflict: RevisionConflict,
 	) -> Self {
 		let recovery_actions = match revision_conflict.safe_state {
@@ -137,13 +146,32 @@ impl CoreError {
 		}
 	}
 
-	pub(crate) fn internal(code: &'static str, detail: String) -> Self {
+	/// A stable refusal because the peers' cores or protocols disagree.
+	pub(crate) fn incompatible(
+		code: &'static str,
+		message: impl Into<String>,
+	) -> Self {
+		Self {
+			category: ErrorCategory::Incompatible,
+			code: code.into(),
+			retryable: false,
+			message: message.into(),
+			detail: None,
+			revision_conflict: None,
+			recovery_actions: vec![],
+		}
+	}
+
+	pub(crate) fn internal(
+		code: &'static str,
+		detail: impl Into<String>,
+	) -> Self {
 		Self {
 			category: ErrorCategory::Internal,
 			code: code.into(),
 			retryable: false,
 			message: "an internal invariant failed".into(),
-			detail: Some(detail),
+			detail: Some(detail.into()),
 			revision_conflict: None,
 			recovery_actions: vec![],
 		}

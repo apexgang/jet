@@ -6,14 +6,11 @@
 mod support;
 
 use jet_protocol::{
-	CODEC_JSON_V1, ClientHello, ErrorCategory, Frame, FrameReader, FrameWriter,
-	MAX_CONTROL_FRAME, MAX_DATA_FRAME, PREFACE, PROTOCOL_VERSION, PlaneStatus,
-	ServerHello, VersionRange, WireError, decode_control, encode_control,
+	CODEC_JSON_V1, ClientHello, ErrorCategory, MAX_DATA_FRAME, PROTOCOL_MINOR,
+	PROTOCOL_VERSION, PlaneStatus, ServerHello, ServerMessage, WireError,
 };
 use pretty_assertions::assert_eq;
-use support::{Daemon, jetd, start_jetd};
-use tokio::io::AsyncWriteExt;
-use tokio::net::UnixStream;
+use support::{Daemon, connect_raw, handshake_raw, hello, jetd, start_jetd};
 use uuid::Uuid;
 
 async fn status(daemon: &Daemon, client_id: Uuid) -> PlaneStatus {
@@ -22,6 +19,14 @@ async fn status(daemon: &Daemon, client_id: Uuid) -> PlaneStatus {
 		.status()
 		.await
 		.unwrap()
+}
+
+fn send_sigterm(daemon: &Daemon) {
+	let pid = rustix::process::Pid::from_raw(
+		i32::try_from(daemon.child.id().unwrap()).unwrap(),
+	)
+	.unwrap();
+	rustix::process::kill_process(pid, rustix::process::Signal::TERM).unwrap();
 }
 
 #[tokio::test]
@@ -37,15 +42,22 @@ async fn status_is_answered_before_and_after_a_daemon_crash_and_restart() {
 	let second = start_jetd(&home).await;
 	let after = status(&second, client_id).await;
 
-	assert_eq!(before.daemon_starts, 1);
 	assert_eq!(
-		after,
-		PlaneStatus {
-			plane_id: before.plane_id,
-			daemon_starts: 2,
-			started_at_unix_ms: after.started_at_unix_ms,
-			core_version: env!("CARGO_PKG_VERSION").into(),
-		}
+		(&before, &after),
+		(
+			&PlaneStatus {
+				plane_id: after.plane_id,
+				daemon_starts: 1,
+				started_at_unix_ms: before.started_at_unix_ms,
+				core_version: env!("CARGO_PKG_VERSION").into(),
+			},
+			&PlaneStatus {
+				plane_id: after.plane_id,
+				daemon_starts: 2,
+				started_at_unix_ms: after.started_at_unix_ms,
+				core_version: env!("CARGO_PKG_VERSION").into(),
+			}
+		)
 	);
 	assert!(after.started_at_unix_ms >= before.started_at_unix_ms);
 }
@@ -70,64 +82,55 @@ async fn a_second_jetd_is_refused_by_the_live_lock_not_by_stale_metadata() {
 }
 
 #[tokio::test]
-async fn sigterm_shuts_jetd_down_and_removes_its_socket() {
+async fn sigterm_drains_connected_clients_then_exits_and_removes_the_socket() {
 	let dir = tempfile::tempdir().unwrap();
 	let home = dir.path().join(".jet");
-
 	let mut daemon = start_jetd(&home).await;
-	let pid = rustix::process::Pid::from_raw(
-		i32::try_from(daemon.child.id().unwrap()).unwrap(),
-	)
-	.unwrap();
-	rustix::process::kill_process(pid, rustix::process::Signal::TERM).unwrap();
+	let mut connected = connect_raw(&daemon, Uuid::new_v4()).await;
+
+	send_sigterm(&daemon);
+	let farewell: ServerMessage = connected.receive().await;
 	let exit = daemon.child.wait().await.unwrap();
 
 	assert_eq!(
-		(exit.success(), daemon.socket.exists()),
-		(true, false),
-		"jetd should exit cleanly and remove its socket"
+		(farewell, exit.success(), daemon.socket.exists()),
+		(
+			ServerMessage::Error {
+				id: None,
+				error: WireError {
+					category: ErrorCategory::Unavailable,
+					code: "daemon.draining".into(),
+					retryable: true,
+					message: "jetd is shutting down; reconnect later and retry with the same Command identity".into(),
+					revision_conflict: None,
+					recovery_actions: vec![],
+				},
+			},
+			true,
+			false
+		),
+		"jetd should tell clients it is draining, exit cleanly, and remove its socket"
 	);
 }
 
-fn hello(codec: &str, max_control_frame: u32) -> ClientHello {
-	ClientHello {
-		protocol: VersionRange { min: 1, max: 1 },
-		codec: codec.into(),
-		client_id: Uuid::new_v4(),
-		max_control_frame,
-		max_data_frame: u32::try_from(MAX_DATA_FRAME).unwrap(),
-		capabilities: vec![],
-	}
-}
-
-async fn raw_handshake(daemon: &Daemon, hello: &ClientHello) -> ServerHello {
-	let mut stream = UnixStream::connect(&daemon.socket).await.unwrap();
-	stream.write_all(PREFACE).await.unwrap();
-	let (read, write) = stream.into_split();
-	let mut writer = FrameWriter::new(write);
-	let mut reader = FrameReader::new(read);
-	writer
-		.write(&Frame::Control(encode_control(hello).unwrap()))
-		.await
-		.unwrap();
-	let Frame::Control(reply) = reader.read().await.unwrap() else {
-		panic!("expected a control frame");
-	};
-	decode_control(&reply).unwrap()
-}
-
 #[tokio::test]
-async fn the_handshake_negotiates_the_smaller_frame_limits() {
+async fn the_handshake_negotiates_the_smaller_frame_limits_and_minor() {
 	let dir = tempfile::tempdir().unwrap();
 	let home = dir.path().join(".jet");
 	let daemon = start_jetd(&home).await;
+	let newer_client = ClientHello {
+		minor: PROTOCOL_MINOR + 3,
+		max_control_frame: 4096,
+		..hello(Uuid::new_v4())
+	};
 
-	let reply = raw_handshake(&daemon, &hello(CODEC_JSON_V1, 4096)).await;
+	let (_, reply) = handshake_raw(&daemon, &newer_client).await;
 
 	assert_eq!(
 		reply,
 		ServerHello::Welcome {
 			protocol: PROTOCOL_VERSION,
+			minor: PROTOCOL_MINOR,
 			codec: CODEC_JSON_V1.into(),
 			max_control_frame: 4096,
 			max_data_frame: u32::try_from(MAX_DATA_FRAME).unwrap(),
@@ -141,12 +144,13 @@ async fn an_unsupported_codec_is_rejected_during_the_handshake() {
 	let dir = tempfile::tempdir().unwrap();
 	let home = dir.path().join(".jet");
 	let daemon = start_jetd(&home).await;
+	let cbor_client = ClientHello {
+		codec: "cbor-v1".into(),
+		..hello(Uuid::new_v4())
+	};
 
-	let reply = raw_handshake(
-		&daemon,
-		&hello("cbor-v1", u32::try_from(MAX_CONTROL_FRAME).unwrap()),
-	)
-	.await;
+	let (_, reply) = handshake_raw(&daemon, &cbor_client).await;
+
 	assert_eq!(
 		reply,
 		ServerHello::Rejected {

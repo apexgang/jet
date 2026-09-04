@@ -127,39 +127,6 @@ pub enum FrameError {
 	Io(#[from] std::io::Error),
 }
 
-impl PartialEq for FrameError {
-	fn eq(&self, other: &Self) -> bool {
-		match (self, other) {
-			(
-				Self::Oversized {
-					kind,
-					declared,
-					limit,
-				},
-				Self::Oversized {
-					kind: other_kind,
-					declared: other_declared,
-					limit: other_limit,
-				},
-			) => {
-				kind == other_kind
-					&& declared == other_declared
-					&& limit == other_limit
-			}
-			(Self::UnknownKind(a), Self::UnknownKind(b)) => a == b,
-			(Self::Closed, Self::Closed) => true,
-			(Self::Io(a), Self::Io(b)) => a.kind() == b.kind(),
-			(
-				Self::Oversized { .. }
-				| Self::UnknownKind(_)
-				| Self::Closed
-				| Self::Io(_),
-				_,
-			) => false,
-		}
-	}
-}
-
 /// Reads bounded frames from an async byte stream.
 #[derive(Debug)]
 pub struct FrameReader<R> {

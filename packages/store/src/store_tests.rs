@@ -7,6 +7,8 @@ use super::{
 	Retention, RunLifecycle, RunRecord, Store, StoreError,
 };
 
+const NOW_UNIX_MS: i64 = 1_700_000_000_000;
+
 #[test]
 fn plane_identity_and_start_count_survive_reopening_the_store() {
 	let dir = tempfile::tempdir().unwrap();
@@ -19,13 +21,18 @@ fn plane_identity_and_start_count_survive_reopening_the_store() {
 	let second = Store::open(&path).unwrap();
 	let after_second_start = second.record_daemon_start().unwrap();
 
-	assert_eq!(after_first_start.daemon_starts, 1);
 	assert_eq!(
-		after_second_start,
-		PlaneRecord {
-			plane_id: after_first_start.plane_id,
-			daemon_starts: 2,
-		}
+		(after_first_start, &after_second_start),
+		(
+			PlaneRecord {
+				plane_id: after_second_start.plane_id,
+				daemon_starts: 1,
+			},
+			&PlaneRecord {
+				plane_id: after_second_start.plane_id,
+				daemon_starts: 2,
+			}
+		)
 	);
 	assert_eq!(second.plane().unwrap(), after_second_start);
 }
@@ -55,15 +62,23 @@ fn actor() -> ActorRecord {
 	}
 }
 
-fn event(conversation_id: Uuid, run_id: Option<Uuid>, kind: &str) -> NewEvent {
+fn conversation_event(conversation_id: Uuid, kind: &str) -> NewEvent {
 	NewEvent {
 		event_id: Uuid::now_v7(),
 		actor: actor(),
+		recorded_at_unix_ms: NOW_UNIX_MS,
 		conversation_id: Some(conversation_id),
-		run_id,
+		run_id: None,
 		kind: kind.into(),
 		payload_version: 1,
 		payload: "{}".into(),
+	}
+}
+
+fn run_event(conversation_id: Uuid, run_id: Uuid, kind: &str) -> NewEvent {
+	NewEvent {
+		run_id: Some(run_id),
+		..conversation_event(conversation_id, kind)
 	}
 }
 
@@ -80,22 +95,26 @@ fn conversations_runs_and_events_survive_reopening_the_store() {
 			let conversation = tx.insert_conversation(NewConversation {
 				conversation_id,
 				retention: Retention::Retain,
+				created_at_unix_ms: NOW_UNIX_MS,
 			})?;
 			assert_eq!(tx.runs(conversation_id)?, vec![]);
-			let created = tx.append_event(event(
+			let created = tx.append_event(conversation_event(
 				conversation_id,
-				None,
 				"conversation.created",
 			))?;
 			tx.insert_run(NewRun {
 				run_id,
 				conversation_id,
+				created_at_unix_ms: NOW_UNIX_MS + 1,
 			})?;
-			let run =
-				tx.update_run_lifecycle(run_id, RunLifecycle::Completed)?;
-			let ended = tx.append_event(event(
+			let run = tx.update_run_lifecycle(
+				run_id,
+				RunLifecycle::Completed,
+				NOW_UNIX_MS + 2,
+			)?;
+			let ended = tx.append_event(run_event(
 				conversation_id,
-				Some(run_id),
+				run_id,
 				"run.lifecycle_changed",
 			))?;
 			Ok::<_, StoreError>((conversation, run, created, ended))
@@ -115,7 +134,9 @@ fn conversations_runs_and_events_survive_reopening_the_store() {
 		})
 		.unwrap();
 	let later = second
-		.write(|tx| tx.append_event(event(conversation_id, None, "later")))
+		.write(|tx| {
+			tx.append_event(conversation_event(conversation_id, "later"))
+		})
 		.unwrap();
 
 	assert_eq!(
@@ -123,7 +144,7 @@ fn conversations_runs_and_events_survive_reopening_the_store() {
 		ConversationRecord {
 			conversation_id,
 			retention: Retention::Retain,
-			created_at_unix_ms: conversation.created_at_unix_ms,
+			created_at_unix_ms: NOW_UNIX_MS,
 		}
 	);
 	assert_eq!(
@@ -133,11 +154,10 @@ fn conversations_runs_and_events_survive_reopening_the_store() {
 			conversation_id,
 			revision: 2,
 			lifecycle: RunLifecycle::Completed,
-			created_at_unix_ms: run.created_at_unix_ms,
-			ended_at_unix_ms: run.ended_at_unix_ms,
+			created_at_unix_ms: NOW_UNIX_MS + 1,
+			ended_at_unix_ms: Some(NOW_UNIX_MS + 2),
 		}
 	);
-	assert!(run.ended_at_unix_ms.is_some());
 	assert_eq!(conversations, vec![conversation]);
 	assert_eq!(runs, vec![run]);
 	assert_eq!(
@@ -153,8 +173,7 @@ fn conversations_runs_and_events_survive_reopening_the_store() {
 			}
 		]
 	);
-	assert_eq!(cursor, 2);
-	assert_eq!(later.sequence, 3);
+	assert_eq!((cursor, later.sequence), (2, 3));
 }
 
 #[test]
@@ -168,10 +187,10 @@ fn a_failed_write_leaves_no_trace_of_its_changes() {
 			tx.insert_conversation(NewConversation {
 				conversation_id,
 				retention: Retention::ForgetAfterFinalRun,
+				created_at_unix_ms: NOW_UNIX_MS,
 			})?;
-			tx.append_event(event(
+			tx.append_event(conversation_event(
 				conversation_id,
-				None,
 				"conversation.created",
 			))?;
 			Err::<(), _>(StoreError::Integrity("rejected by the caller".into()))
@@ -200,6 +219,7 @@ fn a_run_cannot_be_recorded_for_an_unknown_conversation() {
 			tx.insert_run(NewRun {
 				run_id: Uuid::now_v7(),
 				conversation_id: Uuid::now_v7(),
+				created_at_unix_ms: NOW_UNIX_MS,
 			})
 		})
 		.unwrap_err();

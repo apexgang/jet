@@ -1,7 +1,8 @@
-//! Daemon lifecycle: lock, store, listener, serve, shut down.
+//! Daemon lifecycle: lock, store, listener, serve, drain, shut down.
 
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use jet_core::Core;
 use jet_runtime::{
@@ -10,9 +11,15 @@ use jet_runtime::{
 };
 use jet_store::Store;
 use tokio::signal::unix::{SignalKind, signal};
+use tokio::sync::watch;
+use tokio::task::JoinSet;
+use tokio::time::timeout;
 
 const EXIT_FAILURE: u8 = 1;
 const EXIT_PLANE_OWNED: u8 = 2;
+
+/// How long draining connections may hold up the exit (ADR-0088).
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) async fn run(
 	home: JetHome,
@@ -66,17 +73,20 @@ pub(crate) async fn run(
 	println!(
 		"{}",
 		serde_json::json!({
-			"event": "ready",
+			"status": "ready",
 			"socket": listener.socket_path().display().to_string(),
 		})
 	);
-	let exit = serve(&listener, &core).await;
-	drop(listener);
+	let exit = serve(listener, &core).await;
 	drop(lock);
 	exit
 }
 
-async fn serve(listener: &LocalListener, core: &Arc<Core>) -> ExitCode {
+/// Accepts connections until a stop signal or a listener failure, then
+/// drains: the socket closes, every connection finishes the request it is
+/// on and is told to reconnect later, and the daemon exits within
+/// [`DRAIN_TIMEOUT`] either way (ADR-0088).
+async fn serve(listener: LocalListener, core: &Arc<Core>) -> ExitCode {
 	let Ok(mut terminate) = signal(SignalKind::terminate()) else {
 		eprintln!("jetd: cannot listen for SIGTERM");
 		return ExitCode::from(EXIT_FAILURE);
@@ -85,24 +95,42 @@ async fn serve(listener: &LocalListener, core: &Arc<Core>) -> ExitCode {
 		eprintln!("jetd: cannot listen for SIGINT");
 		return ExitCode::from(EXIT_FAILURE);
 	};
-	loop {
+	let (drain, draining) = watch::channel(false);
+	let mut connections = JoinSet::new();
+	let exit = loop {
 		tokio::select! {
-			_ = terminate.recv() => return ExitCode::SUCCESS,
-			_ = interrupt.recv() => return ExitCode::SUCCESS,
+			_ = terminate.recv() => break ExitCode::SUCCESS,
+			_ = interrupt.recv() => break ExitCode::SUCCESS,
+			Some(_) = connections.join_next(), if !connections.is_empty() => {}
 			accepted = listener.accept() => match accepted {
 				Ok(stream) => {
-					tokio::spawn(crate::connection::serve(Arc::clone(core), stream));
+					connections.spawn(crate::connection::serve(
+						Arc::clone(core),
+						stream,
+						draining.clone(),
+					));
 				}
 				Err(IpcError::PeerRejected { uid }) => {
 					eprintln!("jetd: refused local connection from uid {uid}");
 				}
 				Err(error) => {
 					eprintln!("jetd: accept failed: {error}");
-					return ExitCode::from(EXIT_FAILURE);
+					break ExitCode::from(EXIT_FAILURE);
 				}
 			},
 		}
+	};
+	drop(listener);
+	let _ = drain.send(true);
+	let drained = async { while connections.join_next().await.is_some() {} };
+	if timeout(DRAIN_TIMEOUT, drained).await.is_err() {
+		eprintln!(
+			"jetd: {} connection(s) did not drain within {} s; exiting anyway",
+			connections.len(),
+			DRAIN_TIMEOUT.as_secs()
+		);
 	}
+	exit
 }
 
 fn report_owner(home: &JetHome, owner: Option<&DaemonMetadata>) {

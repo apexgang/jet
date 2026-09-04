@@ -3,6 +3,14 @@ use pretty_assertions::assert_eq;
 use super::{DaemonMetadata, InstallationChannel, LifetimeLock, LockError};
 use crate::JetHome;
 
+/// The owner a refused acquisition reported.
+fn reported_owner(error: LockError) -> Option<DaemonMetadata> {
+	let LockError::Held { owner } = error else {
+		panic!("expected the lock to be held, got {error:?}");
+	};
+	owner
+}
+
 fn metadata(pid: u32) -> DaemonMetadata {
 	DaemonMetadata {
 		pid,
@@ -22,7 +30,7 @@ fn a_second_daemon_is_refused_and_told_who_owns_the_plane() {
 	let _first = LifetimeLock::acquire(&home, &owner).unwrap();
 	let error = LifetimeLock::acquire(&home, &metadata(42)).unwrap_err();
 
-	assert_eq!(error, LockError::Held { owner: Some(owner) });
+	assert_eq!(reported_owner(error), Some(owner));
 }
 
 #[test]
@@ -36,7 +44,7 @@ fn metadata_naming_a_dead_process_is_not_reported_as_the_owner() {
 	let _first = LifetimeLock::acquire(&home, &metadata(exited.id())).unwrap();
 	let error = LifetimeLock::acquire(&home, &metadata(42)).unwrap_err();
 
-	assert_eq!(error, LockError::Held { owner: None });
+	assert_eq!(reported_owner(error), None);
 }
 
 #[test]

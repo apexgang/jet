@@ -50,9 +50,7 @@ impl RunLifecycle {
 			}
 		}
 	}
-}
 
-impl RunLifecycle {
 	/// The durable spelling, also used in messages and JSON.
 	#[must_use]
 	pub fn as_str(self) -> &'static str {
@@ -85,9 +83,8 @@ impl RunLifecycle {
 }
 
 impl Retention {
-	/// The durable spelling, also used in messages and JSON.
-	#[must_use]
-	pub fn as_str(self) -> &'static str {
+	/// The durable spelling, also used in JSON.
+	pub(crate) fn as_str(self) -> &'static str {
 		match self {
 			Self::Retain => "retain",
 			Self::ForgetAfterFinalRun => "forget_after_final_run",
@@ -101,7 +98,7 @@ impl Retention {
 	}
 }
 
-/// Who caused an Event (ADR-0063).
+/// The authenticated origin of a Command or Event (ADR-0063).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActorRecord {
 	/// An interactive GUI client identified by its durable Client identity.
@@ -178,6 +175,8 @@ pub struct NewConversation {
 	pub conversation_id: Uuid,
 	/// Retention choice.
 	pub retention: Retention,
+	/// When the caller recorded the Conversation.
+	pub created_at_unix_ms: i64,
 }
 
 /// Current state of one Conversation.
@@ -198,6 +197,8 @@ pub struct NewRun {
 	pub run_id: Uuid,
 	/// The Conversation this Run executes.
 	pub conversation_id: Uuid,
+	/// When the caller recorded the Run.
+	pub created_at_unix_ms: i64,
 }
 
 /// Current state of one Run.
@@ -224,6 +225,9 @@ pub struct NewEvent {
 	pub event_id: Uuid,
 	/// Who caused the Event.
 	pub actor: ActorRecord,
+	/// When the caller recorded the Event; display metadata only
+	/// (ADR-0069).
+	pub recorded_at_unix_ms: i64,
 	/// The Conversation the Event concerns, if any.
 	pub conversation_id: Option<Uuid>,
 	/// The Run the Event concerns, if any.

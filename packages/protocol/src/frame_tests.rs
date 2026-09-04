@@ -6,6 +6,19 @@ use super::{
 	MAX_CONTROL_FRAME, MAX_DATA_FRAME,
 };
 
+/// The `(kind, declared, limit)` of an oversized-frame error.
+fn oversized(error: &FrameError) -> (FrameKind, usize, usize) {
+	let FrameError::Oversized {
+		kind,
+		declared,
+		limit,
+	} = error
+	else {
+		panic!("expected an oversized frame error, got {error:?}");
+	};
+	(*kind, *declared, *limit)
+}
+
 #[tokio::test]
 async fn control_and_data_frames_round_trip_in_order() {
 	let (client, server) = duplex(4096);
@@ -40,12 +53,8 @@ async fn oversized_control_declaration_is_rejected_before_payload_arrives() {
 
 	let error = reader.read().await.unwrap_err();
 	assert_eq!(
-		error,
-		FrameError::Oversized {
-			kind: FrameKind::Control,
-			declared: MAX_CONTROL_FRAME + 1,
-			limit: MAX_CONTROL_FRAME,
-		}
+		oversized(&error),
+		(FrameKind::Control, MAX_CONTROL_FRAME + 1, MAX_CONTROL_FRAME)
 	);
 }
 
@@ -60,12 +69,8 @@ async fn oversized_data_declaration_is_rejected() {
 
 	let error = reader.read().await.unwrap_err();
 	assert_eq!(
-		error,
-		FrameError::Oversized {
-			kind: FrameKind::Data,
-			declared: MAX_DATA_FRAME + 1,
-			limit: MAX_DATA_FRAME,
-		}
+		oversized(&error),
+		(FrameKind::Data, MAX_DATA_FRAME + 1, MAX_DATA_FRAME)
 	);
 }
 
@@ -76,7 +81,7 @@ async fn unknown_frame_kind_is_rejected() {
 	client.write_all(&[9, 0, 0, 0, 0]).await.unwrap();
 
 	let error = reader.read().await.unwrap_err();
-	assert_eq!(error, FrameError::UnknownKind(9));
+	assert!(matches!(error, FrameError::UnknownKind(9)), "{error:?}");
 }
 
 #[tokio::test]
@@ -89,12 +94,8 @@ async fn writer_refuses_oversized_frames() {
 		.await
 		.unwrap_err();
 	assert_eq!(
-		error,
-		FrameError::Oversized {
-			kind: FrameKind::Data,
-			declared: MAX_DATA_FRAME + 1,
-			limit: MAX_DATA_FRAME,
-		}
+		oversized(&error),
+		(FrameKind::Data, MAX_DATA_FRAME + 1, MAX_DATA_FRAME)
 	);
 }
 
@@ -111,14 +112,7 @@ async fn writer_honors_negotiated_limits_below_the_protocol_maxima() {
 		.write(&Frame::Control(vec![b'{'; 17]))
 		.await
 		.unwrap_err();
-	assert_eq!(
-		error,
-		FrameError::Oversized {
-			kind: FrameKind::Control,
-			declared: 17,
-			limit: 16,
-		}
-	);
+	assert_eq!(oversized(&error), (FrameKind::Control, 17, 16));
 }
 
 #[tokio::test]
@@ -128,5 +122,5 @@ async fn closed_peer_reports_end_of_stream() {
 	drop(client);
 
 	let error = reader.read().await.unwrap_err();
-	assert_eq!(error, FrameError::Closed);
+	assert!(matches!(error, FrameError::Closed), "{error:?}");
 }

@@ -2,8 +2,8 @@ use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
 use super::{
-	ClientMessage, ErrorCategory, PlaneStatus, QueryRequest, QueryResponse,
-	RecoveryAction, ServerMessage, WireError,
+	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,
+	QueryResponse, RecoveryAction, ServerMessage, WireError, raw_command,
 };
 use crate::conversation::{
 	CommandRequest, CommandResponse, ConflictState, Conversation,
@@ -11,6 +11,7 @@ use crate::conversation::{
 };
 use crate::event::{Actor, Event};
 use crate::handshake::{ClientHello, ServerHello, VersionRange};
+use crate::{ControlError, decode_control};
 
 fn json(value: &impl serde::Serialize) -> String {
 	serde_json::to_string(value).unwrap()
@@ -20,6 +21,7 @@ fn json(value: &impl serde::Serialize) -> String {
 fn client_hello_has_the_agreed_wire_shape() {
 	let hello = ClientHello {
 		protocol: VersionRange { min: 1, max: 1 },
+		minor: 0,
 		codec: "json-v1".into(),
 		client_id: Uuid::nil(),
 		max_control_frame: 1_048_576,
@@ -28,7 +30,7 @@ fn client_hello_has_the_agreed_wire_shape() {
 	};
 	assert_eq!(
 		json(&hello),
-		r#"{"protocol":{"min":1,"max":1},"codec":"json-v1","client_id":"00000000-0000-0000-0000-000000000000","max_control_frame":1048576,"max_data_frame":262144,"capabilities":[]}"#
+		r#"{"protocol":{"min":1,"max":1},"minor":0,"codec":"json-v1","client_id":"00000000-0000-0000-0000-000000000000","max_control_frame":1048576,"max_data_frame":262144,"capabilities":[]}"#
 	);
 }
 
@@ -36,6 +38,7 @@ fn client_hello_has_the_agreed_wire_shape() {
 fn server_hello_variants_have_the_agreed_wire_shape() {
 	let welcome = ServerHello::Welcome {
 		protocol: 1,
+		minor: 0,
 		codec: "json-v1".into(),
 		max_control_frame: 1_048_576,
 		max_data_frame: 262_144,
@@ -54,7 +57,7 @@ fn server_hello_variants_have_the_agreed_wire_shape() {
 	assert_eq!(
 		(json(&welcome), json(&rejected)),
 		(
-			r#"{"kind":"welcome","protocol":1,"codec":"json-v1","max_control_frame":1048576,"max_data_frame":262144,"capabilities":[]}"#.to_string(),
+			r#"{"kind":"welcome","protocol":1,"minor":0,"codec":"json-v1","max_control_frame":1048576,"max_data_frame":262144,"capabilities":[]}"#.to_string(),
 			r#"{"kind":"rejected","error":{"category":"incompatible","code":"protocol.unsupported_version","retryable":false,"message":"no common protocol version"}}"#.to_string(),
 		)
 	);
@@ -168,16 +171,14 @@ fn revision_preconditions_and_conflicts_have_the_agreed_wire_shape() {
 	assert_eq!(
 		(json(&command), json(&conflict)),
 		(
-			r#"{"kind":"command","id":5,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"transition_run","run_id":"00000000-0000-0000-0000-000000000000","expected_revision":2,"lifecycle":"active"}}"#.to_string(),
-			r#"{"kind":"error","id":5,"error":{"category":"conflict","code":"run.revision_conflict","retryable":false,"message":"the Run changed since the Command was prepared","revision_conflict":{"current_revision":3,"safe_state":{"type":"run","run":{"run_id":"00000000-0000-0000-0000-000000000000","conversation_id":"00000000-0000-0000-0000-000000000000","revision":3,"lifecycle":"active","created_at_unix_ms":1,"ended_at_unix_ms":null}}},"recovery_actions":[{"type":"refresh_run","run_id":"00000000-0000-0000-0000-000000000000"}]}}"#.to_string(),
+			r#"{"kind":"command","id":5,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"transition_run","run_id":"00000000-0000-0000-0000-000000000000","expected_revision":"2","lifecycle":"active"}}"#.to_string(),
+			r#"{"kind":"error","id":5,"error":{"category":"conflict","code":"run.revision_conflict","retryable":false,"message":"the Run changed since the Command was prepared","revision_conflict":{"current_revision":"3","safe_state":{"type":"run","run":{"run_id":"00000000-0000-0000-0000-000000000000","conversation_id":"00000000-0000-0000-0000-000000000000","revision":"3","lifecycle":"active","created_at_unix_ms":1,"ended_at_unix_ms":null}}},"recovery_actions":[{"type":"refresh_run","run_id":"00000000-0000-0000-0000-000000000000"}]}}"#.to_string(),
 		)
 	);
 }
 
 #[test]
 fn a_create_conversation_command_retains_by_default() {
-	use crate::decode_control;
-
 	let command: ClientMessage = decode_control(
 		br#"{"kind":"command","id":2,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"create_conversation"}}"#,
 	)
@@ -196,7 +197,31 @@ fn a_create_conversation_command_retains_by_default() {
 }
 
 #[test]
-fn conversation_snapshots_and_events_have_the_agreed_wire_shape() {
+fn raw_command_keeps_the_exact_command_bytes_of_a_frame() {
+	let frame = br#"{"kind":"command","id":2,"command_id":"00000000-0000-0000-0000-000000000000","command":{ "type" : "create_conversation" }}"#;
+	let typed: ClientMessage = decode_control(frame).unwrap();
+
+	let raw = raw_command(frame).unwrap();
+	let missing = raw_command(br#"{"kind":"query","id":1}"#).unwrap_err();
+
+	assert_eq!(
+		(typed, raw.get()),
+		(
+			ClientMessage::Command {
+				id: 2,
+				command_id: Uuid::nil(),
+				command: CommandRequest::CreateConversation {
+					retention: Retention::Retain,
+				},
+			},
+			r#"{ "type" : "create_conversation" }"#
+		)
+	);
+	assert!(matches!(missing, ControlError::Malformed(_)), "{missing:?}");
+}
+
+#[test]
+fn conversation_snapshots_and_event_pages_have_the_agreed_wire_shape() {
 	let snapshot = QueryResponse::Conversation(ConversationSnapshot {
 		cursor: 3,
 		conversation: Conversation {
@@ -213,7 +238,8 @@ fn conversation_snapshots_and_events_have_the_agreed_wire_shape() {
 			ended_at_unix_ms: Some(3),
 		}],
 	});
-	let events = QueryResponse::Events {
+	let events = QueryResponse::Events(EventPage {
+		cursor: 3,
 		events: vec![Event {
 			sequence: 3,
 			event_id: Uuid::nil(),
@@ -224,14 +250,54 @@ fn conversation_snapshots_and_events_have_the_agreed_wire_shape() {
 			conversation_id: Some(Uuid::nil()),
 			run_id: None,
 			kind: "run.lifecycle_changed".into(),
+			payload_version: 1,
 			payload: serde_json::json!({"from": "active", "to": "completed"}),
 		}],
-	};
+	});
 	assert_eq!(
 		(json(&snapshot), json(&events)),
 		(
-			r#"{"type":"conversation","cursor":3,"conversation":{"conversation_id":"00000000-0000-0000-0000-000000000000","retention":"forget_after_final_run","created_at_unix_ms":1},"runs":[{"run_id":"00000000-0000-0000-0000-000000000000","conversation_id":"00000000-0000-0000-0000-000000000000","revision":4,"lifecycle":"completed","created_at_unix_ms":2,"ended_at_unix_ms":3}]}"#.to_string(),
-			r#"{"type":"events","events":[{"sequence":3,"event_id":"00000000-0000-0000-0000-000000000000","actor":{"type":"interactive_client","client_id":"00000000-0000-0000-0000-000000000000"},"recorded_at_unix_ms":3,"conversation_id":"00000000-0000-0000-0000-000000000000","run_id":null,"kind":"run.lifecycle_changed","payload":{"from":"active","to":"completed"}}]}"#.to_string(),
+			r#"{"type":"conversation","cursor":"3","conversation":{"conversation_id":"00000000-0000-0000-0000-000000000000","retention":"forget_after_final_run","created_at_unix_ms":1},"runs":[{"run_id":"00000000-0000-0000-0000-000000000000","conversation_id":"00000000-0000-0000-0000-000000000000","revision":"4","lifecycle":"completed","created_at_unix_ms":2,"ended_at_unix_ms":3}]}"#.to_string(),
+			r#"{"type":"events","cursor":"3","events":[{"sequence":"3","event_id":"00000000-0000-0000-0000-000000000000","actor":{"type":"interactive_client","client_id":"00000000-0000-0000-0000-000000000000"},"recorded_at_unix_ms":3,"conversation_id":"00000000-0000-0000-0000-000000000000","run_id":null,"kind":"run.lifecycle_changed","payload_version":1,"payload":{"from":"active","to":"completed"}}]}"#.to_string(),
 		)
+	);
+}
+
+#[test]
+fn sequences_and_revisions_round_trip_as_decimal_strings() {
+	let query = ClientMessage::Query {
+		id: 8,
+		query: QueryRequest::Events { after: u64::MAX },
+	};
+
+	let encoded = json(&query);
+	let decoded: ClientMessage = decode_control(encoded.as_bytes()).unwrap();
+
+	assert_eq!(
+		(encoded, decoded),
+		(
+			r#"{"kind":"query","id":8,"query":{"type":"events","after":"18446744073709551615"}}"#.to_string(),
+			query
+		)
+	);
+}
+
+#[test]
+fn only_canonical_decimal_strings_are_accepted_for_sequences() {
+	let decode = |after: &str| {
+		decode_control::<QueryRequest>(
+			format!(r#"{{"type":"events","after":{after}}}"#).as_bytes(),
+		)
+	};
+
+	let rejected = ["3", r#""""#, r#""+3""#, r#""03""#, r#""-1""#, r#""3.0""#]
+		.map(|after| decode(after).map(|_| after).unwrap_err());
+
+	assert_eq!(decode(r#""0""#).unwrap(), QueryRequest::Events { after: 0 });
+	assert!(
+		rejected
+			.iter()
+			.all(|error| matches!(error, ControlError::Malformed(_))),
+		"{rejected:?}"
 	);
 }

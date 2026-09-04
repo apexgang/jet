@@ -1,6 +1,6 @@
 //! Wire form of journal Events. The `kind` and `payload` pair mirrors the
-//! journal row (ADR-0096); clients ignore kinds they do not know
-//! (ADR-0094).
+//! journal row (ADR-0096); clients retain kinds they do not know opaquely
+//! and render them generically (ADR-0094).
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -19,7 +19,9 @@ pub enum Actor {
 /// One journal entry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Event {
-	/// Plane-local monotonic position.
+	/// Plane-local monotonic position, carried as a decimal string
+	/// (ADR-0089).
+	#[serde(with = "crate::decimal")]
 	pub sequence: u64,
 	/// Durable identity.
 	pub event_id: Uuid,
@@ -34,6 +36,8 @@ pub struct Event {
 	pub run_id: Option<Uuid>,
 	/// Indexed kind name such as `run.lifecycle_changed`.
 	pub kind: String,
+	/// Schema version of `payload` for this `kind` (ADR-0096).
+	pub payload_version: u32,
 	/// Kind-specific JSON payload.
 	pub payload: serde_json::Value,
 }

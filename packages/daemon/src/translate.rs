@@ -6,9 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use jet_core::{
 	Actor, Command, CommandOutcome, ConflictState, Conversation,
 	ConversationId, ConversationList, ConversationSnapshot, CoreError,
-	ErrorCategory, Event, EventKind, EventSequence, PlaneStatus, Query,
-	QueryResult, RecoveryAction, Retention, Revision, RevisionConflict, Run,
-	RunId, RunLifecycle,
+	ErrorCategory, Event, EventPage, EventPayload, EventSequence, PlaneStatus,
+	Query, QueryResult, RecoveryAction, Retention, Revision, RevisionConflict,
+	Run, RunId, RunLifecycle,
 };
 use jet_protocol as wire;
 
@@ -40,9 +40,9 @@ pub(crate) fn query_result(
 		QueryResult::Conversation(snapshot) => {
 			wire::QueryResponse::Conversation(conversation_snapshot(&snapshot))
 		}
-		QueryResult::Events(events) => wire::QueryResponse::Events {
-			events: events.iter().map(event).collect::<Result<_, _>>()?,
-		},
+		QueryResult::Events(page) => {
+			wire::QueryResponse::Events(event_page(&page)?)
+		}
 	})
 }
 
@@ -131,8 +131,19 @@ fn run(run: &Run) -> wire::Run {
 	}
 }
 
+fn event_page(page: &EventPage) -> Result<wire::EventPage, CoreError> {
+	Ok(wire::EventPage {
+		cursor: page.cursor.0,
+		events: page.events.iter().map(event).collect::<Result<_, _>>()?,
+	})
+}
+
 fn event(event: &Event) -> Result<wire::Event, CoreError> {
-	let (kind, payload) = EventKind::encode(&event.kind)?;
+	let EventPayload {
+		kind,
+		payload_version,
+		payload,
+	} = event.kind.encode()?;
 	Ok(wire::Event {
 		sequence: event.sequence.0,
 		event_id: event.event_id.0,
@@ -141,6 +152,7 @@ fn event(event: &Event) -> Result<wire::Event, CoreError> {
 		conversation_id: event.conversation_id.map(|id| id.0),
 		run_id: event.run_id.map(|id| id.0),
 		kind,
+		payload_version,
 		payload,
 	})
 }
