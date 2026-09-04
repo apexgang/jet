@@ -1,1 +1,1 @@
-packages/AGENTS.md
+AGENTS.md
