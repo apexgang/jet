@@ -207,18 +207,6 @@ fn full_event_window_disconnects_with_the_last_delivered_cursor() {
 		.queue_event(43, Frame::stream_control(stream(5), vec![3]))
 		.unwrap_err();
 	assert_eq!(error, StreamQueueError::SlowConsumer { resume_after: 41 });
-	assert_eq!(
-		error.disconnect_error(),
-		Some(WireError {
-			category: ErrorCategory::Unavailable,
-			code: "protocol.slow_consumer".into(),
-			retryable: true,
-			message: "the Event consumer exceeded its bounded window; reconnect and replay after the supplied cursor".into(),
-			revision_conflict: None,
-			restart: None,
-			recovery_actions: vec![RecoveryAction::ResumeEvents { after: 41 }],
-		})
-	);
 }
 
 #[test]

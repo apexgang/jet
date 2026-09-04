@@ -121,3 +121,7 @@ impl StreamQueueError {
 		})
 	}
 }
+
+#[cfg(test)]
+#[path = "stream_error_tests.rs"]
+mod tests;
