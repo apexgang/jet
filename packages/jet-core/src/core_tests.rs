@@ -27,12 +27,14 @@ fn status_reports_the_persisted_plane_across_core_restarts() {
 		(&before, &after),
 		(
 			&PlaneStatus {
+				cursor: crate::EventSequence(0),
 				plane_id: after.plane_id,
 				daemon_starts: 1,
 				started_at: before.started_at,
 				core_version: CORE_VERSION,
 			},
 			&PlaneStatus {
+				cursor: crate::EventSequence(0),
 				plane_id: after.plane_id,
 				daemon_starts: 2,
 				started_at: after.started_at,

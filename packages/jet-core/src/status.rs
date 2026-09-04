@@ -2,11 +2,13 @@
 
 use std::time::SystemTime;
 
-use crate::PlaneId;
+use crate::{EventSequence, PlaneId};
 
 /// Point-in-time view of the daemon and the Plane it owns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlaneStatus {
+	/// Newest Event sequence visible when the status was read.
+	pub cursor: EventSequence,
 	/// The Plane's durable identity.
 	pub plane_id: PlaneId,
 	/// Authoritative daemon starts recorded for this Plane, including the

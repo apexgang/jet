@@ -2,8 +2,8 @@
 
 use jet_protocol::{
 	CommandRequest, CommandResponse, Conversation, ConversationList,
-	ConversationSnapshot, EventPage, PlaneStatus, QueryRequest, QueryResponse,
-	RetentionPolicy, Run, RunLifecycle,
+	ConversationSnapshot, EventPage, PageCursor, PlaneStatus, QueryRequest,
+	QueryResponse, RetentionPolicy, Run, RunLifecycle,
 };
 use uuid::Uuid;
 
@@ -18,6 +18,15 @@ impl Client {
 	/// error, or the transport failure otherwise.
 	pub async fn status(&mut self) -> Result<PlaneStatus, ClientError> {
 		match self.query(QueryRequest::Status).await? {
+			QueryResponse::Status(status)
+				if self.negotiated_minor()
+					>= jet_protocol::FENCED_READS_MINOR
+					&& status.cursor.is_none() =>
+			{
+				Err(ClientError::Unexpected(
+					"jetd omitted the negotiated status fence".into(),
+				))
+			}
 			QueryResponse::Status(status) => Ok(status),
 			other @ (QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
@@ -25,8 +34,8 @@ impl Client {
 		}
 	}
 
-	/// Lists every Conversation on the Plane with the journal cursor the
-	/// list was read at.
+	/// Reads the first bounded page of Conversations with its journal fence.
+	/// A minor-zero daemon instead returns its legacy complete list.
 	///
 	/// # Errors
 	///
@@ -36,6 +45,29 @@ impl Client {
 		&mut self,
 	) -> Result<ConversationList, ClientError> {
 		match self.query(QueryRequest::Conversations).await? {
+			QueryResponse::Conversations(list) => Ok(list),
+			other @ (QueryResponse::Status(_)
+			| QueryResponse::Conversation(_)
+			| QueryResponse::Events(_)) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Continues a Conversation keyset snapshot from an opaque cursor
+	/// returned by [`Client::conversations`] or this method.
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] with restart metadata when the cursor
+	/// expired or the snapshot changed, or the transport failure otherwise.
+	pub async fn next_conversations(
+		&mut self,
+		cursor: PageCursor,
+	) -> Result<ConversationList, ClientError> {
+		self.require_minor(jet_protocol::FENCED_READS_MINOR)?;
+		match self
+			.query(QueryRequest::NextConversations { cursor })
+			.await?
+		{
 			QueryResponse::Conversations(list) => Ok(list),
 			other @ (QueryResponse::Status(_)
 			| QueryResponse::Conversation(_)

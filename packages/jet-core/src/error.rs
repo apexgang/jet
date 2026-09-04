@@ -3,7 +3,29 @@
 use jet_store::StoreError;
 use serde::{Deserialize, Serialize};
 
-use crate::{Revision, Run, RunId};
+use crate::{EventSequence, Revision, Run, RunId};
+
+/// Stable metadata explaining how a client must restart a stale read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RestartMetadata {
+	/// Required Event replay is no longer retained.
+	CursorExpired {
+		/// Oldest cursor from which continuous replay remains possible.
+		minimum_available_cursor: EventSequence,
+		/// Current Event high-water cursor for a replacement snapshot.
+		current_snapshot_revision: EventSequence,
+	},
+	/// The supplied Event cursor belongs to a later or different Plane.
+	CursorAhead {
+		/// Current Event high-water cursor for the replacement snapshot.
+		current_snapshot_revision: EventSequence,
+	},
+	/// A later page no longer belongs to the current projection state.
+	PaginationStale {
+		/// Current Event high-water cursor for the replacement first page.
+		current_snapshot_revision: EventSequence,
+	},
+}
 
 /// Structured action a caller may take to recover from an error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -12,6 +34,11 @@ pub enum RecoveryAction {
 	RefreshRun {
 		/// Run whose current state should be queried.
 		run_id: RunId,
+	},
+	/// Discard stale read state and obtain a fresh fenced snapshot.
+	RestartSnapshot {
+		/// Stable reason and cursor values needed to restart honestly.
+		metadata: RestartMetadata,
 	},
 }
 
@@ -80,6 +107,62 @@ pub struct CoreError {
 }
 
 impl CoreError {
+	pub(crate) fn cursor_expired(
+		minimum_available_cursor: EventSequence,
+		current_snapshot_revision: EventSequence,
+	) -> Self {
+		Self::restart_read(
+			"event.cursor_expired",
+			"the Event cursor is older than retained replay",
+			RestartMetadata::CursorExpired {
+				minimum_available_cursor,
+				current_snapshot_revision,
+			},
+		)
+	}
+
+	pub(crate) fn pagination_stale(
+		current_snapshot_revision: EventSequence,
+	) -> Self {
+		Self::restart_read(
+			"pagination.stale",
+			"the paginated snapshot changed; restart from its first page",
+			RestartMetadata::PaginationStale {
+				current_snapshot_revision,
+			},
+		)
+	}
+
+	pub(crate) fn cursor_ahead(
+		current_snapshot_revision: EventSequence,
+	) -> Self {
+		Self::restart_read(
+			"event.cursor_ahead",
+			"the Event cursor is ahead of this Plane; restart from a fresh snapshot",
+			RestartMetadata::CursorAhead {
+				current_snapshot_revision,
+			},
+		)
+	}
+
+	fn restart_read(
+		code: &'static str,
+		message: &'static str,
+		metadata: RestartMetadata,
+	) -> Self {
+		Self {
+			category: ErrorCategory::Conflict,
+			code: code.into(),
+			retryable: false,
+			message: message.into(),
+			detail: None,
+			revision_conflict: None,
+			recovery_actions: vec![RecoveryAction::RestartSnapshot {
+				metadata,
+			}],
+		}
+	}
+
 	pub(crate) fn invalid_input(
 		code: &'static str,
 		message: impl Into<String>,
@@ -185,6 +268,16 @@ impl CoreError {
 impl From<StoreError> for CoreError {
 	fn from(error: StoreError) -> Self {
 		match error {
+			StoreError::CursorExpired {
+				minimum_available_cursor,
+				current_snapshot_revision,
+			} => Self::cursor_expired(
+				EventSequence(minimum_available_cursor),
+				EventSequence(current_snapshot_revision),
+			),
+			StoreError::CursorAhead {
+				current_snapshot_revision,
+			} => Self::cursor_ahead(EventSequence(current_snapshot_revision)),
 			StoreError::Unavailable(detail) => Self {
 				category: ErrorCategory::Unavailable,
 				code: "store.unavailable".into(),

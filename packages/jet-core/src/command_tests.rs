@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use jet_store::NewEvent;
+use jet_store::{EventClass, NewEvent};
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
@@ -454,6 +454,7 @@ fn events_written_by_a_newer_core_are_served_without_interpretation() {
 				kind: future.kind.clone(),
 				payload_version: future.payload_version,
 				payload: future.payload.to_string(),
+				class: EventClass::Semantic,
 			})
 		})
 		.unwrap();

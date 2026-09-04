@@ -38,3 +38,31 @@ fn parse(text: &str) -> Option<u64> {
 		&& (text == "0" || !text.starts_with('0'));
 	canonical.then(|| text.parse().ok()).flatten()
 }
+
+pub(crate) mod optional {
+	use serde::{Deserialize, Deserializer, Serializer};
+
+	pub(crate) fn serialize<S: Serializer>(
+		value: &Option<u64>,
+		serializer: S,
+	) -> Result<S::Ok, S::Error> {
+		match value {
+			Some(value) => serializer.collect_str(value),
+			None => serializer.serialize_none(),
+		}
+	}
+
+	pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+		deserializer: D,
+	) -> Result<Option<u64>, D::Error> {
+		let Some(text) = Option::<String>::deserialize(deserializer)? else {
+			return Ok(None);
+		};
+		super::parse(&text).map(Some).ok_or_else(|| {
+			serde::de::Error::invalid_value(
+				serde::de::Unexpected::Str(&text),
+				&"a canonical decimal string",
+			)
+		})
+	}
+}

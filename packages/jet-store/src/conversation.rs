@@ -5,12 +5,15 @@ use uuid::Uuid;
 
 use crate::StoreError;
 use crate::records::{
-	ConversationRecord, NewConversation, RetentionPolicy, column_error,
-	parse_uuid,
+	ConversationPageKey, ConversationPageStart, ConversationRecord,
+	NewConversation, RetentionPolicy, column_error, parse_uuid,
 };
 use crate::transaction::{ReadTransaction, WriteTransaction};
 
 const COLUMNS: &str = "conversation_id, retention, created_at_unix_ms";
+
+/// Most Conversations returned by one keyset page.
+pub const CONVERSATION_PAGE_LIMIT: usize = 256;
 
 impl ReadTransaction<'_> {
 	/// The Conversation identified by `conversation_id`, if recorded.
@@ -47,6 +50,43 @@ impl ReadTransaction<'_> {
 		let rows = statement.query_map([], read_row)?;
 		Ok(rows.collect::<Result<_, _>>()?)
 	}
+
+	/// One bounded keyset page of Conversations in creation order.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the rows cannot be read.
+	pub fn conversation_page(
+		&self,
+		start: ConversationPageStart,
+	) -> Result<
+		(Vec<ConversationRecord>, Option<ConversationPageKey>),
+		StoreError,
+	> {
+		let after = match start {
+			ConversationPageStart::First => 0,
+			ConversationPageStart::After(key) => key.0,
+		};
+		// ASVS 1.2.4 and 2.2.2: the key is parameterized and the trusted
+		// store fixes the allocation bound rather than accepting one from a
+		// protocol caller.
+		let mut statement = self.transaction.prepare(&format!(
+			"SELECT rowid, {COLUMNS} FROM conversations
+			 WHERE rowid > ?1 ORDER BY rowid LIMIT ?2"
+		))?;
+		let rows = statement.query_map(
+			(
+				after,
+				i64::try_from(CONVERSATION_PAGE_LIMIT + 1).unwrap_or(i64::MAX),
+			),
+			|row| Ok((ConversationPageKey(row.get(0)?), read_row_at(row, 1)?)),
+		)?;
+		let mut rows = rows.collect::<Result<Vec<_>, _>>()?;
+		let next = (rows.len() > CONVERSATION_PAGE_LIMIT)
+			.then(|| rows[CONVERSATION_PAGE_LIMIT - 1].0);
+		rows.truncate(CONVERSATION_PAGE_LIMIT);
+		Ok((rows.into_iter().map(|(_, record)| record).collect(), next))
+	}
 }
 
 impl WriteTransaction<'_> {
@@ -80,12 +120,19 @@ impl WriteTransaction<'_> {
 }
 
 fn read_row(row: &Row<'_>) -> rusqlite::Result<ConversationRecord> {
-	let conversation_id: String = row.get(0)?;
-	let retention: String = row.get(1)?;
+	read_row_at(row, 0)
+}
+
+fn read_row_at(
+	row: &Row<'_>,
+	offset: usize,
+) -> rusqlite::Result<ConversationRecord> {
+	let conversation_id: String = row.get(offset)?;
+	let retention: String = row.get(offset + 1)?;
 	Ok(ConversationRecord {
-		conversation_id: parse_uuid(0, &conversation_id)?,
+		conversation_id: parse_uuid(offset, &conversation_id)?,
 		retention: parse_retention(&retention)?,
-		created_at_unix_ms: row.get(2)?,
+		created_at_unix_ms: row.get(offset + 2)?,
 	})
 }
 

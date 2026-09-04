@@ -2,9 +2,10 @@ use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
 use super::{
-	ActorRecord, CommandReceiptRecord, ConversationRecord, EventRecord,
-	NewCommandReceipt, NewConversation, NewEvent, NewRun, PlaneRecord,
-	RetentionPolicy, RunLifecycle, RunRecord, Store, StoreError,
+	ActorRecord, CommandReceiptRecord, ConversationRecord,
+	EVENT_COMPACTION_BATCH_LIMIT, EventClass, EventRecord, NewCommandReceipt,
+	NewConversation, NewEvent, NewRun, PlaneRecord, RetentionPolicy,
+	RunLifecycle, RunRecord, Store, StoreError,
 };
 
 const NOW_UNIX_MS: i64 = 1_700_000_000_000;
@@ -72,6 +73,7 @@ fn conversation_event(conversation_id: Uuid, kind: &str) -> NewEvent {
 		kind: kind.into(),
 		payload_version: 1,
 		payload: "{}".into(),
+		class: EventClass::Semantic,
 	}
 }
 
@@ -80,6 +82,149 @@ fn run_event(conversation_id: Uuid, run_id: Uuid, kind: &str) -> NewEvent {
 		run_id: Some(run_id),
 		..conversation_event(conversation_id, kind)
 	}
+}
+
+fn operational_event(
+	conversation_id: Uuid,
+	recorded_at_unix_ms: i64,
+) -> NewEvent {
+	NewEvent {
+		recorded_at_unix_ms,
+		class: EventClass::Operational,
+		..conversation_event(conversation_id, "run.output_progressed")
+	}
+}
+
+#[test]
+fn operational_event_compaction_is_bounded_and_preserves_cursor_truth() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = Store::open(&dir.path().join("plane.sqlite3")).unwrap();
+	let conversation_id = Uuid::now_v7();
+	let event_count = EVENT_COMPACTION_BATCH_LIMIT + 2;
+	store
+		.write(|tx| {
+			tx.insert_conversation(NewConversation {
+				conversation_id,
+				retention: RetentionPolicy::Retain,
+				created_at_unix_ms: NOW_UNIX_MS,
+			})?;
+			tx.append_event(conversation_event(
+				conversation_id,
+				"conversation.created",
+			))?;
+			for index in 0..event_count {
+				tx.append_event(operational_event(
+					conversation_id,
+					index as i64,
+				))?;
+			}
+			Ok::<_, StoreError>(())
+		})
+		.unwrap();
+
+	let compact = || {
+		store
+			.write(|tx| {
+				let coverage = tx.verified_projection_coverage()?;
+				tx.compact_operational_events(coverage, i64::MAX)
+			})
+			.unwrap()
+	};
+	let first = compact();
+	let expired = store.read(|tx| tx.events_after(0, 10)).unwrap_err();
+	let second = compact();
+
+	assert_eq!((first, second), (EVENT_COMPACTION_BATCH_LIMIT, 2));
+	let StoreError::CursorExpired {
+		minimum_available_cursor,
+		current_snapshot_revision,
+	} = expired
+	else {
+		panic!("expected an expired cursor, got {expired:?}");
+	};
+	assert_eq!(
+		(minimum_available_cursor, current_snapshot_revision),
+		(
+			u64::try_from(EVENT_COMPACTION_BATCH_LIMIT + 1).unwrap(),
+			u64::try_from(event_count + 1).unwrap(),
+		)
+	);
+}
+
+#[test]
+fn compaction_stops_before_operational_events_inside_the_grace_period() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = Store::open(&dir.path().join("plane.sqlite3")).unwrap();
+	let conversation_id = Uuid::now_v7();
+	store
+		.write(|tx| {
+			tx.append_event(operational_event(conversation_id, 1))?;
+			tx.append_event(operational_event(conversation_id, 3))?;
+			tx.append_event(operational_event(conversation_id, 1))?;
+			Ok::<_, StoreError>(())
+		})
+		.unwrap();
+
+	let removed = store
+		.write(|tx| {
+			let coverage = tx.verified_projection_coverage()?;
+			tx.compact_operational_events(coverage, 2)
+		})
+		.unwrap();
+	let (cursor, events) = store.read(|tx| tx.events_after(1, 10)).unwrap();
+
+	assert_eq!(removed, 1);
+	assert_eq!(cursor, 3);
+	assert_eq!(
+		events
+			.into_iter()
+			.map(|event| (event.sequence, event.recorded_at_unix_ms))
+			.collect::<Vec<_>>(),
+		vec![(2, 3), (3, 1)]
+	);
+}
+
+#[test]
+fn snapshot_coverage_cannot_compact_another_plane() {
+	let dir = tempfile::tempdir().unwrap();
+	let first = Store::open(&dir.path().join("first.sqlite3")).unwrap();
+	let second = Store::open(&dir.path().join("second.sqlite3")).unwrap();
+	let coverage = first
+		.write(|tx| {
+			tx.append_event(operational_event(Uuid::now_v7(), 1))?;
+			tx.verified_projection_coverage()
+		})
+		.unwrap();
+	second
+		.write(|tx| {
+			tx.append_event(operational_event(Uuid::now_v7(), 1))?;
+			Ok::<_, StoreError>(())
+		})
+		.unwrap();
+
+	let error = second
+		.write(|tx| tx.compact_operational_events(coverage, 2))
+		.unwrap_err();
+
+	assert!(matches!(error, StoreError::Integrity(_)), "{error:?}");
+}
+
+#[test]
+fn a_cursor_ahead_of_the_journal_is_rejected() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = Store::open(&dir.path().join("plane.sqlite3")).unwrap();
+
+	let error = store.read(|tx| tx.events_after(1, 10)).unwrap_err();
+
+	assert!(
+		matches!(
+			error,
+			StoreError::CursorAhead {
+				current_snapshot_revision: 0
+			}
+		),
+		"{error:?}"
+	);
 }
 
 #[test]
@@ -162,16 +307,19 @@ fn conversations_runs_and_events_survive_reopening_the_store() {
 	assert_eq!(runs, vec![run]);
 	assert_eq!(
 		events,
-		vec![
-			EventRecord {
-				sequence: 1,
-				..created
-			},
-			EventRecord {
-				sequence: 2,
-				..ended
-			}
-		]
+		(
+			2,
+			vec![
+				EventRecord {
+					sequence: 1,
+					..created
+				},
+				EventRecord {
+					sequence: 2,
+					..ended
+				}
+			],
+		)
 	);
 	assert_eq!((cursor, later.sequence), (2, 3));
 }

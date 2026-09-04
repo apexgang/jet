@@ -7,7 +7,8 @@ mod support;
 
 use jet_protocol::{
 	CODEC_JSON_V1, ClientHello, ErrorCategory, MAX_DATA_FRAME, PROTOCOL_MINOR,
-	PROTOCOL_VERSION, PlaneStatus, ServerHello, ServerMessage, WireError,
+	PROTOCOL_VERSION, PlaneStatus, RetentionPolicy, ServerHello, ServerMessage,
+	WireError,
 };
 use pretty_assertions::assert_eq;
 use support::{Daemon, connect_raw, handshake_raw, hello, jetd, start_jetd};
@@ -36,7 +37,12 @@ async fn status_is_answered_before_and_after_a_daemon_crash_and_restart() {
 	let client_id = Uuid::new_v4();
 
 	let mut first = start_jetd(&home).await;
-	let before = status(&first, client_id).await;
+	let mut client = support::connect(&first, client_id).await;
+	client
+		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
+		.await
+		.unwrap();
+	let before = client.status().await.unwrap();
 	first.child.kill().await.unwrap();
 
 	let second = start_jetd(&home).await;
@@ -46,12 +52,14 @@ async fn status_is_answered_before_and_after_a_daemon_crash_and_restart() {
 		(&before, &after),
 		(
 			&PlaneStatus {
+				cursor: Some(1),
 				plane_id: after.plane_id,
 				daemon_starts: 1,
 				started_at_unix_ms: before.started_at_unix_ms,
 				core_version: env!("CARGO_PKG_VERSION").into(),
 			},
 			&PlaneStatus {
+				cursor: Some(1),
 				plane_id: after.plane_id,
 				daemon_starts: 2,
 				started_at_unix_ms: after.started_at_unix_ms,
@@ -103,6 +111,7 @@ async fn sigterm_drains_connected_clients_then_exits_and_removes_the_socket() {
 					retryable: true,
 					message: "jetd is shutting down; reconnect later and retry with the same Command identity".into(),
 					revision_conflict: None,
+					restart: None,
 					recovery_actions: vec![],
 				},
 			},
@@ -160,6 +169,7 @@ async fn an_unsupported_codec_is_rejected_during_the_handshake() {
 				retryable: false,
 				message: format!("only the {CODEC_JSON_V1} codec is supported"),
 				revision_conflict: None,
+				restart: None,
 				recovery_actions: vec![],
 			}
 		}

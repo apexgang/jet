@@ -8,12 +8,16 @@ mod support;
 
 use jet_client::ClientError;
 use jet_protocol::{
-	CommandResponse, Conversation, ConversationList, ConversationSnapshot,
-	ErrorCategory, EventPage, RetentionPolicy, RunLifecycle, ServerMessage,
-	WireError,
+	ClientMessage, CommandResponse, Conversation, ConversationList,
+	ConversationSnapshot, ErrorCategory, EventPage, QueryRequest,
+	QueryResponse, RestartMetadata, RetentionPolicy, RunLifecycle, ServerHello,
+	ServerMessage, WireError,
+};
+use jet_store::{
+	ActorRecord, CONVERSATION_PAGE_LIMIT, EventClass, NewEvent, Store,
 };
 use pretty_assertions::assert_eq;
-use support::{Daemon, connect, connect_raw, start_jetd};
+use support::{Daemon, connect, connect_raw, handshake_raw, hello, start_jetd};
 use uuid::Uuid;
 
 /// Creates a Conversation with a raw command frame that says nothing about
@@ -149,6 +153,7 @@ async fn a_conversation_is_retained_with_its_terminal_runs_across_a_jetd_restart
 		ConversationList {
 			cursor: 7,
 			conversations: vec![conversation],
+			next_page: None,
 		}
 	);
 	assert_eq!(journal_after_restart, journal_before_restart);
@@ -222,6 +227,7 @@ async fn a_live_run_blocks_a_second_one_with_a_stable_conflict() {
 			message: "the Conversation already has a Run that has not ended"
 				.into(),
 			revision_conflict: None,
+			restart: None,
 			recovery_actions: vec![],
 		}
 	);
@@ -246,6 +252,7 @@ async fn an_unknown_conversation_is_reported_as_not_found() {
 			retryable: false,
 			message: "the Conversation does not exist".into(),
 			revision_conflict: None,
+			restart: None,
 			recovery_actions: vec![],
 		}
 	);
@@ -269,5 +276,206 @@ async fn an_empty_journal_page_still_carries_the_cursor() {
 			cursor: 1,
 			events: vec![],
 		}
+	);
+}
+
+#[tokio::test]
+async fn an_event_cursor_ahead_of_the_plane_requires_a_fresh_snapshot() {
+	let dir = tempfile::tempdir().unwrap();
+	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	let mut client = connect(&daemon, Uuid::new_v4()).await;
+
+	let error = client.events_after(1).await.unwrap_err();
+	let ClientError::Remote(error) = error else {
+		panic!("expected a remote error, got {error:?}");
+	};
+
+	assert_eq!(
+		(error.code.as_str(), error.restart),
+		(
+			"event.cursor_ahead",
+			Some(RestartMetadata::CursorAhead {
+				current_snapshot_revision: 0,
+			}),
+		)
+	);
+}
+
+#[tokio::test]
+async fn an_expired_event_cursor_requires_a_fresh_fenced_snapshot() {
+	let dir = tempfile::tempdir().unwrap();
+	let home = dir.path().join(".jet");
+	let client_id = Uuid::new_v4();
+	let mut first = start_jetd(&home).await;
+	let mut client = connect(&first, client_id).await;
+	let conversation = client
+		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
+		.await
+		.unwrap();
+	drop(client);
+	first.child.kill().await.unwrap();
+
+	let store = Store::open(&home.join("plane.sqlite3")).unwrap();
+	store
+		.write(|tx| {
+			tx.append_event(NewEvent {
+				event_id: Uuid::now_v7(),
+				actor: ActorRecord::InteractiveClient { client_id },
+				recorded_at_unix_ms: 0,
+				conversation_id: Some(conversation.conversation_id),
+				run_id: None,
+				kind: "run.output_progressed".into(),
+				payload_version: 1,
+				payload: "{}".into(),
+				class: EventClass::Operational,
+			})?;
+			let coverage = tx.verified_projection_coverage()?;
+			tx.compact_operational_events(coverage, 1)
+		})
+		.unwrap();
+	drop(store);
+
+	let second = start_jetd(&home).await;
+	let mut client = connect(&second, client_id).await;
+	let expired = client.events_after(0).await.unwrap_err();
+	let snapshot = client.conversations().await.unwrap();
+	let resumed = client.events_after(snapshot.cursor).await.unwrap();
+	let ClientError::Remote(expired) = expired else {
+		panic!("expected a remote error, got {expired:?}");
+	};
+
+	assert_eq!(
+		(expired.code.as_str(), expired.restart),
+		(
+			"event.cursor_expired",
+			Some(RestartMetadata::CursorExpired {
+				minimum_available_cursor: 2,
+				current_snapshot_revision: 2,
+			}),
+		)
+	);
+	assert_eq!(
+		(snapshot.cursor, resumed),
+		(
+			2,
+			EventPage {
+				cursor: 2,
+				events: vec![]
+			}
+		)
+	);
+}
+
+#[tokio::test]
+async fn a_concurrent_write_stales_pagination_and_replays_after_the_fence() {
+	let dir = tempfile::tempdir().unwrap();
+	let home = dir.path().join(".jet");
+	let client_id = Uuid::new_v4();
+	let daemon = start_jetd(&home).await;
+	let mut client = connect(&daemon, client_id).await;
+	for _ in 0..=CONVERSATION_PAGE_LIMIT {
+		client
+			.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
+			.await
+			.unwrap();
+	}
+	let mut legacy_hello = hello(client_id);
+	legacy_hello.minor = 0;
+	let (mut legacy, welcome) = handshake_raw(&daemon, &legacy_hello).await;
+	assert!(matches!(welcome, ServerHello::Welcome { minor: 0, .. }));
+	legacy
+		.send(&ClientMessage::Query {
+			id: 1,
+			query: QueryRequest::Conversations,
+		})
+		.await;
+	let ServerMessage::QueryResult {
+		result: QueryResponse::Conversations(legacy_list),
+		..
+	} = legacy.receive().await
+	else {
+		panic!("expected the legacy Conversation list");
+	};
+	legacy
+		.send(&ClientMessage::Query {
+			id: 2,
+			query: QueryRequest::Status,
+		})
+		.await;
+	let ServerMessage::QueryResult {
+		result: QueryResponse::Status(legacy_status),
+		..
+	} = legacy.receive().await
+	else {
+		panic!("expected the legacy status");
+	};
+	assert_eq!(
+		(
+			legacy_list.conversations.len(),
+			legacy_list.next_page,
+			legacy_status.cursor,
+		),
+		(CONVERSATION_PAGE_LIMIT + 1, None, None)
+	);
+	let first = client.conversations().await.unwrap();
+	let page_cursor = first.next_page.expect("a second page");
+	let second = client.next_conversations(page_cursor).await.unwrap();
+	let snapshot_revision = u64::try_from(CONVERSATION_PAGE_LIMIT + 1).unwrap();
+	assert_eq!(
+		(
+			first.cursor,
+			first.conversations.len(),
+			second.cursor,
+			second.conversations.len(),
+			second.next_page,
+		),
+		(
+			snapshot_revision,
+			CONVERSATION_PAGE_LIMIT,
+			snapshot_revision,
+			1,
+			None,
+		)
+	);
+
+	client
+		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
+		.await
+		.unwrap();
+	let stale = client.next_conversations(page_cursor).await.unwrap_err();
+	let ClientError::Remote(stale) = stale else {
+		panic!("expected a remote error, got {stale:?}");
+	};
+	assert_eq!(
+		(stale.code.as_str(), stale.restart),
+		(
+			"pagination.stale",
+			Some(RestartMetadata::PaginationStale {
+				current_snapshot_revision: snapshot_revision + 1,
+			}),
+		)
+	);
+
+	let fresh = client.conversations().await.unwrap();
+	client
+		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
+		.await
+		.unwrap();
+	let replay = client.events_after(fresh.cursor).await.unwrap();
+	assert_eq!(
+		(
+			fresh.cursor,
+			replay.cursor,
+			replay.events.len(),
+			replay.events[0].sequence,
+			replay.events[0].kind.as_str(),
+		),
+		(
+			snapshot_revision + 1,
+			snapshot_revision + 2,
+			1,
+			snapshot_revision + 2,
+			"conversation.created",
+		)
 	);
 }
