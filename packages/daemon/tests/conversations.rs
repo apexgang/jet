@@ -9,7 +9,7 @@ mod support;
 use jet_client::ClientError;
 use jet_protocol::{
 	CommandResponse, Conversation, ConversationList, ConversationSnapshot,
-	ErrorCategory, EventPage, Retention, RunLifecycle, ServerMessage,
+	ErrorCategory, EventPage, RetentionPolicy, RunLifecycle, ServerMessage,
 	WireError,
 };
 use pretty_assertions::assert_eq;
@@ -62,7 +62,7 @@ async fn a_conversation_is_queryable_before_any_run_and_retained_by_default() {
 			cursor: 1,
 			conversation: Conversation {
 				conversation_id: conversation.conversation_id,
-				retention: Retention::Retain,
+				retention: RetentionPolicy::Retain,
 				created_at_unix_ms: conversation.created_at_unix_ms,
 			},
 			runs: vec![],
@@ -197,7 +197,7 @@ async fn a_live_run_blocks_a_second_one_with_a_stable_conflict() {
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
 	let mut client = connect(&daemon, Uuid::new_v4()).await;
 	let conversation = client
-		.create_conversation(Uuid::now_v7(), Retention::Retain)
+		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
 		.await
 		.unwrap();
 	client
@@ -257,7 +257,7 @@ async fn an_empty_journal_page_still_carries_the_cursor() {
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
 	let mut client = connect(&daemon, Uuid::new_v4()).await;
 	client
-		.create_conversation(Uuid::now_v7(), Retention::Retain)
+		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
 		.await
 		.unwrap();
 

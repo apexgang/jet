@@ -5,7 +5,8 @@ use uuid::Uuid;
 
 use crate::StoreError;
 use crate::records::{
-	ConversationRecord, NewConversation, Retention, column_error, parse_uuid,
+	ConversationRecord, NewConversation, RetentionPolicy, column_error,
+	parse_uuid,
 };
 use crate::transaction::{ReadTransaction, WriteTransaction};
 
@@ -88,8 +89,8 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<ConversationRecord> {
 	})
 }
 
-fn parse_retention(text: &str) -> rusqlite::Result<Retention> {
-	Retention::parse(text).ok_or_else(|| {
+fn parse_retention(text: &str) -> rusqlite::Result<RetentionPolicy> {
+	RetentionPolicy::parse(text).ok_or_else(|| {
 		column_error(1, format!("unknown retention value {text:?}"))
 	})
 }

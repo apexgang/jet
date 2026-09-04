@@ -11,7 +11,7 @@ use crate::{
 	Command, CommandEnvelope, CommandId, CommandOutcome, Conversation,
 	ConversationId, ConversationSnapshot, Core, CoreError, ErrorCategory,
 	EventKind, EventPage, EventPayload, EventSequence, Query, QueryResult,
-	Retention, Revision, Run, RunId, RunLifecycle,
+	RetentionPolicy, Revision, Run, RunId, RunLifecycle,
 };
 use jet_store::Store;
 
@@ -44,7 +44,10 @@ impl Clock for ManualClock {
 	}
 }
 
-fn create_conversation(core: &Core, retention: Retention) -> Conversation {
+fn create_conversation(
+	core: &Core,
+	retention: RetentionPolicy,
+) -> Conversation {
 	let outcome = core
 		.execute(&actor(), request(Command::CreateConversation { retention }))
 		.unwrap();
@@ -127,7 +130,7 @@ fn a_conversation_exists_and_is_queryable_before_any_run() {
 	let dir = tempfile::tempdir().unwrap();
 	let core = start_core(&dir.path().join("p.sqlite3"));
 
-	let conversation = create_conversation(&core, Retention::Retain);
+	let conversation = create_conversation(&core, RetentionPolicy::Retain);
 
 	assert_eq!(
 		snapshot(&core, conversation.conversation_id),
@@ -142,7 +145,7 @@ fn a_conversation_exists_and_is_queryable_before_any_run() {
 		vec![(
 			1,
 			EventKind::ConversationCreated {
-				retention: Retention::Retain
+				retention: RetentionPolicy::Retain
 			}
 		)]
 	);
@@ -153,7 +156,7 @@ fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("p.sqlite3");
 	let first = start_core(&path);
-	let conversation = create_conversation(&first, Retention::Retain);
+	let conversation = create_conversation(&first, RetentionPolicy::Retain);
 	let conversation_id = conversation.conversation_id;
 
 	let run = create_run(&first, conversation_id);
@@ -208,7 +211,7 @@ fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
 fn a_second_run_is_refused_while_one_has_not_ended() {
 	let dir = tempfile::tempdir().unwrap();
 	let core = start_core(&dir.path().join("p.sqlite3"));
-	let conversation = create_conversation(&core, Retention::Retain);
+	let conversation = create_conversation(&core, RetentionPolicy::Retain);
 	let run = create_run(&core, conversation.conversation_id);
 	let starting = transition(&core, run, RunLifecycle::Starting);
 
@@ -244,7 +247,7 @@ fn a_second_run_is_refused_while_one_has_not_ended() {
 fn a_run_lifecycle_only_moves_forward_and_never_leaves_a_terminal_state() {
 	let dir = tempfile::tempdir().unwrap();
 	let core = start_core(&dir.path().join("p.sqlite3"));
-	let conversation = create_conversation(&core, Retention::Retain);
+	let conversation = create_conversation(&core, RetentionPolicy::Retain);
 	let run = create_run(&core, conversation.conversation_id);
 	let refused = |run: Run, lifecycle: RunLifecycle| {
 		core.execute(
@@ -334,7 +337,7 @@ fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 	.unwrap();
 	let command_id = command_id();
 	let command = Command::CreateConversation {
-		retention: Retention::Retain,
+		retention: RetentionPolicy::Retain,
 	};
 	let original = core
 		.execute(&actor(), request_with_id(command_id, command))
@@ -375,7 +378,7 @@ fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 			CommandOutcome::ConversationCreated(original),
 			vec![Conversation {
 				conversation_id: original.conversation_id,
-				retention: Retention::Retain,
+				retention: RetentionPolicy::Retain,
 				created_at: start,
 			}]
 		)
@@ -392,7 +395,7 @@ fn typed_command_content_is_bound_to_the_request_digest() {
 		CommandEnvelope::new(
 			command_id,
 			Command::CreateConversation {
-				retention: Retention::Retain,
+				retention: RetentionPolicy::Retain,
 			},
 			b"same adapter bytes",
 		)
@@ -406,7 +409,7 @@ fn typed_command_content_is_bound_to_the_request_digest() {
 			CommandEnvelope::new(
 				command_id,
 				Command::CreateConversation {
-					retention: Retention::ForgetAfterFinalRun,
+					retention: RetentionPolicy::ForgetAfterFinalRun,
 				},
 				b"same adapter bytes",
 			)
@@ -434,7 +437,7 @@ fn typed_command_content_is_bound_to_the_request_digest() {
 fn events_written_by_a_newer_core_are_served_without_interpretation() {
 	let dir = tempfile::tempdir().unwrap();
 	let core = start_core(&dir.path().join("p.sqlite3"));
-	let conversation = create_conversation(&core, Retention::Retain);
+	let conversation = create_conversation(&core, RetentionPolicy::Retain);
 	let future = EventPayload {
 		kind: "run.teleported".into(),
 		payload_version: 7,

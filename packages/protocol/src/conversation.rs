@@ -8,7 +8,7 @@ use uuid::Uuid;
 	Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum Retention {
+pub enum RetentionPolicy {
 	/// Keep the Conversation and its history. The default.
 	#[default]
 	Retain,
@@ -45,7 +45,7 @@ pub struct Conversation {
 	/// Durable identity.
 	pub conversation_id: Uuid,
 	/// Retention choice.
-	pub retention: Retention,
+	pub retention: RetentionPolicy,
 	/// When it was created, in signed Unix milliseconds.
 	pub created_at_unix_ms: i64,
 }
@@ -101,7 +101,7 @@ pub enum CommandRequest {
 	CreateConversation {
 		/// Retention choice.
 		#[serde(default)]
-		retention: Retention,
+		retention: RetentionPolicy,
 	},
 	/// Record a new Run of a Conversation that has no live Run.
 	CreateRun {

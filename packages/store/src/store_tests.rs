@@ -4,7 +4,7 @@ use uuid::Uuid;
 use super::{
 	ActorRecord, CommandReceiptRecord, ConversationRecord, EventRecord,
 	NewCommandReceipt, NewConversation, NewEvent, NewRun, PlaneRecord,
-	Retention, RunLifecycle, RunRecord, Store, StoreError,
+	RetentionPolicy, RunLifecycle, RunRecord, Store, StoreError,
 };
 
 const NOW_UNIX_MS: i64 = 1_700_000_000_000;
@@ -94,7 +94,7 @@ fn conversations_runs_and_events_survive_reopening_the_store() {
 		.write(|tx| {
 			let conversation = tx.insert_conversation(NewConversation {
 				conversation_id,
-				retention: Retention::Retain,
+				retention: RetentionPolicy::Retain,
 				created_at_unix_ms: NOW_UNIX_MS,
 			})?;
 			assert_eq!(tx.runs(conversation_id)?, vec![]);
@@ -143,7 +143,7 @@ fn conversations_runs_and_events_survive_reopening_the_store() {
 		conversation,
 		ConversationRecord {
 			conversation_id,
-			retention: Retention::Retain,
+			retention: RetentionPolicy::Retain,
 			created_at_unix_ms: NOW_UNIX_MS,
 		}
 	);
@@ -186,7 +186,7 @@ fn a_failed_write_leaves_no_trace_of_its_changes() {
 		.write(|tx| {
 			tx.insert_conversation(NewConversation {
 				conversation_id,
-				retention: Retention::ForgetAfterFinalRun,
+				retention: RetentionPolicy::ForgetAfterFinalRun,
 				created_at_unix_ms: NOW_UNIX_MS,
 			})?;
 			tx.append_event(conversation_event(

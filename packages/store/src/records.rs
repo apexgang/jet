@@ -7,7 +7,7 @@ use uuid::Uuid;
 /// Whether Jet keeps a Conversation after its final Run (ADR-0001).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Retention {
+pub enum RetentionPolicy {
 	/// Keep the Conversation and its history indefinitely. The default.
 	Retain,
 	/// Forget the Conversation once it has no active Run and no other
@@ -82,7 +82,7 @@ impl RunLifecycle {
 	}
 }
 
-impl Retention {
+impl RetentionPolicy {
 	/// The durable spelling, also used in JSON.
 	pub(crate) fn as_str(self) -> &'static str {
 		match self {
@@ -174,7 +174,7 @@ pub struct NewConversation {
 	/// Globally unique identity chosen by the caller.
 	pub conversation_id: Uuid,
 	/// Retention choice.
-	pub retention: Retention,
+	pub retention: RetentionPolicy,
 	/// When the caller recorded the Conversation.
 	pub created_at_unix_ms: i64,
 }
@@ -185,7 +185,7 @@ pub struct ConversationRecord {
 	/// Globally unique identity.
 	pub conversation_id: Uuid,
 	/// Retention choice.
-	pub retention: Retention,
+	pub retention: RetentionPolicy,
 	/// When the Conversation was recorded.
 	pub created_at_unix_ms: i64,
 }

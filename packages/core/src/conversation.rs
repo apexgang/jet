@@ -3,7 +3,7 @@
 
 use std::time::SystemTime;
 
-use jet_store::{ConversationRecord, Retention, RunLifecycle, RunRecord};
+use jet_store::{ConversationRecord, RetentionPolicy, RunLifecycle, RunRecord};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -40,7 +40,7 @@ pub struct Conversation {
 	/// Durable identity.
 	pub conversation_id: ConversationId,
 	/// Whether Jet keeps the Conversation after its final Run.
-	pub retention: Retention,
+	pub retention: RetentionPolicy,
 	/// When the Conversation was created.
 	pub created_at: SystemTime,
 }

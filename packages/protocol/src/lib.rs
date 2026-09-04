@@ -22,8 +22,8 @@ pub use control::{
 };
 pub use conversation::{
 	CommandRequest, CommandResponse, ConflictState, Conversation,
-	ConversationList, ConversationSnapshot, Retention, RevisionConflict, Run,
-	RunLifecycle,
+	ConversationList, ConversationSnapshot, RetentionPolicy, RevisionConflict,
+	Run, RunLifecycle,
 };
 pub use event::{Actor, Event};
 pub use frame::{

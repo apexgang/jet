@@ -4,7 +4,7 @@
 
 use jet_store::{
 	CommandReceiptRecord, NewCommandReceipt, NewConversation, NewRun,
-	Retention, RunLifecycle, WriteTransaction,
+	RetentionPolicy, RunLifecycle, WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -73,7 +73,7 @@ pub enum Command {
 	/// Create a Conversation with no Runs.
 	CreateConversation {
 		/// Whether Jet keeps the Conversation after its final Run.
-		retention: Retention,
+		retention: RetentionPolicy,
 	},
 	/// Record a new Run of a Conversation that has no live Run.
 	CreateRun {
@@ -242,7 +242,7 @@ fn encode_result(
 fn create_conversation(
 	tx: &WriteTransaction<'_>,
 	actor: &Actor,
-	retention: Retention,
+	retention: RetentionPolicy,
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
 	let conversation: Conversation = tx

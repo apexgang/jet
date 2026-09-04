@@ -26,7 +26,7 @@ use rusqlite::Connection;
 pub use plane::PlaneRecord;
 pub use records::{
 	ActorRecord, CommandReceiptRecord, ConversationRecord, EventRecord,
-	NewCommandReceipt, NewConversation, NewEvent, NewRun, Retention,
+	NewCommandReceipt, NewConversation, NewEvent, NewRun, RetentionPolicy,
 	RunLifecycle, RunRecord,
 };
 pub use transaction::{ReadTransaction, WriteTransaction};

@@ -3,7 +3,7 @@
 use jet_protocol::{
 	CommandRequest, CommandResponse, Conversation, ConversationList,
 	ConversationSnapshot, EventPage, PlaneStatus, QueryRequest, QueryResponse,
-	Retention, Run, RunLifecycle,
+	RetentionPolicy, Run, RunLifecycle,
 };
 use uuid::Uuid;
 
@@ -96,7 +96,7 @@ impl Client {
 	pub async fn create_conversation(
 		&mut self,
 		command_id: Uuid,
-		retention: Retention,
+		retention: RetentionPolicy,
 	) -> Result<Conversation, ClientError> {
 		match self
 			.execute_command(

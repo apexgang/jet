@@ -6,7 +6,7 @@ mod support;
 
 use jet_protocol::{
 	Actor, CommandRequest, CommandResponse, ConflictState,
-	ConversationSnapshot, ErrorCategory, RecoveryAction, Retention,
+	ConversationSnapshot, ErrorCategory, RecoveryAction, RetentionPolicy,
 	RevisionConflict, RunLifecycle, ServerMessage, WireError,
 };
 use pretty_assertions::assert_eq;
@@ -38,7 +38,7 @@ async fn an_identical_retry_returns_the_durable_original_result() {
 	let client_id = Uuid::new_v4();
 	let command_id = Uuid::now_v7();
 	let command = CommandRequest::CreateConversation {
-		retention: Retention::Retain,
+		retention: RetentionPolicy::Retain,
 	};
 
 	let mut first = start_jetd(&home).await;
@@ -76,7 +76,7 @@ async fn changed_content_cannot_reuse_an_actors_command_identity() {
 		.execute_command(
 			command_id,
 			CommandRequest::CreateConversation {
-				retention: Retention::Retain,
+				retention: RetentionPolicy::Retain,
 			},
 		)
 		.await
@@ -86,7 +86,7 @@ async fn changed_content_cannot_reuse_an_actors_command_identity() {
 		.execute_command(
 			command_id,
 			CommandRequest::CreateConversation {
-				retention: Retention::ForgetAfterFinalRun,
+				retention: RetentionPolicy::ForgetAfterFinalRun,
 			},
 		)
 		.await
@@ -121,7 +121,7 @@ async fn only_a_byte_equivalent_command_body_is_an_identical_retry() {
 		.execute_command(
 			command_id,
 			CommandRequest::CreateConversation {
-				retention: Retention::Retain,
+				retention: RetentionPolicy::Retain,
 			},
 		)
 		.await
@@ -161,7 +161,7 @@ async fn command_identities_are_scoped_to_the_authenticated_actor() {
 	let second_actor = Uuid::new_v4();
 	let command_id = Uuid::now_v7();
 	let command = CommandRequest::CreateConversation {
-		retention: Retention::Retain,
+		retention: RetentionPolicy::Retain,
 	};
 	let mut first = connect(&daemon, first_actor).await;
 	let mut second = connect(&daemon, second_actor).await;
@@ -202,7 +202,7 @@ async fn concurrent_commands_expose_one_authoritative_revision_order() {
 	let client_id = Uuid::new_v4();
 	let mut setup = connect(&daemon, client_id).await;
 	let conversation = setup
-		.create_conversation(Uuid::now_v7(), Retention::Retain)
+		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
 		.await
 		.unwrap();
 	let run = setup
@@ -294,7 +294,7 @@ async fn retrying_a_rejected_command_returns_its_original_conflict() {
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
 	let mut client = connect(&daemon, Uuid::new_v4()).await;
 	let conversation = client
-		.create_conversation(Uuid::now_v7(), Retention::Retain)
+		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
 		.await
 		.unwrap();
 	let run = client

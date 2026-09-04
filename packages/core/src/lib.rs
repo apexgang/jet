@@ -38,7 +38,7 @@ pub use error::{
 pub use event::{
 	Event, EventId, EventKind, EventPage, EventPayload, EventSequence,
 };
-pub use jet_store::{Retention, RunLifecycle};
+pub use jet_store::{RetentionPolicy, RunLifecycle};
 pub use query::{Query, QueryResult};
 pub use status::PlaneStatus;
 

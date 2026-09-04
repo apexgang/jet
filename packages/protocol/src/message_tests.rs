@@ -7,7 +7,7 @@ use super::{
 };
 use crate::conversation::{
 	CommandRequest, CommandResponse, ConflictState, Conversation,
-	ConversationSnapshot, Retention, RevisionConflict, Run, RunLifecycle,
+	ConversationSnapshot, RetentionPolicy, RevisionConflict, Run, RunLifecycle,
 };
 use crate::event::{Actor, Event};
 use crate::handshake::{ClientHello, ServerHello, VersionRange};
@@ -112,14 +112,14 @@ fn conversation_commands_and_results_have_the_agreed_wire_shape() {
 		id: 2,
 		command_id: Uuid::nil(),
 		command: CommandRequest::CreateConversation {
-			retention: Retention::Retain,
+			retention: RetentionPolicy::Retain,
 		},
 	};
 	let result = ServerMessage::CommandResult {
 		id: 2,
 		result: CommandResponse::ConversationCreated(Conversation {
 			conversation_id: Uuid::nil(),
-			retention: Retention::Retain,
+			retention: RetentionPolicy::Retain,
 			created_at_unix_ms: 1_700_000_000_000,
 		}),
 	};
@@ -190,7 +190,7 @@ fn a_create_conversation_command_retains_by_default() {
 			id: 2,
 			command_id: Uuid::nil(),
 			command: CommandRequest::CreateConversation {
-				retention: Retention::Retain,
+				retention: RetentionPolicy::Retain,
 			},
 		}
 	);
@@ -211,7 +211,7 @@ fn raw_command_keeps_the_exact_command_bytes_of_a_frame() {
 				id: 2,
 				command_id: Uuid::nil(),
 				command: CommandRequest::CreateConversation {
-					retention: Retention::Retain,
+					retention: RetentionPolicy::Retain,
 				},
 			},
 			r#"{ "type" : "create_conversation" }"#
@@ -226,7 +226,7 @@ fn conversation_snapshots_and_event_pages_have_the_agreed_wire_shape() {
 		cursor: 3,
 		conversation: Conversation {
 			conversation_id: Uuid::nil(),
-			retention: Retention::ForgetAfterFinalRun,
+			retention: RetentionPolicy::ForgetAfterFinalRun,
 			created_at_unix_ms: 1,
 		},
 		runs: vec![Run {

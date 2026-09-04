@@ -7,8 +7,8 @@ use jet_core::{
 	Actor, Command, CommandOutcome, ConflictState, Conversation,
 	ConversationId, ConversationList, ConversationSnapshot, CoreError,
 	ErrorCategory, Event, EventPage, EventPayload, EventSequence, PlaneStatus,
-	Query, QueryResult, RecoveryAction, Retention, Revision, RevisionConflict,
-	Run, RunId, RunLifecycle,
+	Query, QueryResult, RecoveryAction, RetentionPolicy, Revision,
+	RevisionConflict, Run, RunId, RunLifecycle,
 };
 use jet_protocol as wire;
 
@@ -167,17 +167,21 @@ fn actor(actor: &Actor) -> wire::Actor {
 	}
 }
 
-fn retention(retention: Retention) -> wire::Retention {
+fn retention(retention: RetentionPolicy) -> wire::RetentionPolicy {
 	match retention {
-		Retention::Retain => wire::Retention::Retain,
-		Retention::ForgetAfterFinalRun => wire::Retention::ForgetAfterFinalRun,
+		RetentionPolicy::Retain => wire::RetentionPolicy::Retain,
+		RetentionPolicy::ForgetAfterFinalRun => {
+			wire::RetentionPolicy::ForgetAfterFinalRun
+		}
 	}
 }
 
-fn retention_from_wire(retention: wire::Retention) -> Retention {
+fn retention_from_wire(retention: wire::RetentionPolicy) -> RetentionPolicy {
 	match retention {
-		wire::Retention::Retain => Retention::Retain,
-		wire::Retention::ForgetAfterFinalRun => Retention::ForgetAfterFinalRun,
+		wire::RetentionPolicy::Retain => RetentionPolicy::Retain,
+		wire::RetentionPolicy::ForgetAfterFinalRun => {
+			RetentionPolicy::ForgetAfterFinalRun
+		}
 	}
 }
 

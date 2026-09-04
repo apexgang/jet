@@ -2,7 +2,7 @@
 
 use std::time::SystemTime;
 
-use jet_store::{EventRecord, NewEvent, Retention, RunLifecycle};
+use jet_store::{EventRecord, NewEvent, RetentionPolicy, RunLifecycle};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -92,7 +92,7 @@ pub enum EventKind {
 	#[serde(rename = "conversation.created")]
 	ConversationCreated {
 		/// Its retention choice.
-		retention: Retention,
+		retention: RetentionPolicy,
 	},
 	/// A Run was recorded in the `created` state.
 	#[serde(rename = "run.created")]
