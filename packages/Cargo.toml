@@ -53,13 +53,17 @@ uuid = { version = "1", features = ["serde", "v4", "v7"] }
 unsafe_code = "forbid"
 missing_docs = "warn"
 
-[workspace.lints.clippy]
-all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-unwrap_used = "warn"
-expect_used = "warn"
-module_name_repetitions = "allow"
+[profile.dev]
+opt-level = "z"
+debug = false
+strip = "symbols"
+lto = true
+codegen-units = 1
+panic = "abort"
 
-# Development profile used for all local checks and tests.
-[profile.jet-dev]
-inherits = "dev"
+[profile.release]
+opt-level = "z"
+strip = "symbols"
+lto = true
+codegen-units = 1
+panic = "abort"
