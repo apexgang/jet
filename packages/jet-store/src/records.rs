@@ -4,6 +4,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::StoreError;
+
 /// Whether Jet keeps a Conversation after its final Run (ADR-0001).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -153,17 +155,13 @@ impl ActorRecord {
 		}
 	}
 
-	pub(crate) fn parse(
-		kind: &str,
-		id: &str,
-		index: usize,
-	) -> rusqlite::Result<Self> {
+	pub(crate) fn parse(kind: &str, id: &str) -> Result<Self, StoreError> {
 		match kind {
 			"interactive_client" => Ok(Self::InteractiveClient {
-				client_id: parse_uuid(index, id)?,
+				client_id: parse_uuid("actor_id", id)?,
 			}),
 			_ => Err(column_error(
-				index,
+				"actor_kind",
 				format!("unknown actor {kind:?} with id {id:?}"),
 			)),
 		}
@@ -443,26 +441,20 @@ pub struct EventRecord {
 	pub payload: String,
 }
 
-/// Reports a column whose stored text no longer parses. The store maps
-/// it to [`crate::StoreError::Integrity`] like any other conversion
-/// failure.
-pub(crate) fn column_error(index: usize, message: String) -> rusqlite::Error {
-	rusqlite::Error::FromSqlConversionFailure(
-		index,
-		rusqlite::types::Type::Text,
-		message.into(),
-	)
+/// Reports a column whose stored value no longer parses. Every conversion
+/// failure inside the store is an integrity failure.
+pub(crate) fn column_error(column: &str, message: String) -> StoreError {
+	StoreError::Integrity(format!("column {column}: {message}"))
 }
 
-pub(crate) fn parse_uuid(index: usize, text: &str) -> rusqlite::Result<Uuid> {
-	Uuid::parse_str(text).map_err(|error| {
-		column_error(index, format!("column {index} is not a UUID: {error}"))
-	})
+pub(crate) fn parse_uuid(column: &str, text: &str) -> Result<Uuid, StoreError> {
+	Uuid::parse_str(text)
+		.map_err(|error| column_error(column, format!("not a UUID: {error}")))
 }
 
 pub(crate) fn parse_optional_uuid(
-	index: usize,
+	column: &str,
 	text: Option<&str>,
-) -> rusqlite::Result<Option<Uuid>> {
-	text.map(|text| parse_uuid(index, text)).transpose()
+) -> Result<Option<Uuid>, StoreError> {
+	text.map(|text| parse_uuid(column, text)).transpose()
 }

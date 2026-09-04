@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT plane_id FROM plane WHERE singleton = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "plane_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plane",
+            "name": "plane_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "32bb4ca85137bb07ac7eb3a980da049b68f61a924ec4544cd92fafa61260aec8"
+}

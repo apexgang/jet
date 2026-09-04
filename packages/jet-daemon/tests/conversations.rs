@@ -315,9 +315,9 @@ async fn an_expired_event_cursor_requires_a_fresh_fenced_snapshot() {
 	drop(client);
 	first.child.kill().await.unwrap();
 
-	let store = Store::open(&home.join("plane.sqlite3")).unwrap();
+	let store = Store::open(&home.join("plane.sqlite3")).await.unwrap();
 	store
-		.write(|tx| {
+		.write(async |tx| {
 			tx.append_event(NewEvent {
 				event_id: Uuid::now_v7(),
 				actor: ActorRecord::InteractiveClient { client_id },
@@ -328,11 +328,14 @@ async fn an_expired_event_cursor_requires_a_fresh_fenced_snapshot() {
 				payload_version: 1,
 				payload: "{}".into(),
 				class: EventClass::Operational,
-			})?;
-			let coverage = tx.verified_projection_coverage()?;
-			tx.compact_operational_events(coverage, 1)
+			})
+			.await?;
+			let coverage = tx.verified_projection_coverage().await?;
+			tx.compact_operational_events(coverage, 1).await
 		})
+		.await
 		.unwrap();
+	store.close().await;
 	drop(store);
 
 	let second = start_jetd(&home).await;

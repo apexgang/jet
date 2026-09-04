@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO plane (singleton, plane_id, daemon_starts)\n\t\t\t VALUES (1, ?1, 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "aa0442999109b5d97b8553401dfd6848c09aeaacc73d0db6dae7b27edfa2656f"
+}

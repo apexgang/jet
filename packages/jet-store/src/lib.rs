@@ -8,7 +8,6 @@
 //! system crash or power loss. SQL and migrations stay private; callers see
 //! typed records and stable errors.
 
-mod clock;
 mod command;
 mod conversation;
 mod effect;
@@ -20,9 +19,13 @@ mod run;
 mod transaction;
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::time::Duration;
 
-use rusqlite::Connection;
+use sqlx::sqlite::{
+	SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions,
+	SqliteSynchronous,
+};
+use sqlx::{Connection, SqlitePool};
 
 pub use conversation::CONVERSATION_PAGE_LIMIT;
 pub use journal::EVENT_COMPACTION_BATCH_LIMIT;
@@ -65,21 +68,13 @@ pub enum StoreError {
 	},
 }
 
-impl From<rusqlite::Error> for StoreError {
-	fn from(error: rusqlite::Error) -> Self {
-		match error {
-			rusqlite::Error::SqliteFailure(code, _)
-				if matches!(
-					code.code,
-					rusqlite::ErrorCode::CannotOpen
-						| rusqlite::ErrorCode::DatabaseBusy
-						| rusqlite::ErrorCode::DatabaseLocked
-						| rusqlite::ErrorCode::SystemIoFailure
-				) =>
-			{
-				Self::Unavailable(error.to_string())
-			}
-			other => Self::Integrity(other.to_string()),
+impl From<sqlx::Error> for StoreError {
+	fn from(error: sqlx::Error) -> Self {
+		// Native SQLite text reaches the message, never the category.
+		if is_unavailable(&error) {
+			Self::Unavailable(error.to_string())
+		} else {
+			Self::Integrity(error.to_string())
 		}
 	}
 }
@@ -88,7 +83,7 @@ impl From<rusqlite::Error> for StoreError {
 /// written through [`Store::read`] and [`Store::write`].
 #[derive(Debug)]
 pub struct Store {
-	connection: Mutex<Connection>,
+	pool: SqlitePool,
 }
 
 impl Store {
@@ -98,17 +93,37 @@ impl Store {
 	///
 	/// Returns [`StoreError::Unavailable`] when the file cannot be opened
 	/// and [`StoreError::Integrity`] when its schema cannot be prepared.
-	pub fn open(path: &Path) -> Result<Self, StoreError> {
-		let mut connection = Connection::open(path)?;
-		connection.pragma_update(None, "journal_mode", "WAL")?;
-		connection.pragma_update(None, "synchronous", "FULL")?;
-		connection.pragma_update(None, "foreign_keys", "ON")?;
-		verify_durability(&connection)?;
-		migrations::apply(&mut connection)?;
-		plane::ensure_present(&mut connection)?;
-		Ok(Self {
-			connection: Mutex::new(connection),
-		})
+	pub async fn open(path: &Path) -> Result<Self, StoreError> {
+		let pool = SqlitePoolOptions::new()
+			// One connection, so reads and writes serialize exactly as they
+			// did behind the single connection this store used to hold.
+			.max_connections(1)
+			.min_connections(0)
+			// A local file cannot go stale the way a socket can, and both
+			// `None`s keep the pool from spawning a maintenance task that
+			// would wake an idle Plane (ADR-0055).
+			.test_before_acquire(false)
+			.idle_timeout(None)
+			.max_lifetime(None)
+			// Long enough for a durable commit, short enough that a
+			// re-entrant transaction fails loudly instead of hanging.
+			.acquire_timeout(ACQUIRE_TIMEOUT)
+			// SQLite ends a transaction by itself when a statement fails on
+			// a full disk or an I/O error, which leaves the driver's own
+			// transaction counter one ahead of the connection. The rollback
+			// that follows then fails and the counter never comes back down,
+			// so such a connection would refuse every later transaction.
+			// Discard it and let the next caller open a fresh one.
+			.after_release(|connection, _| {
+				Box::pin(async move { Ok(!connection.is_in_transaction()) })
+			})
+			.connect_with(connect_options(path))
+			.await?;
+		verify_durability(&pool).await?;
+		reject_legacy_schema(&pool).await?;
+		migrations::apply(&pool).await?;
+		plane::ensure_present(&pool).await?;
+		Ok(Self { pool })
 	}
 
 	/// Current Plane identity and daemon start count.
@@ -116,8 +131,8 @@ impl Store {
 	/// # Errors
 	///
 	/// Returns a [`StoreError`] when the Plane row cannot be read.
-	pub fn plane(&self) -> Result<PlaneRecord, StoreError> {
-		plane::read(&self.lock())
+	pub async fn plane(&self) -> Result<PlaneRecord, StoreError> {
+		plane::read(&self.pool).await
 	}
 
 	/// Durably records that an authoritative `jetd` started on this Plane and
@@ -126,26 +141,55 @@ impl Store {
 	/// # Errors
 	///
 	/// Returns a [`StoreError`] when the increment cannot be committed.
-	pub fn record_daemon_start(&self) -> Result<PlaneRecord, StoreError> {
-		plane::record_daemon_start(&mut self.lock())
+	pub async fn record_daemon_start(&self) -> Result<PlaneRecord, StoreError> {
+		plane::record_daemon_start(&self.pool).await
 	}
 
-	fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
-		self.connection
-			.lock()
-			.unwrap_or_else(std::sync::PoisonError::into_inner)
+	/// Closes the store, letting SQLite finish its write-ahead log checkpoint
+	/// before the process exits. Every later call reports the store as
+	/// unavailable.
+	///
+	/// Skipping this loses no data, because WAL with `synchronous=FULL`
+	/// already survives abrupt termination (ADR-0071); it only leaves the log
+	/// for the next open to replay.
+	pub async fn close(&self) {
+		self.pool.close().await;
 	}
 }
 
+/// How long a caller waits for the store's one connection. A transaction
+/// that outlives this is a re-entrant call, not contention, because the
+/// Plane has a single authoritative daemon (ADR-0003).
+const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long SQLite's own busy handler waits for a write lock held by
+/// another process before giving up.
+const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The durability settings authoritative state requires (ADR-0057).
+fn connect_options(path: &Path) -> SqliteConnectOptions {
+	SqliteConnectOptions::new()
+		.filename(path)
+		.create_if_missing(true)
+		.journal_mode(SqliteJournalMode::Wal)
+		.synchronous(SqliteSynchronous::Full)
+		.foreign_keys(true)
+		.busy_timeout(BUSY_TIMEOUT)
+}
+
 /// SQLite answers a refused `PRAGMA` with the mode it kept rather than an
-/// error, so the durability settings are read back before any acknowledged
-/// commit relies on them (ADR-0057, ADR-0071).
-fn verify_durability(connection: &Connection) -> Result<(), StoreError> {
-	let journal_mode: String =
-		connection
-			.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
-	let synchronous: i64 =
-		connection.pragma_query_value(None, "synchronous", |row| row.get(0))?;
+/// error, and the driver does not inspect that answer, so the durability
+/// settings are read back before any acknowledged commit relies on them
+/// (ADR-0057, ADR-0071).
+async fn verify_durability(pool: &SqlitePool) -> Result<(), StoreError> {
+	// Pragmas have no describable result, so they stay on the runtime query
+	// API rather than the compile-time checked macros.
+	let journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+		.fetch_one(pool)
+		.await?;
+	let synchronous: i64 = sqlx::query_scalar("PRAGMA synchronous")
+		.fetch_one(pool)
+		.await?;
 	if journal_mode.eq_ignore_ascii_case("wal")
 		&& synchronous == SYNCHRONOUS_FULL
 	{
@@ -157,8 +201,87 @@ fn verify_durability(connection: &Connection) -> Result<(), StoreError> {
 	}
 }
 
+/// A store written before the schema tracker moved into the driver keeps
+/// its versions in `schema_migrations`, which the migrator knows nothing
+/// about. Report that plainly instead of failing on the first `CREATE
+/// TABLE`. The store is pre-release, so the answer is to delete the file.
+///
+/// The driver's own table decides. A `jetd` from before this change creates
+/// an empty `schema_migrations` on any store it opens, including one this
+/// code wrote, so its mere presence would condemn a healthy store.
+async fn reject_legacy_schema(pool: &SqlitePool) -> Result<(), StoreError> {
+	let legacy: Option<String> = sqlx::query_scalar(
+		"SELECT name FROM sqlite_master
+		 WHERE type = 'table' AND name = 'schema_migrations'
+		   AND NOT EXISTS (
+			SELECT 1 FROM sqlite_master
+			WHERE type = 'table' AND name = '_sqlx_migrations'
+		   )",
+	)
+	.fetch_optional(pool)
+	.await?;
+	match legacy {
+		None => Ok(()),
+		Some(_) => Err(StoreError::Integrity(
+			"the store was written by a pre-release schema tracker; delete \
+			 the store file and let jetd recreate it"
+				.into(),
+		)),
+	}
+}
+
 /// SQLite's numeric value for `synchronous = FULL`.
 const SYNCHRONOUS_FULL: i64 = 2;
+
+/// Primary SQLite result codes that mean the store is not reachable.
+const SQLITE_BUSY: i32 = 5;
+const SQLITE_LOCKED: i32 = 6;
+const SQLITE_IOERR: i32 = 10;
+const SQLITE_CANTOPEN: i32 = 14;
+
+/// The driver reports SQLite's *extended* result code, whose low byte is
+/// the primary code and whose upper bytes are detail. Masking keeps 517
+/// (`SQLITE_BUSY_SNAPSHOT`) reading as a busy database rather than as
+/// broken data.
+fn is_unavailable_code(extended: i32) -> bool {
+	matches!(
+		extended & 0xff,
+		SQLITE_BUSY | SQLITE_LOCKED | SQLITE_IOERR | SQLITE_CANTOPEN
+	)
+}
+
+/// Whether the store could not be reached at all, as opposed to answering
+/// with something broken.
+///
+/// Both `sqlx::Error` and `sqlx::migrate::MigrateError` are
+/// `#[non_exhaustive]`, so the wildcard arms are required by the types and
+/// cannot be made exhaustive. A variant a future driver release adds counts
+/// as an integrity failure until it is classified here by hand.
+fn is_unavailable(error: &sqlx::Error) -> bool {
+	match error {
+		// Each SQLite connection runs on its own worker thread; losing that
+		// thread is an availability failure, not a data one.
+		sqlx::Error::Io(_)
+		| sqlx::Error::PoolTimedOut
+		| sqlx::Error::PoolClosed
+		| sqlx::Error::WorkerCrashed => true,
+		sqlx::Error::Database(database) => database
+			.code()
+			.and_then(|code| code.parse::<i32>().ok())
+			.is_some_and(is_unavailable_code),
+		// A migration failure reports no database error of its own, so an
+		// unreachable store met while migrating has to be unwrapped or it
+		// is misfiled as an integrity failure.
+		sqlx::Error::Migrate(migrate) => match &**migrate {
+			sqlx::migrate::MigrateError::Execute(inner)
+			| sqlx::migrate::MigrateError::ExecuteMigration(inner, _) => {
+				is_unavailable(inner)
+			}
+			_ => false,
+		},
+		_ => false,
+	}
+}
 
 #[cfg(test)]
 #[path = "store_tests.rs"]

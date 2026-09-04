@@ -1,0 +1,3 @@
+# The migration checksum is taken over the raw file bytes, so a file checked
+# out with CRLF on one machine would not match a store migrated on another.
+packages/jet-store/migrations/*.sql text eol=lf

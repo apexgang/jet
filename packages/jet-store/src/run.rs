@@ -1,7 +1,6 @@
 //! Current state of Runs: bounded executions of one Conversation
 //! (ADR-0065).
 
-use rusqlite::{OptionalExtension, Row};
 use uuid::Uuid;
 
 use crate::StoreError;
@@ -10,24 +9,39 @@ use crate::records::{
 };
 use crate::transaction::{ReadTransaction, WriteTransaction};
 
-const COLUMNS: &str = "run_id, conversation_id, revision, lifecycle, created_at_unix_ms, \
-	ended_at_unix_ms";
+/// One `runs` row as SQLite stores it, before its text columns are parsed
+/// back into domain types.
+struct Row {
+	run_id: String,
+	conversation_id: String,
+	revision: i64,
+	lifecycle: String,
+	created_at_unix_ms: i64,
+	ended_at_unix_ms: Option<i64>,
+}
 
-impl ReadTransaction<'_> {
+impl ReadTransaction {
 	/// The Run identified by `run_id`, if recorded.
 	///
 	/// # Errors
 	///
 	/// Returns a [`StoreError`] when the row cannot be read.
-	pub fn run(&self, run_id: Uuid) -> Result<Option<RunRecord>, StoreError> {
-		Ok(self
-			.transaction
-			.query_row(
-				&format!("SELECT {COLUMNS} FROM runs WHERE run_id = ?1"),
-				[run_id.to_string()],
-				read_row,
-			)
-			.optional()?)
+	pub async fn run(
+		&mut self,
+		run_id: Uuid,
+	) -> Result<Option<RunRecord>, StoreError> {
+		let run_id = run_id.to_string();
+		let row = sqlx::query_as!(
+			Row,
+			r#"SELECT run_id AS "run_id!", conversation_id, revision,
+				lifecycle, created_at_unix_ms, ended_at_unix_ms
+			 FROM runs
+			 WHERE run_id = ?1"#,
+			run_id
+		)
+		.fetch_optional(self.connection())
+		.await?;
+		row.map(read_row).transpose()
 	}
 
 	/// Every Run of `conversation_id` in creation order, terminal ones
@@ -36,28 +50,37 @@ impl ReadTransaction<'_> {
 	/// # Errors
 	///
 	/// Returns a [`StoreError`] when the rows cannot be read.
-	pub fn runs(
-		&self,
+	pub async fn runs(
+		&mut self,
 		conversation_id: Uuid,
 	) -> Result<Vec<RunRecord>, StoreError> {
-		let mut statement = self.transaction.prepare(&format!(
-			"SELECT {COLUMNS} FROM runs WHERE conversation_id = ?1
-			 ORDER BY rowid"
-		))?;
-		let rows =
-			statement.query_map([conversation_id.to_string()], read_row)?;
-		Ok(rows.collect::<Result<_, _>>()?)
+		let conversation_id = conversation_id.to_string();
+		let rows = sqlx::query_as!(
+			Row,
+			r#"SELECT run_id AS "run_id!", conversation_id, revision,
+				lifecycle, created_at_unix_ms, ended_at_unix_ms
+			 FROM runs
+			 WHERE conversation_id = ?1
+			 ORDER BY rowid"#,
+			conversation_id
+		)
+		.fetch_all(self.connection())
+		.await?;
+		rows.into_iter().map(read_row).collect()
 	}
 }
 
-impl WriteTransaction<'_> {
+impl WriteTransaction {
 	/// Records a new Run in the `created` lifecycle state.
 	///
 	/// # Errors
 	///
 	/// Returns a [`StoreError`] when the row cannot be written, including
 	/// when its Conversation is unknown or the identity is already taken.
-	pub fn insert_run(&self, run: NewRun) -> Result<RunRecord, StoreError> {
+	pub async fn insert_run(
+		&mut self,
+		run: NewRun,
+	) -> Result<RunRecord, StoreError> {
 		let record = RunRecord {
 			run_id: run.run_id,
 			conversation_id: run.conversation_id,
@@ -66,20 +89,23 @@ impl WriteTransaction<'_> {
 			created_at_unix_ms: run.created_at_unix_ms,
 			ended_at_unix_ms: None,
 		};
-		self.transaction.execute(
-			&format!(
-				"INSERT INTO runs ({COLUMNS})
-				 VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
-			),
-			(
-				record.run_id.to_string(),
-				record.conversation_id.to_string(),
-				i64::try_from(record.revision).unwrap_or(i64::MAX),
-				record.lifecycle.as_str(),
-				record.created_at_unix_ms,
-				record.ended_at_unix_ms,
-			),
-		)?;
+		let run_id = record.run_id.to_string();
+		let conversation_id = record.conversation_id.to_string();
+		let revision = i64::try_from(record.revision).unwrap_or(i64::MAX);
+		let lifecycle = record.lifecycle.as_str();
+		sqlx::query!(
+			"INSERT INTO runs (run_id, conversation_id, revision, lifecycle,
+				created_at_unix_ms, ended_at_unix_ms)
+			 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+			run_id,
+			conversation_id,
+			revision,
+			lifecycle,
+			record.created_at_unix_ms,
+			record.ended_at_unix_ms
+		)
+		.execute(self.connection())
+		.await?;
 		Ok(record)
 	}
 
@@ -90,48 +116,53 @@ impl WriteTransaction<'_> {
 	///
 	/// Returns [`StoreError::Integrity`] when the Run is unknown, or another
 	/// [`StoreError`] when the row cannot be written.
-	pub fn update_run_lifecycle(
-		&self,
+	pub async fn update_run_lifecycle(
+		&mut self,
 		run_id: Uuid,
 		lifecycle: RunLifecycle,
 		now_unix_ms: i64,
 	) -> Result<RunRecord, StoreError> {
 		let ended_at_unix_ms = lifecycle.is_terminal().then_some(now_unix_ms);
-		self.transaction.execute(
+		let run_id_column = run_id.to_string();
+		let lifecycle = lifecycle.as_str();
+		sqlx::query!(
 			"UPDATE runs
 			 SET lifecycle = ?2,
 			     ended_at_unix_ms = COALESCE(?3, ended_at_unix_ms)
 			 WHERE run_id = ?1",
-			(run_id.to_string(), lifecycle.as_str(), ended_at_unix_ms),
-		)?;
-		self.run(run_id)?.ok_or_else(|| {
+			run_id_column,
+			lifecycle,
+			ended_at_unix_ms
+		)
+		.execute(self.connection())
+		.await?;
+		// Re-read rather than `RETURNING`: the revision trigger fires after
+		// the update, so a returned row would carry the stale revision.
+		self.run(run_id).await?.ok_or_else(|| {
 			StoreError::Integrity(format!("run {run_id} does not exist"))
 		})
 	}
 }
 
-fn read_row(row: &Row<'_>) -> rusqlite::Result<RunRecord> {
-	let run_id: String = row.get(0)?;
-	let conversation_id: String = row.get(1)?;
-	let lifecycle: String = row.get(3)?;
+fn read_row(row: Row) -> Result<RunRecord, StoreError> {
 	Ok(RunRecord {
-		run_id: parse_uuid(0, &run_id)?,
-		conversation_id: parse_uuid(1, &conversation_id)?,
-		revision: parse_revision(row.get(2)?)?,
-		lifecycle: parse_lifecycle(&lifecycle)?,
-		created_at_unix_ms: row.get(4)?,
-		ended_at_unix_ms: row.get(5)?,
+		run_id: parse_uuid("run_id", &row.run_id)?,
+		conversation_id: parse_uuid("conversation_id", &row.conversation_id)?,
+		revision: parse_revision(row.revision)?,
+		lifecycle: parse_lifecycle(&row.lifecycle)?,
+		created_at_unix_ms: row.created_at_unix_ms,
+		ended_at_unix_ms: row.ended_at_unix_ms,
 	})
 }
 
-fn parse_lifecycle(text: &str) -> rusqlite::Result<RunLifecycle> {
+fn parse_lifecycle(text: &str) -> Result<RunLifecycle, StoreError> {
 	RunLifecycle::parse(text).ok_or_else(|| {
-		column_error(3, format!("unknown run lifecycle {text:?}"))
+		column_error("lifecycle", format!("unknown run lifecycle {text:?}"))
 	})
 }
 
-fn parse_revision(revision: i64) -> rusqlite::Result<u64> {
+fn parse_revision(revision: i64) -> Result<u64, StoreError> {
 	u64::try_from(revision).map_err(|_| {
-		column_error(2, format!("run revision {revision} is negative"))
+		column_error("revision", format!("run revision {revision} is negative"))
 	})
 }

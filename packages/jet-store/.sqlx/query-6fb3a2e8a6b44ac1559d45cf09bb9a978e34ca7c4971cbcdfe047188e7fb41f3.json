@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE effects\n\t\t\t SET state = 'in_flight', attempt_count = attempt_count + 1\n\t\t\t WHERE effect_id = ?1 AND state IN ('pending', 'in_flight')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "6fb3a2e8a6b44ac1559d45cf09bb9a978e34ca7c4971cbcdfe047188e7fb41f3"
+}

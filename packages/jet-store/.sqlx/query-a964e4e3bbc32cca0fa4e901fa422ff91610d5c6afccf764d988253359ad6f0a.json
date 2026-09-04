@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE effects SET state = ?2\n\t\t\t WHERE effect_id = ?1 AND state = 'in_flight'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "a964e4e3bbc32cca0fa4e901fa422ff91610d5c6afccf764d988253359ad6f0a"
+}

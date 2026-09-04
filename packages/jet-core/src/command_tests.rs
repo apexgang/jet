@@ -44,12 +44,13 @@ impl Clock for ManualClock {
 	}
 }
 
-fn create_conversation(
+async fn create_conversation(
 	core: &Core,
 	retention: RetentionPolicy,
 ) -> Conversation {
 	let outcome = core
 		.execute(&actor(), request(Command::CreateConversation { retention }))
+		.await
 		.unwrap();
 	let CommandOutcome::ConversationCreated(conversation) = outcome else {
 		panic!("unexpected outcome {outcome:?}");
@@ -57,9 +58,10 @@ fn create_conversation(
 	conversation
 }
 
-fn create_run(core: &Core, conversation_id: ConversationId) -> Run {
+async fn create_run(core: &Core, conversation_id: ConversationId) -> Run {
 	let outcome = core
 		.execute(&actor(), request(Command::CreateRun { conversation_id }))
+		.await
 		.unwrap();
 	let CommandOutcome::RunCreated(run) = outcome else {
 		panic!("unexpected outcome {outcome:?}");
@@ -67,7 +69,7 @@ fn create_run(core: &Core, conversation_id: ConversationId) -> Run {
 	run
 }
 
-fn transition(core: &Core, run: Run, lifecycle: RunLifecycle) -> Run {
+async fn transition(core: &Core, run: Run, lifecycle: RunLifecycle) -> Run {
 	let outcome = core
 		.execute(
 			&actor(),
@@ -77,6 +79,7 @@ fn transition(core: &Core, run: Run, lifecycle: RunLifecycle) -> Run {
 				lifecycle,
 			}),
 		)
+		.await
 		.unwrap();
 	let CommandOutcome::RunTransitioned(run) = outcome else {
 		panic!("unexpected outcome {outcome:?}");
@@ -84,12 +87,13 @@ fn transition(core: &Core, run: Run, lifecycle: RunLifecycle) -> Run {
 	run
 }
 
-fn snapshot(
+async fn snapshot(
 	core: &Core,
 	conversation_id: ConversationId,
 ) -> ConversationSnapshot {
 	let result = core
 		.query(&actor(), Query::Conversation { conversation_id })
+		.await
 		.unwrap();
 	let QueryResult::Conversation(snapshot) = result else {
 		panic!("unexpected result {result:?}");
@@ -97,16 +101,20 @@ fn snapshot(
 	snapshot
 }
 
-fn events_after(core: &Core, after: EventSequence) -> EventPage {
-	let result = core.query(&actor(), Query::Events { after }).unwrap();
+async fn events_after(core: &Core, after: EventSequence) -> EventPage {
+	let result = core.query(&actor(), Query::Events { after }).await.unwrap();
 	let QueryResult::Events(page) = result else {
 		panic!("unexpected result {result:?}");
 	};
 	page
 }
 
-fn event_kinds(core: &Core, after: EventSequence) -> Vec<(u64, EventKind)> {
+async fn event_kinds(
+	core: &Core,
+	after: EventSequence,
+) -> Vec<(u64, EventKind)> {
 	events_after(core, after)
+		.await
 		.events
 		.into_iter()
 		.map(|event| (event.sequence.0, event.kind))
@@ -125,15 +133,16 @@ fn not_found(code: &str, message: &str) -> CoreError {
 	}
 }
 
-#[test]
-fn a_conversation_exists_and_is_queryable_before_any_run() {
+#[tokio::test]
+async fn a_conversation_exists_and_is_queryable_before_any_run() {
 	let dir = tempfile::tempdir().unwrap();
-	let core = start_core(&dir.path().join("p.sqlite3"));
+	let core = start_core(&dir.path().join("p.sqlite3")).await;
 
-	let conversation = create_conversation(&core, RetentionPolicy::Retain);
+	let conversation =
+		create_conversation(&core, RetentionPolicy::Retain).await;
 
 	assert_eq!(
-		snapshot(&core, conversation.conversation_id),
+		snapshot(&core, conversation.conversation_id).await,
 		ConversationSnapshot {
 			cursor: EventSequence(1),
 			conversation,
@@ -141,7 +150,7 @@ fn a_conversation_exists_and_is_queryable_before_any_run() {
 		}
 	);
 	assert_eq!(
-		event_kinds(&core, EventSequence(0)),
+		event_kinds(&core, EventSequence(0)).await,
 		vec![(
 			1,
 			EventKind::ConversationCreated {
@@ -151,26 +160,27 @@ fn a_conversation_exists_and_is_queryable_before_any_run() {
 	);
 }
 
-#[test]
-fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
+#[tokio::test]
+async fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("p.sqlite3");
-	let first = start_core(&path);
-	let conversation = create_conversation(&first, RetentionPolicy::Retain);
+	let first = start_core(&path).await;
+	let conversation =
+		create_conversation(&first, RetentionPolicy::Retain).await;
 	let conversation_id = conversation.conversation_id;
 
-	let run = create_run(&first, conversation_id);
-	let run = transition(&first, run, RunLifecycle::Starting);
-	let run = transition(&first, run, RunLifecycle::Active);
-	let completed = transition(&first, run, RunLifecycle::Completed);
-	let second_run = create_run(&first, conversation_id);
-	let canceled = transition(&first, second_run, RunLifecycle::Canceled);
+	let run = create_run(&first, conversation_id).await;
+	let run = transition(&first, run, RunLifecycle::Starting).await;
+	let run = transition(&first, run, RunLifecycle::Active).await;
+	let completed = transition(&first, run, RunLifecycle::Completed).await;
+	let second_run = create_run(&first, conversation_id).await;
+	let canceled = transition(&first, second_run, RunLifecycle::Canceled).await;
 	drop(first);
 
-	let second = start_core(&path);
-	let restored = snapshot(&second, conversation_id);
-	let third_run = create_run(&second, conversation_id);
-	let kinds = event_kinds(&second, EventSequence(6));
+	let second = start_core(&path).await;
+	let restored = snapshot(&second, conversation_id).await;
+	let third_run = create_run(&second, conversation_id).await;
+	let kinds = event_kinds(&second, EventSequence(6)).await;
 
 	assert_eq!(
 		restored,
@@ -207,13 +217,14 @@ fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
 	);
 }
 
-#[test]
-fn a_second_run_is_refused_while_one_has_not_ended() {
+#[tokio::test]
+async fn a_second_run_is_refused_while_one_has_not_ended() {
 	let dir = tempfile::tempdir().unwrap();
-	let core = start_core(&dir.path().join("p.sqlite3"));
-	let conversation = create_conversation(&core, RetentionPolicy::Retain);
-	let run = create_run(&core, conversation.conversation_id);
-	let starting = transition(&core, run, RunLifecycle::Starting);
+	let core = start_core(&dir.path().join("p.sqlite3")).await;
+	let conversation =
+		create_conversation(&core, RetentionPolicy::Retain).await;
+	let run = create_run(&core, conversation.conversation_id).await;
+	let starting = transition(&core, run, RunLifecycle::Starting).await;
 
 	let error = core
 		.execute(
@@ -222,6 +233,7 @@ fn a_second_run_is_refused_while_one_has_not_ended() {
 				conversation_id: conversation.conversation_id,
 			}),
 		)
+		.await
 		.unwrap_err();
 
 	assert_eq!(
@@ -238,18 +250,20 @@ fn a_second_run_is_refused_while_one_has_not_ended() {
 		}
 	);
 	assert_eq!(
-		snapshot(&core, conversation.conversation_id).runs,
+		snapshot(&core, conversation.conversation_id).await.runs,
 		vec![starting]
 	);
 }
 
-#[test]
-fn a_run_lifecycle_only_moves_forward_and_never_leaves_a_terminal_state() {
+#[tokio::test]
+async fn a_run_lifecycle_only_moves_forward_and_never_leaves_a_terminal_state()
+{
 	let dir = tempfile::tempdir().unwrap();
-	let core = start_core(&dir.path().join("p.sqlite3"));
-	let conversation = create_conversation(&core, RetentionPolicy::Retain);
-	let run = create_run(&core, conversation.conversation_id);
-	let refused = |run: Run, lifecycle: RunLifecycle| {
+	let core = start_core(&dir.path().join("p.sqlite3")).await;
+	let conversation =
+		create_conversation(&core, RetentionPolicy::Retain).await;
+	let run = create_run(&core, conversation.conversation_id).await;
+	let refused = async |run: Run, lifecycle: RunLifecycle| {
 		core.execute(
 			&actor(),
 			request(Command::TransitionRun {
@@ -258,13 +272,14 @@ fn a_run_lifecycle_only_moves_forward_and_never_leaves_a_terminal_state() {
 				lifecycle,
 			}),
 		)
+		.await
 		.unwrap_err()
 	};
 
-	let skipped = refused(run, RunLifecycle::Active);
-	let never_active = refused(run, RunLifecycle::Completed);
-	let failed = transition(&core, run, RunLifecycle::Failed);
-	let revived = refused(failed, RunLifecycle::Active);
+	let skipped = refused(run, RunLifecycle::Active).await;
+	let never_active = refused(run, RunLifecycle::Completed).await;
+	let failed = transition(&core, run, RunLifecycle::Failed).await;
+	let revived = refused(failed, RunLifecycle::Active).await;
 
 	let invalid = |message: &str| CoreError {
 		category: ErrorCategory::Conflict,
@@ -285,18 +300,20 @@ fn a_run_lifecycle_only_moves_forward_and_never_leaves_a_terminal_state() {
 	);
 }
 
-#[test]
-fn an_unknown_conversation_or_run_is_not_found() {
+#[tokio::test]
+async fn an_unknown_conversation_or_run_is_not_found() {
 	let dir = tempfile::tempdir().unwrap();
-	let core = start_core(&dir.path().join("p.sqlite3"));
+	let core = start_core(&dir.path().join("p.sqlite3")).await;
 	let conversation_id = ConversationId(Uuid::now_v7());
 	let run_id = RunId(Uuid::now_v7());
 
 	let queried = core
 		.query(&actor(), Query::Conversation { conversation_id })
+		.await
 		.unwrap_err();
 	let run_created = core
 		.execute(&actor(), request(Command::CreateRun { conversation_id }))
+		.await
 		.unwrap_err();
 	let transitioned = core
 		.execute(
@@ -307,6 +324,7 @@ fn an_unknown_conversation_or_run_is_not_found() {
 				lifecycle: RunLifecycle::Starting,
 			}),
 		)
+		.await
 		.unwrap_err();
 
 	assert_eq!(
@@ -325,15 +343,16 @@ fn an_unknown_conversation_or_run_is_not_found() {
 	);
 }
 
-#[test]
-fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
+#[tokio::test]
+async fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 	let dir = tempfile::tempdir().unwrap();
 	let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 	let clock = Arc::new(ManualClock(Mutex::new(start)));
 	let core = Core::start_with_clock(
-		Store::open(&dir.path().join("p.sqlite3")).unwrap(),
+		Store::open(&dir.path().join("p.sqlite3")).await.unwrap(),
 		clock.clone(),
 	)
+	.await
 	.unwrap();
 	let command_id = command_id();
 	let command = Command::CreateConversation {
@@ -341,15 +360,18 @@ fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 	};
 	let original = core
 		.execute(&actor(), request_with_id(command_id, command))
+		.await
 		.unwrap();
 	clock.advance(Duration::from_hours(30 * 24));
 	let within_window = core
 		.execute(&actor(), request_with_id(command_id, command))
+		.await
 		.unwrap();
 	clock.advance(Duration::from_millis(1));
 
 	let error = core
 		.execute(&actor(), request_with_id(command_id, command))
+		.await
 		.unwrap_err();
 
 	assert_eq!(
@@ -365,7 +387,7 @@ fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 		}
 	);
 	let QueryResult::Conversations(conversations) =
-		core.query(&actor(), Query::Conversations).unwrap()
+		core.query(&actor(), Query::Conversations).await.unwrap()
 	else {
 		panic!("expected the Conversation list");
 	};
@@ -385,10 +407,10 @@ fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 	);
 }
 
-#[test]
-fn typed_command_content_is_bound_to_the_request_digest() {
+#[tokio::test]
+async fn typed_command_content_is_bound_to_the_request_digest() {
 	let dir = tempfile::tempdir().unwrap();
-	let core = start_core(&dir.path().join("p.sqlite3"));
+	let core = start_core(&dir.path().join("p.sqlite3")).await;
 	let command_id = command_id();
 	core.execute(
 		&actor(),
@@ -401,6 +423,7 @@ fn typed_command_content_is_bound_to_the_request_digest() {
 		)
 		.unwrap(),
 	)
+	.await
 	.unwrap();
 
 	let error = core
@@ -415,6 +438,7 @@ fn typed_command_content_is_bound_to_the_request_digest() {
 			)
 			.unwrap(),
 		)
+		.await
 		.unwrap_err();
 
 	assert_eq!(
@@ -433,18 +457,19 @@ fn typed_command_content_is_bound_to_the_request_digest() {
 	);
 }
 
-#[test]
-fn events_written_by_a_newer_core_are_served_without_interpretation() {
+#[tokio::test]
+async fn events_written_by_a_newer_core_are_served_without_interpretation() {
 	let dir = tempfile::tempdir().unwrap();
-	let core = start_core(&dir.path().join("p.sqlite3"));
-	let conversation = create_conversation(&core, RetentionPolicy::Retain);
+	let core = start_core(&dir.path().join("p.sqlite3")).await;
+	let conversation =
+		create_conversation(&core, RetentionPolicy::Retain).await;
 	let future = EventPayload {
 		kind: "run.teleported".into(),
 		payload_version: 7,
 		payload: serde_json::json!({"to": "another Plane"}),
 	};
 	core.store
-		.write(|tx| {
+		.write(async |tx| {
 			tx.append_event(NewEvent {
 				event_id: Uuid::now_v7(),
 				actor: actor().record(),
@@ -456,10 +481,12 @@ fn events_written_by_a_newer_core_are_served_without_interpretation() {
 				payload: future.payload.to_string(),
 				class: EventClass::Semantic,
 			})
+			.await
 		})
+		.await
 		.unwrap();
 
-	let page = events_after(&core, EventSequence(1));
+	let page = events_after(&core, EventSequence(1)).await;
 
 	let kinds: Vec<_> = page.events.iter().map(|event| &event.kind).collect();
 	assert_eq!(

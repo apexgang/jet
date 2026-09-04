@@ -3,22 +3,22 @@ use pretty_assertions::assert_eq;
 use super::{CORE_VERSION, PlaneStatus, Query, QueryResult};
 use crate::test_support::{actor, start_core};
 
-#[test]
-fn status_reports_the_persisted_plane_across_core_restarts() {
+#[tokio::test]
+async fn status_reports_the_persisted_plane_across_core_restarts() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("plane.sqlite3");
 
-	let first = start_core(&path);
+	let first = start_core(&path).await;
 	let QueryResult::Status(before) =
-		first.query(&actor(), Query::Status).unwrap()
+		first.query(&actor(), Query::Status).await.unwrap()
 	else {
 		panic!("expected a status snapshot");
 	};
 	drop(first);
 
-	let second = start_core(&path);
+	let second = start_core(&path).await;
 	let QueryResult::Status(after) =
-		second.query(&actor(), Query::Status).unwrap()
+		second.query(&actor(), Query::Status).await.unwrap()
 	else {
 		panic!("expected a status snapshot");
 	};

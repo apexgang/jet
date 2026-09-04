@@ -15,6 +15,6 @@ pub(crate) fn actor() -> Actor {
 }
 
 /// Starts a core over a fresh or existing store at `path`.
-pub(crate) fn start_core(path: &Path) -> Core {
-	Core::start(Store::open(path).unwrap()).unwrap()
+pub(crate) async fn start_core(path: &Path) -> Core {
+	Core::start(Store::open(path).await.unwrap()).await.unwrap()
 }

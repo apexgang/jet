@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT run_id AS \"run_id!\", conversation_id, revision,\n\t\t\t\tlifecycle, created_at_unix_ms, ended_at_unix_ms\n\t\t\t FROM runs\n\t\t\t WHERE run_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "run_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "name": "conversation_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "name": "revision",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "name": "lifecycle",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "name": "created_at_unix_ms",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "created_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "ended_at_unix_ms",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "ended_at_unix_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "6ee3a9bad182a16c3060c4b7c4b3049446d95eeca8234d55d3b1805d5ea2f62c"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE command_receipts\n\t\t\t SET request_digest = NULL, outcome_version = NULL, outcome = NULL\n\t\t\t WHERE recorded_at_unix_ms < ?1 AND request_digest IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "ef5d8f13f331a6f1dcb840d2f9e53a0f4b451ec51f0881e421d339d0943323fe"
+}

@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT actor_kind, actor_id, command_id, request_digest,\n\t\t\t\trecorded_at_unix_ms, outcome_version, outcome\n\t\t\t FROM command_receipts\n\t\t\t WHERE actor_kind = ?1 AND actor_id = ?2 AND command_id = ?3",
+  "describe": {
+    "columns": [
+      {
+        "name": "actor_kind",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "command_receipts",
+            "name": "actor_kind"
+          }
+        }
+      },
+      {
+        "name": "actor_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "command_receipts",
+            "name": "actor_id"
+          }
+        }
+      },
+      {
+        "name": "command_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "command_receipts",
+            "name": "command_id"
+          }
+        }
+      },
+      {
+        "name": "request_digest",
+        "ordinal": 3,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "command_receipts",
+            "name": "request_digest"
+          }
+        }
+      },
+      {
+        "name": "recorded_at_unix_ms",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "command_receipts",
+            "name": "recorded_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "outcome_version",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "command_receipts",
+            "name": "outcome_version"
+          }
+        }
+      },
+      {
+        "name": "outcome",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "command_receipts",
+            "name": "outcome"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "1d335f77ce12a74ff9686d7ad4722c9ea239017c184c7e686485287ad6e160fb"
+}

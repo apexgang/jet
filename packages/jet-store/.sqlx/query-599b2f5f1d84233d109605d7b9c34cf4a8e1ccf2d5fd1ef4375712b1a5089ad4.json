@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO events (event_id, actor_kind, actor_id,\n\t\t\t\trecorded_at_unix_ms, conversation_id, run_id, kind,\n\t\t\t\tpayload_version, payload, class)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)\n\t\t\t RETURNING sequence AS \"sequence!\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "sequence!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "sequence"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "599b2f5f1d84233d109605d7b9c34cf4a8e1ccf2d5fd1ef4375712b1a5089ad4"
+}
