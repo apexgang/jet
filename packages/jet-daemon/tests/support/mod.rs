@@ -3,6 +3,8 @@
 
 #![allow(dead_code)]
 
+pub mod pairing;
+
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
