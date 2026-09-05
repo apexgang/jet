@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use crate::account::{AccountBinding, CredentialReference, CredentialSource};
 use crate::pairing::{
-	ClientPublicKey, PairedClient, PairingDisclosure, PairingGate,
-	PairingMethod, PendingPairing,
+	ClientPublicKey, PairedClient, PairedClientAccess, PairingDisclosure,
+	PairingGate, PairingMethod, PendingPairing,
 };
 use crate::setting::{SettingKey, SettingScope, SettingValue};
 
@@ -204,6 +204,20 @@ pub enum CommandRequest {
 		#[serde(with = "crate::hex")]
 		signature: [u8; 64],
 	},
+	/// Stop a Paired client controlling the Plane, or let it control the
+	/// Plane again. The Plane keeps its key either way.
+	SetPairedClientAccess {
+		/// The Paired client to decide about.
+		client_id: Uuid,
+		/// What it may do from now on.
+		access: PairedClientAccess,
+	},
+	/// Forget a Paired client and the key it was Paired with. The
+	/// installation has to be Paired again to control the Plane.
+	RevokePairedClient {
+		/// The client to forget.
+		client_id: Uuid,
+	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -284,6 +298,16 @@ pub enum CommandResponse {
 	PairingCompleted {
 		/// The Paired client the Pairing left behind.
 		client: PairedClient,
+	},
+	/// The Paired client as the Plane now records it.
+	PairedClientAccessSet {
+		/// The client, with the access it now has.
+		client: PairedClient,
+	},
+	/// The Plane no longer holds that client or its key.
+	PairedClientRevoked {
+		/// The client that is no longer Paired.
+		client_id: Uuid,
 	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {

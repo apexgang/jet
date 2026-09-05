@@ -112,6 +112,38 @@ impl ReadTransaction {
 			})
 			.collect()
 	}
+
+	/// The Paired client identified by `client_id`, if this Plane has one.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the row cannot be read.
+	pub async fn paired_client(
+		&mut self,
+		client_id: Uuid,
+	) -> Result<Option<PairedClientRecord>, StoreError> {
+		let id = client_id.to_string();
+		let row = sqlx::query!(
+			r#"SELECT client_id AS "client_id!", key_algorithm, public_key,
+				pairing_protocol, access, paired_at_unix_ms
+			 FROM paired_clients
+			 WHERE client_id = ?1"#,
+			id
+		)
+		.fetch_optional(self.connection())
+		.await?;
+		row.map(|row| {
+			Ok(PairedClientRecord {
+				client_id: parse_uuid("client_id", &row.client_id)?,
+				key_algorithm: PairingKeyAlgorithm::parse(&row.key_algorithm)?,
+				public_key: parse_public_key(row.public_key)?,
+				pairing_protocol: row.pairing_protocol,
+				access: PairedClientAccess::parse(&row.access)?,
+				paired_at_unix_ms: row.paired_at_unix_ms,
+			})
+		})
+		.transpose()
+	}
 }
 
 impl WriteTransaction {
@@ -166,6 +198,48 @@ impl WriteTransaction {
 			access: PairedClientAccess::Enabled,
 			paired_at_unix_ms,
 		})
+	}
+
+	/// Records whether a Paired client may control the Plane. The key stays
+	/// where it is either way, so a disabled client needs no new pairing to
+	/// be enabled again.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the row cannot be written.
+	pub async fn set_paired_client_access(
+		&mut self,
+		client_id: Uuid,
+		access: PairedClientAccess,
+	) -> Result<(), StoreError> {
+		let id = client_id.to_string();
+		let access = access.as_str();
+		sqlx::query!(
+			"UPDATE paired_clients SET access = ?1 WHERE client_id = ?2",
+			access,
+			id
+		)
+		.execute(self.connection())
+		.await?;
+		Ok(())
+	}
+
+	/// Forgets a Paired client and the key it was Paired with. Nothing in
+	/// Jet brings it back: the installation pairs again or it does not
+	/// control this Plane.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the row cannot be removed.
+	pub async fn delete_paired_client(
+		&mut self,
+		client_id: Uuid,
+	) -> Result<(), StoreError> {
+		let id = client_id.to_string();
+		sqlx::query!("DELETE FROM paired_clients WHERE client_id = ?1", id)
+			.execute(self.connection())
+			.await?;
+		Ok(())
 	}
 }
 

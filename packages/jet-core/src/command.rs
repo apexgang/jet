@@ -4,8 +4,8 @@
 
 use jet_store::{
 	EffectKindRecord, EffectSafetyRecord, NewCommandReceipt, NewConversation,
-	NewEffect, NewRun, PairingGate, PairingMethod, RetentionPolicy,
-	RunLifecycle, SettingRecord, WriteTransaction,
+	NewEffect, NewRun, PairedClientAccess, PairingGate, PairingMethod,
+	RetentionPolicy, RunLifecycle, SettingRecord, WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -30,8 +30,8 @@ use crate::pairing::{
 };
 use crate::security::{self, SecurityClass, SecurityState};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
-use crate::{Actor, Core, lifecycle};
-use crate::{pairing_completion, pairing_offer};
+use crate::{Actor, ClientId, Core, lifecycle};
+use crate::{paired_client, pairing_completion, pairing_offer};
 
 /// Automatic Git delivery is carried out with the Git the core invokes, so
 /// turning it on depends on that tool being installed (ADR-0029, ADR-0056).
@@ -186,6 +186,20 @@ pub enum Command {
 		/// The signature over the claim's transcript.
 		signature: PairingSignature,
 	},
+	/// Stop a Paired client controlling this Plane, or let it control the
+	/// Plane again. The Plane keeps its key either way (ADR-0017).
+	SetPairedClientAccess {
+		/// The Paired client to decide about.
+		client_id: ClientId,
+		/// What it may do from now on.
+		access: PairedClientAccess,
+	},
+	/// Forget a Paired client and the key it was Paired with. The
+	/// installation has to be Paired again to control this Plane.
+	RevokePairedClient {
+		/// The client to forget.
+		client_id: ClientId,
+	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -220,6 +234,8 @@ impl Command {
 			| Self::ClaimPairing { .. }
 			| Self::ConfirmPairing { .. }
 			| Self::CompletePairing { .. }
+			| Self::SetPairedClientAccess { .. }
+			| Self::RevokePairedClient { .. }
 			| Self::CreateConversation { .. }
 			| Self::CreateRun { .. }
 			| Self::SetSetting { .. }
@@ -297,6 +313,16 @@ pub enum CommandOutcome {
 	PairingCompleted {
 		/// The Paired client the Pairing left behind.
 		client: PairedClient,
+	},
+	/// The Paired client as the Plane now records it.
+	PairedClientAccessSet {
+		/// The client, with the access it now has.
+		client: PairedClient,
+	},
+	/// The Plane no longer holds that client or its key.
+	PairedClientRevoked {
+		/// The client that is no longer Paired.
+		client_id: ClientId,
 	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {
@@ -444,7 +470,9 @@ fn for_receipt(
 			| CommandOutcome::PairingGateSet { .. }
 			| CommandOutcome::PairingClaimed { .. }
 			| CommandOutcome::PairingConfirmed { .. }
-			| CommandOutcome::PairingCompleted { .. }),
+			| CommandOutcome::PairingCompleted { .. }
+			| CommandOutcome::PairedClientAccessSet { .. }
+			| CommandOutcome::PairedClientRevoked { .. }),
 		) => Ok(outcome.clone()),
 		Err(error) => Err(error.clone()),
 	}
@@ -517,6 +545,13 @@ async fn execute_new(
 				now_unix_ms,
 			)
 			.await
+		}
+		Command::SetPairedClientAccess { client_id, access } => {
+			paired_client::set_access(tx, actor, client_id, access, now_unix_ms)
+				.await
+		}
+		Command::RevokePairedClient { client_id } => {
+			paired_client::revoke(tx, actor, client_id, now_unix_ms).await
 		}
 		Command::CompletePairing {
 			offer_id,

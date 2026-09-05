@@ -22,6 +22,7 @@ mod error;
 mod event;
 mod lifecycle;
 mod pagination;
+mod paired_client;
 mod pairing;
 mod pairing_completion;
 mod pairing_identity;
@@ -321,3 +322,7 @@ mod pairing_offer_tests;
 #[cfg(test)]
 #[path = "pairing_completion_tests.rs"]
 mod pairing_completion_tests;
+
+#[cfg(test)]
+#[path = "paired_client_tests.rs"]
+mod paired_client_tests;

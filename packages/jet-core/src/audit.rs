@@ -26,6 +26,7 @@ use crate::account::AccountBindingId;
 use crate::command::Command;
 use crate::conversation::ConversationId;
 use crate::error::CoreError;
+use crate::paired_client;
 use crate::pairing::{self, PairingOfferId};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
 use crate::{Actor, ClientId, PlaneId, ProjectId, system_time};
@@ -94,6 +95,15 @@ pub enum AuditDecision {
 	/// A Pairing completed, so a GUI client now controls this Plane with
 	/// full trust (ADR-0017).
 	PairingCompleted,
+	/// A Paired client was allowed to control this Plane again.
+	PairedClientEnabled,
+	/// A Paired client was stopped from controlling it. The Plane keeps its
+	/// key, so this is not the end of the pairing.
+	PairedClientDisabled,
+	/// A Paired client and its key were forgotten. Nothing in Jet brings
+	/// either back: the installation pairs again or it does not control
+	/// this Plane.
+	PairedClientRevoked,
 }
 
 /// What a decision is about. The core turns each one into the durable kind
@@ -215,6 +225,9 @@ impl AuditDecision {
 			Self::PairingOfferInvalidated => "pairing.offer_invalidated",
 			Self::PairingConfirmed => "pairing.confirmed",
 			Self::PairingCompleted => "pairing.completed",
+			Self::PairedClientEnabled => "pairing.client_enabled",
+			Self::PairedClientDisabled => "pairing.client_disabled",
+			Self::PairedClientRevoked => "pairing.client_revoked",
 		}
 	}
 
@@ -243,15 +256,22 @@ impl AuditDecision {
 			| Self::PairingClaimed
 			| Self::PairingOfferInvalidated
 			| Self::PairingConfirmed
-			| Self::PairingCompleted => AuditRisk::Elevated,
+			| Self::PairingCompleted
+			| Self::PairedClientEnabled => AuditRisk::Elevated,
+			// Revoking destroys the key the pairing was, and no part of Jet
+			// can put it back: the installation pairs again or it does not
+			// control this Plane.
+			Self::PairedClientRevoked => AuditRisk::Destructive,
 			// Shortening the window destroys evidence the Plane already
 			// holds, which is the one policy change the audit itself is at
 			// stake in.
 			Self::AuditRetentionChanged
 			| Self::AuditRetentionCleared => AuditRisk::Destructive,
-			Self::GitAutomationDisabled | Self::PairingGateClosed => {
-				AuditRisk::Routine
-			}
+			Self::GitAutomationDisabled
+			| Self::PairingGateClosed
+			// Stopping a client is the safe direction, and its key stays
+			// where it is.
+			| Self::PairedClientDisabled => AuditRisk::Routine,
 		}
 	}
 }
@@ -310,6 +330,12 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::CompletePairing { .. } => {
 			Some(AuditDecision::PairingCompleted)
 		}
+		Command::SetPairedClientAccess { access, .. } => {
+			Some(paired_client::access_decision(*access))
+		}
+		Command::RevokePairedClient { .. } => {
+			Some(AuditDecision::PairedClientRevoked)
+		}
 		Command::BeginAuditEpoch
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
@@ -326,6 +352,10 @@ fn refused_subject(command: &Command) -> AuditSubject {
 	match command {
 		Command::UnbindAccount { binding_id } => {
 			AuditSubject::AccountBinding(*binding_id)
+		}
+		Command::SetPairedClientAccess { client_id, .. }
+		| Command::RevokePairedClient { client_id } => {
+			AuditSubject::PairedClient(*client_id)
 		}
 		Command::SetSetting { scope, .. }
 		| Command::ClearSetting { scope, .. } => AuditSubject::of_scope(*scope),

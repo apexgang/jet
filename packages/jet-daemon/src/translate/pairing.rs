@@ -18,6 +18,15 @@ pub(super) fn snapshot(snapshot: PairingSnapshot) -> wire::PairingSnapshot {
 	}
 }
 
+pub(super) fn access_from_wire(
+	access: wire::PairedClientAccess,
+) -> PairedClientAccess {
+	match access {
+		wire::PairedClientAccess::Enabled => PairedClientAccess::Enabled,
+		wire::PairedClientAccess::Disabled => PairedClientAccess::Disabled,
+	}
+}
+
 pub(super) fn client(client: PairedClient) -> wire::PairedClient {
 	wire::PairedClient {
 		client_id: client.client_id.0,

@@ -3,8 +3,8 @@
 use std::time::SystemTime;
 
 use jet_store::{
-	EventClass, EventRecord, NewEvent, PairingGate, PairingMethod,
-	RetentionPolicy, RunLifecycle,
+	EventClass, EventRecord, NewEvent, PairedClientAccess, PairingGate,
+	PairingMethod, RetentionPolicy, RunLifecycle,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -206,6 +206,21 @@ pub enum EventKind {
 		/// The Client identity that is now Paired.
 		client_id: ClientId,
 	},
+	/// A Paired client was allowed to control this Plane again, or stopped
+	/// from controlling it. The Plane keeps its key either way (ADR-0017).
+	#[serde(rename = "pairing.client_access_changed")]
+	PairedClientAccessChanged {
+		/// The Paired client whose access changed.
+		client_id: ClientId,
+		/// What it may do now.
+		access: PairedClientAccess,
+	},
+	/// A Paired client and the key it was Paired with were forgotten.
+	#[serde(rename = "pairing.client_revoked")]
+	PairedClientRevoked {
+		/// The client that is no longer Paired.
+		client_id: ClientId,
+	},
 	/// A Pairing offer stopped being usable before it completed.
 	#[serde(rename = "pairing.offer_ended")]
 	PairingOfferEnded {
@@ -253,7 +268,9 @@ impl EventKind {
 			| Self::PairingClaimed { .. }
 			| Self::PairingConfirmed { .. }
 			| Self::PairingCompleted { .. }
-			| Self::PairingOfferEnded { .. } => {
+			| Self::PairingOfferEnded { .. }
+			| Self::PairedClientAccessChanged { .. }
+			| Self::PairedClientRevoked { .. } => {
 				let encoded = serde_json::to_value(self).map_err(|error| {
 					CoreError::internal("event.unencodable", error.to_string())
 				})?;

@@ -335,7 +335,9 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		| CommandRequest::OpenPairing { .. }
 		| CommandRequest::ClaimPairing { .. }
 		| CommandRequest::ConfirmPairing { .. }
-		| CommandRequest::CompletePairing { .. } => Some(MinorRequirement {
+		| CommandRequest::CompletePairing { .. }
+		| CommandRequest::SetPairedClientAccess { .. }
+		| CommandRequest::RevokePairedClient { .. } => Some(MinorRequirement {
 			minor: jet_protocol::PAIRING_MINOR,
 			feature: "Pairing Commands",
 		}),

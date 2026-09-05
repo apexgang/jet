@@ -148,23 +148,19 @@ fn transcript(
 	transcript
 }
 
-/// One whole Pairing over the protocol: the client proves it holds the
-/// identity it presented, and the Plane keeps its public key across the
-/// daemon that recorded it (ADR-0017, ADR-0090).
-#[tokio::test]
-async fn a_completed_pairing_outlives_the_daemon_that_recorded_it() {
-	let dir = tempfile::tempdir().unwrap();
-	let home = dir.path().join(".jet");
-	let client_id = Uuid::new_v4();
-	let signing = SigningKey::from_bytes(&[5; 32]);
+/// Pairs `pairing_client` with the Plane `owner` is connected to, the way
+/// the two people at each end would: a code read off the target, an
+/// authentication string compared, and a challenge signed.
+async fn pair(
+	owner: &jet_client::Client,
+	pairing_client: &jet_client::Client,
+	client_id: Uuid,
+	signing: &SigningKey,
+) -> PairedClient {
 	let key = ClientPublicKey {
 		algorithm: PairingKeyAlgorithm::Ed25519,
 		key: signing.verifying_key().to_bytes(),
 	};
-
-	let mut first = start_jetd(&home).await;
-	let owner = connect(&first, Uuid::new_v4()).await;
-	let pairing_client = connect(&first, client_id).await;
 	owner
 		.set_pairing_gate(Uuid::now_v7(), PairingGate::Open)
 		.await
@@ -205,10 +201,26 @@ async fn a_completed_pairing_outlives_the_daemon_that_recorded_it() {
 			&challenge,
 		))
 		.to_bytes();
-	let paired = pairing_client
+	pairing_client
 		.complete_pairing(Uuid::now_v7(), claimed.offer_id, signature)
 		.await
-		.unwrap();
+		.unwrap()
+}
+
+/// One whole Pairing over the protocol: the client proves it holds the
+/// identity it presented, and the Plane keeps its public key across the
+/// daemon that recorded it (ADR-0017, ADR-0090).
+#[tokio::test]
+async fn a_completed_pairing_outlives_the_daemon_that_recorded_it() {
+	let dir = tempfile::tempdir().unwrap();
+	let home = dir.path().join(".jet");
+	let client_id = Uuid::new_v4();
+	let signing = SigningKey::from_bytes(&[5; 32]);
+
+	let mut first = start_jetd(&home).await;
+	let owner = connect(&first, Uuid::new_v4()).await;
+	let pairing_client = connect(&first, client_id).await;
+	let paired = pair(&owner, &pairing_client, client_id, &signing).await;
 	first.child.kill().await.unwrap();
 
 	let second = start_jetd(&home).await;
@@ -220,13 +232,59 @@ async fn a_completed_pairing_outlives_the_daemon_that_recorded_it() {
 		(
 			&PairedClient {
 				client_id,
-				key,
+				key: ClientPublicKey {
+					algorithm: PairingKeyAlgorithm::Ed25519,
+					key: signing.verifying_key().to_bytes(),
+				},
 				pairing_protocol: "jet.pairing.v1".into(),
 				access: PairedClientAccess::Enabled,
 				paired_at_unix_ms: paired.paired_at_unix_ms,
 			},
 			None,
 			vec![paired.clone()]
+		)
+	);
+}
+
+/// Disabling and revoking are different durable decisions: one keeps the
+/// key the Plane holds for a client, the other forgets it (ADR-0017).
+#[tokio::test]
+async fn disabling_keeps_a_client_the_plane_can_enable_and_revoking_does_not() {
+	let dir = tempfile::tempdir().unwrap();
+	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	let client_id = Uuid::new_v4();
+	let owner = connect(&daemon, Uuid::new_v4()).await;
+	let pairing_client = connect(&daemon, client_id).await;
+	let paired = pair(
+		&owner,
+		&pairing_client,
+		client_id,
+		&SigningKey::from_bytes(&[6; 32]),
+	)
+	.await;
+
+	let disabled = owner
+		.set_paired_client_access(
+			Uuid::now_v7(),
+			client_id,
+			PairedClientAccess::Disabled,
+		)
+		.await
+		.unwrap();
+	let revoked = owner
+		.revoke_paired_client(Uuid::now_v7(), client_id)
+		.await
+		.unwrap();
+
+	assert_eq!(
+		(disabled, revoked, owner.pairing().await.unwrap().clients),
+		(
+			PairedClient {
+				access: PairedClientAccess::Disabled,
+				..paired
+			},
+			client_id,
+			vec![]
 		)
 	);
 }

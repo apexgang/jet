@@ -14,8 +14,8 @@ pub(crate) use capability::snapshot as capabilities;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_core::{
-	AccountBindingId, Actor, AuditSequence, AuthenticationString, Command,
-	CommandOutcome, ConflictState, Conversation, ConversationId,
+	AccountBindingId, Actor, AuditSequence, AuthenticationString, ClientId,
+	Command, CommandOutcome, ConflictState, Conversation, ConversationId,
 	ConversationList, ConversationSnapshot, CoreError, ErrorCategory, Event,
 	EventPage, EventPayload, EventSequence, PairingOfferId, PairingSecret,
 	PairingSignature, PlaneStatus, ProviderId, Query, QueryResult,
@@ -176,6 +176,17 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 			offer_id: PairingOfferId(*offer_id),
 			signature: PairingSignature(*signature),
 		},
+		wire::CommandRequest::SetPairedClientAccess { client_id, access } => {
+			Command::SetPairedClientAccess {
+				client_id: ClientId(*client_id),
+				access: pairing::access_from_wire(*access),
+			}
+		}
+		wire::CommandRequest::RevokePairedClient { client_id } => {
+			Command::RevokePairedClient {
+				client_id: ClientId(*client_id),
+			}
+		}
 		wire::CommandRequest::TransitionRun {
 			run_id,
 			expected_revision,
@@ -253,6 +264,16 @@ pub(crate) fn command_outcome(
 		CommandOutcome::PairingCompleted { client } => {
 			wire::CommandResponse::PairingCompleted {
 				client: pairing::client(client),
+			}
+		}
+		CommandOutcome::PairedClientAccessSet { client } => {
+			wire::CommandResponse::PairedClientAccessSet {
+				client: pairing::client(client),
+			}
+		}
+		CommandOutcome::PairedClientRevoked { client_id } => {
+			wire::CommandResponse::PairedClientRevoked {
+				client_id: client_id.0,
 			}
 		}
 	}

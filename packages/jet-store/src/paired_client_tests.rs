@@ -60,3 +60,50 @@ async fn pairing_again_replaces_the_key_the_plane_held_for_that_client() {
 
 	assert_eq!(clients, vec![recorded(&beside), recorded(&again)]);
 }
+
+#[tokio::test]
+async fn disabling_keeps_the_key_and_revoking_forgets_it() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = Store::open(&dir.path().join("plane.sqlite3"))
+		.await
+		.unwrap();
+	let disabled = Uuid::now_v7();
+	let revoked = Uuid::now_v7();
+
+	store
+		.write(async |tx| {
+			tx.upsert_paired_client(paired(disabled, 1, NOW_UNIX_MS))
+				.await?;
+			tx.upsert_paired_client(paired(revoked, 2, NOW_UNIX_MS + 1))
+				.await
+		})
+		.await
+		.unwrap();
+	store
+		.write(async |tx| {
+			tx.set_paired_client_access(disabled, PairedClientAccess::Disabled)
+				.await?;
+			tx.delete_paired_client(revoked).await
+		})
+		.await
+		.unwrap();
+	let remaining = store
+		.read(async |tx| tx.paired_clients().await)
+		.await
+		.unwrap();
+	let gone = store
+		.read(async |tx| tx.paired_client(revoked).await)
+		.await
+		.unwrap();
+
+	assert_eq!(
+		(remaining, gone),
+		(
+			vec![PairedClientRecord {
+				access: PairedClientAccess::Disabled,
+				..recorded(&paired(disabled, 1, NOW_UNIX_MS))
+			}],
+			None
+		)
+	);
+}
