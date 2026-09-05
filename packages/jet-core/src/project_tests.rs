@@ -10,9 +10,11 @@ use crate::test_support::{
 	request_with_id, start_core, start_core_with, stripped,
 };
 use crate::{
-	AuditOutcome, AuditRisk, AuditSequence, ClientId, Command, CommandId,
-	CommandOutcome, Core, CoreError, ErrorCategory, EventKind, EventSequence,
-	PathGrant, Project, Query, QueryResult,
+	AuditOutcome, AuditRisk, AuditSequence, CapabilityObservation, Checkout,
+	ClientId, Command, CommandId, CommandOutcome, Core, CoreError,
+	ErrorCategory, EventKind, EventSequence, GitLink, PathGrant, Project,
+	ProjectPreview, Query, QueryResult, Registrability, Repository,
+	ToolAvailability, Worktree,
 };
 
 async fn start(dir: &tempfile::TempDir) -> Core {
@@ -367,5 +369,187 @@ async fn every_working_tree_registers_as_its_own_project() {
 			repository.join("vendor/child"),
 			nested,
 		]
+	);
+}
+
+async fn preview(
+	core: &Core,
+	path: &Path,
+	observation: CapabilityObservation,
+) -> Result<ProjectPreview, CoreError> {
+	let result = core
+		.query(
+			&actor(),
+			Query::PreviewProject {
+				grant: PathGrant(path.to_path_buf()),
+				observation,
+			},
+		)
+		.await?;
+	let QueryResult::ProjectPreview(preview) = result else {
+		panic!("unexpected result {result:?}");
+	};
+	Ok(preview)
+}
+
+async fn registrability(core: &Core, path: &Path) -> Registrability {
+	preview(core, path, CapabilityObservation::LastObserved)
+		.await
+		.unwrap()
+		.registrability
+}
+
+/// A preview is the look before the grant (ADR-0101): it resolves the
+/// path and describes the working tree without registering anything.
+#[tokio::test]
+async fn a_preview_describes_the_working_tree_without_registering_it() {
+	let dir = tempfile::tempdir().unwrap();
+	let core = start(&dir).await;
+	let repository = init_repository(&dir.path().join("repo"));
+	let alias = dir.path().join("alias");
+	symlink(&repository, &alias).unwrap();
+
+	let previewed = preview(&core, &alias, CapabilityObservation::LastObserved)
+		.await
+		.unwrap();
+
+	assert_eq!(
+		(previewed, projects(&core).await, events(&core).await),
+		(
+			ProjectPreview {
+				root: repository,
+				registrability: Registrability::Registrable(Repository {
+					worktree: Worktree::Main,
+					checkout: Checkout::Full,
+					submodules: vec![],
+					lfs: ToolAvailability::Present {
+						version: "2.51.0".into()
+					},
+				}),
+			},
+			vec![],
+			vec![]
+		)
+	);
+}
+
+/// What keeps a directory from registering is answered as data the GUI
+/// acts on, not as text it would have to parse (ADR-0068); the one path
+/// it carries is the top of the working tree the user may grant instead.
+#[tokio::test]
+async fn a_preview_names_what_keeps_a_directory_from_registering() {
+	let dir = tempfile::tempdir().unwrap();
+	let core = start(&dir).await;
+	let repository = init_repository(&dir.path().join("repo"));
+	std::fs::create_dir_all(repository.join("src")).unwrap();
+	let plain = dir.path().join("plain");
+	std::fs::create_dir_all(&plain).unwrap();
+	git(dir.path(), &["init", "-q", "--bare", "bare.git"]);
+	let orphan = dir.path().join("orphan");
+	let doomed = init_repository(&dir.path().join("doomed"));
+	git(
+		&doomed,
+		&["worktree", "add", "-q", orphan.to_str().unwrap()],
+	);
+	std::fs::remove_dir_all(&doomed).unwrap();
+
+	assert_eq!(
+		[
+			registrability(&core, &plain).await,
+			registrability(&core, &dir.path().join("bare.git")).await,
+			registrability(&core, &repository.join(".git")).await,
+			registrability(&core, &repository.join("src")).await,
+			registrability(&core, &orphan).await,
+		],
+		[
+			Registrability::NotARepository,
+			Registrability::BareRepository,
+			Registrability::InsideGitDir,
+			Registrability::InsideWorkingTree {
+				toplevel: repository.clone()
+			},
+			Registrability::BrokenRepository,
+		]
+	);
+}
+
+/// ADR-0103: a linked worktree is reported with the repository it shares,
+/// sparse-checkout configuration is reported and left alone, a submodule
+/// is one Git link with its commit and nothing beneath it, and a nested
+/// repository is an opaque directory unless the index holds a Git link
+/// for it. Git LFS is reported from the Plane's Capability observation.
+#[tokio::test]
+async fn a_preview_reports_repository_edges_without_recursing() {
+	let dir = tempfile::tempdir().unwrap();
+	let probe = FixedProbe::new(equipped());
+	let core = start_core_with(
+		&dir.path().join("plane.sqlite3"),
+		Arc::new(crate::clock::SystemClock),
+		Arc::clone(&probe),
+	)
+	.await;
+	let repository = init_repository(&dir.path().join("repo"));
+	let linked = dir.path().join("linked");
+	git(
+		&repository,
+		&["worktree", "add", "-q", linked.to_str().unwrap()],
+	);
+	git(&linked, &["sparse-checkout", "set", "docs"]);
+	let child = init_repository(&dir.path().join("child"));
+	let child_commit = git(&child, &["rev-parse", "HEAD"]).trim().to_owned();
+	git(
+		&repository,
+		&[
+			"submodule",
+			"add",
+			"-q",
+			child.to_str().unwrap(),
+			"vendor/child",
+		],
+	);
+	init_repository(&repository.join("vendor/untracked"));
+	init_repository(&repository.join("vendor/adopted"));
+	git(&repository, &["add", "vendor/adopted"]);
+	let adopted_commit =
+		git(&repository.join("vendor/adopted"), &["rev-parse", "HEAD"])
+			.trim()
+			.to_owned();
+	probe.answer_with(stripped());
+
+	let main = registrability(&core, &repository).await;
+	let linked = preview(&core, &linked, CapabilityObservation::Fresh)
+		.await
+		.unwrap()
+		.registrability;
+
+	assert_eq!(
+		(main, linked),
+		(
+			Registrability::Registrable(Repository {
+				worktree: Worktree::Main,
+				checkout: Checkout::Full,
+				submodules: vec![
+					GitLink {
+						path: "vendor/adopted".into(),
+						commit: adopted_commit,
+					},
+					GitLink {
+						path: "vendor/child".into(),
+						commit: child_commit,
+					},
+				],
+				lfs: ToolAvailability::Present {
+					version: "2.51.0".into()
+				},
+			}),
+			Registrability::Registrable(Repository {
+				worktree: Worktree::Linked {
+					common_dir: repository.join(".git"),
+				},
+				checkout: Checkout::Sparse,
+				submodules: vec![],
+				lfs: ToolAvailability::Missing,
+			}),
+		)
 	);
 }

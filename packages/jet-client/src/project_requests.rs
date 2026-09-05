@@ -1,8 +1,8 @@
 //! The Project Query and Command (ADR-0025, ADR-0101).
 
 use jet_protocol::{
-	CommandRequest, CommandResponse, Project, ProjectList, QueryRequest,
-	QueryResponse,
+	CapabilityObservation, CommandRequest, CommandResponse, Project,
+	ProjectList, ProjectPreview, QueryRequest, QueryResponse,
 };
 use uuid::Uuid;
 
@@ -10,6 +10,45 @@ use crate::connection::{Client, ClientError};
 use crate::requests::unexpected;
 
 impl Client {
+	/// Shows what registering the Git working tree at the absolute `path`
+	/// would record: the directory it resolves to and what the Plane's Git
+	/// says about it. Nothing is registered (ADR-0101).
+	///
+	/// Git LFS is reported from the last observation of the Plane or a new
+	/// one, as `observation` chooses (ADR-0086).
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] with a stable `path_grant.*` code
+	/// when the path cannot be resolved, or the transport failure
+	/// otherwise.
+	pub async fn preview_project(
+		&self,
+		path: &str,
+		observation: CapabilityObservation,
+	) -> Result<ProjectPreview, ClientError> {
+		self.require_minor(jet_protocol::PROJECTS_MINOR)?;
+		match self
+			.query(QueryRequest::PreviewProject {
+				path: path.into(),
+				observation,
+			})
+			.await?
+		{
+			QueryResponse::ProjectPreview(preview) => Ok(preview),
+			other @ (QueryResponse::Status(_)
+			| QueryResponse::Conversations(_)
+			| QueryResponse::Conversation(_)
+			| QueryResponse::Events(_)
+			| QueryResponse::Settings(_)
+			| QueryResponse::Capabilities(_)
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)
+			| QueryResponse::Projects(_)) => Err(unexpected(&other)),
+		}
+	}
+
 	/// Registers the Git working tree at the absolute `path` as a Project
 	/// under the Command identity `command_id`, which a retry must reuse
 	/// (ADR-0093).
@@ -77,7 +116,8 @@ impl Client {
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
 			| QueryResponse::SecurityAudit(_)
-			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
+			| QueryResponse::Pairing(_)
+			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 }

@@ -14,7 +14,7 @@ use crate::conversation::{
 use crate::error::CoreError;
 use crate::event::{EVENT_PAGE_LIMIT, Event, EventPage, EventSequence};
 use crate::pairing::{self, PairingSnapshot};
-use crate::project::ProjectList;
+use crate::project::{self, PathGrant, ProjectList, ProjectPreview};
 use crate::setting::{self, SettingScope, SettingSelection, SettingSnapshot};
 use crate::status::PlaneStatus;
 use crate::{Actor, CORE_VERSION, Core, PlaneId};
@@ -74,6 +74,14 @@ pub enum Query {
 	},
 	/// Every registered Project on the Plane (ADR-0025).
 	Projects,
+	/// What a Path grant would register, before it is made (ADR-0101).
+	PreviewProject {
+		/// The absolute path the user is about to grant.
+		grant: PathGrant,
+		/// Whether Git LFS is reported from the last observation of the
+		/// Plane or a new one, taken now (ADR-0086).
+		observation: CapabilityObservation,
+	},
 }
 
 /// Snapshots returned by [`Core::query`].
@@ -99,6 +107,8 @@ pub enum QueryResult {
 	SecurityAudit(AuditPage),
 	/// Every registered Project on the Plane.
 	Projects(ProjectList),
+	/// What a Path grant would register.
+	ProjectPreview(ProjectPreview),
 }
 
 impl Core {
@@ -216,6 +226,9 @@ impl Core {
 						}))
 					})
 					.await
+			}
+			Query::PreviewProject { grant, observation } => {
+				project::preview(self, actor, &grant, observation).await
 			}
 			Query::Projects => {
 				self.store

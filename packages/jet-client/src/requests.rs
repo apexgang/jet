@@ -39,7 +39,8 @@ impl Client {
 			| QueryResponse::AccountBindings(_)
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
-			| QueryResponse::Projects(_)) => Err(unexpected(&other)),
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -61,7 +62,8 @@ impl Client {
 			| QueryResponse::AccountBindings(_)
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
-			| QueryResponse::Projects(_)) => Err(unexpected(&other)),
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -90,7 +92,8 @@ impl Client {
 			| QueryResponse::AccountBindings(_)
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
-			| QueryResponse::Projects(_)) => Err(unexpected(&other)),
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -119,7 +122,8 @@ impl Client {
 			| QueryResponse::AccountBindings(_)
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
-			| QueryResponse::Projects(_)) => Err(unexpected(&other)),
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -145,7 +149,8 @@ impl Client {
 			| QueryResponse::AccountBindings(_)
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
-			| QueryResponse::Projects(_)) => Err(unexpected(&other)),
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -209,7 +214,8 @@ impl Client {
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
 			| QueryResponse::Pairing(_)
-			| QueryResponse::Projects(_)) => Err(unexpected(&other)),
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -363,7 +369,8 @@ impl Client {
 			| QueryResponse::AccountBindings(_)
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
-			| QueryResponse::Projects(_)) => Err(unexpected(&other)),
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -478,7 +485,8 @@ impl Client {
 			| QueryResponse::AccountBindings(_)
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
-			| QueryResponse::Projects(_)) => Err(unexpected(&other)),
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -514,7 +522,8 @@ impl Client {
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
-			| QueryResponse::Projects(_)) => Err(unexpected(&other)),
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 

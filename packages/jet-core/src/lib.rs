@@ -93,7 +93,10 @@ pub use pairing::{
 	PairingDisclosure, PairingEnd, PairingOfferId, PairingProgress,
 	PairingSecret, PairingSignature, PairingSnapshot, PendingPairing,
 };
-pub use project::{PathGrant, Project, ProjectList};
+pub use project::{
+	Checkout, GitLink, PathGrant, Project, ProjectList, ProjectPreview,
+	Registrability, Repository, Worktree,
+};
 pub use query::{Query, QueryResult};
 pub use remote::RemoteSession;
 pub use security::{SecurityDegradation, SecurityState};

@@ -16,11 +16,15 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::audit::{self, AuditDecision, AuditSubject, Decision};
+use crate::capability::{
+	CapabilityObservation, CapabilitySnapshot, ExternalTool, ToolAvailability,
+};
 use crate::command::CommandOutcome;
 use crate::error::CoreError;
 use crate::event::{EventKind, EventSequence, EventSubject};
-use crate::repository::{self, Verdict, blocking, canonicalize};
-use crate::{Actor, ClientId, ProjectId, system_time};
+use crate::query::QueryResult;
+use crate::repository::{self, Inspection, Verdict, blocking, canonicalize};
+use crate::{Actor, ClientId, Core, ProjectId, system_time};
 
 /// An interactive user's explicit authorization for Jet to register the
 /// directory at one absolute path (see `Path grant`). It is the only form
@@ -51,6 +55,89 @@ pub struct ProjectList {
 	pub cursor: EventSequence,
 	/// The Projects in the order they were registered.
 	pub projects: Vec<Project>,
+}
+
+/// What a Path grant would register, shown before anything is recorded
+/// (ADR-0101).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectPreview {
+	/// The canonical directory the grant resolves to.
+	pub root: PathBuf,
+	/// Whether that directory can be a Project, and what it is if so.
+	pub registrability: Registrability,
+}
+
+/// Whether a granted directory can be a Project (ADR-0103). What keeps it
+/// from registering is answered as data, so a GUI acts on it without
+/// parsing a message (ADR-0068).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Registrability {
+	/// An ordinary working tree, described.
+	Registrable(Repository),
+	/// Git finds no repository at the directory or above it.
+	NotARepository,
+	/// The directory carries a `.git` entry that Git cannot open, such as
+	/// a linked worktree whose repository is gone.
+	BrokenRepository,
+	/// A bare repository, which has no working tree for Runs, diffs, and
+	/// Change checkpoints to use.
+	BareRepository,
+	/// The directory lies inside a repository's own `.git` directory.
+	InsideGitDir,
+	/// The directory lies inside a working tree without being its top. The
+	/// grant is for the directory named, so the user may grant the top
+	/// instead.
+	InsideWorkingTree {
+		/// The top of the working tree the directory lies in.
+		toplevel: PathBuf,
+	},
+}
+
+/// A registrable working tree as `git` describes it (ADR-0103).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Repository {
+	/// Whether the working tree is the repository's own or a linked one.
+	pub worktree: Worktree,
+	/// Whether a sparse checkout narrows it. Jet reports the configuration
+	/// and never changes it.
+	pub checkout: Checkout,
+	/// The submodules its index holds, each as its Git link alone. Nothing
+	/// beneath a link is managed or listed.
+	pub submodules: Vec<GitLink>,
+	/// Whether the Plane has Git LFS, from the Capability observation the
+	/// preview asked for. Jet never bundles it.
+	pub lfs: ToolAvailability,
+}
+
+/// Which working tree of its repository a Project is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Worktree {
+	/// The repository's own working tree.
+	Main,
+	/// A linked worktree, sharing the repository at `common_dir`.
+	Linked {
+		/// The `.git` directory (or bare repository) the worktree shares.
+		common_dir: PathBuf,
+	},
+}
+
+/// Whether a working tree is checked out in full.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Checkout {
+	/// Every tracked path is present.
+	Full,
+	/// Sparse checkout narrows which paths are present.
+	Sparse,
+}
+
+/// One submodule as the index records it: a path that holds a commit of
+/// another repository (ADR-0103).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitLink {
+	/// The path inside the working tree, as Git spells it.
+	pub path: String,
+	/// The commit the link points at, as Git spells it.
+	pub commit: String,
 }
 
 /// A root a Path grant resolved to and `git` accepted, ready to record.
@@ -132,12 +219,7 @@ pub(crate) async fn prepare_registration(
 	actor: &Actor,
 	grant: &PathGrant,
 ) -> Result<Registrable, CoreError> {
-	// ADR-0101: a Path grant is an interactive user's to make. Both Actors
-	// this core knows are interactive; a Harness, Craft, Scheduled-task, or
-	// automatic Actor added later is refused here.
-	match actor {
-		Actor::InteractiveClient { .. } | Actor::RemoteClient { .. } => {}
-	}
+	require_interactive(actor);
 	let root = grant.canonical_root().await?;
 	match repository::verdict(&root).await? {
 		Verdict::Registrable => Ok(Registrable { root }),
@@ -163,6 +245,83 @@ pub(crate) async fn prepare_registration(
 			 of that working tree instead",
 		)),
 	}
+}
+
+/// ADR-0101: a Path grant is an interactive user's to make, and so is the
+/// look before it. Both Actors this core knows are interactive; a Harness,
+/// Craft, Scheduled-task, or automatic Actor added later is refused here.
+fn require_interactive(actor: &Actor) {
+	match actor {
+		Actor::InteractiveClient { .. } | Actor::RemoteClient { .. } => {}
+	}
+}
+
+/// Shows what `grant` would register: the directory it resolves to and
+/// what `git` says about it, without recording anything.
+///
+/// Git LFS is reported from the Capability observation `observation`
+/// selects, the way Account bindings report their credential store
+/// (ADR-0086).
+///
+/// # Errors
+///
+/// Returns the grant's own refusals, or what the inspection reports when
+/// it cannot answer.
+pub(crate) async fn preview(
+	core: &Core,
+	actor: &Actor,
+	grant: &PathGrant,
+	observation: CapabilityObservation,
+) -> Result<QueryResult, CoreError> {
+	require_interactive(actor);
+	let root = grant.canonical_root().await?;
+	let registrability = match repository::verdict(&root).await? {
+		Verdict::Registrable => {
+			let Inspection {
+				worktree,
+				checkout,
+				submodules,
+			} = repository::inspect(&root).await?;
+			let capabilities = match observation {
+				CapabilityObservation::LastObserved => {
+					core.capabilities().await
+				}
+				CapabilityObservation::Fresh => {
+					core.observe_capabilities().await
+				}
+			};
+			Registrability::Registrable(Repository {
+				worktree,
+				checkout,
+				submodules,
+				lfs: lfs(&capabilities),
+			})
+		}
+		Verdict::NotARepository => Registrability::NotARepository,
+		Verdict::BrokenRepository => Registrability::BrokenRepository,
+		Verdict::BareRepository => Registrability::BareRepository,
+		Verdict::InsideGitDir => Registrability::InsideGitDir,
+		Verdict::InsideWorkingTree { toplevel } => {
+			Registrability::InsideWorkingTree { toplevel }
+		}
+	};
+	Ok(QueryResult::ProjectPreview(ProjectPreview {
+		root,
+		registrability,
+	}))
+}
+
+/// What the Plane found when it looked for Git LFS. A snapshot names every
+/// tool the core looks for, so one that does not name it was taken by a
+/// core that did not look, and that is a Plane without it.
+fn lfs(capabilities: &CapabilitySnapshot) -> ToolAvailability {
+	capabilities
+		.external_tools
+		.iter()
+		.find(|status| status.tool == ExternalTool::GitLfs)
+		.map_or(ToolAvailability::Missing, |status| {
+			status.availability.clone()
+		})
 }
 
 /// Records a prepared root as a Project, journals it, and records the

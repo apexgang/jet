@@ -69,6 +69,12 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 			after: AuditSequence(*after),
 		},
 		wire::QueryRequest::Projects => Query::Projects,
+		wire::QueryRequest::PreviewProject { path, observation } => {
+			Query::PreviewProject {
+				grant: PathGrant(PathBuf::from(path)),
+				observation: capability::observation(*observation),
+			}
+		}
 	}
 }
 
@@ -108,6 +114,9 @@ pub(crate) fn query_result(
 		}
 		QueryResult::Projects(list) => {
 			wire::QueryResponse::Projects(project::list(list))
+		}
+		QueryResult::ProjectPreview(preview) => {
+			wire::QueryResponse::ProjectPreview(project::preview(preview))
 		}
 	})
 }

@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 
 use jet_client::ClientError;
 use jet_protocol::{
-	Actor, ClientMessage, ErrorCategory, PAIRING_MINOR, Project, QueryRequest,
-	ServerHello, ServerMessage,
+	Actor, CapabilityObservation, Checkout, ClientMessage, ErrorCategory,
+	ExternalTool, PAIRING_MINOR, Project, ProjectPreview, QueryRequest,
+	Registrability, Repository, ServerHello, ServerMessage, Worktree,
 };
 use pretty_assertions::assert_eq;
 use support::{connect, handshake_raw, hello, start_jetd};
@@ -170,6 +171,64 @@ async fn a_client_below_the_project_minor_is_refused() {
 			ErrorCategory::Incompatible,
 			"protocol.unsupported_minor",
 			"the Project Query needs protocol minor 8"
+		)
+	);
+}
+
+/// A preview is the look before the grant (ADR-0101): it names the
+/// directory the path resolves to and what the Plane's Git makes of it,
+/// and registers nothing.
+#[tokio::test]
+async fn a_preview_describes_a_working_tree_without_registering_it() {
+	let dir = tempfile::tempdir().unwrap();
+	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	let client = connect(&daemon, Uuid::new_v4()).await;
+	let repository = init_repository(&dir.path().join("repo"));
+	std::fs::create_dir_all(repository.join("src")).unwrap();
+	let lfs = client
+		.capabilities(CapabilityObservation::LastObserved)
+		.await
+		.unwrap()
+		.external_tools
+		.into_iter()
+		.find(|status| status.tool == ExternalTool::GitLfs)
+		.unwrap()
+		.availability;
+
+	let previewed = client
+		.preview_project(
+			dir.path().join("repo").to_str().unwrap(),
+			CapabilityObservation::LastObserved,
+		)
+		.await
+		.unwrap();
+	let inside = client
+		.preview_project(
+			repository.join("src").to_str().unwrap(),
+			CapabilityObservation::LastObserved,
+		)
+		.await
+		.unwrap();
+	let listed = client.projects().await.unwrap();
+
+	assert_eq!(
+		(previewed, inside.registrability, listed.projects),
+		(
+			ProjectPreview {
+				root: repository.display().to_string(),
+				registrability: Registrability::Registrable {
+					repository: Repository {
+						worktree: Worktree::Main,
+						checkout: Checkout::Full,
+						submodules: vec![],
+						lfs,
+					},
+				},
+			},
+			Registrability::InsideWorkingTree {
+				toplevel: repository.display().to_string(),
+			},
+			vec![]
 		)
 	);
 }

@@ -35,7 +35,8 @@ impl Client {
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
 			| QueryResponse::SecurityAudit(_)
-			| QueryResponse::Projects(_)) => Err(unexpected(&other)),
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 

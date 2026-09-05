@@ -408,6 +408,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::PROJECTS_MINOR,
 			feature: "the Project Query",
 		}),
+		QueryRequest::PreviewProject { .. } => Some(MinorRequirement {
+			minor: jet_protocol::PROJECTS_MINOR,
+			feature: "the Project preview Query",
+		}),
 		QueryRequest::Status
 		| QueryRequest::Conversations
 		| QueryRequest::Conversation { .. }

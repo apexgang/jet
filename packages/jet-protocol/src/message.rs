@@ -14,7 +14,7 @@ use crate::conversation::{
 };
 use crate::event::Event;
 use crate::pairing::PairingSnapshot;
-use crate::project::ProjectList;
+use crate::project::{ProjectList, ProjectPreview};
 use crate::setting::{SettingScope, SettingSelection, SettingSnapshot};
 
 /// Correlates a client request with its server reply.
@@ -142,6 +142,16 @@ pub enum QueryRequest {
 	},
 	/// Every registered Project on the Plane.
 	Projects,
+	/// What registering the Git working tree at an absolute path would
+	/// record, before the Path grant is made: the directory it resolves to
+	/// and what the Plane's Git says about it.
+	PreviewProject {
+		/// The absolute path the user is about to grant.
+		path: String,
+		/// Whether Git LFS is reported from the last observation of the
+		/// Plane or a new one, taken now.
+		observation: CapabilityObservation,
+	},
 }
 
 /// Query snapshots.
@@ -168,6 +178,8 @@ pub enum QueryResponse {
 	SecurityAudit(SecurityAudit),
 	/// Every registered Project on the Plane.
 	Projects(ProjectList),
+	/// What a Path grant would register.
+	ProjectPreview(ProjectPreview),
 }
 
 /// One page of journal Events, fenced by the journal position it was read

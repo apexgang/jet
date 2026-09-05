@@ -79,7 +79,10 @@ pub use pairing::{
 	PairingEnd, PairingGate, PairingKeyAlgorithm, PairingMethod,
 	PairingProgress, PairingSnapshot, PendingPairing,
 };
-pub use project::{Project, ProjectList};
+pub use project::{
+	Checkout, GitLink, Project, ProjectList, ProjectPreview, Registrability,
+	Repository, Worktree,
+};
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,
 	SettingSnapshot, SettingSource, SettingValue,
