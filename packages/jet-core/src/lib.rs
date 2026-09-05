@@ -29,6 +29,11 @@ mod pairing_identity;
 mod pairing_offer;
 mod pairing_secret;
 mod query;
+#[allow(
+	dead_code,
+	reason = "used by Query::ProjectEntry in the next stage of #15"
+)]
+mod relative_path;
 mod remote;
 mod remote_pairing;
 mod security;
