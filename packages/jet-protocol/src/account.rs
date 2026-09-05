@@ -10,6 +10,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::capability::CredentialStoreKind;
+
 /// Which backend a client asks a new binding to resolve its Credential
 /// through.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +87,44 @@ pub struct AccountBinding {
 	pub created_at_unix_ms: i64,
 }
 
+/// Whether one binding's Credential can be resolved right now, and what
+/// has to happen when it cannot. `jetd` never asks a person for a secret,
+/// so a backend that will not answer becomes one of these and the GUI
+/// starts the operating system's own unlock flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum CredentialState {
+	/// The backend answers, so the Credential resolves at the moment of
+	/// use.
+	Resolvable,
+	/// The backend is present but locked. Work that needs the Credential
+	/// waits until the user unlocks it.
+	WaitingForUnlock {
+		/// The store that is locked.
+		kind: CredentialStoreKind,
+	},
+	/// The backend cannot be reached on this Plane at all, so this binding
+	/// cannot be used until secure storage is set up.
+	Unavailable {
+		/// The store that was expected.
+		kind: CredentialStoreKind,
+	},
+	/// A session-only Credential that an earlier daemon start established.
+	/// This one holds nothing, so it must be established again.
+	InvalidatedByRestart,
+}
+
+/// One Account binding beside the state of the Credential it resolves. The
+/// binding is durable Plane state; the state beside it is observed when the
+/// Query runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountBindingStatus {
+	/// The binding as the Plane recorded it.
+	pub binding: AccountBinding,
+	/// Whether its Credential can be resolved right now.
+	pub credential_state: CredentialState,
+}
+
 /// Every Account binding on one Plane, fenced by a journal cursor
 /// (ADR-0092).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,5 +134,5 @@ pub struct AccountBindingList {
 	#[serde(with = "crate::decimal")]
 	pub cursor: u64,
 	/// The bindings in the order they were established.
-	pub bindings: Vec<AccountBinding>,
+	pub bindings: Vec<AccountBindingStatus>,
 }

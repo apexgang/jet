@@ -114,6 +114,17 @@ pub(crate) fn equipped() -> ObservedCapabilities {
 	}
 }
 
+/// The same Plane whose credential store is present but locked, so it
+/// answers nothing until the user unlocks it (ADR-0076).
+pub(crate) fn locked() -> ObservedCapabilities {
+	ObservedCapabilities {
+		credential_store: CredentialStoreStatus::Locked {
+			kind: CredentialStoreKind::SecretService,
+		},
+		..equipped()
+	}
+}
+
 /// The same Plane after Git and Tailscale were uninstalled, its Craft
 /// removed, and its session bus lost.
 pub(crate) fn stripped() -> ObservedCapabilities {

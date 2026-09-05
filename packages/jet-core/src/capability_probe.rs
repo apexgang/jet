@@ -93,6 +93,13 @@ fn first_line(output: &[u8]) -> Option<String> {
 /// Which credential store this platform resolves through, and whether it
 /// can be reached. Jet never falls back to plaintext, so an unreachable
 /// store is reported rather than replaced (ADR-0076).
+///
+/// This looks for the backend rather than into it. Telling a locked
+/// backend from an open one means speaking the Secret Service D-Bus
+/// interface on Linux and the Keychain API on macOS, which this Plane does
+/// not yet do; until it does, a backend it can find is reported as
+/// available, and a Plane reports [`CredentialStoreStatus::Locked`] only
+/// through a probe that can see the difference.
 fn credential_store() -> CredentialStoreStatus {
 	if cfg!(target_os = "macos") {
 		// The Keychain is part of the operating system.

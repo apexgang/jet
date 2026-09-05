@@ -43,7 +43,11 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 				observation: capability::observation(*observation),
 			}
 		}
-		wire::QueryRequest::AccountBindings => Query::AccountBindings,
+		wire::QueryRequest::AccountBindings { observation } => {
+			Query::AccountBindings {
+				observation: capability::observation(*observation),
+			}
+		}
 		wire::QueryRequest::Settings { scope, selection } => Query::Settings {
 			scope: setting::scope_from_wire(*scope),
 			selection: setting::selection_from_wire(*selection),

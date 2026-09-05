@@ -1,8 +1,9 @@
 //! The Account binding half of the translation seam (ADR-0049, ADR-0016).
 
 use jet_core::{
-	AccountBinding, AccountBindingId, AccountBindingList, CredentialItem,
-	CredentialReference, CredentialSource, ProviderAccount, ProviderId,
+	AccountBinding, AccountBindingId, AccountBindingList, AccountBindingStatus,
+	CredentialItem, CredentialReference, CredentialSource, CredentialState,
+	ProviderAccount, ProviderId,
 };
 use jet_protocol as wire;
 
@@ -11,7 +12,33 @@ use super::unix_ms;
 pub(super) fn list(list: AccountBindingList) -> wire::AccountBindingList {
 	wire::AccountBindingList {
 		cursor: list.cursor.0,
-		bindings: list.bindings.into_iter().map(binding).collect(),
+		bindings: list.bindings.into_iter().map(status).collect(),
+	}
+}
+
+fn status(status: AccountBindingStatus) -> wire::AccountBindingStatus {
+	wire::AccountBindingStatus {
+		binding: binding(status.binding),
+		credential_state: credential_state(status.credential_state),
+	}
+}
+
+fn credential_state(state: CredentialState) -> wire::CredentialState {
+	match state {
+		CredentialState::Resolvable => wire::CredentialState::Resolvable,
+		CredentialState::WaitingForUnlock { kind } => {
+			wire::CredentialState::WaitingForUnlock {
+				kind: super::capability::credential_store_kind(kind),
+			}
+		}
+		CredentialState::Unavailable { kind } => {
+			wire::CredentialState::Unavailable {
+				kind: super::capability::credential_store_kind(kind),
+			}
+		}
+		CredentialState::InvalidatedByRestart => {
+			wire::CredentialState::InvalidatedByRestart
+		}
 	}
 }
 

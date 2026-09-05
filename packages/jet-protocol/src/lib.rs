@@ -25,8 +25,8 @@ mod stream_control;
 mod stream_error;
 
 pub use account::{
-	AccountBinding, AccountBindingList, CredentialItem, CredentialReference,
-	CredentialSource,
+	AccountBinding, AccountBindingList, AccountBindingStatus, CredentialItem,
+	CredentialReference, CredentialSource, CredentialState,
 };
 pub use artifact::{
 	ArtifactError, ArtifactVerifier, DigestError, Sha256Digest,

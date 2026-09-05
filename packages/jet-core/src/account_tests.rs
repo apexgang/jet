@@ -1,12 +1,20 @@
 use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pretty_assertions::assert_eq;
 
-use crate::test_support::{actor, request, start_core};
+use crate::capability::CredentialStoreKind;
+use crate::test_support::{
+	FixedProbe, ManualClock, actor, equipped, locked, request, start_core,
+	start_core_with, stripped,
+};
 use crate::{
-	AccountBinding, AccountBindingId, Command, CommandOutcome, Core, CoreError,
-	CredentialItem, CredentialReference, CredentialSource, ErrorCategory,
-	EventKind, EventSequence, ProviderAccount, ProviderId, Query, QueryResult,
+	AccountBinding, AccountBindingId, AccountBindingStatus,
+	CapabilityObservation, Command, CommandOutcome, Core, CoreError,
+	CredentialItem, CredentialReference, CredentialSource, CredentialState,
+	DegradedCondition, ErrorCategory, EventKind, EventSequence,
+	ProviderAccount, ProviderId, Query, QueryResult,
 };
 
 /// The credential-store service every Jet Credential item lives under, as a
@@ -63,12 +71,38 @@ async fn unbind(
 		.await
 }
 
-async fn bindings(core: &Core) -> Vec<AccountBinding> {
-	let result = core.query(&actor(), Query::AccountBindings).await.unwrap();
+async fn bindings(core: &Core) -> Vec<AccountBindingStatus> {
+	observed_bindings(core, CapabilityObservation::LastObserved).await
+}
+
+async fn observed_bindings(
+	core: &Core,
+	observation: CapabilityObservation,
+) -> Vec<AccountBindingStatus> {
+	let result = core
+		.query(&actor(), Query::AccountBindings { observation })
+		.await
+		.unwrap();
 	let QueryResult::AccountBindings(list) = result else {
 		panic!("unexpected result {result:?}");
 	};
 	list.bindings
+}
+
+async fn credential_states(core: &Core) -> Vec<CredentialState> {
+	bindings(core)
+		.await
+		.into_iter()
+		.map(|status| status.credential_state)
+		.collect()
+}
+
+/// One binding whose Credential the Plane can resolve right now.
+fn resolvable(binding: AccountBinding) -> AccountBindingStatus {
+	AccountBindingStatus {
+		binding,
+		credential_state: CredentialState::Resolvable,
+	}
 }
 
 async fn events(core: &Core) -> Vec<EventKind> {
@@ -126,7 +160,7 @@ async fn a_binding_keeps_only_the_reference_its_credential_resolves_through() {
 				credential: platform_item(bound.binding_id),
 				created_at: bound.created_at,
 			},
-			vec![bound.clone()]
+			vec![resolvable(bound.clone())]
 		)
 	);
 }
@@ -235,7 +269,9 @@ async fn a_provider_account_is_bound_once_per_provider() {
 		(
 			ErrorCategory::Conflict,
 			"account.already_bound",
-			vec![first, elsewhere, unidentified, also_unidentified]
+			[first, elsewhere, unidentified, also_unidentified]
+				.map(resolvable)
+				.to_vec()
 		)
 	);
 }
@@ -419,5 +455,153 @@ async fn bindings_outlive_the_daemon_that_established_them() {
 
 	let second = start_core(path).await;
 
-	assert_eq!(bindings(&second).await, vec![bound]);
+	assert_eq!(bindings(&second).await, vec![resolvable(bound)]);
+}
+
+/// The one instant every observation in these tests is taken at.
+fn observed_at() -> SystemTime {
+	UNIX_EPOCH + Duration::from_secs(1_700_000_000)
+}
+
+async fn start_observing(
+	dir: &tempfile::TempDir,
+	probe: Arc<FixedProbe>,
+) -> Core {
+	start_core_with(
+		&dir.path().join("plane.sqlite3"),
+		ManualClock::at(observed_at()),
+		probe,
+	)
+	.await
+}
+
+async fn degraded(core: &Core) -> Vec<DegradedCondition> {
+	let result = core
+		.query(
+			&actor(),
+			Query::Capabilities {
+				observation: CapabilityObservation::LastObserved,
+			},
+		)
+		.await
+		.unwrap();
+	let QueryResult::Capabilities(snapshot) = result else {
+		panic!("unexpected result {result:?}");
+	};
+	snapshot.degraded
+}
+
+/// A locked backend hides the secrets it holds, not the store itself: the
+/// binding is recorded and reports that it waits for the unlock the user
+/// performs through the operating system. `jetd` never asks for that itself
+/// (ADR-0076).
+#[tokio::test]
+async fn a_locked_credential_store_makes_a_binding_wait() {
+	let dir = tempfile::tempdir().unwrap();
+	let probe = FixedProbe::new(locked());
+	let core = start_observing(&dir, Arc::clone(&probe)).await;
+
+	let bound = bind(&core, "Work", None, CredentialSource::PlatformStore)
+		.await
+		.unwrap();
+	let while_locked = credential_states(&core).await;
+	let conditions = degraded(&core).await;
+	probe.answer_with(equipped());
+	let after_unlocking =
+		observed_bindings(&core, CapabilityObservation::Fresh).await;
+
+	assert_eq!(
+		(while_locked, conditions, after_unlocking),
+		(
+			vec![CredentialState::WaitingForUnlock {
+				kind: CredentialStoreKind::SecretService
+			}],
+			vec![DegradedCondition::CredentialStoreLocked {
+				kind: CredentialStoreKind::SecretService
+			}],
+			vec![resolvable(bound)]
+		)
+	);
+}
+
+/// A Plane with no credential store cannot hold a Credential durably, and
+/// Jet keeps no secret of its own instead: the durable binding is refused
+/// with what the Plane cannot do, while the honest session-only
+/// arrangement remains available (ADR-0076, ADR-0086).
+#[tokio::test]
+async fn a_plane_without_a_credential_store_refuses_a_durable_binding() {
+	let dir = tempfile::tempdir().unwrap();
+	let probe = FixedProbe::new(equipped());
+	let core = start_observing(&dir, Arc::clone(&probe)).await;
+	let bound = bind(&core, "Work", None, CredentialSource::PlatformStore)
+		.await
+		.unwrap();
+	probe.answer_with(stripped());
+
+	let refused =
+		bind(&core, "Also work", None, CredentialSource::PlatformStore)
+			.await
+			.unwrap_err();
+	let session = bind(&core, "Today", None, CredentialSource::SessionOnly)
+		.await
+		.unwrap();
+	let states = credential_states(&core).await;
+
+	assert_eq!(
+		(
+			refused.category,
+			refused.code.as_str(),
+			refused.message,
+			states
+		),
+		(
+			ErrorCategory::Unavailable,
+			"capability.unavailable",
+			"this Plane cannot use the platform credential store right now"
+				.into(),
+			vec![
+				CredentialState::Unavailable {
+					kind: CredentialStoreKind::SecretService
+				},
+				CredentialState::Resolvable,
+			]
+		)
+	);
+	assert_eq!(
+		bindings(&core)
+			.await
+			.into_iter()
+			.map(|status| status.binding)
+			.collect::<Vec<_>>(),
+		vec![bound, session]
+	);
+}
+
+/// A session-only Credential lives in the memory of the daemon start that
+/// established it. The binding survives a restart; the Credential does not,
+/// and the Plane says so rather than pretending otherwise (ADR-0076).
+#[tokio::test]
+async fn a_session_only_credential_does_not_outlive_its_daemon_start() {
+	let dir = tempfile::tempdir().unwrap();
+	let path: &Path = &dir.path().join("plane.sqlite3");
+	let first = start_core(path).await;
+	let bound = bind(&first, "Today", None, CredentialSource::SessionOnly)
+		.await
+		.unwrap();
+	let while_held = credential_states(&first).await;
+	first.close().await;
+
+	let second = start_core(path).await;
+	let after_restart = bindings(&second).await;
+
+	assert_eq!(
+		(while_held, after_restart),
+		(
+			vec![CredentialState::Resolvable],
+			vec![AccountBindingStatus {
+				binding: bound,
+				credential_state: CredentialState::InvalidatedByRestart,
+			}]
+		)
+	);
 }

@@ -7,12 +7,15 @@ mod support;
 
 use jet_client::ClientError;
 use jet_protocol::{
-	AccountBinding, ClientMessage, CredentialItem, CredentialReference,
-	CredentialSource, ErrorCategory, QueryRequest,
-	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, ServerMessage,
+	AccountBinding, AccountBindingStatus, CapabilityObservation, ClientMessage,
+	CredentialItem, CredentialReference, CredentialSource, CredentialState,
+	ErrorCategory, QueryRequest, SETTINGS_AND_CAPABILITIES_MINOR, ServerHello,
+	ServerMessage,
 };
 use pretty_assertions::assert_eq;
-use support::{connect, handshake_raw, hello, start_jetd};
+use support::{
+	connect, handshake_raw, hello, start_jetd, start_jetd_with_credential_store,
+};
 use uuid::Uuid;
 
 /// The service every Jet Credential item lives under, as a client reads it
@@ -38,7 +41,7 @@ async fn a_binding_and_its_reference_outlive_the_daemon_that_stored_them() {
 	let home = dir.path().join(".jet");
 	let client_id = Uuid::new_v4();
 
-	let mut first = start_jetd(&home).await;
+	let mut first = start_jetd_with_credential_store(&home).await;
 	let client = connect(&first, client_id).await;
 	let bound = client
 		.bind_account(
@@ -52,14 +55,20 @@ async fn a_binding_and_its_reference_outlive_the_daemon_that_stored_them() {
 		.unwrap();
 	first.child.kill().await.unwrap();
 
-	let second = start_jetd(&home).await;
+	let second = start_jetd_with_credential_store(&home).await;
 	let client = connect(&second, client_id).await;
-	let resumed = client.account_bindings().await.unwrap();
+	let resumed = client
+		.account_bindings(CapabilityObservation::Fresh)
+		.await
+		.unwrap();
 	let forgotten = client
 		.unbind_account(Uuid::now_v7(), bound.binding_id)
 		.await
 		.unwrap();
-	let remaining = client.account_bindings().await.unwrap();
+	let remaining = client
+		.account_bindings(CapabilityObservation::LastObserved)
+		.await
+		.unwrap();
 
 	assert_eq!(
 		(&bound, resumed.bindings, forgotten, remaining.bindings),
@@ -72,7 +81,10 @@ async fn a_binding_and_its_reference_outlive_the_daemon_that_stored_them() {
 				credential: platform_item(&bound),
 				created_at_unix_ms: bound.created_at_unix_ms,
 			},
-			vec![bound.clone()],
+			vec![AccountBindingStatus {
+				binding: bound.clone(),
+				credential_state: CredentialState::Resolvable,
+			}],
 			platform_item(&bound),
 			vec![]
 		)
@@ -98,7 +110,10 @@ async fn a_secret_pasted_into_binding_metadata_is_refused() {
 		)
 		.await
 		.unwrap_err();
-	let stored = client.account_bindings().await.unwrap();
+	let stored = client
+		.account_bindings(CapabilityObservation::LastObserved)
+		.await
+		.unwrap();
 
 	let ClientError::Remote(error) = error else {
 		panic!("expected a stable remote error, got {error:?}");
@@ -137,7 +152,9 @@ async fn a_client_below_the_account_binding_minor_is_refused() {
 	connection
 		.send(&ClientMessage::Query {
 			id: 1,
-			query: QueryRequest::AccountBindings,
+			query: QueryRequest::AccountBindings {
+				observation: CapabilityObservation::LastObserved,
+			},
 		})
 		.await;
 

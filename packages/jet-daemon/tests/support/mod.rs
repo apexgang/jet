@@ -50,6 +50,17 @@ pub async fn start_jetd_without_external_tools(home: &Path) -> Daemon {
 	start_jetd_process(jetd(home).env("PATH", "/jet-has-no-tools-here")).await
 }
 
+/// Starts `jetd` on a Plane whose credential store answers, so a test that
+/// binds an account through the platform store runs the same way wherever
+/// it runs. macOS resolves through the Keychain; on Linux the probe reads
+/// the advertised session bus address a Secret Service would answer on.
+pub async fn start_jetd_with_credential_store(home: &Path) -> Daemon {
+	start_jetd_process(
+		jetd(home).env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/jet-test-bus"),
+	)
+	.await
+}
+
 /// Spawns one `jetd` and waits for the line that says it can serve.
 pub async fn start_jetd_process(command: &mut Command) -> Daemon {
 	let mut child = command.spawn().unwrap();

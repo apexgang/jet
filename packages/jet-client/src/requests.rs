@@ -357,15 +357,24 @@ impl Client {
 	/// opaque reference its Credential resolves through, never the
 	/// Credential itself (ADR-0016, ADR-0076).
 	///
+	/// Beside each binding is whether its Credential resolves right now,
+	/// taken from the last observation of the Plane or from a new one, as
+	/// `observation` chooses. A client that has just unlocked the credential
+	/// store asks for a new one.
+	///
 	/// # Errors
 	///
 	/// Returns [`ClientError::Remote`] when the daemon reports a stable
 	/// error, or the transport failure otherwise.
 	pub async fn account_bindings(
 		&self,
+		observation: CapabilityObservation,
 	) -> Result<AccountBindingList, ClientError> {
 		self.require_minor(jet_protocol::ACCOUNT_BINDINGS_MINOR)?;
-		match self.query(QueryRequest::AccountBindings).await? {
+		match self
+			.query(QueryRequest::AccountBindings { observation })
+			.await?
+		{
 			QueryResponse::AccountBindings(list) => Ok(list),
 			other @ (QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)

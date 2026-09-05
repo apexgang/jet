@@ -39,8 +39,9 @@ use capability_probe::SystemCapabilityProbe;
 use clock::{Clock, SystemClock};
 
 pub use account::{
-	AccountBinding, AccountBindingId, AccountBindingList, CredentialItem,
-	CredentialReference, CredentialSource, ProviderAccount, ProviderId,
+	AccountBinding, AccountBindingId, AccountBindingList, AccountBindingStatus,
+	CredentialItem, CredentialReference, CredentialSource, CredentialState,
+	ProviderAccount, ProviderId,
 };
 pub use capability::{
 	CapabilityObservation, CapabilitySnapshot, CraftId, CredentialStoreKind,

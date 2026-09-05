@@ -19,6 +19,7 @@ use jet_store::{AccountBindingRecord, CredentialSourceRecord};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::capability::{CredentialStoreKind, CredentialStoreStatus};
 use crate::error::CoreError;
 use crate::event::EventSequence;
 use crate::system_time;
@@ -124,6 +125,46 @@ pub struct AccountBinding {
 	pub created_at: SystemTime,
 }
 
+/// Whether one binding's Credential can be resolved right now, and what
+/// has to happen when it cannot.
+///
+/// `jetd` never asks a person for a secret: it has no interface to ask
+/// through and no place to keep the answer. A backend that will not answer
+/// therefore becomes one of these, and the GUI that has a user in front of
+/// it starts the operating system's own unlock flow (ADR-0076).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialState {
+	/// The backend answers, so the Credential resolves at the moment of
+	/// use.
+	Resolvable,
+	/// The backend is present but locked. Work that needs the Credential
+	/// waits until the user unlocks it.
+	WaitingForUnlock {
+		/// The store that is locked.
+		kind: CredentialStoreKind,
+	},
+	/// The backend cannot be reached on this Plane at all, so this binding
+	/// cannot be used until secure storage is set up.
+	Unavailable {
+		/// The store that was expected.
+		kind: CredentialStoreKind,
+	},
+	/// A session-only Credential that an earlier daemon start established.
+	/// This one holds nothing, so it must be established again.
+	InvalidatedByRestart,
+}
+
+/// One Account binding beside the state of the Credential it resolves. The
+/// binding is durable Plane state; the state beside it is observed when the
+/// Query runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountBindingStatus {
+	/// The binding as the Plane recorded it.
+	pub binding: AccountBinding,
+	/// Whether its Credential can be resolved right now.
+	pub credential_state: CredentialState,
+}
+
 /// Every Account binding on the Plane, fenced by the journal position the
 /// snapshot was read at (ADR-0092).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,7 +172,7 @@ pub struct AccountBindingList {
 	/// Newest Event sequence visible when the snapshot was read.
 	pub cursor: EventSequence,
 	/// The bindings in the order they were established.
-	pub bindings: Vec<AccountBinding>,
+	pub bindings: Vec<AccountBindingStatus>,
 }
 
 /// A validated Account binding, ready to be recorded.
@@ -205,6 +246,44 @@ impl From<AccountBindingRecord> for AccountBinding {
 				record.established_at_daemon_start,
 			),
 			created_at: system_time(record.created_at_unix_ms),
+		}
+	}
+}
+
+impl CredentialState {
+	/// The state of `credential` on a Plane whose credential store was last
+	/// seen as `store` and whose current daemon start is `daemon_start`.
+	///
+	/// A helper and native Harness authentication answer only at the moment
+	/// of use, and asking them earlier would mean invoking them for no
+	/// reason, so the Plane reports the arrangement rather than a guess
+	/// about it. What each one costs is already in the reference itself.
+	pub(crate) fn of(
+		credential: &CredentialReference,
+		store: CredentialStoreStatus,
+		daemon_start: u64,
+	) -> Self {
+		match credential {
+			CredentialReference::PlatformStore { .. } => match store {
+				CredentialStoreStatus::Available { .. } => Self::Resolvable,
+				CredentialStoreStatus::Locked { kind } => {
+					Self::WaitingForUnlock { kind }
+				}
+				CredentialStoreStatus::Unavailable { kind } => {
+					Self::Unavailable { kind }
+				}
+			},
+			CredentialReference::ExternalHelper { .. }
+			| CredentialReference::HarnessNative => Self::Resolvable,
+			CredentialReference::SessionOnly {
+				established_at_daemon_start,
+			} => {
+				if *established_at_daemon_start == daemon_start {
+					Self::Resolvable
+				} else {
+					Self::InvalidatedByRestart
+				}
+			}
 		}
 	}
 }

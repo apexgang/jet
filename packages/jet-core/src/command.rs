@@ -29,6 +29,12 @@ use crate::{Actor, Core, lifecycle};
 /// turning it on depends on that tool being installed (ADR-0029, ADR-0056).
 const GIT: &[Capability] = &[Capability::ExternalTool(ExternalTool::Git)];
 
+/// A binding that resolves through the platform credential store depends on
+/// there being one. Jet keeps no secret of its own instead, so a Plane
+/// without a store refuses the binding rather than falling back to
+/// plaintext (ADR-0076).
+const CREDENTIAL_STORE: &[Capability] = &[Capability::CredentialStore];
+
 /// Actor-scoped identity of a Command, retained for retry safety.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CommandId(pub Uuid);
@@ -149,6 +155,10 @@ impl Command {
 				value: SettingValue::Flag(true),
 				..
 			} => GIT,
+			Self::BindAccount {
+				credential: CredentialSource::PlatformStore,
+				..
+			} => CREDENTIAL_STORE,
 			Self::BindAccount { .. }
 			| Self::UnbindAccount { .. }
 			| Self::CreateConversation { .. }

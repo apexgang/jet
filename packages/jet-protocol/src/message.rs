@@ -107,8 +107,13 @@ pub enum QueryRequest {
 		/// Whether to report the last observation or take a new one.
 		observation: CapabilityObservation,
 	},
-	/// Every Account binding on the Plane.
-	AccountBindings,
+	/// Every Account binding on the Plane, with the state of the Credential
+	/// each one resolves.
+	AccountBindings {
+		/// Whether the Credential states follow the last observation of the
+		/// Plane or a new one, taken now.
+		observation: CapabilityObservation,
+	},
 	/// Settings resolved for one scope.
 	Settings {
 		/// The scope to resolve for; its own values win over the Plane's.

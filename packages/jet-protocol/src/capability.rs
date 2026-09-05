@@ -87,14 +87,22 @@ pub enum CredentialStoreKind {
 	SecretService,
 }
 
-/// Whether the platform credential store can be reached. Jet never falls
-/// back to plaintext, so this is reported rather than worked around.
+/// Whether the platform credential store can be reached, and whether it
+/// will answer. Jet never falls back to plaintext, so each of these is
+/// reported rather than worked around.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum CredentialStoreStatus {
 	/// The store is present and can be asked for credentials.
 	Available {
 		/// Which store the Plane resolves through.
+		kind: CredentialStoreKind,
+	},
+	/// The store is present but locked: it answers nothing until the user
+	/// unlocks it through the operating system. `jetd` never asks for that
+	/// itself, so work that needs a Credential waits instead.
+	Locked {
+		/// Which store is locked.
 		kind: CredentialStoreKind,
 	},
 	/// The store cannot be reached on this Plane right now.
@@ -129,6 +137,12 @@ pub enum DegradedCondition {
 	/// Credentials cannot be resolved, so no Account binding can be used.
 	CredentialStoreUnavailable {
 		/// The store that was expected.
+		kind: CredentialStoreKind,
+	},
+	/// The credential store is locked, so Credentials resolve only after
+	/// the user unlocks it through the operating system.
+	CredentialStoreLocked {
+		/// The store that is locked.
 		kind: CredentialStoreKind,
 	},
 }
