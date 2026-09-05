@@ -12,6 +12,7 @@ mod capability;
 mod capability_probe;
 mod clock;
 mod command;
+mod command_receipt;
 mod conversation;
 #[allow(dead_code, reason = "wired to the Harness by follow-up issue #20")]
 mod effect;

@@ -13,7 +13,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::SystemTime;
 
-use crate::CORE_VERSION;
+use jet_store::ActorRecord;
+
+use crate::command::{Command, CommandId};
+use crate::error::CoreError;
+use crate::{CORE_VERSION, Core};
 
 /// Longest tool version line the core keeps, so a talkative tool cannot
 /// grow a snapshot without bound (ADR-0061).
@@ -294,5 +298,43 @@ impl CapabilitySnapshot {
 				})
 			}
 		}
+	}
+}
+
+impl Core {
+	/// Observes the Plane again for every Capability `command` depends on,
+	/// before it commits anything (ADR-0086).
+	///
+	/// A Command whose outcome is already durable is not revalidated: its
+	/// work is done, and repeating it must return what the Plane decided
+	/// then rather than what this observation would decide now (ADR-0093).
+	pub(crate) async fn revalidate_capabilities(
+		&self,
+		actor: ActorRecord,
+		command_id: CommandId,
+		command: &Command,
+	) -> Result<(), CoreError> {
+		let required = command.required_capabilities();
+		if required.is_empty() {
+			return Ok(());
+		}
+		let recorded = self
+			.store
+			.read(async |tx| {
+				Ok::<_, CoreError>(
+					tx.command_receipt(actor, command_id.0).await?,
+				)
+			})
+			.await?;
+		if recorded.is_some() {
+			return Ok(());
+		}
+		let capabilities = self.observe_capabilities().await;
+		for &capability in required {
+			if !capabilities.supports(capability) {
+				return Err(CoreError::capability_unavailable(capability));
+			}
+		}
+		Ok(())
 	}
 }

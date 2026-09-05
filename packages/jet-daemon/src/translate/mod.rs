@@ -1,19 +1,18 @@
 //! Translation between core domain types and versioned wire types
-//! (ADR-0049). This is the only place the two vocabularies meet.
+//! (ADR-0049). This is the only place the two vocabularies meet; its
+//! Capability and Setting halves sit in the submodules beside it.
+
+mod capability;
+mod setting;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_core::{
-	Actor, CapabilityObservation, CapabilitySnapshot, Command, CommandOutcome,
-	ConflictState, Conversation, ConversationId, ConversationList,
-	ConversationSnapshot, CoreError, CraftId, CredentialStoreKind,
-	CredentialStoreStatus, DegradedCondition, ErrorCategory, Event, EventPage,
-	EventPayload, EventSequence, ExternalTool, ExternalToolStatus, HarnessId,
-	InstalledCraft, PlaneStatus, Platform, ProjectId, Query, QueryResult,
-	RecoveryAction, ResolvedSetting, RetentionPolicy, Revision,
-	RevisionConflict, Run, RunId, RunLifecycle, SettingKey, SettingScope,
-	SettingSelection, SettingSnapshot, SettingSource, SettingValue,
-	ToolAvailability,
+	Actor, Command, CommandOutcome, ConflictState, Conversation,
+	ConversationId, ConversationList, ConversationSnapshot, CoreError,
+	ErrorCategory, Event, EventPage, EventPayload, EventSequence, PlaneStatus,
+	Query, QueryResult, RecoveryAction, RetentionPolicy, Revision,
+	RevisionConflict, Run, RunId, RunLifecycle,
 };
 use jet_protocol as wire;
 
@@ -38,19 +37,12 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 		}
 		wire::QueryRequest::Capabilities { observation } => {
 			Query::Capabilities {
-				observation: match observation {
-					wire::CapabilityObservation::LastObserved => {
-						CapabilityObservation::LastObserved
-					}
-					wire::CapabilityObservation::Fresh => {
-						CapabilityObservation::Fresh
-					}
-				},
+				observation: capability::observation(*observation),
 			}
 		}
 		wire::QueryRequest::Settings { scope, selection } => Query::Settings {
-			scope: setting_scope_from_wire(*scope),
-			selection: setting_selection_from_wire(*selection),
+			scope: setting::scope_from_wire(*scope),
+			selection: setting::selection_from_wire(*selection),
 		},
 		wire::QueryRequest::Events { after } => Query::Events {
 			after: EventSequence(*after),
@@ -73,10 +65,10 @@ pub(crate) fn query_result(
 			wire::QueryResponse::Conversation(conversation_snapshot(&snapshot))
 		}
 		QueryResult::Capabilities(snapshot) => {
-			wire::QueryResponse::Capabilities(capabilities(snapshot))
+			wire::QueryResponse::Capabilities(capability::snapshot(snapshot))
 		}
 		QueryResult::Settings(snapshot) => {
-			wire::QueryResponse::Settings(setting_snapshot(snapshot))
+			wire::QueryResponse::Settings(setting::snapshot(snapshot))
 		}
 		QueryResult::Events(page) => {
 			wire::QueryResponse::Events(event_page(&page)?)
@@ -98,15 +90,15 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 		}
 		wire::CommandRequest::SetSetting { key, scope, value } => {
 			Command::SetSetting {
-				key: setting_key_from_wire(*key),
-				scope: setting_scope_from_wire(*scope),
-				value: setting_value_from_wire(value.clone()),
+				key: setting::key_from_wire(*key),
+				scope: setting::scope_from_wire(*scope),
+				value: setting::value_from_wire(value.clone()),
 			}
 		}
 		wire::CommandRequest::ClearSetting { key, scope } => {
 			Command::ClearSetting {
-				key: setting_key_from_wire(*key),
-				scope: setting_scope_from_wire(*scope),
+				key: setting::key_from_wire(*key),
+				scope: setting::scope_from_wire(*scope),
 			}
 		}
 		wire::CommandRequest::TransitionRun {
@@ -136,225 +128,16 @@ pub(crate) fn command_outcome(
 		}
 		CommandOutcome::SettingSet { key, scope, value } => {
 			wire::CommandResponse::SettingSet {
-				key: setting_key(key),
-				scope: setting_scope(scope),
-				value: setting_value(value),
+				key: setting::key(key),
+				scope: setting::scope(scope),
+				value: setting::value(value),
 			}
 		}
 		CommandOutcome::SettingCleared { key, scope } => {
 			wire::CommandResponse::SettingCleared {
-				key: setting_key(key),
-				scope: setting_scope(scope),
+				key: setting::key(key),
+				scope: setting::scope(scope),
 			}
-		}
-	}
-}
-
-fn capabilities(snapshot: CapabilitySnapshot) -> wire::CapabilitySnapshot {
-	wire::CapabilitySnapshot {
-		observed_at_unix_ms: unix_ms(snapshot.observed_at),
-		core_version: snapshot.core_version.into(),
-		platform: platform(snapshot.platform),
-		external_tools: snapshot
-			.external_tools
-			.into_iter()
-			.map(external_tool_status)
-			.collect(),
-		credential_store: credential_store(snapshot.credential_store),
-		crafts: snapshot.crafts.into_iter().map(craft).collect(),
-		harnesses: snapshot.harnesses.into_iter().map(harness).collect(),
-		degraded: snapshot
-			.degraded
-			.into_iter()
-			.map(degraded_condition)
-			.collect(),
-	}
-}
-
-fn platform(platform: Platform) -> wire::Platform {
-	wire::Platform {
-		operating_system: platform.operating_system.into(),
-		architecture: platform.architecture.into(),
-	}
-}
-
-fn external_tool_status(
-	status: ExternalToolStatus,
-) -> wire::ExternalToolStatus {
-	wire::ExternalToolStatus {
-		tool: external_tool(status.tool),
-		availability: match status.availability {
-			ToolAvailability::Present { version } => {
-				wire::ToolAvailability::Present { version }
-			}
-			ToolAvailability::Missing => wire::ToolAvailability::Missing,
-		},
-	}
-}
-
-fn external_tool(tool: ExternalTool) -> wire::ExternalTool {
-	match tool {
-		ExternalTool::Git => wire::ExternalTool::Git,
-		ExternalTool::Ssh => wire::ExternalTool::Ssh,
-		ExternalTool::Tailscale => wire::ExternalTool::Tailscale,
-	}
-}
-
-fn credential_store(
-	store: CredentialStoreStatus,
-) -> wire::CredentialStoreStatus {
-	match store {
-		CredentialStoreStatus::Available { kind } => {
-			wire::CredentialStoreStatus::Available {
-				kind: credential_store_kind(kind),
-			}
-		}
-		CredentialStoreStatus::Unavailable { kind } => {
-			wire::CredentialStoreStatus::Unavailable {
-				kind: credential_store_kind(kind),
-			}
-		}
-	}
-}
-
-fn credential_store_kind(
-	kind: CredentialStoreKind,
-) -> wire::CredentialStoreKind {
-	match kind {
-		CredentialStoreKind::AppleKeychain => {
-			wire::CredentialStoreKind::AppleKeychain
-		}
-		CredentialStoreKind::SecretService => {
-			wire::CredentialStoreKind::SecretService
-		}
-	}
-}
-
-fn craft(installed: InstalledCraft) -> wire::InstalledCraft {
-	let CraftId(craft_id) = installed.craft;
-	wire::InstalledCraft {
-		craft_id,
-		version: installed.version,
-		harnesses: installed.harnesses.into_iter().map(harness).collect(),
-	}
-}
-
-fn harness(harness: HarnessId) -> String {
-	harness.0
-}
-
-fn degraded_condition(condition: DegradedCondition) -> wire::DegradedCondition {
-	match condition {
-		DegradedCondition::MissingExternalTool { tool } => {
-			wire::DegradedCondition::MissingExternalTool {
-				tool: external_tool(tool),
-			}
-		}
-		DegradedCondition::NoHarnessAvailable => {
-			wire::DegradedCondition::NoHarnessAvailable
-		}
-		DegradedCondition::CredentialStoreUnavailable { kind } => {
-			wire::DegradedCondition::CredentialStoreUnavailable {
-				kind: credential_store_kind(kind),
-			}
-		}
-	}
-}
-
-fn setting_snapshot(snapshot: SettingSnapshot) -> wire::SettingSnapshot {
-	wire::SettingSnapshot {
-		cursor: snapshot.cursor.0,
-		scope: setting_scope(snapshot.scope),
-		settings: snapshot.settings.into_iter().map(setting).collect(),
-	}
-}
-
-fn setting(resolved: ResolvedSetting) -> wire::ResolvedSetting {
-	wire::ResolvedSetting {
-		key: setting_key(resolved.key),
-		value: setting_value(resolved.value),
-		source: match resolved.source {
-			SettingSource::BuiltIn => wire::SettingSource::BuiltIn,
-			SettingSource::Scope(scope) => wire::SettingSource::Scope {
-				scope: setting_scope(scope),
-			},
-		},
-	}
-}
-
-fn setting_key(key: SettingKey) -> wire::SettingKey {
-	match key {
-		SettingKey::UtilityAutomaticNaming => {
-			wire::SettingKey::UtilityAutomaticNaming
-		}
-		SettingKey::GitAutoCommit => wire::SettingKey::GitAutoCommit,
-		SettingKey::GitMessageInstructions => {
-			wire::SettingKey::GitMessageInstructions
-		}
-	}
-}
-
-fn setting_key_from_wire(key: wire::SettingKey) -> SettingKey {
-	match key {
-		wire::SettingKey::UtilityAutomaticNaming => {
-			SettingKey::UtilityAutomaticNaming
-		}
-		wire::SettingKey::GitAutoCommit => SettingKey::GitAutoCommit,
-		wire::SettingKey::GitMessageInstructions => {
-			SettingKey::GitMessageInstructions
-		}
-	}
-}
-
-fn setting_value(value: SettingValue) -> wire::SettingValue {
-	match value {
-		SettingValue::Flag(flag) => wire::SettingValue::Flag(flag),
-		SettingValue::Text(text) => wire::SettingValue::Text(text),
-	}
-}
-
-fn setting_value_from_wire(value: wire::SettingValue) -> SettingValue {
-	match value {
-		wire::SettingValue::Flag(flag) => SettingValue::Flag(flag),
-		wire::SettingValue::Text(text) => SettingValue::Text(text),
-	}
-}
-
-fn setting_scope(scope: SettingScope) -> wire::SettingScope {
-	match scope {
-		SettingScope::Plane => wire::SettingScope::Plane,
-		SettingScope::Project { project_id } => wire::SettingScope::Project {
-			project_id: project_id.0,
-		},
-		SettingScope::Conversation { conversation_id } => {
-			wire::SettingScope::Conversation {
-				conversation_id: conversation_id.0,
-			}
-		}
-	}
-}
-
-fn setting_scope_from_wire(scope: wire::SettingScope) -> SettingScope {
-	match scope {
-		wire::SettingScope::Plane => SettingScope::Plane,
-		wire::SettingScope::Project { project_id } => SettingScope::Project {
-			project_id: ProjectId(project_id),
-		},
-		wire::SettingScope::Conversation { conversation_id } => {
-			SettingScope::Conversation {
-				conversation_id: ConversationId(conversation_id),
-			}
-		}
-	}
-}
-
-fn setting_selection_from_wire(
-	selection: wire::SettingSelection,
-) -> SettingSelection {
-	match selection {
-		wire::SettingSelection::All => SettingSelection::All,
-		wire::SettingSelection::Key { key } => {
-			SettingSelection::Key(setting_key_from_wire(key))
 		}
 	}
 }
@@ -567,7 +350,7 @@ fn category(category: ErrorCategory) -> wire::ErrorCategory {
 	}
 }
 
-fn unix_ms(time: SystemTime) -> i64 {
+pub(super) fn unix_ms(time: SystemTime) -> i64 {
 	match time.duration_since(UNIX_EPOCH) {
 		Ok(elapsed) => i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX),
 		Err(behind) => i64::try_from(behind.duration().as_millis())

@@ -3,15 +3,18 @@
 //! acknowledged only after that commit (ADR-0020, ADR-0071).
 
 use jet_store::{
-	ActorRecord, CommandReceiptRecord, EffectKindRecord, EffectSafetyRecord,
-	NewCommandReceipt, NewConversation, NewEffect, NewRun, RetentionPolicy,
-	RunLifecycle, SettingRecord, WriteTransaction,
+	EffectKindRecord, EffectSafetyRecord, NewCommandReceipt, NewConversation,
+	NewEffect, NewRun, RetentionPolicy, RunLifecycle, SettingRecord,
+	WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::capability::{Capability, ExternalTool};
+use crate::command_receipt::{
+	COMMAND_RETENTION_MS, OUTCOME_VERSION, encode_result, replay,
+};
 use crate::conversation::{Conversation, ConversationId, Revision, Run, RunId};
 use crate::error::{ConflictState, CoreError, RevisionConflict};
 use crate::event::{EventKind, EventSubject};
@@ -21,9 +24,6 @@ use crate::{Actor, Core, lifecycle};
 /// Automatic Git delivery is carried out with the Git the core invokes, so
 /// turning it on depends on that tool being installed (ADR-0029, ADR-0056).
 const GIT: &[Capability] = &[Capability::ExternalTool(ExternalTool::Git)];
-
-const OUTCOME_VERSION: u32 = 1;
-const COMMAND_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 
 /// Actor-scoped identity of a Command, retained for retry safety.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -119,7 +119,7 @@ impl Command {
 	/// What the Plane must still be able to do when this Command runs. Each
 	/// one is checked against a new observation before anything commits
 	/// (ADR-0086).
-	fn required_capabilities(&self) -> &'static [Capability] {
+	pub(crate) fn required_capabilities(&self) -> &'static [Capability] {
 		match self {
 			Self::SetSetting {
 				key: SettingKey::GitAutoCommit,
@@ -234,90 +234,6 @@ impl Core {
 	}
 }
 
-impl Core {
-	/// Observes the Plane again for every Capability `command` depends on,
-	/// before it commits anything (ADR-0086).
-	///
-	/// A Command whose outcome is already durable is not revalidated: its
-	/// work is done, and repeating it must return what the Plane decided
-	/// then rather than what this observation would decide now (ADR-0093).
-	async fn revalidate_capabilities(
-		&self,
-		actor: ActorRecord,
-		command_id: CommandId,
-		command: &Command,
-	) -> Result<(), CoreError> {
-		let required = command.required_capabilities();
-		if required.is_empty() {
-			return Ok(());
-		}
-		let recorded = self
-			.store
-			.read(async |tx| {
-				Ok::<_, CoreError>(
-					tx.command_receipt(actor, command_id.0).await?,
-				)
-			})
-			.await?;
-		if recorded.is_some() {
-			return Ok(());
-		}
-		let capabilities = self.observe_capabilities().await;
-		for &capability in required {
-			if !capabilities.supports(capability) {
-				return Err(CoreError::capability_unavailable(capability));
-			}
-		}
-		Ok(())
-	}
-}
-
-fn replay(
-	receipt: CommandReceiptRecord,
-	request_digest: [u8; 32],
-	now_unix_ms: i64,
-) -> Result<Result<CommandOutcome, CoreError>, CoreError> {
-	if now_unix_ms.saturating_sub(receipt.recorded_at_unix_ms)
-		> COMMAND_RETENTION_MS
-	{
-		return Ok(Err(CoreError::invalid_input(
-			"command.identity_expired",
-			"the Command identity is older than thirty days",
-		)));
-	}
-	let Some(original_digest) = receipt.request_digest else {
-		return Err(invalid_receipt("digest"));
-	};
-	if original_digest != request_digest {
-		return Err(CoreError::conflict(
-			"command.identity_reused",
-			"the Command identity was already used for different content",
-		));
-	}
-	let Some(outcome_version) = receipt.outcome_version else {
-		return Err(invalid_receipt("outcome version"));
-	};
-	if outcome_version != OUTCOME_VERSION {
-		return Ok(Err(CoreError::incompatible(
-			"command.outcome_incompatible",
-			"the Command outcome was recorded by an incompatible core; submit the Command again under a new identity",
-		)));
-	}
-	let Some(outcome) = receipt.outcome else {
-		return Err(invalid_receipt("outcome"));
-	};
-	serde_json::from_str(&outcome).map_err(|error| {
-		CoreError::internal("command.outcome_invalid", error.to_string())
-	})
-}
-
-fn invalid_receipt(missing: &str) -> CoreError {
-	CoreError::internal(
-		"command.receipt_invalid",
-		format!("an unexpired Command receipt has no {missing}"),
-	)
-}
-
 async fn execute_new(
 	tx: &mut WriteTransaction,
 	actor: &Actor,
@@ -355,14 +271,6 @@ async fn execute_new(
 			.await
 		}
 	}
-}
-
-fn encode_result(
-	result: &Result<CommandOutcome, CoreError>,
-) -> Result<String, CoreError> {
-	serde_json::to_string(result).map_err(|error| {
-		CoreError::internal("command.outcome_encode_failed", error.to_string())
-	})
 }
 
 async fn create_conversation(
