@@ -82,7 +82,7 @@ pub struct AccountBinding {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub provider_account: Option<String>,
 	/// The reference its Credential resolves through.
-	pub credential: CredentialReference,
+	pub credential_reference: CredentialReference,
 	/// When the binding was established, in signed Unix milliseconds.
 	pub created_at_unix_ms: i64,
 }
@@ -94,9 +94,14 @@ pub struct AccountBinding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum CredentialState {
-	/// The backend answers, so the Credential resolves at the moment of
-	/// use.
+	/// The Plane can see the backend, so the Credential resolves at the
+	/// moment of use.
 	Resolvable,
+	/// The Plane holds no evidence either way. An external helper and
+	/// native Harness authentication answer only when they are invoked, and
+	/// invoking one early would run somebody's helper for no reason, so
+	/// work that needs the Credential finds out when it asks.
+	ResolvedAtUse,
 	/// The backend is present but locked. Work that needs the Credential
 	/// waits until the user unlocks it.
 	WaitingForUnlock {

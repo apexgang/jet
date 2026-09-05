@@ -164,33 +164,6 @@ impl ReadTransaction {
 		.await?;
 		row.map(read_row).transpose()
 	}
-
-	/// The binding that already holds `provider_account` for `provider`, if
-	/// one does. Only a Provider-supplied identity groups bindings, so this
-	/// is what keeps one from being bound twice (ADR-0016).
-	///
-	/// # Errors
-	///
-	/// Returns a [`StoreError`] when the row cannot be read.
-	pub async fn account_binding_for(
-		&mut self,
-		provider: &str,
-		provider_account: &str,
-	) -> Result<Option<AccountBindingRecord>, StoreError> {
-		let row = sqlx::query_as!(
-			Row,
-			r#"SELECT binding_id AS "binding_id!", provider, label,
-				provider_account, credential_source, credential_helper,
-				established_at_daemon_start, created_at_unix_ms
-			 FROM account_bindings
-			 WHERE provider = ?1 AND provider_account = ?2"#,
-			provider,
-			provider_account
-		)
-		.fetch_optional(self.connection())
-		.await?;
-		row.map(read_row).transpose()
-	}
 }
 
 impl WriteTransaction {
@@ -198,8 +171,7 @@ impl WriteTransaction {
 	///
 	/// # Errors
 	///
-	/// Returns a [`StoreError`] when the row cannot be written, including
-	/// when the Provider account is already bound on this Plane.
+	/// Returns a [`StoreError`] when the row cannot be written.
 	pub async fn insert_account_binding(
 		&mut self,
 		binding: NewAccountBinding,

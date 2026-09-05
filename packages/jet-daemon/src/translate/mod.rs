@@ -1,6 +1,7 @@
 //! Translation between core domain types and versioned wire types
 //! (ADR-0049). This is the only place the two vocabularies meet; its
-//! Capability and Setting halves sit in the submodules beside it.
+//! Account binding, Capability, and Setting parts sit in the submodules
+//! beside it.
 
 mod account;
 mod capability;
@@ -11,11 +12,11 @@ pub(crate) use capability::snapshot as capabilities;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_core::{
-	Actor, Command, CommandOutcome, ConflictState, Conversation,
-	ConversationId, ConversationList, ConversationSnapshot, CoreError,
-	ErrorCategory, Event, EventPage, EventPayload, EventSequence, PlaneStatus,
-	Query, QueryResult, RecoveryAction, RetentionPolicy, Revision,
-	RevisionConflict, Run, RunId, RunLifecycle,
+	AccountBindingId, Actor, Command, CommandOutcome, ConflictState,
+	Conversation, ConversationId, ConversationList, ConversationSnapshot,
+	CoreError, ErrorCategory, Event, EventPage, EventPayload, EventSequence,
+	PlaneStatus, ProviderId, Query, QueryResult, RecoveryAction,
+	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
 };
 use jet_protocol as wire;
 
@@ -116,18 +117,18 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 			provider,
 			label,
 			provider_account,
-			credential,
+			credential_source,
 		} => Command::BindAccount {
-			provider: account::provider(provider),
+			provider: ProviderId(provider.clone()),
 			label: label.clone(),
 			provider_account: account::provider_account(
 				provider_account.as_ref(),
 			),
-			credential: account::source_from_wire(credential),
+			credential_source: account::source_from_wire(credential_source),
 		},
 		wire::CommandRequest::UnbindAccount { binding_id } => {
 			Command::UnbindAccount {
-				binding_id: account::binding_id(*binding_id),
+				binding_id: AccountBindingId(*binding_id),
 			}
 		}
 		wire::CommandRequest::TransitionRun {
@@ -173,10 +174,10 @@ pub(crate) fn command_outcome(
 		}
 		CommandOutcome::AccountUnbound {
 			binding_id,
-			credential,
+			credential_reference,
 		} => wire::CommandResponse::AccountUnbound {
 			binding_id: binding_id.0,
-			credential: account::reference(credential),
+			credential_reference: account::reference(credential_reference),
 		},
 	}
 }

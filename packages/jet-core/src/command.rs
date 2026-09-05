@@ -3,9 +3,9 @@
 //! acknowledged only after that commit (ADR-0020, ADR-0071).
 
 use jet_store::{
-	EffectKindRecord, EffectSafetyRecord, NewAccountBinding, NewCommandReceipt,
-	NewConversation, NewEffect, NewRun, RetentionPolicy, RunLifecycle,
-	SettingRecord, WriteTransaction,
+	EffectKindRecord, EffectSafetyRecord, NewCommandReceipt, NewConversation,
+	NewEffect, NewRun, RetentionPolicy, RunLifecycle, SettingRecord,
+	WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -124,7 +124,7 @@ pub enum Command {
 		/// The Provider's own account identity, when it supplies one.
 		provider_account: Option<ProviderAccount>,
 		/// The backend that resolves the binding's Credential.
-		credential: CredentialSource,
+		credential_source: CredentialSource,
 	},
 	/// Remove an Account binding from this Plane. The secret it referred to
 	/// belongs to its backend, so Jet forgets the reference and leaves the
@@ -156,7 +156,7 @@ impl Command {
 				..
 			} => GIT,
 			Self::BindAccount {
-				credential: CredentialSource::PlatformStore,
+				credential_source: CredentialSource::PlatformStore,
 				..
 			} => CREDENTIAL_STORE,
 			Self::BindAccount { .. }
@@ -203,7 +203,7 @@ pub enum CommandOutcome {
 		/// The binding that was removed.
 		binding_id: AccountBindingId,
 		/// The reference it resolved through.
-		credential: CredentialReference,
+		credential_reference: CredentialReference,
 	},
 }
 
@@ -303,23 +303,23 @@ async fn execute_new(
 			provider,
 			label,
 			provider_account,
-			credential,
+			credential_source,
 		} => {
-			bind_account(
+			account::bind(
 				tx,
 				actor,
-				account::prepare_binding(
+				account::Requested {
 					provider,
 					label,
 					provider_account,
-					credential,
-				)?,
+					credential_source,
+				},
 				now_unix_ms,
 			)
 			.await
 		}
 		Command::UnbindAccount { binding_id } => {
-			unbind_account(tx, actor, binding_id, now_unix_ms).await
+			account::unbind(tx, actor, binding_id, now_unix_ms).await
 		}
 		Command::TransitionRun {
 			run_id,
@@ -456,90 +456,6 @@ async fn clear_setting(
 	)?)
 	.await?;
 	Ok(CommandOutcome::SettingCleared { key, scope })
-}
-
-/// Records one Plane-local binding. Only the Provider's own account
-/// identity groups bindings, so only it can already be bound (ADR-0016).
-async fn bind_account(
-	tx: &mut WriteTransaction,
-	actor: &Actor,
-	prepared: account::PreparedBinding,
-	now_unix_ms: i64,
-) -> Result<CommandOutcome, CoreError> {
-	let account::PreparedBinding {
-		provider,
-		label,
-		provider_account,
-		credential,
-	} = prepared;
-	if let Some(ProviderAccount(identity)) = &provider_account
-		&& tx
-			.account_binding_for(&provider.0, identity)
-			.await?
-			.is_some()
-	{
-		return Err(CoreError::conflict(
-			"account.already_bound",
-			"this Plane already has a binding for that Provider account",
-		));
-	}
-	// The daemon start that establishes the binding is what tells a later
-	// start that a session-only Credential is no longer the one it holds.
-	let established_at_daemon_start = tx.plane().await?.daemon_starts;
-	let binding: AccountBinding = tx
-		.insert_account_binding(NewAccountBinding {
-			binding_id: Uuid::now_v7(),
-			provider: provider.0.clone(),
-			label,
-			provider_account: provider_account
-				.map(|ProviderAccount(identity)| identity),
-			credential: credential.record(),
-			established_at_daemon_start,
-			created_at_unix_ms: now_unix_ms,
-		})
-		.await?
-		.into();
-	// ASVS 8.3.4 and 14.1.4: the journal records who bound what through
-	// which backend, and no part of the Credential itself.
-	let event = EventKind::AccountBound {
-		binding_id: binding.binding_id,
-		provider,
-		credential,
-	};
-	tx.append_event(event.to_record(
-		actor,
-		EventSubject::Plane,
-		now_unix_ms,
-	)?)
-	.await?;
-	Ok(CommandOutcome::AccountBound(binding))
-}
-
-async fn unbind_account(
-	tx: &mut WriteTransaction,
-	actor: &Actor,
-	binding_id: AccountBindingId,
-	now_unix_ms: i64,
-) -> Result<CommandOutcome, CoreError> {
-	let Some(record) = tx.account_binding(binding_id.0).await? else {
-		return Err(CoreError::not_found(
-			"account.not_found",
-			"the Account binding does not exist",
-		));
-	};
-	let binding: AccountBinding = record.into();
-	tx.delete_account_binding(binding_id.0).await?;
-	let event = EventKind::AccountUnbound { binding_id };
-	tx.append_event(event.to_record(
-		actor,
-		EventSubject::Plane,
-		now_unix_ms,
-	)?)
-	.await?;
-	Ok(CommandOutcome::AccountUnbound {
-		binding_id,
-		credential: binding.credential,
-	})
 }
 
 async fn transition_run(

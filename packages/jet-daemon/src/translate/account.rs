@@ -1,9 +1,8 @@
 //! The Account binding half of the translation seam (ADR-0049, ADR-0016).
 
 use jet_core::{
-	AccountBinding, AccountBindingId, AccountBindingList, AccountBindingStatus,
-	CredentialItem, CredentialReference, CredentialSource, CredentialState,
-	ProviderAccount, ProviderId,
+	AccountBinding, AccountBindingList, AccountBindingStatus, CredentialItem,
+	CredentialReference, CredentialSource, CredentialState, ProviderAccount,
 };
 use jet_protocol as wire;
 
@@ -26,6 +25,7 @@ fn status(status: AccountBindingStatus) -> wire::AccountBindingStatus {
 fn credential_state(state: CredentialState) -> wire::CredentialState {
 	match state {
 		CredentialState::Resolvable => wire::CredentialState::Resolvable,
+		CredentialState::ResolvedAtUse => wire::CredentialState::ResolvedAtUse,
 		CredentialState::WaitingForUnlock { kind } => {
 			wire::CredentialState::WaitingForUnlock {
 				kind: super::capability::credential_store_kind(kind),
@@ -50,17 +50,9 @@ pub(super) fn binding(binding: AccountBinding) -> wire::AccountBinding {
 		provider_account: binding
 			.provider_account
 			.map(|ProviderAccount(identity)| identity),
-		credential: reference(binding.credential),
+		credential_reference: reference(binding.credential_reference),
 		created_at_unix_ms: unix_ms(binding.created_at),
 	}
-}
-
-pub(super) fn binding_id(binding_id: uuid::Uuid) -> AccountBindingId {
-	AccountBindingId(binding_id)
-}
-
-pub(super) fn provider(provider: &str) -> ProviderId {
-	ProviderId(provider.into())
 }
 
 pub(super) fn provider_account(

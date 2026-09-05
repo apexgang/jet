@@ -2,7 +2,7 @@ use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
 use super::{AccountBindingRecord, CredentialSourceRecord, NewAccountBinding};
-use crate::{Store, StoreError};
+use crate::Store;
 
 const NOW_UNIX_MS: i64 = 1_700_000_000_000;
 
@@ -79,41 +79,4 @@ async fn bindings_outlive_the_daemon_that_recorded_them() {
 			vec![recorded(helper)]
 		)
 	);
-}
-
-/// Bindings group into one Provider account only through an identity the
-/// Provider supplies, so the store keeps that identity unique per Provider
-/// even though the core refuses the duplicate first (ADR-0016).
-#[tokio::test]
-async fn one_provider_account_is_bound_at_most_once() {
-	let dir = tempfile::tempdir().unwrap();
-	let store = Store::open(&dir.path().join("plane.sqlite3"))
-		.await
-		.unwrap();
-	let first = binding(
-		Uuid::now_v7(),
-		Some("acct-7"),
-		CredentialSourceRecord::PlatformStore,
-	);
-	let again = binding(
-		Uuid::now_v7(),
-		Some("acct-7"),
-		CredentialSourceRecord::PlatformStore,
-	);
-	store
-		.write(async |tx| tx.insert_account_binding(first.clone()).await)
-		.await
-		.unwrap();
-
-	let refused = store
-		.write(async |tx| tx.insert_account_binding(again).await)
-		.await
-		.unwrap_err();
-	let found = store
-		.read(async |tx| tx.account_binding_for("anthropic", "acct-7").await)
-		.await
-		.unwrap();
-
-	assert!(matches!(refused, StoreError::Integrity(_)), "{refused:?}");
-	assert_eq!(found, Some(recorded(first)));
 }

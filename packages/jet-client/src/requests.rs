@@ -404,7 +404,7 @@ impl Client {
 		provider: &str,
 		label: &str,
 		provider_account: Option<&str>,
-		credential: CredentialSource,
+		credential_source: CredentialSource,
 	) -> Result<AccountBinding, ClientError> {
 		self.require_minor(jet_protocol::ACCOUNT_BINDINGS_MINOR)?;
 		match self
@@ -414,7 +414,7 @@ impl Client {
 					provider: provider.into(),
 					label: label.into(),
 					provider_account: provider_account.map(Into::into),
-					credential,
+					credential_source,
 				},
 			)
 			.await?
@@ -451,9 +451,10 @@ impl Client {
 			)
 			.await?
 		{
-			CommandResponse::AccountUnbound { credential, .. } => {
-				Ok(credential)
-			}
+			CommandResponse::AccountUnbound {
+				credential_reference,
+				..
+			} => Ok(credential_reference),
 			other @ (CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)

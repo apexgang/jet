@@ -25,10 +25,9 @@ CREATE TABLE account_bindings (
 	)
 );
 
--- Bindings group into one Provider account automatically only when the
--- Provider supplies a stable account identity, so that identity is unique
--- per Provider on this Plane (ADR-0016). Bindings without one are linked by
--- the user and may repeat.
-CREATE UNIQUE INDEX account_bindings_provider_account
-	ON account_bindings (provider, provider_account)
-	WHERE provider_account IS NOT NULL;
+-- The Provider account identity is what a GUI groups bindings by across
+-- Planes, not a key (ADR-0016). One Plane may hold several bindings for one
+-- Provider account, such as the same account reached through the platform
+-- store and through a helper.
+CREATE INDEX account_bindings_by_provider
+	ON account_bindings (provider, provider_account);

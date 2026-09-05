@@ -142,7 +142,7 @@ pub enum EventKind {
 		/// The Provider it authenticates to.
 		provider: ProviderId,
 		/// The backend that resolves its Credential.
-		credential: CredentialSource,
+		credential_source: CredentialSource,
 	},
 	/// An Account binding was removed from this Plane.
 	#[serde(rename = "account.unbound")]

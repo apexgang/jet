@@ -15,13 +15,18 @@
 
 use std::time::SystemTime;
 
-use jet_store::{AccountBindingRecord, CredentialSourceRecord};
+use jet_store::{
+	AccountBindingRecord, CredentialSourceRecord, NewAccountBinding,
+	WriteTransaction,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::Actor;
 use crate::capability::{CredentialStoreKind, CredentialStoreStatus};
+use crate::command::CommandOutcome;
 use crate::error::CoreError;
-use crate::event::EventSequence;
+use crate::event::{EventKind, EventSequence, EventSubject};
 use crate::system_time;
 
 /// The credential-store service every Jet Credential item lives under. It
@@ -120,7 +125,7 @@ pub struct AccountBinding {
 	/// The Provider's own account identity, when it supplies one.
 	pub provider_account: Option<ProviderAccount>,
 	/// The opaque reference its Credential resolves through.
-	pub credential: CredentialReference,
+	pub credential_reference: CredentialReference,
 	/// When the binding was recorded.
 	pub created_at: SystemTime,
 }
@@ -134,9 +139,14 @@ pub struct AccountBinding {
 /// it starts the operating system's own unlock flow (ADR-0076).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CredentialState {
-	/// The backend answers, so the Credential resolves at the moment of
-	/// use.
+	/// The Plane can see the backend, so the Credential resolves at the
+	/// moment of use.
 	Resolvable,
+	/// The Plane holds no evidence either way. An external helper and
+	/// native Harness authentication answer only when they are invoked, and
+	/// invoking one early would run somebody's helper for no reason, so
+	/// work that needs the Credential finds out when it asks.
+	ResolvedAtUse,
 	/// The backend is present but locked. Work that needs the Credential
 	/// waits until the user unlocks it.
 	WaitingForUnlock {
@@ -175,12 +185,17 @@ pub struct AccountBindingList {
 	pub bindings: Vec<AccountBindingStatus>,
 }
 
-/// A validated Account binding, ready to be recorded.
-pub(crate) struct PreparedBinding {
+/// What a client asked one new binding to be, before the core has checked
+/// that it is the metadata a binding carries.
+pub(crate) struct Requested {
+	/// The Provider the binding authenticates to.
 	pub(crate) provider: ProviderId,
+	/// The user-facing name of the binding.
 	pub(crate) label: String,
+	/// The Provider's own account identity, when it supplies one.
 	pub(crate) provider_account: Option<ProviderAccount>,
-	pub(crate) credential: CredentialSource,
+	/// The backend that is to resolve the binding's Credential.
+	pub(crate) credential_source: CredentialSource,
 }
 
 impl CredentialSource {
@@ -240,7 +255,7 @@ impl From<AccountBindingRecord> for AccountBinding {
 			provider: ProviderId(record.provider),
 			label: record.label,
 			provider_account: record.provider_account.map(ProviderAccount),
-			credential: CredentialReference::from_record(
+			credential_reference: CredentialReference::from_record(
 				binding_id,
 				record.credential,
 				record.established_at_daemon_start,
@@ -251,19 +266,14 @@ impl From<AccountBindingRecord> for AccountBinding {
 }
 
 impl CredentialState {
-	/// The state of `credential` on a Plane whose credential store was last
+	/// The state of `reference` on a Plane whose credential store was last
 	/// seen as `store` and whose current daemon start is `daemon_start`.
-	///
-	/// A helper and native Harness authentication answer only at the moment
-	/// of use, and asking them earlier would mean invoking them for no
-	/// reason, so the Plane reports the arrangement rather than a guess
-	/// about it. What each one costs is already in the reference itself.
 	pub(crate) fn of(
-		credential: &CredentialReference,
+		reference: &CredentialReference,
 		store: CredentialStoreStatus,
 		daemon_start: u64,
 	) -> Self {
-		match credential {
+		match reference {
 			CredentialReference::PlatformStore { .. } => match store {
 				CredentialStoreStatus::Available { .. } => Self::Resolvable,
 				CredentialStoreStatus::Locked { kind } => {
@@ -274,7 +284,7 @@ impl CredentialState {
 				}
 			},
 			CredentialReference::ExternalHelper { .. }
-			| CredentialReference::HarnessNative => Self::Resolvable,
+			| CredentialReference::HarnessNative => Self::ResolvedAtUse,
 			CredentialReference::SessionOnly {
 				established_at_daemon_start,
 			} => {
@@ -288,46 +298,137 @@ impl CredentialState {
 	}
 }
 
-/// Validates the non-secret metadata of a new binding and settles which
-/// backend resolves it.
+/// Checks that a requested binding carries the metadata a binding carries.
 ///
-/// Everything a client supplies here is metadata a person reads. Nothing
-/// carries the Credential itself, and the platform-store item is named by
-/// the core rather than accepted, so a client cannot write secret material
-/// into Jet-owned state through this Command (ADR-0076).
+/// The Credential has no field to arrive through: no parameter accepts
+/// secret material, and the platform-store item is named by the core rather
+/// than taken from the request, so nothing a client sends becomes a secret
+/// Jet holds (ADR-0076). What is checked here is narrower — that a label,
+/// a Provider account identity, and a helper name are bounded text without
+/// control characters. A person who types a token into a label still gets
+/// it stored as the label they typed; the guarantee is that Jet has no
+/// place for a secret, not that it can recognize one.
 ///
 /// # Errors
 ///
 /// Returns an `invalid_input` [`CoreError`] when a value is empty, longer
 /// than the bound on binding metadata, or not the kind of text that
 /// metadata is.
-pub(crate) fn prepare_binding(
-	provider: ProviderId,
-	label: String,
-	provider_account: Option<ProviderAccount>,
-	credential: CredentialSource,
-) -> Result<PreparedBinding, CoreError> {
-	require_provider(&provider.0)?;
-	require_metadata("account.label_unsupported", "a binding label", &label)?;
-	if let Some(ProviderAccount(account)) = &provider_account {
+fn require_binding_metadata(requested: &Requested) -> Result<(), CoreError> {
+	require_provider(&requested.provider.0)?;
+	require_metadata(
+		"account.label_unsupported",
+		"a binding label",
+		&requested.label,
+	)?;
+	if let Some(ProviderAccount(account)) = &requested.provider_account {
 		require_metadata(
 			"account.provider_account_unsupported",
 			"a Provider account identity",
 			account,
 		)?;
 	}
-	if let CredentialSource::ExternalHelper { helper } = &credential {
+	if let CredentialSource::ExternalHelper { helper } =
+		&requested.credential_source
+	{
 		require_metadata(
 			"account.helper_unsupported",
 			"a credential helper name",
 			helper,
 		)?;
 	}
-	Ok(PreparedBinding {
+	Ok(())
+}
+
+/// Records one Plane-local binding and journals it.
+///
+/// A Provider account identity is what a GUI groups bindings by, not a key,
+/// so one Plane may hold several bindings for one Provider account — the
+/// same account through the platform store and through a helper, for
+/// instance (ADR-0016).
+///
+/// # Errors
+///
+/// Returns an `invalid_input` [`CoreError`] when the metadata is not the
+/// metadata a binding carries, or a store category when the row cannot be
+/// written.
+pub(crate) async fn bind(
+	tx: &mut WriteTransaction,
+	actor: &Actor,
+	requested: Requested,
+	now_unix_ms: i64,
+) -> Result<CommandOutcome, CoreError> {
+	require_binding_metadata(&requested)?;
+	let Requested {
 		provider,
 		label,
 		provider_account,
-		credential,
+		credential_source,
+	} = requested;
+	// The daemon start that establishes the binding is what tells a later
+	// start that a session-only Credential is no longer the one it holds.
+	let established_at_daemon_start = tx.plane().await?.daemon_starts;
+	let binding: AccountBinding = tx
+		.insert_account_binding(NewAccountBinding {
+			binding_id: Uuid::now_v7(),
+			provider: provider.0.clone(),
+			label,
+			provider_account: provider_account
+				.map(|ProviderAccount(identity)| identity),
+			credential: credential_source.record(),
+			established_at_daemon_start,
+			created_at_unix_ms: now_unix_ms,
+		})
+		.await?
+		.into();
+	// ASVS 8.3.4 and 14.1.4: the journal records who bound what through
+	// which backend, and no part of the Credential itself.
+	let event = EventKind::AccountBound {
+		binding_id: binding.binding_id,
+		provider,
+		credential_source,
+	};
+	tx.append_event(event.to_record(
+		actor,
+		EventSubject::Plane,
+		now_unix_ms,
+	)?)
+	.await?;
+	Ok(CommandOutcome::AccountBound(binding))
+}
+
+/// Forgets one binding and hands its reference back, so the client that
+/// owns the secret can remove it from the backend that holds it. Jet never
+/// reaches into a credential backend itself (ADR-0076).
+///
+/// # Errors
+///
+/// Returns a `not_found` [`CoreError`] when the Plane has no such binding,
+/// or a store category when the row cannot be removed.
+pub(crate) async fn unbind(
+	tx: &mut WriteTransaction,
+	actor: &Actor,
+	binding_id: AccountBindingId,
+	now_unix_ms: i64,
+) -> Result<CommandOutcome, CoreError> {
+	let Some(record) = tx.account_binding(binding_id.0).await? else {
+		return Err(CoreError::not_found(
+			"account.not_found",
+			"the Account binding does not exist",
+		));
+	};
+	let binding: AccountBinding = record.into();
+	tx.delete_account_binding(binding_id.0).await?;
+	let event = EventKind::AccountUnbound { binding_id };
+	tx.append_event(event.to_record(
+		actor,
+		EventSubject::Plane,
+		now_unix_ms,
+	)?)
+	.await?;
+	Ok(CommandOutcome::AccountUnbound {
+		binding_id,
+		credential_reference: binding.credential_reference,
 	})
 }
 

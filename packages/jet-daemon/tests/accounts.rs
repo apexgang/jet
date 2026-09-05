@@ -78,7 +78,7 @@ async fn a_binding_and_its_reference_outlive_the_daemon_that_stored_them() {
 				provider: "anthropic".into(),
 				label: "Work".into(),
 				provider_account: Some("acct-7".into()),
-				credential: platform_item(&bound),
+				credential_reference: platform_item(&bound),
 				created_at_unix_ms: bound.created_at_unix_ms,
 			},
 			vec![AccountBindingStatus {
@@ -91,11 +91,13 @@ async fn a_binding_and_its_reference_outlive_the_daemon_that_stored_them() {
 	);
 }
 
-/// Binding metadata is text a person types. A secret pasted into it carries
-/// the control characters that no label does, and the Plane refuses it
-/// instead of storing it (ADR-0076).
+/// Binding metadata is text a person types, so the Plane bounds it and
+/// refuses the control characters no name carries. This is not secret
+/// detection — Jet's guarantee is that it has no field for a Credential at
+/// all (ADR-0076) — but it keeps a pasted blob out of the metadata a person
+/// reads.
 #[tokio::test]
-async fn a_secret_pasted_into_binding_metadata_is_refused() {
+async fn binding_metadata_refuses_text_that_is_not_a_name() {
 	let dir = tempfile::tempdir().unwrap();
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
 	let client = connect(&daemon, Uuid::new_v4()).await;

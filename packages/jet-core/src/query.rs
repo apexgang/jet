@@ -202,7 +202,7 @@ async fn account_bindings(
 						let binding: crate::AccountBinding = record.into();
 						AccountBindingStatus {
 							credential_state: CredentialState::of(
-								&binding.credential,
+								&binding.credential_reference,
 								store,
 								daemon_start,
 							),

@@ -33,9 +33,16 @@ async fn bind(
 	core: &Core,
 	label: &str,
 	provider_account: Option<&str>,
-	credential: CredentialSource,
+	credential_source: CredentialSource,
 ) -> Result<AccountBinding, CoreError> {
-	bind_to(core, anthropic(), label, provider_account, credential).await
+	bind_to(
+		core,
+		anthropic(),
+		label,
+		provider_account,
+		credential_source,
+	)
+	.await
 }
 
 async fn bind_to(
@@ -43,7 +50,7 @@ async fn bind_to(
 	provider: ProviderId,
 	label: &str,
 	provider_account: Option<&str>,
-	credential: CredentialSource,
+	credential_source: CredentialSource,
 ) -> Result<AccountBinding, CoreError> {
 	let outcome = core
 		.execute(
@@ -53,7 +60,7 @@ async fn bind_to(
 				label: label.into(),
 				provider_account: provider_account
 					.map(|identity| ProviderAccount(identity.into())),
-				credential,
+				credential_source,
 			}),
 		)
 		.await?;
@@ -157,7 +164,7 @@ async fn a_binding_keeps_only_the_reference_its_credential_resolves_through() {
 				provider: anthropic(),
 				label: "Work".into(),
 				provider_account: Some(ProviderAccount("acct-7".into())),
-				credential: platform_item(bound.binding_id),
+				credential_reference: platform_item(bound.binding_id),
 				created_at: bound.created_at,
 			},
 			vec![resolvable(bound.clone())]
@@ -199,79 +206,40 @@ async fn every_credential_source_reports_the_limitation_it_carries() {
 		bind(&second, "Tomorrow", None, CredentialSource::SessionOnly)
 			.await
 			.unwrap();
+	let states = credential_states(&second).await;
 
 	assert_eq!(
-		[
-			helper.credential,
-			native.credential,
-			session.credential,
-			after_restart.credential
-		],
-		[
-			CredentialReference::ExternalHelper {
-				helper: "op-read".into()
-			},
-			CredentialReference::HarnessNative,
-			CredentialReference::SessionOnly {
-				established_at_daemon_start: 1
-			},
-			CredentialReference::SessionOnly {
-				established_at_daemon_start: 2
-			},
-		]
-	);
-}
-
-/// Bindings group into one Provider account only through an identity the
-/// Provider supplies, so that identity is bound once per Provider. Bindings
-/// without one are the user's to link and may repeat (ADR-0016).
-#[tokio::test]
-async fn a_provider_account_is_bound_once_per_provider() {
-	let dir = tempfile::tempdir().unwrap();
-	let core = start(&dir).await;
-	let first = bind(
-		&core,
-		"Work",
-		Some("acct-7"),
-		CredentialSource::PlatformStore,
-	)
-	.await
-	.unwrap();
-
-	let again = bind(
-		&core,
-		"Work again",
-		Some("acct-7"),
-		CredentialSource::PlatformStore,
-	)
-	.await
-	.unwrap_err();
-	let elsewhere = bind_to(
-		&core,
-		ProviderId("openai".into()),
-		"Work",
-		Some("acct-7"),
-		CredentialSource::PlatformStore,
-	)
-	.await
-	.unwrap();
-	let unidentified =
-		bind(&core, "Personal", None, CredentialSource::SessionOnly)
-			.await
-			.unwrap();
-	let also_unidentified =
-		bind(&core, "Personal", None, CredentialSource::SessionOnly)
-			.await
-			.unwrap();
-
-	assert_eq!(
-		(again.category, again.code.as_str(), bindings(&core).await),
 		(
-			ErrorCategory::Conflict,
-			"account.already_bound",
-			[first, elsewhere, unidentified, also_unidentified]
-				.map(resolvable)
-				.to_vec()
+			[
+				helper.credential_reference,
+				native.credential_reference,
+				session.credential_reference,
+				after_restart.credential_reference
+			],
+			states
+		),
+		(
+			[
+				CredentialReference::ExternalHelper {
+					helper: "op-read".into()
+				},
+				CredentialReference::HarnessNative,
+				CredentialReference::SessionOnly {
+					established_at_daemon_start: 1
+				},
+				CredentialReference::SessionOnly {
+					established_at_daemon_start: 2
+				},
+			],
+			vec![
+				// A helper and a Harness answer only when they are asked,
+				// and the Plane has not asked.
+				CredentialState::ResolvedAtUse,
+				CredentialState::ResolvedAtUse,
+				// The daemon start whose memory held this one is gone.
+				CredentialState::InvalidatedByRestart,
+				CredentialState::Resolvable,
+			]
 		)
 	);
 }
@@ -370,7 +338,7 @@ async fn unbinding_hands_the_reference_back_and_forgets_the_binding() {
 		(
 			CommandOutcome::AccountUnbound {
 				binding_id: bound.binding_id,
-				credential: platform_item(bound.binding_id),
+				credential_reference: platform_item(bound.binding_id),
 			},
 			vec![],
 			ErrorCategory::NotFound,
@@ -412,7 +380,7 @@ async fn the_journal_records_the_binding_and_not_its_credential() {
 				EventKind::AccountBound {
 					binding_id: bound.binding_id,
 					provider: anthropic(),
-					credential: CredentialSource::ExternalHelper {
+					credential_source: CredentialSource::ExternalHelper {
 						helper: "op-read".into()
 					},
 				},
@@ -426,7 +394,7 @@ async fn the_journal_records_the_binding_and_not_its_credential() {
 					serde_json::json!({
 						"binding_id": bound.binding_id.0,
 						"provider": "anthropic",
-						"credential": {
+						"credential_source": {
 							"source": "external_helper",
 							"helper": "op-read"
 						},

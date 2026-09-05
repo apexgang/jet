@@ -147,7 +147,7 @@ pub enum CommandRequest {
 		#[serde(default)]
 		provider_account: Option<String>,
 		/// The backend that resolves the binding's Credential.
-		credential: CredentialSource,
+		credential_source: CredentialSource,
 	},
 	/// Remove an Account binding from this Plane.
 	UnbindAccount {
@@ -201,7 +201,7 @@ pub enum CommandResponse {
 		/// The binding that was removed.
 		binding_id: Uuid,
 		/// The reference it resolved through.
-		credential: CredentialReference,
+		credential_reference: CredentialReference,
 	},
 }
 
