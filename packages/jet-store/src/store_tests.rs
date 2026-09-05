@@ -5,7 +5,8 @@ use super::{
 	ActorRecord, CommandReceiptRecord, ConversationRecord,
 	EVENT_COMPACTION_BATCH_LIMIT, EventClass, EventRecord, NewCommandReceipt,
 	NewConversation, NewEvent, NewRun, PlaneRecord, RetentionPolicy,
-	RunLifecycle, RunRecord, Store, StoreError, is_unavailable_code,
+	RunLifecycle, RunRecord, SettingRecord, SettingScopeRecord, Store,
+	StoreError, is_unavailable_code,
 };
 
 const NOW_UNIX_MS: i64 = 1_700_000_000_000;
@@ -692,5 +693,103 @@ async fn expired_command_receipts_keep_only_an_identity_tombstone() {
 			outcome_version: None,
 			outcome: None,
 		}
+	);
+}
+
+fn setting(key: &str, scope: SettingScopeRecord, value: &str) -> SettingRecord {
+	SettingRecord {
+		key: key.into(),
+		scope,
+		value: value.into(),
+		updated_at_unix_ms: NOW_UNIX_MS,
+	}
+}
+
+#[tokio::test]
+async fn a_scope_reads_the_values_it_stores_beside_the_planes() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = Store::open(&dir.path().join("plane.sqlite3"))
+		.await
+		.unwrap();
+	let conversation_id = Uuid::now_v7();
+	let elsewhere = SettingScopeRecord::Conversation {
+		conversation_id: Uuid::now_v7(),
+	};
+	let addressed = SettingScopeRecord::Conversation { conversation_id };
+	store
+		.write(async |tx| {
+			tx.upsert_setting(&setting(
+				"utility.automatic_naming",
+				SettingScopeRecord::Plane,
+				"true",
+			))
+			.await?;
+			tx.upsert_setting(&setting(
+				"utility.automatic_naming",
+				addressed,
+				"false",
+			))
+			.await?;
+			tx.upsert_setting(&setting("git.auto_commit", elsewhere, "true"))
+				.await
+		})
+		.await
+		.unwrap();
+
+	let chain = store
+		.read(async |tx| tx.settings_for_scope(addressed).await)
+		.await
+		.unwrap();
+
+	assert_eq!(
+		chain,
+		vec![
+			setting("utility.automatic_naming", addressed, "false"),
+			setting(
+				"utility.automatic_naming",
+				SettingScopeRecord::Plane,
+				"true"
+			),
+		]
+	);
+}
+
+#[tokio::test]
+async fn writing_a_scope_replaces_only_the_value_that_scope_stored() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = Store::open(&dir.path().join("plane.sqlite3"))
+		.await
+		.unwrap();
+	let conversation_id = Uuid::now_v7();
+	let addressed = SettingScopeRecord::Conversation { conversation_id };
+	let key = "utility.automatic_naming";
+
+	let (replaced, cleared) = store
+		.write(async |tx| {
+			tx.upsert_setting(&setting(
+				key,
+				SettingScopeRecord::Plane,
+				"false",
+			))
+			.await?;
+			tx.upsert_setting(&setting(key, addressed, "false")).await?;
+			tx.upsert_setting(&setting(key, addressed, "true")).await?;
+			let replaced = tx.settings_for_scope(addressed).await?;
+			tx.delete_setting(key, addressed).await?;
+			let cleared = tx.settings_for_scope(addressed).await?;
+			Ok::<_, StoreError>((replaced, cleared))
+		})
+		.await
+		.unwrap();
+
+	assert_eq!(
+		(replaced, cleared),
+		(
+			vec![
+				setting(key, addressed, "true"),
+				setting(key, SettingScopeRecord::Plane, "false"),
+			],
+			vec![setting(key, SettingScopeRecord::Plane, "false")]
+		)
 	);
 }

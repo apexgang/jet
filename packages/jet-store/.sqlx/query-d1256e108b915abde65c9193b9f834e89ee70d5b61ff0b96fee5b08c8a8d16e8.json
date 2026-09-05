@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE settings\n\t\t\t SET value = ?4, updated_at_unix_ms = ?5\n\t\t\t WHERE key = ?1 AND scope = ?2 AND scope_id IS ?3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "d1256e108b915abde65c9193b9f834e89ee70d5b61ff0b96fee5b08c8a8d16e8"
+}

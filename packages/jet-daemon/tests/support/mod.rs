@@ -22,6 +22,8 @@ use uuid::Uuid;
 pub struct Daemon {
 	pub child: Child,
 	pub socket: PathBuf,
+	/// The line `jetd` prints once it can serve, parsed.
+	pub ready: serde_json::Value,
 }
 
 pub fn jetd(home: &Path) -> Command {
@@ -38,7 +40,19 @@ pub fn jetd(home: &Path) -> Command {
 }
 
 pub async fn start_jetd(home: &Path) -> Daemon {
-	let mut child = jetd(home).spawn().unwrap();
+	start_jetd_process(&mut jetd(home)).await
+}
+
+/// Starts `jetd` where none of the external tools it invokes can be found,
+/// so its Capability snapshot reports them missing (ADR-0056). The search
+/// path is given to the child alone; this process keeps its own.
+pub async fn start_jetd_without_external_tools(home: &Path) -> Daemon {
+	start_jetd_process(jetd(home).env("PATH", "/jet-has-no-tools-here")).await
+}
+
+/// Spawns one `jetd` and waits for the line that says it can serve.
+pub async fn start_jetd_process(command: &mut Command) -> Daemon {
+	let mut child = command.spawn().unwrap();
 	let stdout = child.stdout.take().unwrap();
 	let mut lines = BufReader::new(stdout).lines();
 	let ready = lines.next_line().await.unwrap().expect("jetd exited early");
@@ -47,6 +61,7 @@ pub async fn start_jetd(home: &Path) -> Daemon {
 	Daemon {
 		child,
 		socket: PathBuf::from(ready["socket"].as_str().unwrap()),
+		ready,
 	}
 }
 

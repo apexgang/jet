@@ -3,6 +3,7 @@
 use jet_store::StoreError;
 use serde::{Deserialize, Serialize};
 
+use crate::capability::Capability;
 use crate::{EventSequence, Revision, Run, RunId};
 
 /// Stable metadata explaining how a client must restart a stale read.
@@ -239,6 +240,22 @@ impl CoreError {
 			code: code.into(),
 			retryable: false,
 			message: message.into(),
+			detail: None,
+			revision_conflict: None,
+			recovery_actions: vec![],
+		}
+	}
+
+	/// A Command that depends on a Capability the Plane no longer has.
+	pub(crate) fn capability_unavailable(capability: Capability) -> Self {
+		Self {
+			category: ErrorCategory::Unavailable,
+			code: "capability.unavailable".into(),
+			retryable: false,
+			message: format!(
+				"this Plane cannot use {} right now",
+				capability.describe()
+			),
 			detail: None,
 			revision_conflict: None,
 			recovery_actions: vec![],

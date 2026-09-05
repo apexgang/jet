@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT key AS \"key!\", scope AS \"scope!\", scope_id, value,\n\t\t\t\tupdated_at_unix_ms\n\t\t\t FROM settings\n\t\t\t WHERE scope = 'plane' OR (scope = ?1 AND scope_id = ?2)\n\t\t\t ORDER BY key, scope",
+  "describe": {
+    "columns": [
+      {
+        "name": "key!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "settings",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "name": "scope!",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "settings",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "name": "scope_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "settings",
+            "name": "scope_id"
+          }
+        }
+      },
+      {
+        "name": "value",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "settings",
+            "name": "value"
+          }
+        }
+      },
+      {
+        "name": "updated_at_unix_ms",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "settings",
+            "name": "updated_at_unix_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "bea590c13df257e43a2e39cd02dfe8d47acd50d7fbd234c3944593a865b2ac44"
+}

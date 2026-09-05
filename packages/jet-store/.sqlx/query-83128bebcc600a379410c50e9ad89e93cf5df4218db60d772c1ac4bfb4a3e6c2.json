@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO settings\n\t\t\t\t\t(key, scope, scope_id, value, updated_at_unix_ms)\n\t\t\t\t VALUES (?1, ?2, ?3, ?4, ?5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "83128bebcc600a379410c50e9ad89e93cf5df4218db60d772c1ac4bfb4a3e6c2"
+}

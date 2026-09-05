@@ -74,11 +74,16 @@ pub(crate) async fn run(
 			return ExitCode::from(EXIT_FAILURE);
 		}
 	};
+	// ADR-0086: the Plane reports what it can do at startup, on the one
+	// line a launcher reads, and on demand afterwards.
+	let capabilities =
+		crate::translate::capabilities(core.capabilities().await);
 	println!(
 		"{}",
 		serde_json::json!({
 			"status": "ready",
 			"socket": listener.socket_path().display().to_string(),
+			"capabilities": capabilities,
 		})
 	);
 	let exit = serve(listener, &core).await;

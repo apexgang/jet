@@ -1,9 +1,11 @@
 //! The Queries and Commands a client can issue once connected.
 
 use jet_protocol::{
-	CommandRequest, CommandResponse, Conversation, ConversationList,
-	ConversationSnapshot, EventPage, PageCursor, PlaneStatus, QueryRequest,
-	QueryResponse, RetentionPolicy, Run, RunLifecycle,
+	CapabilityObservation, CapabilitySnapshot, CommandRequest, CommandResponse,
+	Conversation, ConversationList, ConversationSnapshot, EventPage,
+	PageCursor, PlaneStatus, QueryRequest, QueryResponse, RetentionPolicy, Run,
+	RunLifecycle, SettingKey, SettingScope, SettingSelection, SettingSnapshot,
+	SettingValue,
 };
 use uuid::Uuid;
 
@@ -30,7 +32,9 @@ impl Client {
 			QueryResponse::Status(status) => Ok(status),
 			other @ (QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
-			| QueryResponse::Events(_)) => Err(unexpected(&other)),
+			| QueryResponse::Events(_)
+			| QueryResponse::Settings(_)
+			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -46,7 +50,9 @@ impl Client {
 			QueryResponse::Conversations(list) => Ok(list),
 			other @ (QueryResponse::Status(_)
 			| QueryResponse::Conversation(_)
-			| QueryResponse::Events(_)) => Err(unexpected(&other)),
+			| QueryResponse::Events(_)
+			| QueryResponse::Settings(_)
+			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -69,7 +75,9 @@ impl Client {
 			QueryResponse::Conversations(list) => Ok(list),
 			other @ (QueryResponse::Status(_)
 			| QueryResponse::Conversation(_)
-			| QueryResponse::Events(_)) => Err(unexpected(&other)),
+			| QueryResponse::Events(_)
+			| QueryResponse::Settings(_)
+			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -92,7 +100,9 @@ impl Client {
 			QueryResponse::Conversation(snapshot) => Ok(snapshot),
 			other @ (QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
-			| QueryResponse::Events(_)) => Err(unexpected(&other)),
+			| QueryResponse::Events(_)
+			| QueryResponse::Settings(_)
+			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -112,7 +122,9 @@ impl Client {
 			QueryResponse::Events(page) => Ok(page),
 			other @ (QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
-			| QueryResponse::Conversation(_)) => Err(unexpected(&other)),
+			| QueryResponse::Conversation(_)
+			| QueryResponse::Settings(_)
+			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -139,7 +151,9 @@ impl Client {
 				Ok(conversation)
 			}
 			other @ (CommandResponse::RunCreated(_)
-			| CommandResponse::RunTransitioned(_)) => Err(unexpected(&other)),
+			| CommandResponse::RunTransitioned(_)
+			| CommandResponse::SettingSet { .. }
+			| CommandResponse::SettingCleared { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -164,7 +178,9 @@ impl Client {
 		{
 			CommandResponse::RunCreated(run) => Ok(run),
 			other @ (CommandResponse::ConversationCreated(_)
-			| CommandResponse::RunTransitioned(_)) => Err(unexpected(&other)),
+			| CommandResponse::RunTransitioned(_)
+			| CommandResponse::SettingSet { .. }
+			| CommandResponse::SettingCleared { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -196,7 +212,125 @@ impl Client {
 		{
 			CommandResponse::RunTransitioned(run) => Ok(run),
 			other @ (CommandResponse::ConversationCreated(_)
-			| CommandResponse::RunCreated(_)) => Err(unexpected(&other)),
+			| CommandResponse::RunCreated(_)
+			| CommandResponse::SettingSet { .. }
+			| CommandResponse::SettingCleared { .. }) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Resolves Settings for `scope`, the scope's own values winning over
+	/// the Plane's and built-in defaults beneath both (ADR-0085).
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the scope may not store a named
+	/// Setting or the daemon reports another stable error, or the transport
+	/// failure otherwise.
+	pub async fn settings(
+		&self,
+		scope: SettingScope,
+		selection: SettingSelection,
+	) -> Result<SettingSnapshot, ClientError> {
+		self.require_minor(jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR)?;
+		match self
+			.query(QueryRequest::Settings { scope, selection })
+			.await?
+		{
+			QueryResponse::Settings(snapshot) => Ok(snapshot),
+			other @ (QueryResponse::Status(_)
+			| QueryResponse::Conversations(_)
+			| QueryResponse::Conversation(_)
+			| QueryResponse::Events(_)
+			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Stores `value` for `key` at `scope` under the Command identity
+	/// `command_id`, which a retry must reuse (ADR-0093).
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the scope may not store the
+	/// Setting or the value does not fit it, or the transport failure
+	/// otherwise.
+	pub async fn set_setting(
+		&self,
+		command_id: Uuid,
+		key: SettingKey,
+		scope: SettingScope,
+		value: SettingValue,
+	) -> Result<SettingValue, ClientError> {
+		self.require_minor(jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR)?;
+		match self
+			.execute_command(
+				command_id,
+				CommandRequest::SetSetting { key, scope, value },
+			)
+			.await?
+		{
+			CommandResponse::SettingSet { value, .. } => Ok(value),
+			other @ (CommandResponse::ConversationCreated(_)
+			| CommandResponse::RunCreated(_)
+			| CommandResponse::RunTransitioned(_)
+			| CommandResponse::SettingCleared { .. }) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Removes whatever `scope` stores for `key`, leaving the scopes above
+	/// it untouched, under the Command identity `command_id`.
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the scope may not store the
+	/// Setting, or the transport failure otherwise.
+	pub async fn clear_setting(
+		&self,
+		command_id: Uuid,
+		key: SettingKey,
+		scope: SettingScope,
+	) -> Result<(), ClientError> {
+		self.require_minor(jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR)?;
+		match self
+			.execute_command(
+				command_id,
+				CommandRequest::ClearSetting { key, scope },
+			)
+			.await?
+		{
+			CommandResponse::SettingCleared { .. } => Ok(()),
+			other @ (CommandResponse::ConversationCreated(_)
+			| CommandResponse::RunCreated(_)
+			| CommandResponse::RunTransitioned(_)
+			| CommandResponse::SettingSet { .. }) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Reports what the Plane can do: its platform, the external tools it
+	/// found, whether credentials resolve, its Crafts and Harnesses, and
+	/// what leaves it degraded (ADR-0086).
+	///
+	/// `jetd` observes the Plane at startup and whenever `observation` asks
+	/// for a new look; it never polls in between.
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the daemon reports a stable
+	/// error, or the transport failure otherwise.
+	pub async fn capabilities(
+		&self,
+		observation: CapabilityObservation,
+	) -> Result<CapabilitySnapshot, ClientError> {
+		self.require_minor(jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR)?;
+		match self
+			.query(QueryRequest::Capabilities { observation })
+			.await?
+		{
+			QueryResponse::Capabilities(snapshot) => Ok(snapshot),
+			other @ (QueryResponse::Status(_)
+			| QueryResponse::Conversations(_)
+			| QueryResponse::Conversation(_)
+			| QueryResponse::Events(_)
+			| QueryResponse::Settings(_)) => Err(unexpected(&other)),
 		}
 	}
 }

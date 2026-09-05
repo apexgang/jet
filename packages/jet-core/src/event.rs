@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::conversation::{ConversationId, RunId};
 use crate::error::CoreError;
+use crate::setting::{SettingKey, SettingScope, SettingValue};
 use crate::{Actor, system_time};
 
 /// Most Events one `Query::Events` page returns.
@@ -43,6 +44,8 @@ pub struct EventSequence(pub u64);
 /// What an Event is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EventSubject {
+	/// The Plane itself, with no Conversation of its own.
+	Plane,
 	/// The Conversation as a whole.
 	Conversation(ConversationId),
 	/// One Run of a Conversation.
@@ -110,6 +113,24 @@ pub enum EventKind {
 	/// A Run was recorded in the `created` state.
 	#[serde(rename = "run.created")]
 	RunCreated {},
+	/// One scope stored a Setting value.
+	#[serde(rename = "setting.changed")]
+	SettingChanged {
+		/// The Setting that changed.
+		key: SettingKey,
+		/// The scope that stores the new value.
+		scope: SettingScope,
+		/// The value that scope now stores.
+		value: SettingValue,
+	},
+	/// One scope stopped storing its own value for a Setting.
+	#[serde(rename = "setting.cleared")]
+	SettingCleared {
+		/// The Setting that was cleared.
+		key: SettingKey,
+		/// The scope that no longer stores a value.
+		scope: SettingScope,
+	},
 	/// A Run moved to a later lifecycle state.
 	#[serde(rename = "run.lifecycle_changed")]
 	RunLifecycleChanged {
@@ -138,7 +159,9 @@ impl EventKind {
 			Self::Unrecognized(payload) => Ok(payload.clone()),
 			Self::ConversationCreated { .. }
 			| Self::RunCreated {}
-			| Self::RunLifecycleChanged { .. } => {
+			| Self::RunLifecycleChanged { .. }
+			| Self::SettingChanged { .. }
+			| Self::SettingCleared { .. } => {
 				let encoded = serde_json::to_value(self).map_err(|error| {
 					CoreError::internal("event.unencodable", error.to_string())
 				})?;
@@ -202,19 +225,20 @@ impl EventKind {
 			payload,
 		} = self.encode()?;
 		let (conversation_id, run_id) = match subject {
+			EventSubject::Plane => (None, None),
 			EventSubject::Conversation(conversation_id) => {
-				(conversation_id, None)
+				(Some(conversation_id), None)
 			}
 			EventSubject::Run {
 				conversation_id,
 				run_id,
-			} => (conversation_id, Some(run_id)),
+			} => (Some(conversation_id), Some(run_id)),
 		};
 		Ok(NewEvent {
 			event_id: Uuid::now_v7(),
 			actor: actor.record(),
 			recorded_at_unix_ms,
-			conversation_id: Some(conversation_id.0),
+			conversation_id: conversation_id.map(|id| id.0),
 			run_id: run_id.map(|id| id.0),
 			kind,
 			payload_version,

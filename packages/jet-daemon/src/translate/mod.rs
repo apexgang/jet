@@ -1,5 +1,11 @@
 //! Translation between core domain types and versioned wire types
-//! (ADR-0049). This is the only place the two vocabularies meet.
+//! (ADR-0049). This is the only place the two vocabularies meet; its
+//! Capability and Setting halves sit in the submodules beside it.
+
+mod capability;
+mod setting;
+
+pub(crate) use capability::snapshot as capabilities;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -31,6 +37,15 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 				conversation_id: ConversationId(*conversation_id),
 			}
 		}
+		wire::QueryRequest::Capabilities { observation } => {
+			Query::Capabilities {
+				observation: capability::observation(*observation),
+			}
+		}
+		wire::QueryRequest::Settings { scope, selection } => Query::Settings {
+			scope: setting::scope_from_wire(*scope),
+			selection: setting::selection_from_wire(*selection),
+		},
 		wire::QueryRequest::Events { after } => Query::Events {
 			after: EventSequence(*after),
 		},
@@ -51,6 +66,12 @@ pub(crate) fn query_result(
 		QueryResult::Conversation(snapshot) => {
 			wire::QueryResponse::Conversation(conversation_snapshot(&snapshot))
 		}
+		QueryResult::Capabilities(snapshot) => {
+			wire::QueryResponse::Capabilities(capability::snapshot(snapshot))
+		}
+		QueryResult::Settings(snapshot) => {
+			wire::QueryResponse::Settings(setting::snapshot(snapshot))
+		}
 		QueryResult::Events(page) => {
 			wire::QueryResponse::Events(event_page(&page)?)
 		}
@@ -58,15 +79,28 @@ pub(crate) fn query_result(
 }
 
 pub(crate) fn command(request: &wire::CommandRequest) -> Command {
-	match *request {
+	match request {
 		wire::CommandRequest::CreateConversation { retention } => {
 			Command::CreateConversation {
-				retention: retention_from_wire(retention),
+				retention: retention_from_wire(*retention),
 			}
 		}
 		wire::CommandRequest::CreateRun { conversation_id } => {
 			Command::CreateRun {
-				conversation_id: ConversationId(conversation_id),
+				conversation_id: ConversationId(*conversation_id),
+			}
+		}
+		wire::CommandRequest::SetSetting { key, scope, value } => {
+			Command::SetSetting {
+				key: setting::key_from_wire(*key),
+				scope: setting::scope_from_wire(*scope),
+				value: setting::value_from_wire(value.clone()),
+			}
+		}
+		wire::CommandRequest::ClearSetting { key, scope } => {
+			Command::ClearSetting {
+				key: setting::key_from_wire(*key),
+				scope: setting::scope_from_wire(*scope),
 			}
 		}
 		wire::CommandRequest::TransitionRun {
@@ -74,9 +108,9 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 			expected_revision,
 			lifecycle,
 		} => Command::TransitionRun {
-			run_id: RunId(run_id),
-			expected_revision: Revision(expected_revision),
-			lifecycle: lifecycle_from_wire(lifecycle),
+			run_id: RunId(*run_id),
+			expected_revision: Revision(*expected_revision),
+			lifecycle: lifecycle_from_wire(*lifecycle),
 		},
 	}
 }
@@ -93,6 +127,19 @@ pub(crate) fn command_outcome(
 		}
 		CommandOutcome::RunTransitioned(transitioned) => {
 			wire::CommandResponse::RunTransitioned(run(&transitioned))
+		}
+		CommandOutcome::SettingSet { key, scope, value } => {
+			wire::CommandResponse::SettingSet {
+				key: setting::key(key),
+				scope: setting::scope(scope),
+				value: setting::value(value),
+			}
+		}
+		CommandOutcome::SettingCleared { key, scope } => {
+			wire::CommandResponse::SettingCleared {
+				key: setting::key(key),
+				scope: setting::scope(scope),
+			}
 		}
 	}
 }
@@ -305,7 +352,7 @@ fn category(category: ErrorCategory) -> wire::ErrorCategory {
 	}
 }
 
-fn unix_ms(time: SystemTime) -> i64 {
+pub(super) fn unix_ms(time: SystemTime) -> i64 {
 	match time.duration_since(UNIX_EPOCH) {
 		Ok(elapsed) => i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX),
 		Err(behind) => i64::try_from(behind.duration().as_millis())

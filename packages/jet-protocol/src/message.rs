@@ -4,12 +4,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use uuid::Uuid;
 
+use crate::capability::{CapabilityObservation, CapabilitySnapshot};
 use crate::control::{ControlError, decode_control};
 use crate::conversation::{
 	CommandRequest, CommandResponse, ConversationList, ConversationSnapshot,
 	PageCursor, RevisionConflict,
 };
 use crate::event::Event;
+use crate::setting::{SettingScope, SettingSelection, SettingSnapshot};
 
 /// Correlates a client request with its server reply.
 pub type RequestId = u64;
@@ -99,6 +101,18 @@ pub enum QueryRequest {
 		/// The Conversation to read.
 		conversation_id: Uuid,
 	},
+	/// What the Plane can do.
+	Capabilities {
+		/// Whether to report the last observation or take a new one.
+		observation: CapabilityObservation,
+	},
+	/// Settings resolved for one scope.
+	Settings {
+		/// The scope to resolve for; its own values win over the Plane's.
+		scope: SettingScope,
+		/// Which Settings to resolve.
+		selection: SettingSelection,
+	},
 	/// A page of journal Events strictly after a sequence.
 	Events {
 		/// The sequence to resume after, carried as a decimal string
@@ -118,6 +132,10 @@ pub enum QueryResponse {
 	Conversations(ConversationList),
 	/// One Conversation with all of its Runs.
 	Conversation(ConversationSnapshot),
+	/// What the Plane can do.
+	Capabilities(CapabilitySnapshot),
+	/// Settings resolved for one scope.
+	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.
 	Events(EventPage),
 }

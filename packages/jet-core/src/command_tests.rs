@@ -1,48 +1,19 @@
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use jet_store::{EventClass, NewEvent};
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
-use crate::clock::Clock;
-use crate::test_support::{actor, start_core};
-use crate::{
-	Command, CommandEnvelope, CommandId, CommandOutcome, Conversation,
-	ConversationId, ConversationSnapshot, Core, CoreError, ErrorCategory,
-	EventKind, EventPage, EventPayload, EventSequence, Query, QueryResult,
-	RetentionPolicy, Revision, Run, RunId, RunLifecycle,
+use crate::test_support::{
+	FixedProbe, ManualClock, actor, command_id, equipped, request,
+	request_with_id, start_core, start_core_with,
 };
-use jet_store::Store;
-
-fn command_id() -> CommandId {
-	CommandId(Uuid::now_v7())
-}
-
-fn request(command: Command) -> CommandEnvelope {
-	request_with_id(command_id(), command)
-}
-
-fn request_with_id(command_id: CommandId, command: Command) -> CommandEnvelope {
-	let bytes = serde_json::to_vec(&command).unwrap();
-	CommandEnvelope::new(command_id, command, &bytes).unwrap()
-}
-
-#[derive(Debug)]
-struct ManualClock(Mutex<SystemTime>);
-
-impl ManualClock {
-	fn advance(&self, duration: Duration) {
-		let mut now = self.0.lock().unwrap();
-		*now += duration;
-	}
-}
-
-impl Clock for ManualClock {
-	fn now(&self) -> SystemTime {
-		*self.0.lock().unwrap()
-	}
-}
+use crate::{
+	Command, CommandEnvelope, CommandOutcome, Conversation, ConversationId,
+	ConversationSnapshot, Core, CoreError, ErrorCategory, EventKind, EventPage,
+	EventPayload, EventSequence, Query, QueryResult, RetentionPolicy, Revision,
+	Run, RunId, RunLifecycle,
+};
 
 async fn create_conversation(
 	core: &Core,
@@ -347,24 +318,24 @@ async fn an_unknown_conversation_or_run_is_not_found() {
 async fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 	let dir = tempfile::tempdir().unwrap();
 	let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-	let clock = Arc::new(ManualClock(Mutex::new(start)));
-	let core = Core::start_with_clock(
-		Store::open(&dir.path().join("p.sqlite3")).await.unwrap(),
+	let clock = ManualClock::at(start);
+	let core = start_core_with(
+		&dir.path().join("p.sqlite3"),
 		clock.clone(),
+		FixedProbe::new(equipped()),
 	)
-	.await
-	.unwrap();
+	.await;
 	let command_id = command_id();
 	let command = Command::CreateConversation {
 		retention: RetentionPolicy::Retain,
 	};
 	let original = core
-		.execute(&actor(), request_with_id(command_id, command))
+		.execute(&actor(), request_with_id(command_id, command.clone()))
 		.await
 		.unwrap();
 	clock.advance(Duration::from_hours(30 * 24));
 	let within_window = core
-		.execute(&actor(), request_with_id(command_id, command))
+		.execute(&actor(), request_with_id(command_id, command.clone()))
 		.await
 		.unwrap();
 	clock.advance(Duration::from_millis(1));

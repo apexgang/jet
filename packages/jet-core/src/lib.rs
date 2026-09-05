@@ -8,8 +8,11 @@
 //! Domain types here never double as wire types (ADR-0049); `jetd`
 //! translates at the transport seam.
 
+mod capability;
+mod capability_probe;
 mod clock;
 mod command;
+mod command_receipt;
 mod conversation;
 #[allow(dead_code, reason = "wired to the Harness by follow-up issue #20")]
 mod effect;
@@ -18,6 +21,7 @@ mod event;
 mod lifecycle;
 mod pagination;
 mod query;
+mod setting;
 mod status;
 #[cfg(test)]
 mod test_support;
@@ -26,10 +30,18 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use jet_store::{ActorRecord, Store};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use capability::CapabilityProbe;
+use capability_probe::SystemCapabilityProbe;
 use clock::{Clock, SystemClock};
 
+pub use capability::{
+	CapabilityObservation, CapabilitySnapshot, CraftId, CredentialStoreKind,
+	CredentialStoreStatus, DegradedCondition, ExternalTool, ExternalToolStatus,
+	HarnessId, InstalledCraft, Platform, ToolAvailability,
+};
 pub use command::{Command, CommandEnvelope, CommandId, CommandOutcome};
 pub use conversation::{
 	Conversation, ConversationId, ConversationList, ConversationSnapshot,
@@ -44,6 +56,10 @@ pub use event::{
 };
 pub use jet_store::{RetentionPolicy, RunLifecycle};
 pub use query::{Query, QueryResult};
+pub use setting::{
+	ResolvedSetting, SettingKey, SettingScope, SettingSelection,
+	SettingSnapshot, SettingSource, SettingValue,
+};
 pub use status::PlaneStatus;
 
 /// Version of the running core, reported in status snapshots.
@@ -56,6 +72,12 @@ pub struct ClientId(pub Uuid);
 /// Durable identity of one Plane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PlaneId(pub Uuid);
+
+/// Durable identity of one registered Project. The Project registry itself
+/// arrives with Project registration; Settings already resolve through the
+/// scope it names (ADR-0085).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ProjectId(pub Uuid);
 
 /// The authenticated origin of a Command or Query (ADR-0063).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +129,11 @@ impl Actor {
 pub struct Core {
 	store: Store,
 	clock: Arc<dyn Clock>,
+	probe: Arc<dyn CapabilityProbe>,
+	/// What the Plane could do when it was last observed. Nothing refreshes
+	/// it on a timer: a Query or a Command that depends on a Capability
+	/// observes the Plane again and leaves the result here (ADR-0086).
+	capabilities: tokio::sync::RwLock<CapabilitySnapshot>,
 	started_at: SystemTime,
 	#[allow(dead_code, reason = "used by Effect reconciliation in issue #20")]
 	effect_reconciliation: tokio::sync::Mutex<()>,
@@ -121,28 +148,58 @@ impl Core {
 	/// Returns [`CoreError`] with an `unavailable` or `internal` category
 	/// when the start cannot be committed.
 	pub async fn start(store: Store) -> Result<Self, CoreError> {
-		Self::start_with_clock(store, Arc::new(SystemClock)).await
+		Self::start_with(
+			store,
+			Arc::new(SystemClock),
+			Arc::new(SystemCapabilityProbe),
+		)
+		.await
 	}
 
-	/// Starts the core with an injected wall clock.
+	/// Starts the core with an injected wall clock and Capability probe,
+	/// observing the Plane once so its first report needs no waiting.
 	///
 	/// # Errors
 	///
 	/// Returns [`CoreError`] with an `unavailable` or `internal` category
 	/// when the start cannot be committed.
-	pub(crate) async fn start_with_clock(
+	pub(crate) async fn start_with(
 		store: Store,
 		clock: Arc<dyn Clock>,
+		probe: Arc<dyn CapabilityProbe>,
 	) -> Result<Self, CoreError> {
 		store.record_daemon_start().await?;
 		let started_at = clock.now();
+		let capabilities = CapabilitySnapshot::from_observation(
+			probe.observe().await,
+			started_at,
+		);
 		Ok(Self {
 			store,
 			clock,
+			probe,
+			capabilities: tokio::sync::RwLock::new(capabilities),
 			started_at,
 			effect_reconciliation: tokio::sync::Mutex::new(()),
 			conversation_pages: pagination::ConversationPages::default(),
 		})
+	}
+
+	/// What the Plane could do when it was last observed. `jetd` reports
+	/// this at startup, before any client has connected to ask for it
+	/// (ADR-0086).
+	pub async fn capabilities(&self) -> CapabilitySnapshot {
+		self.capabilities.read().await.clone()
+	}
+
+	/// Observes the Plane again and keeps the result as its latest
+	/// snapshot.
+	pub(crate) async fn observe_capabilities(&self) -> CapabilitySnapshot {
+		let observed = self.probe.observe().await;
+		let snapshot =
+			CapabilitySnapshot::from_observation(observed, self.clock.now());
+		*self.capabilities.write().await = snapshot.clone();
+		snapshot
 	}
 
 	/// The core clock's current time as the store records it. Every stamp
@@ -179,3 +236,11 @@ mod tests;
 #[cfg(test)]
 #[path = "effect_tests.rs"]
 mod effect_tests;
+
+#[cfg(test)]
+#[path = "setting_tests.rs"]
+mod setting_tests;
+
+#[cfg(test)]
+#[path = "capability_tests.rs"]
+mod capability_tests;

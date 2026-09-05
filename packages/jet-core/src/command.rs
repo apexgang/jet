@@ -3,21 +3,27 @@
 //! acknowledged only after that commit (ADR-0020, ADR-0071).
 
 use jet_store::{
-	CommandReceiptRecord, EffectKindRecord, EffectSafetyRecord,
-	NewCommandReceipt, NewConversation, NewEffect, NewRun, RetentionPolicy,
-	RunLifecycle, WriteTransaction,
+	EffectKindRecord, EffectSafetyRecord, NewCommandReceipt, NewConversation,
+	NewEffect, NewRun, RetentionPolicy, RunLifecycle, SettingRecord,
+	WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use crate::capability::{Capability, ExternalTool};
+use crate::command_receipt::{
+	COMMAND_RETENTION_MS, OUTCOME_VERSION, encode_result, replay,
+};
 use crate::conversation::{Conversation, ConversationId, Revision, Run, RunId};
 use crate::error::{ConflictState, CoreError, RevisionConflict};
 use crate::event::{EventKind, EventSubject};
+use crate::setting::{self, SettingKey, SettingScope, SettingValue};
 use crate::{Actor, Core, lifecycle};
 
-const OUTCOME_VERSION: u32 = 1;
-const COMMAND_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
+/// Automatic Git delivery is carried out with the Git the core invokes, so
+/// turning it on depends on that tool being installed (ADR-0029, ADR-0056).
+const GIT: &[Capability] = &[Capability::ExternalTool(ExternalTool::Git)];
 
 /// Actor-scoped identity of a Command, retained for retry safety.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -25,7 +31,7 @@ pub struct CommandId(pub Uuid);
 
 /// One Command with the identity and exact request bytes used for retry
 /// safety.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandEnvelope {
 	/// Actor-scoped identity of the Command.
 	command_id: CommandId,
@@ -69,7 +75,7 @@ impl CommandEnvelope {
 }
 
 /// A state-changing request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
 	/// Create a Conversation with no Runs.
 	CreateConversation {
@@ -80,6 +86,23 @@ pub enum Command {
 	CreateRun {
 		/// The Conversation to execute.
 		conversation_id: ConversationId,
+	},
+	/// Store a Setting value at one scope (ADR-0085).
+	SetSetting {
+		/// The Setting to store.
+		key: SettingKey,
+		/// The scope that stores the value.
+		scope: SettingScope,
+		/// The value to store.
+		value: SettingValue,
+	},
+	/// Remove whatever value one scope stores for a Setting, leaving the
+	/// scopes above it untouched.
+	ClearSetting {
+		/// The Setting to clear.
+		key: SettingKey,
+		/// The scope that stops storing a value.
+		scope: SettingScope,
 	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
@@ -92,8 +115,28 @@ pub enum Command {
 	},
 }
 
+impl Command {
+	/// What the Plane must still be able to do when this Command runs. Each
+	/// one is checked against a new observation before anything commits
+	/// (ADR-0086).
+	pub(crate) fn required_capabilities(&self) -> &'static [Capability] {
+		match self {
+			Self::SetSetting {
+				key: SettingKey::GitAutoCommit,
+				value: SettingValue::Flag(true),
+				..
+			} => GIT,
+			Self::CreateConversation { .. }
+			| Self::CreateRun { .. }
+			| Self::SetSetting { .. }
+			| Self::ClearSetting { .. }
+			| Self::TransitionRun { .. } => &[],
+		}
+	}
+}
+
 /// The durable result of a [`Command`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
 	/// The Conversation as created.
 	ConversationCreated(Conversation),
@@ -101,6 +144,22 @@ pub enum CommandOutcome {
 	RunCreated(Run),
 	/// The Run after its transition.
 	RunTransitioned(Run),
+	/// The Setting value the named scope now stores.
+	SettingSet {
+		/// The Setting that was stored.
+		key: SettingKey,
+		/// The scope that stores it.
+		scope: SettingScope,
+		/// The stored value.
+		value: SettingValue,
+	},
+	/// The named scope no longer stores its own value for the Setting.
+	SettingCleared {
+		/// The Setting that was cleared.
+		key: SettingKey,
+		/// The scope that no longer stores a value.
+		scope: SettingScope,
+	},
 }
 
 impl Core {
@@ -124,6 +183,8 @@ impl Core {
 			request_digest,
 		} = envelope;
 		let actor_record = actor.record();
+		self.revalidate_capabilities(actor_record, command_id, &command)
+			.await?;
 		let recorded_at_unix_ms = self.now_unix_ms();
 		self.store
 			.write(async |tx| {
@@ -173,52 +234,6 @@ impl Core {
 	}
 }
 
-fn replay(
-	receipt: CommandReceiptRecord,
-	request_digest: [u8; 32],
-	now_unix_ms: i64,
-) -> Result<Result<CommandOutcome, CoreError>, CoreError> {
-	if now_unix_ms.saturating_sub(receipt.recorded_at_unix_ms)
-		> COMMAND_RETENTION_MS
-	{
-		return Ok(Err(CoreError::invalid_input(
-			"command.identity_expired",
-			"the Command identity is older than thirty days",
-		)));
-	}
-	let Some(original_digest) = receipt.request_digest else {
-		return Err(invalid_receipt("digest"));
-	};
-	if original_digest != request_digest {
-		return Err(CoreError::conflict(
-			"command.identity_reused",
-			"the Command identity was already used for different content",
-		));
-	}
-	let Some(outcome_version) = receipt.outcome_version else {
-		return Err(invalid_receipt("outcome version"));
-	};
-	if outcome_version != OUTCOME_VERSION {
-		return Ok(Err(CoreError::incompatible(
-			"command.outcome_incompatible",
-			"the Command outcome was recorded by an incompatible core; submit the Command again under a new identity",
-		)));
-	}
-	let Some(outcome) = receipt.outcome else {
-		return Err(invalid_receipt("outcome"));
-	};
-	serde_json::from_str(&outcome).map_err(|error| {
-		CoreError::internal("command.outcome_invalid", error.to_string())
-	})
-}
-
-fn invalid_receipt(missing: &str) -> CoreError {
-	CoreError::internal(
-		"command.receipt_invalid",
-		format!("an unexpired Command receipt has no {missing}"),
-	)
-}
-
 async fn execute_new(
 	tx: &mut WriteTransaction,
 	actor: &Actor,
@@ -232,6 +247,12 @@ async fn execute_new(
 		}
 		Command::CreateRun { conversation_id } => {
 			create_run(tx, actor, conversation_id, now_unix_ms).await
+		}
+		Command::SetSetting { key, scope, value } => {
+			set_setting(tx, actor, key, scope, value, now_unix_ms).await
+		}
+		Command::ClearSetting { key, scope } => {
+			clear_setting(tx, actor, key, scope, now_unix_ms).await
 		}
 		Command::TransitionRun {
 			run_id,
@@ -250,14 +271,6 @@ async fn execute_new(
 			.await
 		}
 	}
-}
-
-fn encode_result(
-	result: &Result<CommandOutcome, CoreError>,
-) -> Result<String, CoreError> {
-	serde_json::to_string(result).map_err(|error| {
-		CoreError::internal("command.outcome_encode_failed", error.to_string())
-	})
 }
 
 async fn create_conversation(
@@ -325,6 +338,57 @@ async fn create_run(
 	)?)
 	.await?;
 	Ok(CommandOutcome::RunCreated(run))
+}
+
+async fn set_setting(
+	tx: &mut WriteTransaction,
+	actor: &Actor,
+	key: SettingKey,
+	scope: SettingScope,
+	value: SettingValue,
+	now_unix_ms: i64,
+) -> Result<CommandOutcome, CoreError> {
+	let encoded = setting::prepare_write(key, scope, &value)?;
+	setting::require_subject(tx, scope).await?;
+	tx.upsert_setting(&SettingRecord {
+		key: key.as_str().into(),
+		scope: scope.record(),
+		value: encoded,
+		updated_at_unix_ms: now_unix_ms,
+	})
+	.await?;
+	let event = EventKind::SettingChanged {
+		key,
+		scope,
+		value: value.clone(),
+	};
+	tx.append_event(event.to_record(
+		actor,
+		setting::event_subject(scope),
+		now_unix_ms,
+	)?)
+	.await?;
+	Ok(CommandOutcome::SettingSet { key, scope, value })
+}
+
+async fn clear_setting(
+	tx: &mut WriteTransaction,
+	actor: &Actor,
+	key: SettingKey,
+	scope: SettingScope,
+	now_unix_ms: i64,
+) -> Result<CommandOutcome, CoreError> {
+	setting::prepare_clear(key, scope)?;
+	setting::require_subject(tx, scope).await?;
+	tx.delete_setting(key.as_str(), scope.record()).await?;
+	let event = EventKind::SettingCleared { key, scope };
+	tx.append_event(event.to_record(
+		actor,
+		setting::event_subject(scope),
+		now_unix_ms,
+	)?)
+	.await?;
+	Ok(CommandOutcome::SettingCleared { key, scope })
 }
 
 async fn transition_run(
