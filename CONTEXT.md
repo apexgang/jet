@@ -148,6 +148,10 @@ _Avoid_: Provider account, credential, login session
 An opaque identifier stored by Jet that resolves through the platform credential store or an external authentication helper without persisting secret material under `~/.jet`.
 _Avoid_: Credential, token, environment value
 
+**Credential source**:
+The backend one Account binding resolves its Credential through: the platform credential store, an explicitly configured external helper, native Harness authentication from the launch environment, or the memory of one daemon start. Each names the limitation it carries, and none of them is a plaintext fallback.
+_Avoid_: Credential store, credential helper, secret backend
+
 **Model**:
 An inference model made available through a provider account.
 _Avoid_: Provider, harness, agent

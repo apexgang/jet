@@ -8,6 +8,7 @@
 //! Domain types here never double as wire types (ADR-0049); `jetd`
 //! translates at the transport seam.
 
+mod account;
 mod capability;
 mod capability_probe;
 mod clock;
@@ -37,6 +38,10 @@ use capability::CapabilityProbe;
 use capability_probe::SystemCapabilityProbe;
 use clock::{Clock, SystemClock};
 
+pub use account::{
+	AccountBinding, AccountBindingId, AccountBindingList, CredentialItem,
+	CredentialReference, CredentialSource, ProviderAccount, ProviderId,
+};
 pub use capability::{
 	CapabilityObservation, CapabilitySnapshot, CraftId, CredentialStoreKind,
 	CredentialStoreStatus, DegradedCondition, ExternalTool, ExternalToolStatus,
@@ -244,3 +249,7 @@ mod setting_tests;
 #[cfg(test)]
 #[path = "capability_tests.rs"]
 mod capability_tests;
+
+#[cfg(test)]
+#[path = "account_tests.rs"]
+mod account_tests;

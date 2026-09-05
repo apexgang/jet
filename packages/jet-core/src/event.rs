@@ -8,6 +8,7 @@ use jet_store::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::account::{AccountBindingId, CredentialSource, ProviderId};
 use crate::conversation::{ConversationId, RunId};
 use crate::error::CoreError;
 use crate::setting::{SettingKey, SettingScope, SettingValue};
@@ -131,6 +132,24 @@ pub enum EventKind {
 		/// The scope that no longer stores a value.
 		scope: SettingScope,
 	},
+	/// A Provider account was bound to this Plane. The Event names the
+	/// binding, its Provider, and the backend that resolves its Credential;
+	/// no part of the Credential itself is recorded (ADR-0076).
+	#[serde(rename = "account.bound")]
+	AccountBound {
+		/// The binding that was established.
+		binding_id: AccountBindingId,
+		/// The Provider it authenticates to.
+		provider: ProviderId,
+		/// The backend that resolves its Credential.
+		credential: CredentialSource,
+	},
+	/// An Account binding was removed from this Plane.
+	#[serde(rename = "account.unbound")]
+	AccountUnbound {
+		/// The binding that was removed.
+		binding_id: AccountBindingId,
+	},
 	/// A Run moved to a later lifecycle state.
 	#[serde(rename = "run.lifecycle_changed")]
 	RunLifecycleChanged {
@@ -161,7 +180,9 @@ impl EventKind {
 			| Self::RunCreated {}
 			| Self::RunLifecycleChanged { .. }
 			| Self::SettingChanged { .. }
-			| Self::SettingCleared { .. } => {
+			| Self::SettingCleared { .. }
+			| Self::AccountBound { .. }
+			| Self::AccountUnbound { .. } => {
 				let encoded = serde_json::to_value(self).map_err(|error| {
 					CoreError::internal("event.unencodable", error.to_string())
 				})?;

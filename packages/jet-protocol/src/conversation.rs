@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::account::{AccountBinding, CredentialReference, CredentialSource};
 use crate::setting::{SettingKey, SettingScope, SettingValue};
 
 /// Opaque token for continuing one fenced keyset snapshot page.
@@ -135,6 +136,24 @@ pub enum CommandRequest {
 		/// The scope that stops storing a value.
 		scope: SettingScope,
 	},
+	/// Bind a Provider account to this Plane. The request carries non-secret
+	/// metadata only; the Credential itself never crosses this protocol.
+	BindAccount {
+		/// The Provider the binding authenticates to, such as `anthropic`.
+		provider: String,
+		/// The user-facing name of the binding.
+		label: String,
+		/// The Provider's own account identity, when it supplies one.
+		#[serde(default)]
+		provider_account: Option<String>,
+		/// The backend that resolves the binding's Credential.
+		credential: CredentialSource,
+	},
+	/// Remove an Account binding from this Plane.
+	UnbindAccount {
+		/// The binding to remove.
+		binding_id: Uuid,
+	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -173,6 +192,16 @@ pub enum CommandResponse {
 		key: SettingKey,
 		/// The scope that no longer stores a value.
 		scope: SettingScope,
+	},
+	/// The Account binding as established.
+	AccountBound(AccountBinding),
+	/// The Plane no longer has the binding, and the reference whose secret
+	/// its owner may now remove from the backend.
+	AccountUnbound {
+		/// The binding that was removed.
+		binding_id: Uuid,
+		/// The reference it resolved through.
+		credential: CredentialReference,
 	},
 }
 

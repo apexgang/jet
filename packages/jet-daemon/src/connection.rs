@@ -296,6 +296,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR,
 			feature: "the Capability Query",
 		}),
+		QueryRequest::AccountBindings => Some(MinorRequirement {
+			minor: jet_protocol::ACCOUNT_BINDINGS_MINOR,
+			feature: "the Account binding Query",
+		}),
 		QueryRequest::Status
 		| QueryRequest::Conversations
 		| QueryRequest::Conversation { .. }
@@ -309,6 +313,11 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		| CommandRequest::ClearSetting { .. } => Some(MinorRequirement {
 			minor: jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR,
 			feature: "Setting Commands",
+		}),
+		CommandRequest::BindAccount { .. }
+		| CommandRequest::UnbindAccount { .. } => Some(MinorRequirement {
+			minor: jet_protocol::ACCOUNT_BINDINGS_MINOR,
+			feature: "Account binding Commands",
 		}),
 		CommandRequest::CreateConversation { .. }
 		| CommandRequest::CreateRun { .. }

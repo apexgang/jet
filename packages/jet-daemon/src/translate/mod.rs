@@ -2,6 +2,7 @@
 //! (ADR-0049). This is the only place the two vocabularies meet; its
 //! Capability and Setting halves sit in the submodules beside it.
 
+mod account;
 mod capability;
 mod setting;
 
@@ -42,6 +43,7 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 				observation: capability::observation(*observation),
 			}
 		}
+		wire::QueryRequest::AccountBindings => Query::AccountBindings,
 		wire::QueryRequest::Settings { scope, selection } => Query::Settings {
 			scope: setting::scope_from_wire(*scope),
 			selection: setting::selection_from_wire(*selection),
@@ -68,6 +70,9 @@ pub(crate) fn query_result(
 		}
 		QueryResult::Capabilities(snapshot) => {
 			wire::QueryResponse::Capabilities(capability::snapshot(snapshot))
+		}
+		QueryResult::AccountBindings(bindings) => {
+			wire::QueryResponse::AccountBindings(account::list(bindings))
 		}
 		QueryResult::Settings(snapshot) => {
 			wire::QueryResponse::Settings(setting::snapshot(snapshot))
@@ -101,6 +106,24 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 			Command::ClearSetting {
 				key: setting::key_from_wire(*key),
 				scope: setting::scope_from_wire(*scope),
+			}
+		}
+		wire::CommandRequest::BindAccount {
+			provider,
+			label,
+			provider_account,
+			credential,
+		} => Command::BindAccount {
+			provider: account::provider(provider),
+			label: label.clone(),
+			provider_account: account::provider_account(
+				provider_account.as_ref(),
+			),
+			credential: account::source_from_wire(credential),
+		},
+		wire::CommandRequest::UnbindAccount { binding_id } => {
+			Command::UnbindAccount {
+				binding_id: account::binding_id(*binding_id),
 			}
 		}
 		wire::CommandRequest::TransitionRun {
@@ -141,6 +164,16 @@ pub(crate) fn command_outcome(
 				scope: setting::scope(scope),
 			}
 		}
+		CommandOutcome::AccountBound(bound) => {
+			wire::CommandResponse::AccountBound(account::binding(bound))
+		}
+		CommandOutcome::AccountUnbound {
+			binding_id,
+			credential,
+		} => wire::CommandResponse::AccountUnbound {
+			binding_id: binding_id.0,
+			credential: account::reference(credential),
+		},
 	}
 }
 

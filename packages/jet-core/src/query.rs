@@ -3,6 +3,7 @@
 
 use jet_store::{ConversationPageStart, ReadTransaction};
 
+use crate::account::AccountBindingList;
 use crate::capability::{CapabilityObservation, CapabilitySnapshot};
 use crate::conversation::{
 	ConversationId, ConversationList, ConversationSnapshot, PageCursor,
@@ -37,6 +38,8 @@ pub enum Query {
 		/// Whether to report the last observation or take a new one.
 		observation: CapabilityObservation,
 	},
+	/// Every Account binding on the Plane (ADR-0016).
+	AccountBindings,
 	/// Settings resolved for one scope (ADR-0085).
 	Settings {
 		/// The scope to resolve for; its own values win over the Plane's.
@@ -63,6 +66,8 @@ pub enum QueryResult {
 	Conversation(ConversationSnapshot),
 	/// What the Plane can do.
 	Capabilities(CapabilitySnapshot),
+	/// Every Account binding on the Plane.
+	AccountBindings(AccountBindingList),
 	/// Settings resolved for one scope.
 	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.
@@ -132,6 +137,23 @@ impl Core {
 						self.observe_capabilities().await
 					}
 				}))
+			}
+			Query::AccountBindings => {
+				// ASVS 2.3.3: the bindings and their Event fence come from
+				// one SQLite snapshot.
+				self.store
+					.read(async |tx| {
+						let cursor = EventSequence(tx.event_cursor().await?);
+						let bindings = tx.account_bindings().await?;
+						Ok(QueryResult::AccountBindings(AccountBindingList {
+							cursor,
+							bindings: bindings
+								.into_iter()
+								.map(Into::into)
+								.collect(),
+						}))
+					})
+					.await
 			}
 			Query::Settings { scope, selection } => {
 				settings(self, scope, selection).await

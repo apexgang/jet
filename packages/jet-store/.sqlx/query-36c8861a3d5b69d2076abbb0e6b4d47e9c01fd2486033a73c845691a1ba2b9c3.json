@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM account_bindings WHERE binding_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "36c8861a3d5b69d2076abbb0e6b4d47e9c01fd2486033a73c845691a1ba2b9c3"
+}
