@@ -30,6 +30,7 @@ mod pairing_offer;
 mod pairing_secret;
 mod preparation;
 mod project;
+mod project_entry;
 mod query;
 mod relative_path;
 mod remote;
@@ -90,9 +91,10 @@ pub use pairing::{
 	PairingSecret, PairingSignature, PairingSnapshot, PendingPairing,
 };
 pub use project::{
-	Checkout, EntryKind, GitLink, PathGrant, Project, ProjectEntry,
-	ProjectList, ProjectPreview, Registrability, Repository, Worktree,
+	Checkout, GitLink, PathGrant, Project, ProjectList, ProjectPreview,
+	Registrability, Repository, Worktree,
 };
+pub use project_entry::{EntryKind, ProjectEntry};
 pub use query::{Query, QueryResult};
 pub use relative_path::RelativePath;
 pub use remote::RemoteSession;

@@ -14,9 +14,8 @@ use crate::conversation::{
 use crate::error::CoreError;
 use crate::event::{EVENT_PAGE_LIMIT, Event, EventPage, EventSequence};
 use crate::pairing::{self, PairingSnapshot};
-use crate::project::{
-	self, PathGrant, ProjectEntry, ProjectList, ProjectPreview,
-};
+use crate::project::{self, PathGrant, ProjectList, ProjectPreview};
+use crate::project_entry::{self, ProjectEntry};
 use crate::relative_path::RelativePath;
 use crate::setting::{self, SettingScope, SettingSelection, SettingSnapshot};
 use crate::status::PlaneStatus;
@@ -246,7 +245,7 @@ impl Core {
 				project::preview(self, actor, &grant, observation).await
 			}
 			Query::ProjectEntry { project_id, path } => {
-				project::entry(self, project_id, path).await
+				project_entry::entry(self, project_id, path).await
 			}
 			Query::Projects => {
 				self.store
