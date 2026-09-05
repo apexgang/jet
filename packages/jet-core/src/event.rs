@@ -3,7 +3,8 @@
 use std::time::SystemTime;
 
 use jet_store::{
-	EventClass, EventRecord, NewEvent, RetentionPolicy, RunLifecycle,
+	EventClass, EventRecord, NewEvent, PairingGate, RetentionPolicy,
+	RunLifecycle,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -159,6 +160,14 @@ pub enum EventKind {
 		/// The epoch that now holds the chain the Plane vouches for.
 		epoch: AuditEpoch,
 	},
+	/// The Plane's Pairing gate was opened or closed, deciding whether a
+	/// new GUI client may begin Pairing (ADR-0017). It says nothing about
+	/// the clients that are already Paired.
+	#[serde(rename = "pairing.gate_changed")]
+	PairingGateChanged {
+		/// Where the owner left the gate.
+		gate: PairingGate,
+	},
 	/// A Run moved to a later lifecycle state.
 	#[serde(rename = "run.lifecycle_changed")]
 	RunLifecycleChanged {
@@ -192,7 +201,8 @@ impl EventKind {
 			| Self::SettingCleared { .. }
 			| Self::AccountBound { .. }
 			| Self::AccountUnbound { .. }
-			| Self::AuditEpochBegun { .. } => {
+			| Self::AuditEpochBegun { .. }
+			| Self::PairingGateChanged { .. } => {
 				let encoded = serde_json::to_value(self).map_err(|error| {
 					CoreError::internal("event.unencodable", error.to_string())
 				})?;

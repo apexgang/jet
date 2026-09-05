@@ -6,6 +6,7 @@
 mod account;
 mod audit;
 mod capability;
+mod pairing;
 mod setting;
 
 pub(crate) use capability::snapshot as capabilities;
@@ -58,6 +59,7 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 		wire::QueryRequest::Events { after } => Query::Events {
 			after: EventSequence(*after),
 		},
+		wire::QueryRequest::Pairing => Query::Pairing,
 		wire::QueryRequest::SecurityAudit { after } => Query::SecurityAudit {
 			after: AuditSequence(*after),
 		},
@@ -89,6 +91,9 @@ pub(crate) fn query_result(
 		}
 		QueryResult::Events(page) => {
 			wire::QueryResponse::Events(event_page(&page)?)
+		}
+		QueryResult::Pairing(snapshot) => {
+			wire::QueryResponse::Pairing(pairing::snapshot(snapshot))
 		}
 		QueryResult::SecurityAudit(page) => {
 			wire::QueryResponse::SecurityAudit(audit::page(page))
@@ -140,6 +145,11 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 			}
 		}
 		wire::CommandRequest::BeginAuditEpoch => Command::BeginAuditEpoch,
+		wire::CommandRequest::SetPairingGate { gate } => {
+			Command::SetPairingGate {
+				gate: pairing::gate_from_wire(*gate),
+			}
+		}
 		wire::CommandRequest::TransitionRun {
 			run_id,
 			expected_revision,
@@ -190,6 +200,11 @@ pub(crate) fn command_outcome(
 		},
 		CommandOutcome::AuditEpochBegun { epoch } => {
 			wire::CommandResponse::AuditEpochBegun { epoch: epoch.0 }
+		}
+		CommandOutcome::PairingGateSet { gate } => {
+			wire::CommandResponse::PairingGateSet {
+				gate: pairing::gate(gate),
+			}
 		}
 	}
 }

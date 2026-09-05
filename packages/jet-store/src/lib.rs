@@ -21,6 +21,7 @@ mod conversation;
 mod effect;
 mod journal;
 mod migrations;
+mod pairing;
 mod plane;
 mod records;
 mod run;
@@ -50,6 +51,7 @@ pub use audit_head::{AuditHead, audit_head_path};
 pub use audit_integrity::{AuditBreach, AuditIntegrity, AuditIntegrityFailure};
 pub use conversation::CONVERSATION_PAGE_LIMIT;
 pub use journal::EVENT_COMPACTION_BATCH_LIMIT;
+pub use pairing::PairingGate;
 pub use plane::PlaneRecord;
 pub use records::{
 	ActorRecord, CommandReceiptRecord, ConversationPageKey,

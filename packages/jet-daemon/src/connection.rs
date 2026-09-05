@@ -304,6 +304,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::SECURITY_AUDIT_MINOR,
 			feature: "the Security audit Query",
 		}),
+		QueryRequest::Pairing => Some(MinorRequirement {
+			minor: jet_protocol::PAIRING_MINOR,
+			feature: "the Pairing Query",
+		}),
 		QueryRequest::Status
 		| QueryRequest::Conversations
 		| QueryRequest::Conversation { .. }
@@ -326,6 +330,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		CommandRequest::BeginAuditEpoch => Some(MinorRequirement {
 			minor: jet_protocol::SECURITY_AUDIT_MINOR,
 			feature: "beginning a Security audit epoch",
+		}),
+		CommandRequest::SetPairingGate { .. } => Some(MinorRequirement {
+			minor: jet_protocol::PAIRING_MINOR,
+			feature: "Pairing Commands",
 		}),
 		CommandRequest::CreateConversation { .. }
 		| CommandRequest::CreateRun { .. }

@@ -22,6 +22,7 @@ mod error;
 mod event;
 mod lifecycle;
 mod pagination;
+mod pairing;
 mod query;
 mod security;
 mod setting;
@@ -68,9 +69,10 @@ pub use event::{
 };
 pub use jet_store::{AuditBreach, AuditHead};
 pub use jet_store::{
-	AuditEntryHash, AuditOutcome, AuditRisk, AuditTargetRef, RetentionPolicy,
-	RunLifecycle,
+	AuditEntryHash, AuditOutcome, AuditRisk, AuditTargetRef, PairingGate,
+	RetentionPolicy, RunLifecycle,
 };
+pub use pairing::PairingSnapshot;
 pub use query::{Query, QueryResult};
 pub use security::{SecurityDegradation, SecurityState};
 pub use setting::{
@@ -291,3 +293,7 @@ mod audit_tests;
 #[cfg(test)]
 #[path = "security_tests.rs"]
 mod security_tests;
+
+#[cfg(test)]
+#[path = "pairing_tests.rs"]
+mod pairing_tests;

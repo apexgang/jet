@@ -4,9 +4,10 @@ use jet_protocol::{
 	AccountBinding, AccountBindingList, CapabilityObservation,
 	CapabilitySnapshot, CommandRequest, CommandResponse, Conversation,
 	ConversationList, ConversationSnapshot, CredentialReference,
-	CredentialSource, EventPage, PageCursor, PlaneStatus, QueryRequest,
-	QueryResponse, RetentionPolicy, Run, RunLifecycle, SecurityAudit,
-	SettingKey, SettingScope, SettingSelection, SettingSnapshot, SettingValue,
+	CredentialSource, EventPage, PageCursor, PairingGate, PairingSnapshot,
+	PlaneStatus, QueryRequest, QueryResponse, RetentionPolicy, Run,
+	RunLifecycle, SecurityAudit, SettingKey, SettingScope, SettingSelection,
+	SettingSnapshot, SettingValue,
 };
 use uuid::Uuid;
 
@@ -37,7 +38,8 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -57,7 +59,8 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -84,7 +87,8 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -111,7 +115,8 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -135,7 +140,8 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -162,7 +168,8 @@ impl Client {
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
-			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AccountUnbound { .. }
+			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -189,7 +196,8 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
-			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -221,7 +229,8 @@ impl Client {
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -251,7 +260,8 @@ impl Client {
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -288,7 +298,8 @@ impl Client {
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -317,7 +328,8 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -351,7 +363,8 @@ impl Client {
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -383,7 +396,8 @@ impl Client {
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -414,7 +428,8 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -448,7 +463,8 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -493,7 +509,8 @@ impl Client {
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -529,6 +546,66 @@ impl Client {
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Reads the Plane's Pairing with the journal cursor the snapshot was
+	/// read at: whether a new GUI client may begin Pairing at all
+	/// (ADR-0017).
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the daemon reports a stable
+	/// error, or the transport failure otherwise.
+	pub async fn pairing(&self) -> Result<PairingSnapshot, ClientError> {
+		self.require_minor(jet_protocol::PAIRING_MINOR)?;
+		match self.query(QueryRequest::Pairing).await? {
+			QueryResponse::Pairing(snapshot) => Ok(snapshot),
+			other @ (QueryResponse::Status(_)
+			| QueryResponse::Conversations(_)
+			| QueryResponse::Conversation(_)
+			| QueryResponse::Events(_)
+			| QueryResponse::Settings(_)
+			| QueryResponse::Capabilities(_)
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Leaves the Plane's Pairing gate at `gate` under the Command identity
+	/// `command_id`, which a retry must reuse (ADR-0093).
+	///
+	/// The gate decides whether a new GUI client may begin Pairing. It does
+	/// not alter the clients that are already Paired, in either direction
+	/// (ADR-0017).
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the daemon reports a stable
+	/// error, or the transport failure otherwise.
+	pub async fn set_pairing_gate(
+		&self,
+		command_id: Uuid,
+		gate: PairingGate,
+	) -> Result<PairingGate, ClientError> {
+		self.require_minor(jet_protocol::PAIRING_MINOR)?;
+		match self
+			.execute_command(
+				command_id,
+				CommandRequest::SetPairingGate { gate },
+			)
+			.await?
+		{
+			CommandResponse::PairingGateSet { gate } => Ok(gate),
+			other @ (CommandResponse::ConversationCreated(_)
+			| CommandResponse::RunCreated(_)
+			| CommandResponse::RunTransitioned(_)
+			| CommandResponse::SettingSet { .. }
+			| CommandResponse::SettingCleared { .. }
+			| CommandResponse::AccountBound(_)
+			| CommandResponse::AccountUnbound { .. }
 			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
 		}
 	}

@@ -26,6 +26,7 @@ use crate::account::AccountBindingId;
 use crate::command::Command;
 use crate::conversation::ConversationId;
 use crate::error::CoreError;
+use crate::pairing;
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
 use crate::{Actor, PlaneId, ProjectId, system_time};
 
@@ -74,6 +75,11 @@ pub enum AuditDecision {
 	/// An owner carried on past an integrity failure, beginning an
 	/// authority epoch that records the gap it leaves behind.
 	AuditEpochBegun,
+	/// The Plane began accepting new Pairings, so a GUI client that holds a
+	/// current pairing code may take control of it (ADR-0017).
+	PairingGateOpened,
+	/// It stopped accepting them. The clients already Paired are unaffected.
+	PairingGateClosed,
 }
 
 /// What a decision is about. The core turns each one into the durable kind
@@ -184,6 +190,8 @@ impl AuditDecision {
 			Self::AuditRetentionChanged => "policy.audit_retention_changed",
 			Self::AuditRetentionCleared => "policy.audit_retention_cleared",
 			Self::AuditEpochBegun => "audit.epoch_begun",
+			Self::PairingGateOpened => "pairing.gate_opened",
+			Self::PairingGateClosed => "pairing.gate_closed",
 		}
 	}
 
@@ -203,13 +211,18 @@ impl AuditDecision {
 			| Self::GitAutomationCleared
 			// Beginning an epoch is how a Plane stops vouching for
 			// everything before it.
-			| Self::AuditEpochBegun => AuditRisk::Elevated,
+			| Self::AuditEpochBegun
+			// An open gate is the window in which an unknown client can
+			// come to control the Plane.
+			| Self::PairingGateOpened => AuditRisk::Elevated,
 			// Shortening the window destroys evidence the Plane already
 			// holds, which is the one policy change the audit itself is at
 			// stake in.
 			Self::AuditRetentionChanged
 			| Self::AuditRetentionCleared => AuditRisk::Destructive,
-			Self::GitAutomationDisabled => AuditRisk::Routine,
+			Self::GitAutomationDisabled | Self::PairingGateClosed => {
+				AuditRisk::Routine
+			}
 		}
 	}
 }
@@ -257,6 +270,7 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::UnbindAccount { .. } => Some(AuditDecision::AccountUnbound),
 		Command::SetSetting { key, value, .. } => stored_setting(*key, value),
 		Command::ClearSetting { key, .. } => cleared_setting(*key),
+		Command::SetPairingGate { gate } => Some(pairing::gate_decision(*gate)),
 		Command::BeginAuditEpoch
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
@@ -278,6 +292,7 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::ClearSetting { scope, .. } => AuditSubject::of_scope(*scope),
 		Command::BindAccount { .. }
 		| Command::BeginAuditEpoch
+		| Command::SetPairingGate { .. }
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::TransitionRun { .. } => AuditSubject::Plane,

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::account::{AccountBinding, CredentialReference, CredentialSource};
+use crate::pairing::PairingGate;
 use crate::setting::{SettingKey, SettingScope, SettingValue};
 
 /// Opaque token for continuing one fenced keyset snapshot page.
@@ -157,6 +158,13 @@ pub enum CommandRequest {
 	/// Begin a new authority epoch of the Security audit, carrying on past
 	/// an integrity failure and recording the gap it leaves behind.
 	BeginAuditEpoch,
+	/// Open or close the Plane's Pairing gate, which decides whether a new
+	/// GUI client may begin Pairing at all. It does not alter the clients
+	/// that are already Paired.
+	SetPairingGate {
+		/// Where to leave the gate.
+		gate: PairingGate,
+	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -205,6 +213,11 @@ pub enum CommandResponse {
 		binding_id: Uuid,
 		/// The reference it resolved through.
 		credential_reference: CredentialReference,
+	},
+	/// Where the Plane's Pairing gate now stands.
+	PairingGateSet {
+		/// The gate as the Plane now records it.
+		gate: PairingGate,
 	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {

@@ -4,8 +4,8 @@
 
 use jet_store::{
 	EffectKindRecord, EffectSafetyRecord, NewCommandReceipt, NewConversation,
-	NewEffect, NewRun, RetentionPolicy, RunLifecycle, SettingRecord,
-	WriteTransaction,
+	NewEffect, NewRun, PairingGate, RetentionPolicy, RunLifecycle,
+	SettingRecord, WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -23,6 +23,7 @@ use crate::command_receipt::{
 use crate::conversation::{Conversation, ConversationId, Revision, Run, RunId};
 use crate::error::{ConflictState, CoreError, RevisionConflict};
 use crate::event::{EventKind, EventSubject};
+use crate::pairing;
 use crate::security::{self, SecurityClass, SecurityState};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
 use crate::{Actor, Core, lifecycle};
@@ -138,6 +139,13 @@ pub enum Command {
 	/// Begin a new authority epoch of the Security audit, carrying on past
 	/// an integrity failure and recording the gap it leaves (ADR-0105).
 	BeginAuditEpoch,
+	/// Open or close this Plane's Pairing gate, which decides whether a new
+	/// GUI client may begin Pairing at all (ADR-0017). It does not alter the
+	/// clients that are already Paired.
+	SetPairingGate {
+		/// Where to leave the gate.
+		gate: PairingGate,
+	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -167,6 +175,7 @@ impl Command {
 			Self::BindAccount { .. }
 			| Self::UnbindAccount { .. }
 			| Self::BeginAuditEpoch
+			| Self::SetPairingGate { .. }
 			| Self::CreateConversation { .. }
 			| Self::CreateRun { .. }
 			| Self::SetSetting { .. }
@@ -214,6 +223,11 @@ pub enum CommandOutcome {
 	},
 	/// The Account binding as established.
 	AccountBound(AccountBinding),
+	/// Where the Plane's Pairing gate now stands.
+	PairingGateSet {
+		/// The gate as the Plane now records it.
+		gate: PairingGate,
+	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {
 		/// The epoch that holds the chain the Plane vouches for.
@@ -377,6 +391,9 @@ async fn execute_new(
 		}
 		Command::BeginAuditEpoch => {
 			security::begin_epoch(tx, actor, security, now_unix_ms).await
+		}
+		Command::SetPairingGate { gate } => {
+			pairing::set_gate(tx, actor, gate, now_unix_ms).await
 		}
 		Command::TransitionRun {
 			run_id,

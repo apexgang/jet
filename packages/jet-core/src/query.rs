@@ -13,6 +13,7 @@ use crate::conversation::{
 };
 use crate::error::CoreError;
 use crate::event::{EVENT_PAGE_LIMIT, Event, EventPage, EventSequence};
+use crate::pairing::PairingSnapshot;
 use crate::setting::{self, SettingScope, SettingSelection, SettingSnapshot};
 use crate::status::PlaneStatus;
 use crate::{Actor, CORE_VERSION, Core, PlaneId};
@@ -62,6 +63,8 @@ pub enum Query {
 		/// The position to resume after; zero for the whole journal.
 		after: EventSequence,
 	},
+	/// The Plane's Pairing: whether it accepts new GUI clients (ADR-0017).
+	Pairing,
 	/// One page of the owner-only Security audit strictly after a position
 	/// (ADR-0105).
 	SecurityAudit {
@@ -87,6 +90,8 @@ pub enum QueryResult {
 	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.
 	Events(EventPage),
+	/// The Plane's Pairing as it stands.
+	Pairing(PairingSnapshot),
 	/// One page of the Security audit, oldest first.
 	SecurityAudit(AuditPage),
 }
@@ -174,6 +179,19 @@ impl Core {
 								.into_iter()
 								.map(Event::try_from)
 								.collect::<Result<_, _>>()?,
+						}))
+					})
+					.await
+			}
+			Query::Pairing => {
+				// ASVS 2.3.3: the gate and the position that fences it come
+				// from one SQLite snapshot.
+				self.store
+					.read(async |tx| {
+						let cursor = EventSequence(tx.event_cursor().await?);
+						Ok(QueryResult::Pairing(PairingSnapshot {
+							cursor,
+							gate: tx.pairing_gate().await?,
 						}))
 					})
 					.await
