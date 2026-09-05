@@ -2,9 +2,8 @@ use std::path::Path;
 
 use jet_store::{AuditBreach, audit_head_path};
 use pretty_assertions::assert_eq;
-use uuid::Uuid;
 
-use crate::test_support::{actor, request, start_core};
+use crate::test_support::{actor, register_repository, request, start_core};
 use crate::{
 	AuditEpoch, AuditSequence, Command, CommandOutcome, Core, CoreError,
 	CredentialSource, ErrorCategory, ProviderId, Query, QueryResult,
@@ -125,10 +124,17 @@ async fn a_degraded_plane_refuses_to_change_trust_and_keeps_working() {
 async fn a_degraded_plane_refuses_a_policy_change_but_not_a_preference() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("plane.sqlite3");
-	let core = start_without_a_head(&path).await;
+	// Registering a Project is itself a decision the audit guards, so the
+	// Project is registered while the Plane still vouches for its audit.
+	let trusted = start_core(&path).await;
 	let project = SettingScope::Project {
-		project_id: crate::ProjectId(Uuid::now_v7()),
+		project_id: register_repository(&trusted, &dir.path().join("repo"))
+			.await,
 	};
+	trusted.close().await;
+	drop(trusted);
+	std::fs::remove_file(audit_head_path(&path)).unwrap();
+	let core = start_core(&path).await;
 
 	let policy = core
 		.execute(

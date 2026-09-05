@@ -16,8 +16,8 @@ use crate::capability::{
 };
 use crate::clock::{Clock, SystemClock};
 use crate::{
-	Actor, ClientId, Command, CommandEnvelope, CommandId, Core, CraftId,
-	HarnessId,
+	Actor, ClientId, Command, CommandEnvelope, CommandId, CommandOutcome, Core,
+	CraftId, HarnessId, PathGrant, ProjectId,
 };
 
 /// The one interactive Actor every core test acts as.
@@ -223,4 +223,23 @@ pub(crate) fn init_repository(dir: &Path) -> std::path::PathBuf {
 	git(dir, &["add", "-A"]);
 	git(dir, &["commit", "-q", "-m", "Initial"]);
 	dir.canonicalize().unwrap()
+}
+
+/// Creates a repository at `dir` and registers it as a Project of `core`
+/// through the Path grant an interactive user would make.
+pub(crate) async fn register_repository(core: &Core, dir: &Path) -> ProjectId {
+	let root = init_repository(dir);
+	let outcome = core
+		.execute(
+			&actor(),
+			request(Command::RegisterProject {
+				grant: PathGrant(root),
+			}),
+		)
+		.await
+		.unwrap();
+	let CommandOutcome::ProjectRegistered(project) = outcome else {
+		panic!("unexpected outcome {outcome:?}");
+	};
+	project.project_id
 }
