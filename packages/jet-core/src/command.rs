@@ -24,13 +24,14 @@ use crate::conversation::{Conversation, ConversationId, Revision, Run, RunId};
 use crate::error::{ConflictState, CoreError, RevisionConflict};
 use crate::event::{EventKind, EventSubject};
 use crate::pairing::{
-	self, ClientPublicKey, PairingChallenge, PairingDisclosure, PairingSecret,
-	PendingPairing,
+	self, AuthenticationString, ClientPublicKey, PairedClient,
+	PairingChallenge, PairingDisclosure, PairingOfferId, PairingSecret,
+	PairingSignature, PendingPairing,
 };
-use crate::pairing_offer;
 use crate::security::{self, SecurityClass, SecurityState};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
 use crate::{Actor, Core, lifecycle};
+use crate::{pairing_completion, pairing_offer};
 
 /// Automatic Git delivery is carried out with the Git the core invokes, so
 /// turning it on depends on that tool being installed (ADR-0029, ADR-0056).
@@ -166,6 +167,25 @@ pub enum Command {
 		/// completes.
 		key: ClientPublicKey,
 	},
+	/// Confirm, on the Plane being Paired with, that both screens show the
+	/// same authentication string. The client being Paired cannot confirm
+	/// its own Pairing (ADR-0017).
+	ConfirmPairing {
+		/// The offer being confirmed, which must be the one the Plane has
+		/// open.
+		offer_id: PairingOfferId,
+		/// The string as the person confirming reads it.
+		authentication_string: AuthenticationString,
+	},
+	/// Complete the Pairing by signing the transcript of the claim with the
+	/// Client identity that made it (ADR-0090).
+	CompletePairing {
+		/// The offer being completed, which must be the one the Plane has
+		/// open.
+		offer_id: PairingOfferId,
+		/// The signature over the claim's transcript.
+		signature: PairingSignature,
+	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -198,6 +218,8 @@ impl Command {
 			| Self::SetPairingGate { .. }
 			| Self::OpenPairing { .. }
 			| Self::ClaimPairing { .. }
+			| Self::ConfirmPairing { .. }
+			| Self::CompletePairing { .. }
 			| Self::CreateConversation { .. }
 			| Self::CreateRun { .. }
 			| Self::SetSetting { .. }
@@ -265,6 +287,16 @@ pub enum CommandOutcome {
 		pending: PendingPairing,
 		/// The challenge to sign.
 		challenge: PairingChallenge,
+	},
+	/// The Pairing offer after the person at the target confirmed it.
+	PairingConfirmed {
+		/// The offer, now waiting for the client to prove its key.
+		pending: PendingPairing,
+	},
+	/// The client this Plane is now Paired with.
+	PairingCompleted {
+		/// The Paired client the Pairing left behind.
+		client: PairedClient,
 	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {
@@ -410,7 +442,9 @@ fn for_receipt(
 			| CommandOutcome::AccountUnbound { .. }
 			| CommandOutcome::AuditEpochBegun { .. }
 			| CommandOutcome::PairingGateSet { .. }
-			| CommandOutcome::PairingClaimed { .. }),
+			| CommandOutcome::PairingClaimed { .. }
+			| CommandOutcome::PairingConfirmed { .. }
+			| CommandOutcome::PairingCompleted { .. }),
 		) => Ok(outcome.clone()),
 		Err(error) => Err(error.clone()),
 	}
@@ -470,6 +504,32 @@ async fn execute_new(
 		}
 		Command::ClaimPairing { secret, key } => {
 			pairing_offer::claim(tx, actor, secret, key, now_unix_ms).await
+		}
+		Command::ConfirmPairing {
+			offer_id,
+			authentication_string,
+		} => {
+			pairing_completion::confirm(
+				tx,
+				actor,
+				offer_id,
+				authentication_string,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::CompletePairing {
+			offer_id,
+			signature,
+		} => {
+			pairing_completion::complete(
+				tx,
+				actor,
+				offer_id,
+				signature,
+				now_unix_ms,
+			)
+			.await
 		}
 		Command::TransitionRun {
 			run_id,

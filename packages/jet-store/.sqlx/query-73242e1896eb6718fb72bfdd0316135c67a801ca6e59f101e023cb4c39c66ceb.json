@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO paired_clients\n\t\t\t\t(client_id, key_algorithm, public_key, pairing_protocol,\n\t\t\t\t access, paired_at_unix_ms)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5, ?6)\n\t\t\t ON CONFLICT (client_id) DO UPDATE SET\n\t\t\t\tkey_algorithm = excluded.key_algorithm,\n\t\t\t\tpublic_key = excluded.public_key,\n\t\t\t\tpairing_protocol = excluded.pairing_protocol,\n\t\t\t\taccess = excluded.access,\n\t\t\t\tpaired_at_unix_ms = excluded.paired_at_unix_ms",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "73242e1896eb6718fb72bfdd0316135c67a801ca6e59f101e023cb4c39c66ceb"
+}

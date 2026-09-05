@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT offer_id, method, endpoint, secret_salt, secret_digest,\n\t\t\t\tstate, invalidation, failed_attempts, opened_by,\n\t\t\t\topened_at_unix_ms, expires_at_unix_ms, claimed_by,\n\t\t\t\tkey_algorithm, public_key, challenge, authentication_string\n\t\t\t FROM pairing_offers\n\t\t\t WHERE singleton = 1",
+  "query": "SELECT offer_id, method, endpoint, secret_salt, secret_digest,\n\t\t\t\tstate, invalidation, failed_attempts, opened_by,\n\t\t\t\topened_at_unix_ms, expires_at_unix_ms, claimed_by,\n\t\t\t\tkey_algorithm, public_key, challenge, authentication_string,\n\t\t\t\tconfirmed_by\n\t\t\t FROM pairing_offers\n\t\t\t WHERE singleton = 1",
   "describe": {
     "columns": [
       {
@@ -178,6 +178,17 @@
             "name": "authentication_string"
           }
         }
+      },
+      {
+        "name": "confirmed_by",
+        "ordinal": 16,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "pairing_offers",
+            "name": "confirmed_by"
+          }
+        }
       }
     ],
     "parameters": {
@@ -199,8 +210,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "cf656b07b4b6e4b06f9d70988bdfe6859c7af646e5f7f3af1fd94db0aa6c019f"
+  "hash": "df1d6f628359668eaca7d37a0e0bb7d1a14f08b93411b98119252d002c506ecd"
 }

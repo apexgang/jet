@@ -23,6 +23,8 @@ mod event;
 mod lifecycle;
 mod pagination;
 mod pairing;
+mod pairing_completion;
+mod pairing_identity;
 mod pairing_offer;
 mod pairing_secret;
 mod query;
@@ -71,13 +73,14 @@ pub use event::{
 };
 pub use jet_store::{AuditBreach, AuditHead};
 pub use jet_store::{
-	AuditEntryHash, AuditOutcome, AuditRisk, AuditTargetRef, PairingGate,
-	PairingKeyAlgorithm, PairingMethod, RetentionPolicy, RunLifecycle,
+	AuditEntryHash, AuditOutcome, AuditRisk, AuditTargetRef,
+	PairedClientAccess, PairingGate, PairingKeyAlgorithm, PairingMethod,
+	RetentionPolicy, RunLifecycle,
 };
 pub use pairing::{
-	AuthenticationString, ClientPublicKey, PairingChallenge, PairingDisclosure,
-	PairingEnd, PairingOfferId, PairingProgress, PairingSecret,
-	PairingSnapshot, PendingPairing,
+	AuthenticationString, ClientPublicKey, PairedClient, PairingChallenge,
+	PairingDisclosure, PairingEnd, PairingOfferId, PairingProgress,
+	PairingSecret, PairingSignature, PairingSnapshot, PendingPairing,
 };
 pub use query::{Query, QueryResult};
 pub use security::{SecurityDegradation, SecurityState};
@@ -314,3 +317,7 @@ mod pairing_tests;
 #[cfg(test)]
 #[path = "pairing_offer_tests.rs"]
 mod pairing_offer_tests;
+
+#[cfg(test)]
+#[path = "pairing_completion_tests.rs"]
+mod pairing_completion_tests;

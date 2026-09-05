@@ -122,6 +122,9 @@ pub struct PairingOfferRecord {
 	pub expires_at_unix_ms: i64,
 	/// What the claiming client presented, once one has.
 	pub claim: Option<NewPairingClaim>,
+	/// Who confirmed that both screens show the same authentication string,
+	/// once somebody has.
+	pub confirmed_by: Option<Uuid>,
 }
 
 impl PairingMethod {
@@ -203,7 +206,7 @@ impl PairingKeyAlgorithm {
 		}
 	}
 
-	fn parse(algorithm: &str) -> Result<Self, StoreError> {
+	pub(crate) fn parse(algorithm: &str) -> Result<Self, StoreError> {
 		match algorithm {
 			"ed25519" => Ok(Self::Ed25519),
 			algorithm => Err(column_error(
@@ -230,7 +233,8 @@ impl ReadTransaction {
 			r#"SELECT offer_id, method, endpoint, secret_salt, secret_digest,
 				state, invalidation, failed_attempts, opened_by,
 				opened_at_unix_ms, expires_at_unix_ms, claimed_by,
-				key_algorithm, public_key, challenge, authentication_string
+				key_algorithm, public_key, challenge, authentication_string,
+				confirmed_by
 			 FROM pairing_offers
 			 WHERE singleton = 1"#
 		)
@@ -286,6 +290,10 @@ impl ReadTransaction {
 			opened_at_unix_ms: row.opened_at_unix_ms,
 			expires_at_unix_ms: row.expires_at_unix_ms,
 			claim,
+			confirmed_by: parse_optional_uuid(
+				"confirmed_by",
+				row.confirmed_by.as_deref(),
+			)?,
 		}))
 	}
 }
@@ -349,7 +357,46 @@ impl WriteTransaction {
 			opened_at_unix_ms,
 			expires_at_unix_ms,
 			claim: None,
+			confirmed_by: None,
 		})
+	}
+
+	/// Records that `confirmed_by` agreed the authentication string on both
+	/// screens is the same one, and gives the client its own window to
+	/// prove its key in.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the row cannot be written.
+	pub async fn record_pairing_confirmation(
+		&mut self,
+		confirmed_by: Uuid,
+		expires_at_unix_ms: i64,
+	) -> Result<(), StoreError> {
+		let confirmed_by = confirmed_by.to_string();
+		sqlx::query!(
+			"UPDATE pairing_offers
+			 SET confirmed_by = ?1, expires_at_unix_ms = ?2
+			 WHERE singleton = 1",
+			confirmed_by,
+			expires_at_unix_ms
+		)
+		.execute(self.connection())
+		.await?;
+		Ok(())
+	}
+
+	/// Forgets the open offer, which a completed Pairing has no further use
+	/// for: what it established is the Paired client it left behind.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the row cannot be removed.
+	pub async fn delete_pairing_offer(&mut self) -> Result<(), StoreError> {
+		sqlx::query!("DELETE FROM pairing_offers")
+			.execute(self.connection())
+			.await?;
+		Ok(())
 	}
 
 	/// Records what a claiming client presented and gives the offer its own

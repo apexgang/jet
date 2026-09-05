@@ -28,7 +28,7 @@ use crate::conversation::ConversationId;
 use crate::error::CoreError;
 use crate::pairing::{self, PairingOfferId};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
-use crate::{Actor, PlaneId, ProjectId, system_time};
+use crate::{Actor, ClientId, PlaneId, ProjectId, system_time};
 
 /// Most records one `Query::SecurityAudit` page returns.
 pub(crate) const AUDIT_PAGE_LIMIT: usize = jet_store::AUDIT_PAGE_LIMIT;
@@ -88,6 +88,12 @@ pub enum AuditDecision {
 	/// An offer was killed after too many wrong secrets, which is what an
 	/// attempt to guess one looks like.
 	PairingOfferInvalidated,
+	/// The person at the target agreed that both screens showed the same
+	/// authentication string.
+	PairingConfirmed,
+	/// A Pairing completed, so a GUI client now controls this Plane with
+	/// full trust (ADR-0017).
+	PairingCompleted,
 }
 
 /// What a decision is about. The core turns each one into the durable kind
@@ -104,6 +110,8 @@ pub(crate) enum AuditSubject {
 	AccountBinding(AccountBindingId),
 	/// One Pairing offer.
 	PairingOffer(PairingOfferId),
+	/// One Paired client.
+	PairedClient(ClientId),
 }
 
 /// One decision to record beside the change that carried it out.
@@ -205,6 +213,8 @@ impl AuditDecision {
 			Self::PairingOffered => "pairing.offered",
 			Self::PairingClaimed => "pairing.claimed",
 			Self::PairingOfferInvalidated => "pairing.offer_invalidated",
+			Self::PairingConfirmed => "pairing.confirmed",
+			Self::PairingCompleted => "pairing.completed",
 		}
 	}
 
@@ -231,7 +241,9 @@ impl AuditDecision {
 			| Self::PairingGateOpened
 			| Self::PairingOffered
 			| Self::PairingClaimed
-			| Self::PairingOfferInvalidated => AuditRisk::Elevated,
+			| Self::PairingOfferInvalidated
+			| Self::PairingConfirmed
+			| Self::PairingCompleted => AuditRisk::Elevated,
 			// Shortening the window destroys evidence the Plane already
 			// holds, which is the one policy change the audit itself is at
 			// stake in.
@@ -264,6 +276,7 @@ impl AuditSubject {
 			Self::Conversation(_) => "conversation",
 			Self::AccountBinding(_) => "account_binding",
 			Self::PairingOffer(_) => "pairing_offer",
+			Self::PairedClient(_) => "paired_client",
 		}
 	}
 
@@ -273,7 +286,8 @@ impl AuditSubject {
 			Self::Project(ProjectId(id))
 			| Self::Conversation(ConversationId(id))
 			| Self::AccountBinding(AccountBindingId(id))
-			| Self::PairingOffer(PairingOfferId(id)) => Some(id.to_string()),
+			| Self::PairingOffer(PairingOfferId(id))
+			| Self::PairedClient(ClientId(id)) => Some(id.to_string()),
 		}
 	}
 }
@@ -292,6 +306,10 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::SetPairingGate { gate } => Some(pairing::gate_decision(*gate)),
 		Command::OpenPairing { .. } => Some(AuditDecision::PairingOffered),
 		Command::ClaimPairing { .. } => Some(AuditDecision::PairingClaimed),
+		Command::ConfirmPairing { .. } => Some(AuditDecision::PairingConfirmed),
+		Command::CompletePairing { .. } => {
+			Some(AuditDecision::PairingCompleted)
+		}
 		Command::BeginAuditEpoch
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
@@ -316,6 +334,8 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::SetPairingGate { .. }
 		| Command::OpenPairing { .. }
 		| Command::ClaimPairing { .. }
+		| Command::ConfirmPairing { .. }
+		| Command::CompletePairing { .. }
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::TransitionRun { .. } => AuditSubject::Plane,

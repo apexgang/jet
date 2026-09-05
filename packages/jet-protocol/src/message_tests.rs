@@ -16,8 +16,9 @@ use crate::conversation::{
 use crate::event::{Actor, Event};
 use crate::handshake::{ClientHello, ServerHello, VersionRange};
 use crate::pairing::{
-	ClientPublicKey, PairingGate, PairingKeyAlgorithm, PairingMethod,
-	PairingProgress, PairingSnapshot, PendingPairing,
+	ClientPublicKey, PairedClient, PairedClientAccess, PairingGate,
+	PairingKeyAlgorithm, PairingMethod, PairingProgress, PairingSnapshot,
+	PendingPairing,
 };
 use crate::{ControlError, decode_control};
 
@@ -457,13 +458,23 @@ fn pairing_commands_and_snapshots_have_the_agreed_wire_shape() {
 			opened_at_unix_ms: 1,
 			expires_at_unix_ms: 121,
 		}),
+		clients: vec![PairedClient {
+			client_id: Uuid::nil(),
+			key: ClientPublicKey {
+				algorithm: PairingKeyAlgorithm::Ed25519,
+				key: [34; 32],
+			},
+			pairing_protocol: "jet.pairing.v1".into(),
+			access: PairedClientAccess::Enabled,
+			paired_at_unix_ms: 2,
+		}],
 	});
 
 	assert_eq!(
 		(json(&claim), json(&snapshot)),
 		(
 			r#"{"type":"claim_pairing","secret":"1234-5678","key":{"algorithm":"ed25519","key":"1111111111111111111111111111111111111111111111111111111111111111"}}"#.to_owned(),
-			r#"{"type":"pairing","cursor":"4","gate":"open","pending":{"offer_id":"00000000-0000-0000-0000-000000000000","method":{"method":"qr_payload","endpoint":"alex@studio.example"},"progress":{"progress":"awaiting_confirmation","client_id":"00000000-0000-0000-0000-000000000000","authentication_string":"418-273"},"attempts_remaining":5,"opened_at_unix_ms":1,"expires_at_unix_ms":121}}"#.to_owned()
+			r#"{"type":"pairing","cursor":"4","gate":"open","pending":{"offer_id":"00000000-0000-0000-0000-000000000000","method":{"method":"qr_payload","endpoint":"alex@studio.example"},"progress":{"progress":"awaiting_confirmation","client_id":"00000000-0000-0000-0000-000000000000","authentication_string":"418-273"},"attempts_remaining":5,"opened_at_unix_ms":1,"expires_at_unix_ms":121},"clients":[{"client_id":"00000000-0000-0000-0000-000000000000","key":{"algorithm":"ed25519","key":"2222222222222222222222222222222222222222222222222222222222222222"},"pairing_protocol":"jet.pairing.v1","access":"enabled","paired_at_unix_ms":2}]}"#.to_owned()
 		)
 	);
 }

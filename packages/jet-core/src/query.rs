@@ -192,12 +192,17 @@ impl Core {
 						let cursor = EventSequence(tx.event_cursor().await?);
 						let gate = tx.pairing_gate().await?;
 						let offer = tx.pairing_offer().await?;
+						let clients = tx.paired_clients().await?;
 						Ok(QueryResult::Pairing(PairingSnapshot {
 							cursor,
 							gate,
 							pending: offer.as_ref().map(|record| {
 								pairing::pending(record, now_unix_ms)
 							}),
+							clients: clients
+								.into_iter()
+								.map(pairing::paired_client)
+								.collect(),
 						}))
 					})
 					.await

@@ -310,8 +310,7 @@ async fn claiming_an_offer_leaves_both_sides_a_string_to_compare() {
 	let dir = tempfile::tempdir().unwrap();
 	let core = start(&dir).await;
 	open_gate(&core).await;
-	let (offered, disclosure) =
-		open(&core, PairingMethod::ManualCode).await.unwrap();
+	let (_, disclosure) = open(&core, PairingMethod::ManualCode).await.unwrap();
 
 	let outcome = claim(&core, &manual_code(&disclosure)).await.unwrap();
 
@@ -334,16 +333,7 @@ async fn claiming_an_offer_leaves_both_sides_a_string_to_compare() {
 			challenge.0 == [0; 32],
 			pairing(&core).await.pending.as_ref(),
 		),
-		(
-			ClientId(Uuid::from_u128(7)),
-			6,
-			true,
-			false,
-			Some(&PendingPairing {
-				progress: pending.progress.clone(),
-				..offered
-			})
-		)
+		(ClientId(Uuid::from_u128(7)), 6, true, false, Some(&pending))
 	);
 }
 

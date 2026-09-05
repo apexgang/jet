@@ -77,6 +77,33 @@ pub enum PairingDisclosure {
 	AlreadyDisclosed,
 }
 
+/// Whether a Paired client may control the Plane right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PairedClientAccess {
+	/// It may.
+	Enabled,
+	/// It may not. The Plane keeps its key, so enabling it again needs no
+	/// new pairing.
+	Disabled,
+}
+
+/// One GUI client a Plane has Paired with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairedClient {
+	/// The Client identity that was Paired.
+	pub client_id: Uuid,
+	/// The durable public key that is now its credential.
+	pub key: ClientPublicKey,
+	/// The Pairing protocol the key was established under, such as
+	/// `jet.pairing.v1`.
+	pub pairing_protocol: String,
+	/// Whether it may control the Plane right now.
+	pub access: PairedClientAccess,
+	/// When the Pairing completed, in signed Unix milliseconds.
+	pub paired_at_unix_ms: i64,
+}
+
 /// Why a Pairing offer is over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -101,6 +128,15 @@ pub enum PairingProgress {
 		/// The Client identity that claimed the offer.
 		client_id: Uuid,
 		/// What both sides display.
+		authentication_string: String,
+	},
+	/// The person at the target agreed that both screens show the same
+	/// string. The Pairing now waits for the client to prove that it holds
+	/// the identity it presented.
+	Confirmed {
+		/// The Client identity that claimed the offer.
+		client_id: Uuid,
+		/// What both sides displayed.
 		authentication_string: String,
 	},
 	/// Over. It can only be replaced by a new offer.
@@ -141,4 +177,7 @@ pub struct PairingSnapshot {
 	/// The offer the Plane has open, if any.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub pending: Option<PendingPairing>,
+	/// The clients this Plane has Paired with, oldest pairing first.
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub clients: Vec<PairedClient>,
 }

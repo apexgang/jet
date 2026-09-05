@@ -188,6 +188,24 @@ pub enum EventKind {
 		/// The Client identity that claimed it.
 		client_id: ClientId,
 	},
+	/// The person at the target confirmed that both screens showed the same
+	/// authentication string.
+	#[serde(rename = "pairing.confirmed")]
+	PairingConfirmed {
+		/// The offer that was confirmed.
+		offer_id: PairingOfferId,
+		/// The Client identity being Paired.
+		client_id: ClientId,
+	},
+	/// A Pairing completed: the client proved it holds the identity it
+	/// presented, and the Plane now holds its durable public key.
+	#[serde(rename = "pairing.completed")]
+	PairingCompleted {
+		/// The offer that completed.
+		offer_id: PairingOfferId,
+		/// The Client identity that is now Paired.
+		client_id: ClientId,
+	},
 	/// A Pairing offer stopped being usable before it completed.
 	#[serde(rename = "pairing.offer_ended")]
 	PairingOfferEnded {
@@ -233,6 +251,8 @@ impl EventKind {
 			| Self::PairingGateChanged { .. }
 			| Self::PairingOffered { .. }
 			| Self::PairingClaimed { .. }
+			| Self::PairingConfirmed { .. }
+			| Self::PairingCompleted { .. }
 			| Self::PairingOfferEnded { .. } => {
 				let encoded = serde_json::to_value(self).map_err(|error| {
 					CoreError::internal("event.unencodable", error.to_string())

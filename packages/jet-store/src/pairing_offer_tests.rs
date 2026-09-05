@@ -49,6 +49,7 @@ fn recorded(
 		opened_at_unix_ms: offer.opened_at_unix_ms,
 		expires_at_unix_ms: offer.expires_at_unix_ms,
 		claim,
+		confirmed_by: None,
 	}
 }
 

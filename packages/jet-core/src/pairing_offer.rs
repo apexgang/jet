@@ -187,12 +187,11 @@ async fn open_offer(
 		PairingProgress::Offered => Ok(record),
 		// The secret is single-use: the first claim spends it, and a second
 		// one is not a guess to be counted but an offer that is over.
-		PairingProgress::AwaitingConfirmation { .. } => {
-			Err(CoreError::conflict(
-				"pairing.already_claimed",
-				"this Pairing offer was already claimed; open another one",
-			))
-		}
+		PairingProgress::AwaitingConfirmation { .. }
+		| PairingProgress::Confirmed { .. } => Err(CoreError::conflict(
+			"pairing.already_claimed",
+			"this Pairing offer was already claimed; open another one",
+		)),
 		PairingProgress::Ended { reason } => Err(CoreError::conflict(
 			ended_code(reason),
 			format!("{}; open another one", ended_message(reason)),
@@ -200,24 +199,53 @@ async fn open_offer(
 	}
 }
 
-/// Counts one wrong secret against the offer, ending it once too many have
-/// been presented, and refuses the claim.
+/// Counts one wrong secret against the offer and refuses the claim.
 async fn refuse(
 	tx: &mut WriteTransaction,
 	actor: &Actor,
 	record: &PairingOfferRecord,
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
-	let offer_id = PairingOfferId(record.offer_id);
+	let remaining = count_failure(
+		tx,
+		actor,
+		PairingOfferId(record.offer_id),
+		AuditDecision::PairingClaimed,
+		now_unix_ms,
+	)
+	.await?;
+	// An authoritative refusal, so the attempt it counted commits with it.
+	Err(CoreError::invalid_input(
+		"pairing.secret_rejected",
+		format!(
+			"that is not this Pairing offer's secret; {remaining} attempts \
+			 remain"
+		),
+	))
+}
+
+/// Counts one failed proof against the open offer, ending it once too many
+/// have been made, and returns how many are left.
+///
+/// A wrong secret and a signature that does not verify are the same kind of
+/// failure: something presented itself as the client being Paired and could
+/// not show it. Both are recorded as refused decisions, because that is
+/// what an attempt to take control of the Plane looks like (ASVS 16.2.1,
+/// ADR-0105).
+pub(crate) async fn count_failure(
+	tx: &mut WriteTransaction,
+	actor: &Actor,
+	offer_id: PairingOfferId,
+	denied: AuditDecision,
+	now_unix_ms: i64,
+) -> Result<u32, CoreError> {
 	let attempts = tx.record_failed_pairing_attempt().await?;
 	let remaining = MAX_PAIRING_ATTEMPTS.saturating_sub(attempts);
-	// ASVS 16.2.1: a secret presented and refused is what an attempt to
-	// take control of the Plane looks like, so the audit keeps it.
 	audit::record(
 		tx,
 		actor,
 		Decision {
-			decision: AuditDecision::PairingClaimed,
+			decision: denied,
 			subject: AuditSubject::PairingOffer(offer_id),
 			outcome: jet_store::AuditOutcome::Denied,
 		},
@@ -246,17 +274,10 @@ async fn refuse(
 		)
 		.await?;
 	}
-	// An authoritative refusal, so the attempt it counted commits with it.
-	Err(CoreError::invalid_input(
-		"pairing.secret_rejected",
-		format!(
-			"that is not this Pairing offer's secret; {remaining} attempts \
-			 remain"
-		),
-	))
+	Ok(remaining)
 }
 
-fn ended_code(reason: PairingEnd) -> &'static str {
+pub(crate) fn ended_code(reason: PairingEnd) -> &'static str {
 	match reason {
 		PairingEnd::Expired => "pairing.offer_expired",
 		PairingEnd::TooManyAttempts | PairingEnd::GateClosed => {
@@ -265,7 +286,7 @@ fn ended_code(reason: PairingEnd) -> &'static str {
 	}
 }
 
-fn ended_message(reason: PairingEnd) -> &'static str {
+pub(crate) fn ended_message(reason: PairingEnd) -> &'static str {
 	match reason {
 		PairingEnd::Expired => "this Pairing offer expired",
 		PairingEnd::TooManyAttempts => {

@@ -69,9 +69,9 @@ pub use message::{
 	WireError, raw_command,
 };
 pub use pairing::{
-	ClientPublicKey, PairingDisclosure, PairingEnd, PairingGate,
-	PairingKeyAlgorithm, PairingMethod, PairingProgress, PairingSnapshot,
-	PendingPairing,
+	ClientPublicKey, PairedClient, PairedClientAccess, PairingDisclosure,
+	PairingEnd, PairingGate, PairingKeyAlgorithm, PairingMethod,
+	PairingProgress, PairingSnapshot, PendingPairing,
 };
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,

@@ -172,6 +172,20 @@ pub(crate) fn authentication_string(transcript: &[u8]) -> AuthenticationString {
 	AuthenticationString(format!("{first}-{second}"))
 }
 
+/// Whether the string presented back is the one this Pairing is showing.
+///
+/// It is not a secret — both screens display it — but it is what a client
+/// racing a substituted key would have to guess, so it is compared the same
+/// way the secret is.
+pub(crate) fn same_authentication_string(
+	displayed: &AuthenticationString,
+	presented: &AuthenticationString,
+) -> bool {
+	let (displayed, presented) =
+		(displayed.0.as_bytes(), presented.0.as_bytes());
+	displayed.len() == presented.len() && bool::from(displayed.ct_eq(presented))
+}
+
 /// The secret as it is hashed and compared, whatever spacing the person
 /// typing it used. A manual code is its digits; a token is the lowercase
 /// hexadecimal the QR payload carried.

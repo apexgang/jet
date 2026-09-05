@@ -1,9 +1,9 @@
 //! The Pairing half of the translation seam (ADR-0049, ADR-0017).
 
 use jet_core::{
-	AuthenticationString, ClientPublicKey, PairingDisclosure, PairingEnd,
-	PairingGate, PairingKeyAlgorithm, PairingMethod, PairingProgress,
-	PairingSnapshot, PendingPairing,
+	AuthenticationString, ClientPublicKey, PairedClient, PairedClientAccess,
+	PairingDisclosure, PairingEnd, PairingGate, PairingKeyAlgorithm,
+	PairingMethod, PairingProgress, PairingSnapshot, PendingPairing,
 };
 use jet_protocol as wire;
 
@@ -14,6 +14,29 @@ pub(super) fn snapshot(snapshot: PairingSnapshot) -> wire::PairingSnapshot {
 		cursor: snapshot.cursor.0,
 		gate: gate(snapshot.gate),
 		pending: snapshot.pending.map(pending),
+		clients: snapshot.clients.into_iter().map(client).collect(),
+	}
+}
+
+pub(super) fn client(client: PairedClient) -> wire::PairedClient {
+	wire::PairedClient {
+		client_id: client.client_id.0,
+		key: key(client.key),
+		pairing_protocol: client.pairing_protocol,
+		access: match client.access {
+			PairedClientAccess::Enabled => wire::PairedClientAccess::Enabled,
+			PairedClientAccess::Disabled => wire::PairedClientAccess::Disabled,
+		},
+		paired_at_unix_ms: unix_ms(client.paired_at),
+	}
+}
+
+fn key(key: ClientPublicKey) -> wire::ClientPublicKey {
+	wire::ClientPublicKey {
+		algorithm: match key.algorithm {
+			PairingKeyAlgorithm::Ed25519 => wire::PairingKeyAlgorithm::Ed25519,
+		},
+		key: key.key,
 	}
 }
 
@@ -94,6 +117,13 @@ fn progress(progress: PairingProgress) -> wire::PairingProgress {
 			client_id,
 			authentication_string: AuthenticationString(displayed),
 		} => wire::PairingProgress::AwaitingConfirmation {
+			client_id: client_id.0,
+			authentication_string: displayed,
+		},
+		PairingProgress::Confirmed {
+			client_id,
+			authentication_string: AuthenticationString(displayed),
+		} => wire::PairingProgress::Confirmed {
 			client_id: client_id.0,
 			authentication_string: displayed,
 		},

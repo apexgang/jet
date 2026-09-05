@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT client_id AS \"client_id!\", key_algorithm, public_key,\n\t\t\t\tpairing_protocol, access, paired_at_unix_ms\n\t\t\t FROM paired_clients\n\t\t\t ORDER BY paired_at_unix_ms, rowid",
+  "describe": {
+    "columns": [
+      {
+        "name": "client_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "paired_clients",
+            "name": "client_id"
+          }
+        }
+      },
+      {
+        "name": "key_algorithm",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "paired_clients",
+            "name": "key_algorithm"
+          }
+        }
+      },
+      {
+        "name": "public_key",
+        "ordinal": 2,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "paired_clients",
+            "name": "public_key"
+          }
+        }
+      },
+      {
+        "name": "pairing_protocol",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "paired_clients",
+            "name": "pairing_protocol"
+          }
+        }
+      },
+      {
+        "name": "access",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "paired_clients",
+            "name": "access"
+          }
+        }
+      },
+      {
+        "name": "paired_at_unix_ms",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "paired_clients",
+            "name": "paired_at_unix_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "926f6a33363f5c5439a3c6180dc4ae728a3b9ab9b58276e2ed10791c2ed9a4f3"
+}

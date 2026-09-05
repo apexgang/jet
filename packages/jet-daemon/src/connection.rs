@@ -333,7 +333,9 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		}),
 		CommandRequest::SetPairingGate { .. }
 		| CommandRequest::OpenPairing { .. }
-		| CommandRequest::ClaimPairing { .. } => Some(MinorRequirement {
+		| CommandRequest::ClaimPairing { .. }
+		| CommandRequest::ConfirmPairing { .. }
+		| CommandRequest::CompletePairing { .. } => Some(MinorRequirement {
 			minor: jet_protocol::PAIRING_MINOR,
 			feature: "Pairing Commands",
 		}),

@@ -80,6 +80,7 @@ async fn a_plane_accepts_no_new_client_until_its_owner_opens_the_gate() {
 				cursor: EventSequence(0),
 				gate: PairingGate::Closed,
 				pending: None,
+				clients: vec![],
 			},
 			CommandOutcome::PairingGateSet {
 				gate: PairingGate::Open,
@@ -88,6 +89,7 @@ async fn a_plane_accepts_no_new_client_until_its_owner_opens_the_gate() {
 				cursor: EventSequence(1),
 				gate: PairingGate::Open,
 				pending: None,
+				clients: vec![],
 			},
 			CommandOutcome::PairingGateSet {
 				gate: PairingGate::Closed,
@@ -96,6 +98,7 @@ async fn a_plane_accepts_no_new_client_until_its_owner_opens_the_gate() {
 				cursor: EventSequence(2),
 				gate: PairingGate::Closed,
 				pending: None,
+				clients: vec![],
 			}
 		)
 	);

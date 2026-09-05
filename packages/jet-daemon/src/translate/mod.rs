@@ -14,12 +14,13 @@ pub(crate) use capability::snapshot as capabilities;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_core::{
-	AccountBindingId, Actor, AuditSequence, Command, CommandOutcome,
-	ConflictState, Conversation, ConversationId, ConversationList,
-	ConversationSnapshot, CoreError, ErrorCategory, Event, EventPage,
-	EventPayload, EventSequence, PairingSecret, PlaneStatus, ProviderId, Query,
-	QueryResult, RecoveryAction, RetentionPolicy, Revision, RevisionConflict,
-	Run, RunId, RunLifecycle,
+	AccountBindingId, Actor, AuditSequence, AuthenticationString, Command,
+	CommandOutcome, ConflictState, Conversation, ConversationId,
+	ConversationList, ConversationSnapshot, CoreError, ErrorCategory, Event,
+	EventPage, EventPayload, EventSequence, PairingOfferId, PairingSecret,
+	PairingSignature, PlaneStatus, ProviderId, Query, QueryResult,
+	RecoveryAction, RetentionPolicy, Revision, RevisionConflict, Run, RunId,
+	RunLifecycle,
 };
 use jet_protocol as wire;
 
@@ -159,6 +160,22 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 				key: pairing::key_from_wire(key),
 			}
 		}
+		wire::CommandRequest::ConfirmPairing {
+			offer_id,
+			authentication_string,
+		} => Command::ConfirmPairing {
+			offer_id: PairingOfferId(*offer_id),
+			authentication_string: AuthenticationString(
+				authentication_string.clone(),
+			),
+		},
+		wire::CommandRequest::CompletePairing {
+			offer_id,
+			signature,
+		} => Command::CompletePairing {
+			offer_id: PairingOfferId(*offer_id),
+			signature: PairingSignature(*signature),
+		},
 		wire::CommandRequest::TransitionRun {
 			run_id,
 			expected_revision,
@@ -226,6 +243,16 @@ pub(crate) fn command_outcome(
 			wire::CommandResponse::PairingClaimed {
 				pending: pairing::pending(pending),
 				challenge: challenge.0,
+			}
+		}
+		CommandOutcome::PairingConfirmed { pending } => {
+			wire::CommandResponse::PairingConfirmed {
+				pending: pairing::pending(pending),
+			}
+		}
+		CommandOutcome::PairingCompleted { client } => {
+			wire::CommandResponse::PairingCompleted {
+				client: pairing::client(client),
 			}
 		}
 	}

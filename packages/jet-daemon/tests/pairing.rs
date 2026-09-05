@@ -4,12 +4,13 @@
 
 mod support;
 
+use ed25519_dalek::{Signer, SigningKey};
 use jet_client::ClientError;
 use jet_protocol::{
-	ClientMessage, ClientPublicKey, ErrorCategory, PairingDisclosure,
-	PairingGate, PairingKeyAlgorithm, PairingMethod, PairingProgress,
-	PairingSnapshot, QueryRequest, SECURITY_AUDIT_MINOR, ServerHello,
-	ServerMessage,
+	ClientMessage, ClientPublicKey, ErrorCategory, PairedClient,
+	PairedClientAccess, PairingDisclosure, PairingGate, PairingKeyAlgorithm,
+	PairingMethod, PairingProgress, PairingSnapshot, QueryRequest,
+	SECURITY_AUDIT_MINOR, ServerHello, ServerMessage,
 };
 use pretty_assertions::assert_eq;
 use support::{connect, handshake_raw, hello, start_jetd};
@@ -44,12 +45,14 @@ async fn the_gate_starts_closed_and_outlives_the_daemon_that_opened_it() {
 				cursor: 0,
 				gate: PairingGate::Closed,
 				pending: None,
+				clients: vec![],
 			},
 			PairingGate::Open,
 			PairingSnapshot {
 				cursor: 1,
 				gate: PairingGate::Open,
 				pending: None,
+				clients: vec![],
 			}
 		)
 	);
@@ -117,6 +120,113 @@ async fn a_client_claims_an_offer_with_the_code_read_off_the_target() {
 			7,
 			false,
 			Some(&claimed)
+		)
+	);
+}
+
+/// What a GUI client signs to complete a Pairing, built here the way a
+/// client that has only the protocol has to build it: from the Plane, the
+/// offer, its own identity, the key it presented, and the challenge it was
+/// answered with (ADR-0017).
+fn transcript(
+	plane_id: Uuid,
+	offer_id: Uuid,
+	client_id: Uuid,
+	key: &ClientPublicKey,
+	challenge: &[u8; 32],
+) -> Vec<u8> {
+	let mut transcript = Vec::new();
+	transcript.extend_from_slice(b"jet.pairing.transcript.v1");
+	transcript.push(0);
+	transcript.extend_from_slice(plane_id.as_bytes());
+	transcript.extend_from_slice(offer_id.as_bytes());
+	transcript.extend_from_slice(client_id.as_bytes());
+	transcript.extend_from_slice(b"ed25519");
+	transcript.push(0);
+	transcript.extend_from_slice(&key.key);
+	transcript.extend_from_slice(challenge);
+	transcript
+}
+
+/// One whole Pairing over the protocol: the client proves it holds the
+/// identity it presented, and the Plane keeps its public key across the
+/// daemon that recorded it (ADR-0017, ADR-0090).
+#[tokio::test]
+async fn a_completed_pairing_outlives_the_daemon_that_recorded_it() {
+	let dir = tempfile::tempdir().unwrap();
+	let home = dir.path().join(".jet");
+	let client_id = Uuid::new_v4();
+	let signing = SigningKey::from_bytes(&[5; 32]);
+	let key = ClientPublicKey {
+		algorithm: PairingKeyAlgorithm::Ed25519,
+		key: signing.verifying_key().to_bytes(),
+	};
+
+	let mut first = start_jetd(&home).await;
+	let owner = connect(&first, Uuid::new_v4()).await;
+	let pairing_client = connect(&first, client_id).await;
+	owner
+		.set_pairing_gate(Uuid::now_v7(), PairingGate::Open)
+		.await
+		.unwrap();
+	let (_, disclosure) = owner
+		.open_pairing(Uuid::now_v7(), PairingMethod::ManualCode)
+		.await
+		.unwrap();
+	let PairingDisclosure::ManualCode { code } = disclosure else {
+		panic!("unexpected disclosure {disclosure:?}");
+	};
+	let (claimed, challenge) = pairing_client
+		.claim_pairing(Uuid::now_v7(), &code, key)
+		.await
+		.unwrap();
+	let PairingProgress::AwaitingConfirmation {
+		authentication_string,
+		..
+	} = claimed.progress.clone()
+	else {
+		panic!("unexpected progress {:?}", claimed.progress);
+	};
+	owner
+		.confirm_pairing(
+			Uuid::now_v7(),
+			claimed.offer_id,
+			&authentication_string,
+		)
+		.await
+		.unwrap();
+	let plane_id = owner.status().await.unwrap().plane_id;
+	let signature = signing
+		.sign(&transcript(
+			plane_id,
+			claimed.offer_id,
+			client_id,
+			&key,
+			&challenge,
+		))
+		.to_bytes();
+	let paired = pairing_client
+		.complete_pairing(Uuid::now_v7(), claimed.offer_id, signature)
+		.await
+		.unwrap();
+	first.child.kill().await.unwrap();
+
+	let second = start_jetd(&home).await;
+	let after_restart =
+		connect(&second, client_id).await.pairing().await.unwrap();
+
+	assert_eq!(
+		(&paired, after_restart.pending, after_restart.clients),
+		(
+			&PairedClient {
+				client_id,
+				key,
+				pairing_protocol: "jet.pairing.v1".into(),
+				access: PairedClientAccess::Enabled,
+				paired_at_unix_ms: paired.paired_at_unix_ms,
+			},
+			None,
+			vec![paired.clone()]
 		)
 	);
 }

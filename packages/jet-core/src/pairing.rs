@@ -17,8 +17,9 @@ use std::fmt;
 use std::time::SystemTime;
 
 use jet_store::{
-	PairingGate, PairingInvalidation, PairingKeyAlgorithm, PairingMethod,
-	PairingOfferRecord, PairingOfferState, WriteTransaction,
+	PairedClientAccess, PairedClientRecord, PairingGate, PairingInvalidation,
+	PairingKeyAlgorithm, PairingMethod, PairingOfferRecord, PairingOfferState,
+	WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
@@ -39,6 +40,10 @@ pub(crate) const PAIRING_WINDOW_MS: i64 = 2 * 60 * 1000;
 /// How many wrong secrets one offer survives before it is dead
 /// (ADR-0017: five).
 pub(crate) const MAX_PAIRING_ATTEMPTS: u32 = 5;
+
+/// The Pairing protocol a completed Pairing records its key under, kept so
+/// a later release can tell what it has to keep working with (ADR-0017).
+pub(crate) const PAIRING_PROTOCOL: &str = "jet.pairing.v1";
 
 /// Durable identity of one Pairing offer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -94,6 +99,33 @@ pub struct ClientPublicKey {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PairingChallenge(pub [u8; 32]);
 
+/// One signature over a claim's transcript, which is what a client
+/// completes its Pairing with.
+///
+/// It is Ed25519's fixed 64 bytes, which is wider than the arrays `serde`
+/// derives for, so it encodes itself as the same lowercase hexadecimal the
+/// wire uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PairingSignature(pub [u8; 64]);
+
+/// One GUI client this Plane has Paired with: a Client identity, the
+/// durable public key that is now its credential, and whether it may
+/// control the Plane right now (ADR-0017).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairedClient {
+	/// The Client identity that was Paired.
+	pub client_id: ClientId,
+	/// The durable public key that is now its credential.
+	pub key: ClientPublicKey,
+	/// The Pairing protocol the key was established under, retained so a
+	/// later release can tell what it has to keep working with.
+	pub pairing_protocol: String,
+	/// Whether it may control the Plane right now.
+	pub access: PairedClientAccess,
+	/// When the Pairing completed.
+	pub paired_at: SystemTime,
+}
+
 /// What both sides display for the people at each end to compare
 /// (ADR-0017).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +143,15 @@ pub enum PairingProgress {
 		/// The Client identity that claimed the offer.
 		client_id: ClientId,
 		/// What both sides display.
+		authentication_string: AuthenticationString,
+	},
+	/// The person at the target agreed that both screens show the same
+	/// string. The Pairing now waits for the client to prove that it holds
+	/// the identity it presented.
+	Confirmed {
+		/// The Client identity that claimed the offer.
+		client_id: ClientId,
+		/// What both sides displayed.
 		authentication_string: AuthenticationString,
 	},
 	/// Over. It can only be replaced by a new offer.
@@ -160,6 +201,22 @@ pub struct PairingSnapshot {
 	/// The offer the Plane has open, if any. A Plane pairs with one client
 	/// at a time, so opening an offer replaces whatever was open.
 	pub pending: Option<PendingPairing>,
+	/// The clients this Plane has Paired with, oldest pairing first.
+	pub clients: Vec<PairedClient>,
+}
+
+impl Serialize for PairingSignature {
+	fn serialize<S: serde::Serializer>(
+		&self,
+		serializer: S,
+	) -> Result<S::Ok, S::Error> {
+		let mut text = String::with_capacity(self.0.len() * 2);
+		for byte in self.0 {
+			use fmt::Write as _;
+			let _ = write!(text, "{byte:02x}");
+		}
+		serializer.serialize_str(&text)
+	}
 }
 
 impl fmt::Debug for PairingSecret {
@@ -181,6 +238,20 @@ pub(crate) fn gate_decision(gate: PairingGate) -> AuditDecision {
 	match gate {
 		PairingGate::Open => AuditDecision::PairingGateOpened,
 		PairingGate::Closed => AuditDecision::PairingGateClosed,
+	}
+}
+
+/// One Paired client as a client sees it.
+pub(crate) fn paired_client(record: PairedClientRecord) -> PairedClient {
+	PairedClient {
+		client_id: ClientId(record.client_id),
+		key: ClientPublicKey {
+			algorithm: record.key_algorithm,
+			key: record.public_key,
+		},
+		pairing_protocol: record.pairing_protocol,
+		access: record.access,
+		paired_at: system_time(record.paired_at_unix_ms),
 	}
 }
 
@@ -227,11 +298,19 @@ fn progress(record: &PairingOfferRecord, now_unix_ms: i64) -> PairingProgress {
 		(PairingOfferState::Offered, _)
 		| (PairingOfferState::AwaitingConfirmation, None) => PairingProgress::Offered,
 		(PairingOfferState::AwaitingConfirmation, Some(claim)) => {
-			PairingProgress::AwaitingConfirmation {
-				client_id: ClientId(claim.client_id),
-				authentication_string: AuthenticationString(
-					claim.authentication_string.clone(),
-				),
+			let client_id = ClientId(claim.client_id);
+			let authentication_string =
+				AuthenticationString(claim.authentication_string.clone());
+			if record.confirmed_by.is_some() {
+				PairingProgress::Confirmed {
+					client_id,
+					authentication_string,
+				}
+			} else {
+				PairingProgress::AwaitingConfirmation {
+					client_id,
+					authentication_string,
+				}
 			}
 		}
 		// An invalidated offer answered above; the store cannot hold one

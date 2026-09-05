@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use crate::account::{AccountBinding, CredentialReference, CredentialSource};
 use crate::pairing::{
-	ClientPublicKey, PairingDisclosure, PairingGate, PairingMethod,
-	PendingPairing,
+	ClientPublicKey, PairedClient, PairingDisclosure, PairingGate,
+	PairingMethod, PendingPairing,
 };
 use crate::setting::{SettingKey, SettingScope, SettingValue};
 
@@ -183,6 +183,27 @@ pub enum CommandRequest {
 		/// completes.
 		key: ClientPublicKey,
 	},
+	/// Confirm, on the Plane being Paired with, that both screens show the
+	/// same authentication string. The client being Paired cannot confirm
+	/// its own Pairing.
+	ConfirmPairing {
+		/// The offer being confirmed, which must be the one the Plane has
+		/// open.
+		offer_id: Uuid,
+		/// The string as the person confirming reads it.
+		authentication_string: String,
+	},
+	/// Complete the Pairing by signing the transcript of the claim with the
+	/// Client identity that made it.
+	CompletePairing {
+		/// The offer being completed, which must be the one the Plane has
+		/// open.
+		offer_id: Uuid,
+		/// The signature over the claim's transcript, as 128 lowercase
+		/// hexadecimal characters.
+		#[serde(with = "crate::hex")]
+		signature: [u8; 64],
+	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -253,6 +274,16 @@ pub enum CommandResponse {
 		/// The challenge to sign, as 64 lowercase hexadecimal characters.
 		#[serde(with = "crate::hex")]
 		challenge: [u8; 32],
+	},
+	/// The Pairing offer after the person at the target confirmed it.
+	PairingConfirmed {
+		/// The offer, now waiting for the client to prove its key.
+		pending: PendingPairing,
+	},
+	/// The client the Plane is now Paired with.
+	PairingCompleted {
+		/// The Paired client the Pairing left behind.
+		client: PairedClient,
 	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {
