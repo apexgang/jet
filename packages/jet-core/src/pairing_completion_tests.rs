@@ -333,8 +333,9 @@ async fn the_client_being_paired_cannot_confirm_its_own_pairing() {
 	);
 }
 
-/// A string that is not the one on the screen is refused, and so is a
-/// Pairing nobody has confirmed yet.
+/// A string that is not the one on the screen is a failed proof like any
+/// other, so it costs the offer an attempt; a Pairing nobody has confirmed
+/// cannot be completed either (ADR-0017).
 #[tokio::test]
 async fn a_wrong_string_and_an_unconfirmed_pairing_are_both_refused() {
 	let dir = tempfile::tempdir().unwrap();
@@ -359,14 +360,19 @@ async fn a_wrong_string_and_an_unconfirmed_pairing_are_both_refused() {
 	assert_eq!(
 		(
 			(wrong_string.category, wrong_string.code.as_str()),
-			(too_early.category, too_early.code.as_str())
+			(too_early.category, too_early.code.as_str()),
+			pairing(&core)
+				.await
+				.pending
+				.map(|pending| pending.attempts_remaining)
 		),
 		(
 			(
 				ErrorCategory::InvalidInput,
 				"pairing.authentication_string_mismatch"
 			),
-			(ErrorCategory::Conflict, "pairing.not_confirmed")
+			(ErrorCategory::Conflict, "pairing.not_confirmed"),
+			Some(4)
 		)
 	);
 }

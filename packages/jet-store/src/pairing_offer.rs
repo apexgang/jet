@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::StoreError;
-use crate::records::{column_error, parse_optional_uuid, parse_uuid};
+use crate::records::{
+	column_error, parse_bytes, parse_optional_uuid, parse_uuid,
+};
 use crate::transaction::{ReadTransaction, WriteTransaction};
 
 /// How the Plane hands one offer's one-time secret to the person pairing.
@@ -30,7 +32,7 @@ pub enum PairingMethod {
 
 /// How far one offer has got.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "state", rename_all = "snake_case")]
 pub enum PairingOfferState {
 	/// Issued, and waiting for a client to present its secret.
 	Offered,
@@ -38,7 +40,11 @@ pub enum PairingOfferState {
 	/// and the pairing waits for the people at each end.
 	AwaitingConfirmation,
 	/// Dead. It cannot be claimed or confirmed, only replaced.
-	Invalidated,
+	Invalidated {
+		/// Why it stopped being usable. An invalidated offer always has
+		/// one, which is why it is held here rather than beside the state.
+		reason: PairingInvalidation,
+	},
 }
 
 /// Why an offer stopped being usable before it was completed.
@@ -108,10 +114,8 @@ pub struct PairingOfferRecord {
 	pub secret_salt: [u8; 16],
 	/// The digest of its one-time secret.
 	pub secret_digest: [u8; 32],
-	/// How far it has got.
+	/// How far it has got, and why it stopped if it has.
 	pub state: PairingOfferState,
-	/// Why it stopped being usable, once it has.
-	pub invalidation: Option<PairingInvalidation>,
 	/// How many wrong secrets have been presented against it.
 	pub failed_attempts: u32,
 	/// The Client identity of the owner that opened it.
@@ -154,22 +158,30 @@ impl PairingMethod {
 }
 
 impl PairingOfferState {
-	fn as_str(self) -> &'static str {
+	/// The durable spelling of the state and the reason it carries.
+	fn columns(self) -> (&'static str, Option<&'static str>) {
 		match self {
-			Self::Offered => "offered",
-			Self::AwaitingConfirmation => "awaiting_confirmation",
-			Self::Invalidated => "invalidated",
+			Self::Offered => ("offered", None),
+			Self::AwaitingConfirmation => ("awaiting_confirmation", None),
+			Self::Invalidated { reason } => {
+				("invalidated", Some(reason.as_str()))
+			}
 		}
 	}
 
-	fn parse(state: &str) -> Result<Self, StoreError> {
-		match state {
-			"offered" => Ok(Self::Offered),
-			"awaiting_confirmation" => Ok(Self::AwaitingConfirmation),
-			"invalidated" => Ok(Self::Invalidated),
-			state => Err(column_error(
+	fn parse(
+		state: &str,
+		invalidation: Option<&str>,
+	) -> Result<Self, StoreError> {
+		match (state, invalidation) {
+			("offered", None) => Ok(Self::Offered),
+			("awaiting_confirmation", None) => Ok(Self::AwaitingConfirmation),
+			("invalidated", Some(reason)) => Ok(Self::Invalidated {
+				reason: PairingInvalidation::parse(reason)?,
+			}),
+			(state, _) => Err(column_error(
 				"state",
-				format!("unknown Pairing offer state {state:?}"),
+				format!("unknown or incomplete Pairing offer state {state:?}"),
 			)),
 		}
 	}
@@ -261,8 +273,8 @@ impl ReadTransaction {
 			) => Some(NewPairingClaim {
 				client_id,
 				key_algorithm: PairingKeyAlgorithm::parse(&algorithm)?,
-				public_key: parse_key("public_key", public_key)?,
-				challenge: parse_key("challenge", challenge)?,
+				public_key: parse_bytes("public_key", public_key)?,
+				challenge: parse_bytes("challenge", challenge)?,
 				authentication_string,
 			}),
 			_ => None,
@@ -270,14 +282,12 @@ impl ReadTransaction {
 		Ok(Some(PairingOfferRecord {
 			offer_id: parse_uuid("offer_id", &row.offer_id)?,
 			method: PairingMethod::parse(&row.method, row.endpoint)?,
-			secret_salt: parse_salt(row.secret_salt)?,
-			secret_digest: parse_key("secret_digest", row.secret_digest)?,
-			state: PairingOfferState::parse(&row.state)?,
-			invalidation: row
-				.invalidation
-				.as_deref()
-				.map(PairingInvalidation::parse)
-				.transpose()?,
+			secret_salt: parse_bytes("secret_salt", row.secret_salt)?,
+			secret_digest: parse_bytes("secret_digest", row.secret_digest)?,
+			state: PairingOfferState::parse(
+				&row.state,
+				row.invalidation.as_deref(),
+			)?,
 			failed_attempts: u32::try_from(row.failed_attempts).map_err(
 				|_| {
 					column_error(
@@ -317,7 +327,7 @@ impl WriteTransaction {
 		let salt = offer.secret_salt.as_slice();
 		let digest = offer.secret_digest.as_slice();
 		let opened_by = offer.opened_by.to_string();
-		let state = PairingOfferState::Offered.as_str();
+		let (state, _) = PairingOfferState::Offered.columns();
 		sqlx::query!(
 			"INSERT INTO pairing_offers
 				(singleton, offer_id, method, endpoint, secret_salt,
@@ -351,7 +361,6 @@ impl WriteTransaction {
 			secret_salt,
 			secret_digest,
 			state: PairingOfferState::Offered,
-			invalidation: None,
 			failed_attempts: 0,
 			opened_by,
 			opened_at_unix_ms,
@@ -410,7 +419,7 @@ impl WriteTransaction {
 		claim: &NewPairingClaim,
 		expires_at_unix_ms: i64,
 	) -> Result<(), StoreError> {
-		let state = PairingOfferState::AwaitingConfirmation.as_str();
+		let (state, _) = PairingOfferState::AwaitingConfirmation.columns();
 		let client_id = claim.client_id.to_string();
 		let algorithm = claim.key_algorithm.as_str();
 		let public_key = claim.public_key.as_slice();
@@ -467,10 +476,10 @@ impl WriteTransaction {
 	/// Returns a [`StoreError`] when the row cannot be written.
 	pub async fn invalidate_pairing_offer(
 		&mut self,
-		invalidation: PairingInvalidation,
+		reason: PairingInvalidation,
 	) -> Result<(), StoreError> {
-		let state = PairingOfferState::Invalidated.as_str();
-		let invalidation = invalidation.as_str();
+		let (state, invalidation) =
+			PairingOfferState::Invalidated { reason }.columns();
 		sqlx::query!(
 			"UPDATE pairing_offers
 			 SET state = ?1, invalidation = ?2
@@ -482,20 +491,6 @@ impl WriteTransaction {
 		.await?;
 		Ok(())
 	}
-}
-
-fn parse_salt(bytes: Vec<u8>) -> Result<[u8; 16], StoreError> {
-	let length = bytes.len();
-	bytes.try_into().map_err(|_| {
-		column_error("secret_salt", format!("the salt has {length} bytes"))
-	})
-}
-
-fn parse_key(column: &str, bytes: Vec<u8>) -> Result<[u8; 32], StoreError> {
-	let length = bytes.len();
-	bytes.try_into().map_err(|_| {
-		column_error(column, format!("the value has {length} bytes"))
-	})
 }
 
 #[cfg(test)]

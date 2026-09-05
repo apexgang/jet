@@ -43,7 +43,6 @@ fn recorded(
 		secret_salt: offer.secret_salt,
 		secret_digest: offer.secret_digest,
 		state,
-		invalidation: None,
 		failed_attempts: 0,
 		opened_by: offer.opened_by,
 		opened_at_unix_ms: offer.opened_at_unix_ms,
@@ -172,9 +171,12 @@ async fn an_invalidated_offer_keeps_the_reason_it_died_of() {
 
 	assert_eq!(
 		dead,
-		Some(PairingOfferRecord {
-			invalidation: Some(PairingInvalidation::TooManyAttempts),
-			..recorded(&offered, PairingOfferState::Invalidated, None)
-		})
+		Some(recorded(
+			&offered,
+			PairingOfferState::Invalidated {
+				reason: PairingInvalidation::TooManyAttempts,
+			},
+			None
+		))
 	);
 }

@@ -416,17 +416,21 @@ impl Core {
 				{
 					return Err(error.clone());
 				}
-				// An authoritative error is raised before the Command writes
-				// any state, so committing its receipt commits nothing else.
-				// A Command that must fail authoritatively after writing
-				// wraps its writes in a savepoint first.
+				// An authoritative error is a durable answer, so its receipt
+				// commits together with whatever the Command wrote before
+				// raising it. Most write nothing; a refused Pairing claim
+				// deliberately writes the attempt it counted, because a
+				// Plane that rolled that back would let a client guess for
+				// as long as the offer lasts. A Command whose partial
+				// writes must not survive its own failure wraps them in a
+				// savepoint.
 				tx.insert_command_receipt(&NewCommandReceipt {
 					actor: actor_record,
 					command_id: command_id.0,
 					request_digest,
 					recorded_at_unix_ms,
 					outcome_version: OUTCOME_VERSION,
-					outcome: encode_result(&for_receipt(&result))?,
+					outcome: encode_result(&redacted_for_receipt(&result))?,
 				})
 				.await?;
 				Ok(result)
@@ -448,7 +452,7 @@ impl Core {
 /// outlives the offer it belongs to by thirty days (ADR-0093), and a
 /// pairing code that lived for two minutes has no business being there.
 /// The retry is answered with the offer, and its owner opens another one.
-fn for_receipt(
+fn redacted_for_receipt(
 	result: &Result<CommandOutcome, CoreError>,
 ) -> Result<CommandOutcome, CoreError> {
 	match result {

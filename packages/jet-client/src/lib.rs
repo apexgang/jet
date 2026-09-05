@@ -5,6 +5,7 @@
 //! ADR-0057).
 
 mod connection;
+mod pairing_requests;
 mod requests;
 
 pub use connection::{Client, ClientError};

@@ -210,12 +210,7 @@ impl Serialize for PairingSignature {
 		&self,
 		serializer: S,
 	) -> Result<S::Ok, S::Error> {
-		let mut text = String::with_capacity(self.0.len() * 2);
-		for byte in self.0 {
-			use fmt::Write as _;
-			let _ = write!(text, "{byte:02x}");
-		}
-		serializer.serialize_str(&text)
+		serializer.serialize_str(&crate::pairing_secret::hex(&self.0))
 	}
 }
 
@@ -279,22 +274,24 @@ pub(crate) fn pending(
 /// that would be a Plane that answers differently depending on whether it
 /// was awake (ADR-0055).
 fn progress(record: &PairingOfferRecord, now_unix_ms: i64) -> PairingProgress {
-	if let Some(invalidation) = record.invalidation {
-		return PairingProgress::Ended {
-			reason: match invalidation {
-				PairingInvalidation::TooManyAttempts => {
-					PairingEnd::TooManyAttempts
-				}
-				PairingInvalidation::GateClosed => PairingEnd::GateClosed,
-			},
-		};
-	}
-	if now_unix_ms > record.expires_at_unix_ms {
-		return PairingProgress::Ended {
-			reason: PairingEnd::Expired,
-		};
-	}
 	match (record.state, &record.claim) {
+		(PairingOfferState::Invalidated { reason }, _) => {
+			PairingProgress::Ended {
+				reason: match reason {
+					PairingInvalidation::TooManyAttempts => {
+						PairingEnd::TooManyAttempts
+					}
+					PairingInvalidation::GateClosed => PairingEnd::GateClosed,
+				},
+			}
+		}
+		(
+			PairingOfferState::Offered
+			| PairingOfferState::AwaitingConfirmation,
+			_,
+		) if now_unix_ms > record.expires_at_unix_ms => PairingProgress::Ended {
+			reason: PairingEnd::Expired,
+		},
 		(PairingOfferState::Offered, _)
 		| (PairingOfferState::AwaitingConfirmation, None) => PairingProgress::Offered,
 		(PairingOfferState::AwaitingConfirmation, Some(claim)) => {
@@ -313,11 +310,6 @@ fn progress(record: &PairingOfferRecord, now_unix_ms: i64) -> PairingProgress {
 				}
 			}
 		}
-		// An invalidated offer answered above; the store cannot hold one
-		// without a reason to be invalidated for.
-		(PairingOfferState::Invalidated, _) => PairingProgress::Ended {
-			reason: PairingEnd::Expired,
-		},
 	}
 }
 

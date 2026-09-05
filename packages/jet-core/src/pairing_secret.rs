@@ -221,7 +221,8 @@ fn digit() -> Result<u8, CoreError> {
 	}
 }
 
-fn hex(bytes: &[u8]) -> String {
+/// Bytes as the lowercase hexadecimal this protocol spells them in.
+pub(crate) fn hex(bytes: &[u8]) -> String {
 	bytes.iter().fold(String::new(), |mut text, byte| {
 		use std::fmt::Write as _;
 		let _ = write!(text, "{byte:02x}");

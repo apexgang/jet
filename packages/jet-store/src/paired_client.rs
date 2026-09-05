@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::StoreError;
 use crate::pairing_offer::PairingKeyAlgorithm;
-use crate::records::{column_error, parse_uuid};
+use crate::records::{column_error, parse_bytes, parse_uuid};
 use crate::transaction::{ReadTransaction, WriteTransaction};
 
 /// Whether a Paired client may control the Plane right now.
@@ -99,16 +99,14 @@ impl ReadTransaction {
 		.await?;
 		rows.into_iter()
 			.map(|row| {
-				Ok(PairedClientRecord {
-					client_id: parse_uuid("client_id", &row.client_id)?,
-					key_algorithm: PairingKeyAlgorithm::parse(
-						&row.key_algorithm,
-					)?,
-					public_key: parse_public_key(row.public_key)?,
-					pairing_protocol: row.pairing_protocol,
-					access: PairedClientAccess::parse(&row.access)?,
-					paired_at_unix_ms: row.paired_at_unix_ms,
-				})
+				read_row(
+					&row.client_id,
+					&row.key_algorithm,
+					row.public_key,
+					row.pairing_protocol,
+					&row.access,
+					row.paired_at_unix_ms,
+				)
 			})
 			.collect()
 	}
@@ -133,14 +131,14 @@ impl ReadTransaction {
 		.fetch_optional(self.connection())
 		.await?;
 		row.map(|row| {
-			Ok(PairedClientRecord {
-				client_id: parse_uuid("client_id", &row.client_id)?,
-				key_algorithm: PairingKeyAlgorithm::parse(&row.key_algorithm)?,
-				public_key: parse_public_key(row.public_key)?,
-				pairing_protocol: row.pairing_protocol,
-				access: PairedClientAccess::parse(&row.access)?,
-				paired_at_unix_ms: row.paired_at_unix_ms,
-			})
+			read_row(
+				&row.client_id,
+				&row.key_algorithm,
+				row.public_key,
+				row.pairing_protocol,
+				&row.access,
+				row.paired_at_unix_ms,
+			)
 		})
 		.transpose()
 	}
@@ -151,6 +149,11 @@ impl WriteTransaction {
 	/// that Client identity. Pairing again is how a client that lost its
 	/// key comes back, so it is one row per client rather than a second
 	/// pairing beside the first.
+	///
+	/// It replaces the access as well as the key: pairing again takes an
+	/// open gate, a secret read off this Plane, and somebody confirming
+	/// here, so a client the owner had disabled and has now Paired again is
+	/// a client the owner has just re-admitted.
 	///
 	/// # Errors
 	///
@@ -243,10 +246,21 @@ impl WriteTransaction {
 	}
 }
 
-fn parse_public_key(bytes: Vec<u8>) -> Result<[u8; 32], StoreError> {
-	let length = bytes.len();
-	bytes.try_into().map_err(|_| {
-		column_error("public_key", format!("the key has {length} bytes"))
+fn read_row(
+	client_id: &str,
+	key_algorithm: &str,
+	public_key: Vec<u8>,
+	pairing_protocol: String,
+	access: &str,
+	paired_at_unix_ms: i64,
+) -> Result<PairedClientRecord, StoreError> {
+	Ok(PairedClientRecord {
+		client_id: parse_uuid("client_id", client_id)?,
+		key_algorithm: PairingKeyAlgorithm::parse(key_algorithm)?,
+		public_key: parse_bytes("public_key", public_key)?,
+		pairing_protocol,
+		access: PairedClientAccess::parse(access)?,
+		paired_at_unix_ms,
 	})
 }
 

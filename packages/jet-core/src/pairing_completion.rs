@@ -54,7 +54,7 @@ pub(crate) async fn confirm(
 		authentication_string,
 	} = progress
 	else {
-		return Err(not_awaiting_confirmation(&progress));
+		return Err(wrong_progress(&progress));
 	};
 	if client_id == actor.client_id() {
 		return Err(CoreError::conflict(
@@ -64,9 +64,21 @@ pub(crate) async fn confirm(
 		));
 	}
 	if !secret::same_authentication_string(&authentication_string, &presented) {
+		let remaining = pairing_offer::count_failure(
+			tx,
+			actor,
+			offer_id,
+			AuditDecision::PairingConfirmed,
+			now_unix_ms,
+		)
+		.await?;
+		// An authoritative refusal, so the attempt it counted commits.
 		return Err(CoreError::invalid_input(
 			"pairing.authentication_string_mismatch",
-			"that is not the authentication string this Pairing is showing",
+			format!(
+				"that is not the authentication string this Pairing is \
+				 showing; {remaining} attempts remain"
+			),
 		));
 	}
 	// Signing is done by a machine, but only once a person has looked at
@@ -126,7 +138,7 @@ pub(crate) async fn complete(
 	let record = named_offer(tx, offer_id).await?;
 	let progress = pairing::pending(&record, now_unix_ms).progress;
 	let PairingProgress::Confirmed { client_id, .. } = progress else {
-		return Err(not_confirmed(&progress));
+		return Err(wrong_progress(&progress));
 	};
 	if client_id != actor.client_id() {
 		return Err(CoreError::conflict(
@@ -227,26 +239,10 @@ async fn named_offer(
 	Ok(record)
 }
 
-fn not_awaiting_confirmation(progress: &PairingProgress) -> CoreError {
-	match progress {
-		PairingProgress::Offered => CoreError::conflict(
-			"pairing.not_claimed",
-			"nobody has presented this Pairing offer's secret yet",
-		),
-		PairingProgress::Confirmed { .. } => CoreError::conflict(
-			"pairing.already_confirmed",
-			"this Pairing was already confirmed",
-		),
-		PairingProgress::AwaitingConfirmation { .. } => CoreError::internal(
-			"pairing.progress_unexpected",
-			"an offer awaiting confirmation reported it could not be \
-			 confirmed",
-		),
-		PairingProgress::Ended { reason } => ended(*reason),
-	}
-}
-
-fn not_confirmed(progress: &PairingProgress) -> CoreError {
+/// Why the offer cannot take the step being asked of it, said from where
+/// it actually is. Confirming and completing are consecutive steps, so each
+/// refuses everything the other is for.
+fn wrong_progress(progress: &PairingProgress) -> CoreError {
 	match progress {
 		PairingProgress::Offered => CoreError::conflict(
 			"pairing.not_claimed",
@@ -257,9 +253,9 @@ fn not_confirmed(progress: &PairingProgress) -> CoreError {
 			"nobody has confirmed this Pairing on the Plane being Paired \
 			 with yet",
 		),
-		PairingProgress::Confirmed { .. } => CoreError::internal(
-			"pairing.progress_unexpected",
-			"a confirmed offer reported it was not confirmed",
+		PairingProgress::Confirmed { .. } => CoreError::conflict(
+			"pairing.already_confirmed",
+			"this Pairing was already confirmed",
 		),
 		PairingProgress::Ended { reason } => ended(*reason),
 	}

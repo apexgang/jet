@@ -510,6 +510,17 @@ pub(crate) fn column_error(column: &str, message: String) -> StoreError {
 	StoreError::Integrity(format!("column {column}: {message}"))
 }
 
+/// One fixed-width blob column, as the width its algorithm or hash fixes.
+pub(crate) fn parse_bytes<const N: usize>(
+	column: &str,
+	bytes: Vec<u8>,
+) -> Result<[u8; N], StoreError> {
+	let length = bytes.len();
+	bytes.try_into().map_err(|_| {
+		column_error(column, format!("the value has {length} bytes"))
+	})
+}
+
 pub(crate) fn parse_uuid(column: &str, text: &str) -> Result<Uuid, StoreError> {
 	Uuid::parse_str(text)
 		.map_err(|error| column_error(column, format!("not a UUID: {error}")))
