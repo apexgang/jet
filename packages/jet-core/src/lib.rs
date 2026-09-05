@@ -29,6 +29,8 @@ mod pairing_identity;
 mod pairing_offer;
 mod pairing_secret;
 mod query;
+mod remote;
+mod remote_pairing;
 mod security;
 mod setting;
 mod status;
@@ -84,6 +86,7 @@ pub use pairing::{
 	PairingSecret, PairingSignature, PairingSnapshot, PendingPairing,
 };
 pub use query::{Query, QueryResult};
+pub use remote::RemoteSession;
 pub use security::{SecurityDegradation, SecurityState};
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,
@@ -111,6 +114,11 @@ pub struct ProjectId(pub Uuid);
 /// The authenticated origin of a Command or Query (ADR-0063).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Actor {
+	/// An interactive client authorized by a fresh Paired-client signature.
+	RemoteClient {
+		/// Live revocable authority, issued only by this core's authentication.
+		session: RemoteSession,
+	},
 	/// An interactive GUI client authorized through owner-only local IPC.
 	InteractiveClient {
 		/// The client's durable identity.
@@ -122,30 +130,27 @@ impl Actor {
 	/// Checks that the Actor may drive and read this Plane's Conversations.
 	/// Every authenticated local Actor may in this slice; remote and
 	/// automation Actors arrive with their own rules (ADR-0063).
-	#[expect(
-		clippy::unnecessary_wraps,
-		reason = "the first non-local Actor turns this into a real check"
-	)]
-	fn authorize(&self) -> Result<(), CoreError> {
+	fn authorize(
+		&self,
+		sessions: &remote::RemoteSessions,
+	) -> Result<(), CoreError> {
 		match self {
+			Self::RemoteClient { session } => sessions.authorize(session),
 			Self::InteractiveClient { .. } => Ok(()),
 		}
 	}
 
 	/// The Client identity this Actor acts through.
-	pub(crate) fn client_id(&self) -> ClientId {
+	pub fn client_id(&self) -> ClientId {
 		match self {
+			Self::RemoteClient { session } => session.client_id(),
 			Self::InteractiveClient { client_id } => *client_id,
 		}
 	}
 
 	fn record(&self) -> ActorRecord {
-		match self {
-			Self::InteractiveClient { client_id } => {
-				ActorRecord::InteractiveClient {
-					client_id: client_id.0,
-				}
-			}
+		ActorRecord::InteractiveClient {
+			client_id: self.client_id().0,
 		}
 	}
 
@@ -163,6 +168,9 @@ impl Actor {
 /// One running core bound to one Plane store.
 #[derive(Debug)]
 pub struct Core {
+	// Serialize authority publication with Commands and fence concurrent reads.
+	remote_access: tokio::sync::Semaphore,
+	remote_sessions: remote::RemoteSessions,
 	store: Store,
 	clock: Arc<dyn Clock>,
 	probe: Arc<dyn CapabilityProbe>,
@@ -222,6 +230,10 @@ impl Core {
 			started_at,
 		);
 		Ok(Self {
+			remote_access: tokio::sync::Semaphore::new(
+				remote::AUTHORITY_READERS as usize,
+			),
+			remote_sessions: remote::RemoteSessions::default(),
 			store,
 			clock,
 			probe,

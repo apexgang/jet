@@ -63,7 +63,7 @@ impl JetHome {
 	}
 
 	/// Path of the local Jet protocol socket.
-	pub(crate) fn socket_path(&self) -> PathBuf {
+	pub fn socket_path(&self) -> PathBuf {
 		self.runtime_dir().join(SOCKET_FILE)
 	}
 

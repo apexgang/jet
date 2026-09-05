@@ -128,6 +128,97 @@ async fn start_paired(dir: &tempfile::TempDir) -> Core {
 	core
 }
 
+#[tokio::test]
+async fn revocation_forces_a_no_visa_operation_to_stop_within_a_bound() {
+	use std::process::Stdio;
+	use tokio::io::{AsyncBufReadExt, BufReader};
+	let dir = tempfile::tempdir().unwrap();
+	let core = start_paired(&dir).await;
+	let transcript = b"connection supplied by the trusted transport";
+	let remote = core
+		.authenticate_remote(
+			pairing_client().client_id(),
+			transcript,
+			PairingSignature(signing_key().sign(transcript).to_bytes()),
+		)
+		.await
+		.unwrap();
+	let Actor::RemoteClient { session } = &remote else {
+		panic!("not remote");
+	};
+	let mut command = tokio::process::Command::new("sh");
+	command
+		.args([
+			"-c",
+			"trap '' TERM; printf 'ready\\n'; while :; do sleep 1; done",
+		])
+		.stdout(Stdio::piped());
+	let mut operation =
+		core.spawn_no_visa(session, &mut command).await.unwrap();
+	let mut output = BufReader::new(operation.take_stdout().unwrap()).lines();
+	assert_eq!(output.next_line().await.unwrap().as_deref(), Some("ready"));
+	execute(
+		&core,
+		&actor(),
+		Command::RevokePairedClient {
+			client_id: pairing_client().client_id(),
+		},
+	)
+	.await
+	.unwrap();
+	let stopped =
+		tokio::time::timeout(Duration::from_secs(4), operation.wait())
+			.await
+			.unwrap()
+			.unwrap();
+	assert!(!stopped.success());
+	assert!(core.query(&remote, Query::Status).await.is_err());
+	assert!(core.spawn_no_visa(session, &mut command).await.is_err());
+}
+
+#[tokio::test]
+async fn a_postcommit_audit_head_failure_still_revokes_live_authority() {
+	let dir = tempfile::tempdir().unwrap();
+	let core = start_paired(&dir).await;
+	let transcript = b"connection supplied by the trusted transport";
+	let remote = core
+		.authenticate_remote(
+			pairing_client().client_id(),
+			transcript,
+			PairingSignature(signing_key().sign(transcript).to_bytes()),
+		)
+		.await
+		.unwrap();
+	let head = jet_store::audit_head_path(&dir.path().join("plane.sqlite3"));
+	let mut pending = head.into_os_string();
+	pending.push(".pending");
+	std::fs::create_dir(&pending).unwrap();
+	let result = execute(
+		&core,
+		&actor(),
+		Command::RevokePairedClient {
+			client_id: pairing_client().client_id(),
+		},
+	)
+	.await;
+	assert!(result.is_err());
+	std::fs::remove_dir(&pending).unwrap();
+	assert_eq!(pairing(&core).await.clients, vec![]);
+	assert_eq!(
+		core.query(&remote, Query::Status)
+			.await
+			.unwrap_err()
+			.category,
+		ErrorCategory::Unauthorized
+	);
+	let Actor::RemoteClient { session } = remote else {
+		panic!("not remote");
+	};
+	tokio::time::timeout(Duration::from_millis(100), session.revoked())
+		.await
+		.unwrap();
+}
+
 async fn execute(
 	core: &Core,
 	actor: &Actor,

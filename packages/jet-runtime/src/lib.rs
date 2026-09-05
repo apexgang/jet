@@ -8,7 +8,9 @@
 mod home;
 mod ipc;
 mod lock;
+mod no_visa;
 
 pub use home::JetHome;
 pub use ipc::{IpcError, LocalListener};
 pub use lock::{DaemonMetadata, InstallationChannel, LifetimeLock, LockError};
+pub use no_visa::NoVisaOperation;

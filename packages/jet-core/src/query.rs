@@ -108,7 +108,12 @@ impl Core {
 		actor: &Actor,
 		query: Query,
 	) -> Result<QueryResult, CoreError> {
-		actor.authorize()?;
+		let _access = self
+			.remote_access
+			.acquire()
+			.await
+			.expect("authority gate never closes");
+		actor.authorize(&self.remote_sessions)?;
 		match query {
 			Query::Status => {
 				let security = *self.security.read().await;

@@ -26,6 +26,8 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 struct Connection {
 	reader: FrameReader<OwnedReadHalf>,
 	writer: FrameWriter<OwnedWriteHalf>,
+	remote: bool,
+	capacity: Arc<tokio::sync::OwnedSemaphorePermit>,
 }
 
 /// Why no message could be received on the connection.
@@ -45,33 +47,54 @@ pub(crate) async fn serve(
 	core: Arc<Core>,
 	stream: UnixStream,
 	draining: watch::Receiver<bool>,
+	capacity: Arc<tokio::sync::OwnedSemaphorePermit>,
 ) {
 	let Ok(Some((connection, actor, minor))) =
-		timeout(HANDSHAKE_TIMEOUT, open(stream)).await
+		timeout(HANDSHAKE_TIMEOUT, open(&core, stream, capacity)).await
 	else {
 		return;
 	};
-	connection
-		.serve_requests(core, actor, minor, draining)
-		.await;
+	let authority = actor.clone();
+	let revoked = async {
+		match &authority {
+			Actor::RemoteClient { session } => session.revoked().await,
+			Actor::InteractiveClient { .. } => std::future::pending().await,
+		}
+	};
+	tokio::select! {
+		biased;
+		() = revoked => {},
+		() = connection.serve_requests(core, actor, minor, draining) => {},
+	}
 }
 
-async fn open(mut stream: UnixStream) -> Option<(Connection, Actor, u32)> {
+async fn open(
+	core: &Arc<Core>,
+	mut stream: UnixStream,
+	capacity: Arc<tokio::sync::OwnedSemaphorePermit>,
+) -> Option<(Connection, Actor, u32)> {
 	let mut preface = vec![0u8; PREFACE.len()];
-	if stream.read_exact(&mut preface).await.is_err() || preface != PREFACE {
+	stream.read_exact(&mut preface).await.ok()?;
+	let remote = preface == crate::stdio::REMOTE_PREFACE;
+	if remote {
+		stream.read_exact(&mut preface).await.ok()?;
+	}
+	if preface != PREFACE {
 		return None;
 	}
 	let (read, write) = stream.into_split();
 	let mut connection = Connection {
 		reader: FrameReader::new(read),
 		writer: FrameWriter::new(write),
+		remote,
+		capacity,
 	};
-	let (actor, minor) = connection.handshake().await?;
+	let (actor, minor) = connection.handshake(core).await?;
 	Some((connection, actor, minor))
 }
 
 impl Connection {
-	async fn handshake(&mut self) -> Option<(Actor, u32)> {
+	async fn handshake(&mut self, core: &Arc<Core>) -> Option<(Actor, u32)> {
 		let hello: ClientHello = match self.receive().await {
 			Ok((stream_id, hello)) if stream_id.is_connection() => hello,
 			Ok(_) => return None,
@@ -122,18 +145,86 @@ impl Connection {
 			max_data_frame: frame_limit(limits.data),
 			capabilities: vec![],
 		};
+		let actor = if self.remote {
+			self.authenticate(core, &hello).await?
+		} else {
+			Actor::InteractiveClient {
+				client_id: ClientId(hello.client_id),
+			}
+		};
 		self.send(&welcome).await.ok()?;
 		self.writer.set_limits(limits);
 		if minor >= MULTIPLEXED_STREAMS_MINOR {
 			self.reader.enable_multiplexing();
 			self.writer.enable_multiplexing();
 		}
-		Some((
-			Actor::InteractiveClient {
-				client_id: ClientId(hello.client_id),
-			},
-			minor,
-		))
+		Some((actor, minor))
+	}
+
+	async fn authenticate(
+		&mut self,
+		core: &Arc<Core>,
+		hello: &ClientHello,
+	) -> Option<Actor> {
+		if hello.minor < jet_protocol::REMOTE_AUTH_MINOR {
+			let error = wire_error(
+				ErrorCategory::Incompatible,
+				"protocol.remote_auth_required",
+				"remote connections require protocol minor 7".into(),
+			);
+			let _ = self.send(&ServerHello::Rejected { error }).await;
+			return None;
+		}
+		// ASVS 11.5.1, 11.6.1: a fresh 256-bit CSPRNG challenge, strict Ed25519.
+		let mut nonce = [0; 32];
+		getrandom::fill(&mut nonce).ok()?;
+		self.send(&ServerHello::Challenge { nonce }).await.ok()?;
+		let (stream, payload) = self.receive_control().await.ok()?;
+		if !stream.is_connection() {
+			return None;
+		}
+		let proof: jet_protocol::ConnectionProof =
+			match decode_control(&payload) {
+				Ok(proof) => proof,
+				Err(_) => {
+					let request = decode_control(&payload).ok()?;
+					let core = Arc::clone(core);
+					let (client_id, minor) = (
+						ClientId(hello.client_id),
+						hello.minor.min(PROTOCOL_MINOR),
+					);
+					let capacity = Arc::clone(&self.capacity);
+					let response = tokio::spawn(async move {
+						let _capacity = capacity;
+						crate::connection_pairing::enroll(
+							&core, client_id, request, minor,
+						)
+						.await
+					})
+					.await
+					.ok()?;
+					self.send(&response).await.ok()?;
+					return None;
+				}
+			};
+		let transcript =
+			jet_protocol::connection_signing_bytes(hello, &nonce).ok()?;
+		match core
+			.authenticate_remote(
+				ClientId(hello.client_id),
+				&transcript,
+				jet_core::PairingSignature(proof.signature),
+			)
+			.await
+		{
+			Ok(actor) => Some(actor),
+			Err(error) => {
+				let error =
+					translate::error(error, hello.minor.min(PROTOCOL_MINOR));
+				let _ = self.send(&ServerHello::Rejected { error }).await;
+				None
+			}
+		}
 	}
 
 	/// Answers requests until the peer leaves or the daemon drains. A request
@@ -146,9 +237,14 @@ impl Connection {
 		minor: u32,
 		draining: watch::Receiver<bool>,
 	) {
-		let Self { reader, writer } = self;
+		let Self {
+			reader,
+			writer,
+			capacity,
+			..
+		} = self;
 		crate::connection_session::serve(
-			reader, writer, core, actor, minor, draining,
+			reader, writer, core, actor, minor, draining, capacity,
 		)
 		.await;
 	}

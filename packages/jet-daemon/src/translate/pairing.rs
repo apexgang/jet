@@ -27,7 +27,7 @@ pub(super) fn access_from_wire(
 	}
 }
 
-pub(super) fn client(client: PairedClient) -> wire::PairedClient {
+pub(crate) fn client(client: PairedClient) -> wire::PairedClient {
 	wire::PairedClient {
 		client_id: client.client_id.0,
 		key: key(client.key),
@@ -63,7 +63,7 @@ pub(super) fn gate_from_wire(gate: wire::PairingGate) -> PairingGate {
 	}
 }
 
-pub(super) fn pending(pending: PendingPairing) -> wire::PendingPairing {
+pub(crate) fn pending(pending: PendingPairing) -> wire::PendingPairing {
 	wire::PendingPairing {
 		offer_id: pending.offer_id.0,
 		method: method(pending.method),
