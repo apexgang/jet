@@ -6,6 +6,7 @@ use jet_store::{ConversationPageStart, ReadTransaction};
 use crate::account::{
 	AccountBindingList, AccountBindingStatus, CredentialState,
 };
+use crate::audit::{AUDIT_PAGE_LIMIT, AuditEntry, AuditPage, AuditSequence};
 use crate::capability::{CapabilityObservation, CapabilitySnapshot};
 use crate::conversation::{
 	ConversationId, ConversationList, ConversationSnapshot, PageCursor,
@@ -61,6 +62,12 @@ pub enum Query {
 		/// The position to resume after; zero for the whole journal.
 		after: EventSequence,
 	},
+	/// One page of the owner-only Security audit strictly after a position
+	/// (ADR-0105).
+	SecurityAudit {
+		/// The position to resume after; zero for the whole audit.
+		after: AuditSequence,
+	},
 }
 
 /// Snapshots returned by [`Core::query`].
@@ -80,6 +87,8 @@ pub enum QueryResult {
 	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.
 	Events(EventPage),
+	/// One page of the Security audit, oldest first.
+	SecurityAudit(AuditPage),
 }
 
 impl Core {
@@ -97,6 +106,7 @@ impl Core {
 		actor.authorize()?;
 		match query {
 			Query::Status => {
+				let security = *self.security.read().await;
 				self.store
 					.read(async |tx| {
 						let plane = tx.plane().await?;
@@ -107,6 +117,7 @@ impl Core {
 							daemon_starts: plane.daemon_starts,
 							started_at: self.started_at,
 							core_version: CORE_VERSION,
+							security,
 						}))
 					})
 					.await
@@ -163,6 +174,23 @@ impl Core {
 								.into_iter()
 								.map(Event::try_from)
 								.collect::<Result<_, _>>()?,
+						}))
+					})
+					.await
+			}
+			Query::SecurityAudit { after } => {
+				// ASVS 2.3.3: the page and the position that fences it come
+				// from one SQLite snapshot.
+				self.store
+					.read(async |tx| {
+						let (cursor, records) =
+							tx.audit_page(after.0, AUDIT_PAGE_LIMIT).await?;
+						Ok(QueryResult::SecurityAudit(AuditPage {
+							cursor: AuditSequence(cursor),
+							entries: records
+								.into_iter()
+								.map(AuditEntry::from)
+								.collect(),
 						}))
 					})
 					.await

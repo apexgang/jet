@@ -9,6 +9,7 @@
 //! translates at the transport seam.
 
 mod account;
+mod audit;
 mod capability;
 mod capability_probe;
 mod clock;
@@ -22,6 +23,7 @@ mod event;
 mod lifecycle;
 mod pagination;
 mod query;
+mod security;
 mod setting;
 mod status;
 #[cfg(test)]
@@ -43,6 +45,10 @@ pub use account::{
 	CredentialItem, CredentialReference, CredentialSource, CredentialState,
 	ProviderAccount, ProviderId,
 };
+pub use audit::{
+	AuditDecision, AuditEntry, AuditEpoch, AuditPage, AuditRecordId,
+	AuditSequence, AuditTarget,
+};
 pub use capability::{
 	CapabilityObservation, CapabilitySnapshot, CraftId, CredentialStoreKind,
 	CredentialStoreStatus, DegradedCondition, ExternalTool, ExternalToolStatus,
@@ -60,8 +66,13 @@ pub use error::{
 pub use event::{
 	Event, EventId, EventKind, EventPage, EventPayload, EventSequence,
 };
-pub use jet_store::{RetentionPolicy, RunLifecycle};
+pub use jet_store::{AuditBreach, AuditHead};
+pub use jet_store::{
+	AuditEntryHash, AuditOutcome, AuditRisk, AuditTargetRef, RetentionPolicy,
+	RunLifecycle,
+};
 pub use query::{Query, QueryResult};
+pub use security::{SecurityDegradation, SecurityState};
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,
 	SettingSnapshot, SettingSource, SettingValue,
@@ -140,6 +151,10 @@ pub struct Core {
 	/// it on a timer: a Query or a Command that depends on a Capability
 	/// observes the Plane again and leaves the result here (ADR-0086).
 	capabilities: tokio::sync::RwLock<CapabilitySnapshot>,
+	/// Whether the Plane can vouch for its own Security audit. It is
+	/// decided once, when the daemon starts, and changes only when an owner
+	/// begins a new audit epoch (ADR-0105).
+	security: tokio::sync::RwLock<SecurityState>,
 	started_at: SystemTime,
 	#[allow(dead_code, reason = "used by Effect reconciliation in issue #20")]
 	effect_reconciliation: tokio::sync::Mutex<()>,
@@ -176,6 +191,13 @@ impl Core {
 	) -> Result<Self, CoreError> {
 		store.record_daemon_start().await?;
 		let started_at = clock.now();
+		// Retention runs only behind a whole chain. A store that moved
+		// backwards keeps every record it still has until an owner has
+		// seen the evidence and decided what to do (ADR-0105).
+		let security = SecurityState::of(store.validate_audit().await?);
+		if security == SecurityState::Trusted {
+			audit::sweep_retention(&store, unix_ms(started_at)).await?;
+		}
 		let capabilities = CapabilitySnapshot::from_observation(
 			probe.observe().await,
 			started_at,
@@ -185,6 +207,7 @@ impl Core {
 			clock,
 			probe,
 			capabilities: tokio::sync::RwLock::new(capabilities),
+			security: tokio::sync::RwLock::new(security),
 			started_at,
 			effect_reconciliation: tokio::sync::Mutex::new(()),
 			conversation_pages: pagination::ConversationPages::default(),
@@ -196,6 +219,12 @@ impl Core {
 	/// (ADR-0086).
 	pub async fn capabilities(&self) -> CapabilitySnapshot {
 		self.capabilities.read().await.clone()
+	}
+
+	/// Whether the Plane can vouch for its own Security audit right now
+	/// (ADR-0105).
+	pub async fn security(&self) -> SecurityState {
+		*self.security.read().await
 	}
 
 	/// Observes the Plane again and keeps the result as its latest
@@ -254,3 +283,11 @@ mod capability_tests;
 #[cfg(test)]
 #[path = "account_tests.rs"]
 mod account_tests;
+
+#[cfg(test)]
+#[path = "audit_tests.rs"]
+mod audit_tests;
+
+#[cfg(test)]
+#[path = "security_tests.rs"]
+mod security_tests;

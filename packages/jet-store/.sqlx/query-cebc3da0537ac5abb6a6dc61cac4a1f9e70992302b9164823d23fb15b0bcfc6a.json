@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE audit_state SET next_sequence = MAX(next_sequence, ?1)\n\t\t\t WHERE singleton = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "cebc3da0537ac5abb6a6dc61cac4a1f9e70992302b9164823d23fb15b0bcfc6a"
+}

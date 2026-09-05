@@ -15,6 +15,7 @@ use crate::account::{
 	self, AccountBinding, AccountBindingId, CredentialReference,
 	CredentialSource, ProviderAccount, ProviderId,
 };
+use crate::audit::{self, AuditEpoch, AuditSubject, Decision};
 use crate::capability::{Capability, ExternalTool};
 use crate::command_receipt::{
 	COMMAND_RETENTION_MS, OUTCOME_VERSION, encode_result, replay,
@@ -22,6 +23,7 @@ use crate::command_receipt::{
 use crate::conversation::{Conversation, ConversationId, Revision, Run, RunId};
 use crate::error::{ConflictState, CoreError, RevisionConflict};
 use crate::event::{EventKind, EventSubject};
+use crate::security::{self, SecurityClass, SecurityState};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
 use crate::{Actor, Core, lifecycle};
 
@@ -133,6 +135,9 @@ pub enum Command {
 		/// The binding to remove.
 		binding_id: AccountBindingId,
 	},
+	/// Begin a new authority epoch of the Security audit, carrying on past
+	/// an integrity failure and recording the gap it leaves (ADR-0105).
+	BeginAuditEpoch,
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -161,12 +166,24 @@ impl Command {
 			} => CREDENTIAL_STORE,
 			Self::BindAccount { .. }
 			| Self::UnbindAccount { .. }
+			| Self::BeginAuditEpoch
 			| Self::CreateConversation { .. }
 			| Self::CreateRun { .. }
 			| Self::SetSetting { .. }
 			| Self::ClearSetting { .. }
 			| Self::TransitionRun { .. } => &[],
 		}
+	}
+
+	/// Whether this Command may run while the Plane cannot vouch for its
+	/// Security audit (ADR-0105).
+	///
+	/// A change the audit exists to record is exactly a change that needs
+	/// an audit worth recording it in, so the two answers come from the
+	/// same place. Beginning an epoch is the way out and is never guarded.
+	pub(crate) fn security_class(&self) -> SecurityClass {
+		audit::decision_for(self)
+			.map_or(SecurityClass::Ordinary, |_| SecurityClass::Guarded)
 	}
 }
 
@@ -197,6 +214,11 @@ pub enum CommandOutcome {
 	},
 	/// The Account binding as established.
 	AccountBound(AccountBinding),
+	/// The authority epoch the Security audit now records in.
+	AuditEpochBegun {
+		/// The epoch that holds the chain the Plane vouches for.
+		epoch: AuditEpoch,
+	},
 	/// The Plane no longer has the binding, and the reference whose secret
 	/// its owner may now remove from the backend.
 	AccountUnbound {
@@ -228,10 +250,25 @@ impl Core {
 			request_digest,
 		} = envelope;
 		let actor_record = actor.record();
-		self.revalidate_capabilities(actor_record, command_id, &command)
-			.await?;
+		let security = *self.security.read().await;
 		let recorded_at_unix_ms = self.now_unix_ms();
-		self.store
+		if let Err(refusal) = self
+			.revalidate_capabilities(actor_record, command_id, &command)
+			.await
+		{
+			// ASVS 16.2.1: a decision the audit would have recorded is
+			// recorded when it is refused as well (ADR-0105).
+			audit::record_refusal(
+				&self.store,
+				actor,
+				&command,
+				recorded_at_unix_ms,
+			)
+			.await?;
+			return Err(refusal);
+		}
+		let outcome = self
+			.store
 			.write(async |tx| {
 				tx.prune_command_receipts_before(
 					recorded_at_unix_ms.saturating_sub(COMMAND_RETENTION_MS),
@@ -246,12 +283,21 @@ impl Core {
 						recorded_at_unix_ms,
 					);
 				}
+				// ASVS 16.2.1: a Plane that cannot vouch for its Security
+				// audit changes nothing worth recording until an owner has
+				// dealt with it (ADR-0105). The check sits behind the
+				// receipt above, because a retry of a Command that already
+				// committed is not a new mutation (ADR-0093), and it takes
+				// the transaction down with it rather than recording an
+				// outcome the audit could not be trusted to hold.
+				security.admit(command.security_class())?;
 
 				let result = execute_new(
 					tx,
 					actor,
 					command_id,
 					command,
+					security,
 					recorded_at_unix_ms,
 				)
 				.await;
@@ -275,7 +321,14 @@ impl Core {
 				.await?;
 				Ok(result)
 			})
-			.await?
+			.await??;
+		// Carrying on past an integrity failure is not the daemon deciding
+		// it is well again: it validates the chain it now vouches for.
+		if matches!(outcome, CommandOutcome::AuditEpochBegun { .. }) {
+			*self.security.write().await =
+				SecurityState::of(self.store.validate_audit().await?);
+		}
+		Ok(outcome)
 	}
 }
 
@@ -284,6 +337,7 @@ async fn execute_new(
 	actor: &Actor,
 	command_id: CommandId,
 	command: Command,
+	security: SecurityState,
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
 	match command {
@@ -320,6 +374,9 @@ async fn execute_new(
 		}
 		Command::UnbindAccount { binding_id } => {
 			account::unbind(tx, actor, binding_id, now_unix_ms).await
+		}
+		Command::BeginAuditEpoch => {
+			security::begin_epoch(tx, actor, security, now_unix_ms).await
 		}
 		Command::TransitionRun {
 			run_id,
@@ -435,6 +492,17 @@ async fn set_setting(
 		now_unix_ms,
 	)?)
 	.await?;
+	// ASVS 16.2.1: a policy that decides what Jet may do on its own is
+	// recorded in the Security audit as well as in the journal (ADR-0105).
+	if let Some(decision) = audit::stored_setting(key, &value) {
+		audit::record(
+			tx,
+			actor,
+			Decision::succeeded(decision, AuditSubject::of_scope(scope)),
+			now_unix_ms,
+		)
+		.await?;
+	}
 	Ok(CommandOutcome::SettingSet { key, scope, value })
 }
 
@@ -455,6 +523,15 @@ async fn clear_setting(
 		now_unix_ms,
 	)?)
 	.await?;
+	if let Some(decision) = audit::cleared_setting(key) {
+		audit::record(
+			tx,
+			actor,
+			Decision::succeeded(decision, AuditSubject::of_scope(scope)),
+			now_unix_ms,
+		)
+		.await?;
+	}
 	Ok(CommandOutcome::SettingCleared { key, scope })
 }
 

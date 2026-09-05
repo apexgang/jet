@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO security_audit (sequence, epoch, record_id,\n\t\t\t\trecorded_at_unix_ms, plane_id, actor_kind, actor_id,\n\t\t\t\ttarget_kind, target_reference, target_id, decision, risk,\n\t\t\t\toutcome, entry_hash)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,\n\t\t\t\t?14)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 14
+    },
+    "nullable": []
+  },
+  "hash": "a14cafe1d7bee6e7857bcc89b09217a992b0199668bf9cbe1060c24db8c5673f"
+}

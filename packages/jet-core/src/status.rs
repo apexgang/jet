@@ -2,6 +2,7 @@
 
 use std::time::SystemTime;
 
+use crate::security::SecurityState;
 use crate::{EventSequence, PlaneId};
 
 /// Point-in-time view of the daemon and the Plane it owns.
@@ -18,4 +19,6 @@ pub struct PlaneStatus {
 	pub started_at: SystemTime,
 	/// Version of the running core.
 	pub core_version: &'static str,
+	/// Whether the Plane can vouch for its own Security audit (ADR-0105).
+	pub security: SecurityState,
 }

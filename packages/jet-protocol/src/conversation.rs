@@ -154,6 +154,9 @@ pub enum CommandRequest {
 		/// The binding to remove.
 		binding_id: Uuid,
 	},
+	/// Begin a new authority epoch of the Security audit, carrying on past
+	/// an integrity failure and recording the gap it leaves behind.
+	BeginAuditEpoch,
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -202,6 +205,13 @@ pub enum CommandResponse {
 		binding_id: Uuid,
 		/// The reference it resolved through.
 		credential_reference: CredentialReference,
+	},
+	/// The authority epoch the Security audit now records in.
+	AuditEpochBegun {
+		/// The epoch that holds the chain the Plane vouches for, carried as
+		/// a decimal string (ADR-0089).
+		#[serde(with = "crate::decimal")]
+		epoch: u64,
 	},
 }
 

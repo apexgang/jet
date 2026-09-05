@@ -37,6 +37,9 @@ pub enum SettingKey {
 	/// text.
 	#[serde(rename = "git.message_instructions")]
 	GitMessageInstructions,
+	/// How many days the Plane keeps its Security audit.
+	#[serde(rename = "security.audit_retention_days")]
+	SecurityAuditRetentionDays,
 }
 
 /// One Setting's value. Each key holds exactly one of these shapes.
@@ -47,6 +50,8 @@ pub enum SettingValue {
 	Flag(bool),
 	/// Bounded free text.
 	Text(String),
+	/// A whole number of something, such as days.
+	Count(u32),
 }
 
 /// Which Settings one Query resolves.

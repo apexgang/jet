@@ -9,6 +9,13 @@
 //! typed records and stable errors.
 
 mod account;
+mod audit;
+mod audit_chain;
+mod audit_epoch;
+mod audit_head;
+mod audit_integrity;
+mod audit_read;
+mod audit_retention;
 mod command;
 mod conversation;
 mod effect;
@@ -20,7 +27,7 @@ mod run;
 mod setting;
 mod transaction;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use sqlx::sqlite::{
@@ -28,10 +35,19 @@ use sqlx::sqlite::{
 	SqliteSynchronous,
 };
 use sqlx::{Connection, SqlitePool};
+use uuid::Uuid;
 
 pub use account::{
 	AccountBindingRecord, CredentialSourceRecord, NewAccountBinding,
 };
+pub use audit::{
+	AUDIT_PAGE_LIMIT, AuditOutcome, AuditRecord, AuditRisk, AuditTip,
+	NewAuditRecord,
+};
+pub use audit_chain::{AuditEntryHash, AuditTargetRef};
+pub use audit_epoch::AuditGap;
+pub use audit_head::{AuditHead, audit_head_path};
+pub use audit_integrity::{AuditBreach, AuditIntegrity, AuditIntegrityFailure};
 pub use conversation::CONVERSATION_PAGE_LIMIT;
 pub use journal::EVENT_COMPACTION_BATCH_LIMIT;
 pub use plane::PlaneRecord;
@@ -90,10 +106,20 @@ impl From<sqlx::Error> for StoreError {
 #[derive(Debug)]
 pub struct Store {
 	pool: SqlitePool,
+	/// The database file, which also names the Security audit head kept
+	/// beside it (ADR-0105).
+	database: PathBuf,
+	/// This Plane's durable identity, read once at open. It binds the audit
+	/// head to the store it describes.
+	plane_id: Uuid,
 }
 
 impl Store {
 	/// Opens or creates the store at `path` and applies pending migrations.
+	///
+	/// The Security audit head lives beside the database rather than in it,
+	/// at [`audit_head_path`], so a database restored from a snapshot
+	/// cannot silently shorten the audit (ADR-0105).
 	///
 	/// # Errors
 	///
@@ -129,7 +155,12 @@ impl Store {
 		reject_legacy_schema(&pool).await?;
 		migrations::apply(&pool).await?;
 		plane::ensure_present(&pool).await?;
-		Ok(Self { pool })
+		let plane_id = plane::read(&pool).await?.plane_id;
+		Ok(Self {
+			pool,
+			database: path.to_owned(),
+			plane_id,
+		})
 	}
 
 	/// Current Plane identity and daemon start count.

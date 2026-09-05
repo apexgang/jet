@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE security_audit SET target_id = NULL\n\t\t\t WHERE target_reference = ?1 AND target_id IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "81d5b41a977d76ca77f27d2a4c90e2285d94af3d6f7ec8d2be0f6577cf159d30"
+}

@@ -116,7 +116,18 @@ pub enum SettingKey {
 	/// Plane-wide guidance for generated commit messages and pull-request
 	/// text.
 	GitMessageInstructions,
+	/// How many days the Plane keeps its Security audit (ADR-0105).
+	SecurityAuditRetentionDays,
 }
+
+/// Fewest days a Plane may keep its Security audit. Below this the audit
+/// stops being able to answer what happened during an incident, so the
+/// floor is not a preference (ADR-0105).
+const MINIMUM_AUDIT_RETENTION_DAYS: u32 = 90;
+
+/// How many days a Plane keeps its Security audit unless a value says
+/// otherwise.
+const DEFAULT_AUDIT_RETENTION_DAYS: u32 = 365;
 
 /// One Setting's built-in default, spelled so the catalog stays constant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,6 +136,8 @@ enum BuiltIn {
 	Flag(bool),
 	/// A text default.
 	Text(&'static str),
+	/// A whole-number default.
+	Count(u32),
 }
 
 /// What one [`SettingKey`] declares: its durable spelling, the scopes that
@@ -137,7 +150,7 @@ struct Catalog {
 }
 
 /// Every Setting this core resolves, in the order a snapshot reports them.
-const CATALOG: [Catalog; 3] = [
+const CATALOG: [Catalog; 4] = [
 	Catalog {
 		key: SettingKey::UtilityAutomaticNaming,
 		spelling: "utility.automatic_naming",
@@ -163,6 +176,13 @@ const CATALOG: [Catalog; 3] = [
 		scopes: &[SettingScopeKind::Plane],
 		built_in: BuiltIn::Text(""),
 	},
+	Catalog {
+		// One audit covers the whole Plane, so its window is Plane-wide.
+		key: SettingKey::SecurityAuditRetentionDays,
+		spelling: "security.audit_retention_days",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Count(DEFAULT_AUDIT_RETENTION_DAYS),
+	},
 ];
 
 impl BuiltIn {
@@ -170,6 +190,7 @@ impl BuiltIn {
 		match self {
 			Self::Flag(flag) => SettingValue::Flag(flag),
 			Self::Text(text) => SettingValue::Text(text.into()),
+			Self::Count(count) => SettingValue::Count(count),
 		}
 	}
 }
@@ -262,6 +283,19 @@ impl SettingKey {
 					self.as_str()
 				),
 			)),
+			SettingValue::Count(days)
+				if self == Self::SecurityAuditRetentionDays
+					&& *days < MINIMUM_AUDIT_RETENTION_DAYS =>
+			{
+				Err(CoreError::invalid_input(
+					"setting.value_below_minimum",
+					format!(
+						"the Security audit is kept at least \
+						 {MINIMUM_AUDIT_RETENTION_DAYS} days"
+					),
+				))
+			}
+			SettingValue::Count(_) => Ok(()),
 		}
 	}
 
@@ -299,6 +333,8 @@ pub enum SettingValue {
 	Flag(bool),
 	/// Bounded free text.
 	Text(String),
+	/// A whole number of something, such as days.
+	Count(u32),
 }
 
 impl SettingValue {
@@ -442,6 +478,23 @@ pub(crate) fn event_subject(scope: SettingScope) -> EventSubject {
 			EventSubject::Conversation(conversation_id)
 		}
 	}
+}
+
+/// The value the Plane itself resolves for `key`: whatever the Plane scope
+/// stores, and the built-in default until something does.
+///
+/// # Errors
+///
+/// Returns a store category [`CoreError`] when the values cannot be read.
+pub(crate) async fn resolve_plane(
+	tx: &mut ReadTransaction,
+	key: SettingKey,
+) -> Result<SettingValue, CoreError> {
+	let stored = tx.settings_for_scope(SettingScope::Plane.record()).await?;
+	Ok(resolve(&[key], &stored)
+		.into_iter()
+		.next()
+		.map_or_else(|| key.built_in(), |resolved| resolved.value))
 }
 
 /// Refuses a scope whose subject this Plane does not have.

@@ -7,8 +7,8 @@ mod support;
 
 use jet_protocol::{
 	CODEC_JSON_V1, ClientHello, ErrorCategory, MAX_DATA_FRAME, PROTOCOL_MINOR,
-	PROTOCOL_VERSION, PlaneStatus, RetentionPolicy, ServerHello, ServerMessage,
-	WireError,
+	PROTOCOL_VERSION, PlaneStatus, RetentionPolicy, SecurityState, ServerHello,
+	ServerMessage, WireError,
 };
 use pretty_assertions::assert_eq;
 use support::{Daemon, connect_raw, handshake_raw, hello, jetd, start_jetd};
@@ -57,6 +57,7 @@ async fn status_is_answered_before_and_after_a_daemon_crash_and_restart() {
 				daemon_starts: 1,
 				started_at_unix_ms: before.started_at_unix_ms,
 				core_version: env!("CARGO_PKG_VERSION").into(),
+				security: Some(SecurityState::Trusted),
 			},
 			&PlaneStatus {
 				cursor: Some(1),
@@ -64,6 +65,7 @@ async fn status_is_answered_before_and_after_a_daemon_crash_and_restart() {
 				daemon_starts: 2,
 				started_at_unix_ms: after.started_at_unix_ms,
 				core_version: env!("CARGO_PKG_VERSION").into(),
+				security: Some(SecurityState::Trusted),
 			}
 		)
 	);

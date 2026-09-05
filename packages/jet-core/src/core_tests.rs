@@ -1,6 +1,6 @@
 use pretty_assertions::assert_eq;
 
-use super::{CORE_VERSION, PlaneStatus, Query, QueryResult};
+use super::{CORE_VERSION, PlaneStatus, Query, QueryResult, SecurityState};
 use crate::test_support::{actor, start_core};
 
 #[tokio::test]
@@ -32,6 +32,7 @@ async fn status_reports_the_persisted_plane_across_core_restarts() {
 				daemon_starts: 1,
 				started_at: before.started_at,
 				core_version: CORE_VERSION,
+				security: SecurityState::Trusted,
 			},
 			&PlaneStatus {
 				cursor: crate::EventSequence(0),
@@ -39,6 +40,7 @@ async fn status_reports_the_persisted_plane_across_core_restarts() {
 				daemon_starts: 2,
 				started_at: after.started_at,
 				core_version: CORE_VERSION,
+				security: SecurityState::Trusted,
 			}
 		)
 	);

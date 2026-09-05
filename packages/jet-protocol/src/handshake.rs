@@ -14,7 +14,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 4;
+pub const PROTOCOL_MINOR: u32 = 5;
 /// Minor that introduced fenced status and Conversation pagination.
 pub const FENCED_READS_MINOR: u32 = 1;
 /// Minor that switches post-handshake frames to numbered stream envelopes.
@@ -24,6 +24,8 @@ pub const MULTIPLEXED_STREAMS_MINOR: u32 = 2;
 pub const SETTINGS_AND_CAPABILITIES_MINOR: u32 = 3;
 /// Minor that introduced Account binding Queries and Commands.
 pub const ACCOUNT_BINDINGS_MINOR: u32 = 4;
+/// Minor that introduced the owner-only Security audit Query.
+pub const SECURITY_AUDIT_MINOR: u32 = 5;
 /// The only v1 codec; other codecs are reserved for later negotiation.
 pub const CODEC_JSON_V1: &str = "json-v1";
 

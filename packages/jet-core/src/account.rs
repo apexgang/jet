@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::Actor;
+use crate::audit::{self, AuditDecision, AuditSubject, Decision};
 use crate::capability::{CredentialStoreKind, CredentialStoreStatus};
 use crate::command::CommandOutcome;
 use crate::error::CoreError;
@@ -394,6 +395,18 @@ pub(crate) async fn bind(
 		now_unix_ms,
 	)?)
 	.await?;
+	// ASVS 16.2.1: widening what may authenticate on this Plane is a
+	// Security audit decision, not only journal history (ADR-0105).
+	audit::record(
+		tx,
+		actor,
+		Decision::succeeded(
+			AuditDecision::AccountBound,
+			AuditSubject::AccountBinding(binding.binding_id),
+		),
+		now_unix_ms,
+	)
+	.await?;
 	Ok(CommandOutcome::AccountBound(binding))
 }
 
@@ -425,6 +438,16 @@ pub(crate) async fn unbind(
 		EventSubject::Plane,
 		now_unix_ms,
 	)?)
+	.await?;
+	audit::record(
+		tx,
+		actor,
+		Decision::succeeded(
+			AuditDecision::AccountUnbound,
+			AuditSubject::AccountBinding(binding_id),
+		),
+		now_unix_ms,
+	)
 	.await?;
 	Ok(CommandOutcome::AccountUnbound {
 		binding_id,

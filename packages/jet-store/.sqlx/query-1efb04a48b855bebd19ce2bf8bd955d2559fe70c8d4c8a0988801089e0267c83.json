@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM security_audit WHERE sequence <= ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1efb04a48b855bebd19ce2bf8bd955d2559fe70c8d4c8a0988801089e0267c83"
+}

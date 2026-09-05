@@ -214,6 +214,11 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 					SettingValue::Text("Explain why, not what".into()),
 					SettingSource::Scope(SettingScope::Plane)
 				),
+				resolved(
+					SettingKey::SecurityAuditRetentionDays,
+					SettingValue::Count(365),
+					SettingSource::BuiltIn
+				),
 			],
 			vec![
 				resolved(
@@ -232,6 +237,11 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 					SettingKey::GitMessageInstructions,
 					SettingValue::Text("Explain why, not what".into()),
 					SettingSource::Scope(SettingScope::Plane)
+				),
+				resolved(
+					SettingKey::SecurityAuditRetentionDays,
+					SettingValue::Count(365),
+					SettingSource::BuiltIn
 				),
 			]
 		)

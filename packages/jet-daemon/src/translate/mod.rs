@@ -4,6 +4,7 @@
 //! beside it.
 
 mod account;
+mod audit;
 mod capability;
 mod setting;
 
@@ -12,11 +13,12 @@ pub(crate) use capability::snapshot as capabilities;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_core::{
-	AccountBindingId, Actor, Command, CommandOutcome, ConflictState,
-	Conversation, ConversationId, ConversationList, ConversationSnapshot,
-	CoreError, ErrorCategory, Event, EventPage, EventPayload, EventSequence,
-	PlaneStatus, ProviderId, Query, QueryResult, RecoveryAction,
-	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
+	AccountBindingId, Actor, AuditSequence, Command, CommandOutcome,
+	ConflictState, Conversation, ConversationId, ConversationList,
+	ConversationSnapshot, CoreError, ErrorCategory, Event, EventPage,
+	EventPayload, EventSequence, PlaneStatus, ProviderId, Query, QueryResult,
+	RecoveryAction, RetentionPolicy, Revision, RevisionConflict, Run, RunId,
+	RunLifecycle,
 };
 use jet_protocol as wire;
 
@@ -56,6 +58,9 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 		wire::QueryRequest::Events { after } => Query::Events {
 			after: EventSequence(*after),
 		},
+		wire::QueryRequest::SecurityAudit { after } => Query::SecurityAudit {
+			after: AuditSequence(*after),
+		},
 	}
 }
 
@@ -80,10 +85,13 @@ pub(crate) fn query_result(
 			wire::QueryResponse::AccountBindings(account::list(bindings))
 		}
 		QueryResult::Settings(snapshot) => {
-			wire::QueryResponse::Settings(setting::snapshot(snapshot))
+			wire::QueryResponse::Settings(setting::snapshot(snapshot, minor))
 		}
 		QueryResult::Events(page) => {
 			wire::QueryResponse::Events(event_page(&page)?)
+		}
+		QueryResult::SecurityAudit(page) => {
+			wire::QueryResponse::SecurityAudit(audit::page(page))
 		}
 	})
 }
@@ -131,6 +139,7 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 				binding_id: AccountBindingId(*binding_id),
 			}
 		}
+		wire::CommandRequest::BeginAuditEpoch => Command::BeginAuditEpoch,
 		wire::CommandRequest::TransitionRun {
 			run_id,
 			expected_revision,
@@ -179,6 +188,9 @@ pub(crate) fn command_outcome(
 			binding_id: binding_id.0,
 			credential_reference: account::reference(credential_reference),
 		},
+		CommandOutcome::AuditEpochBegun { epoch } => {
+			wire::CommandResponse::AuditEpochBegun { epoch: epoch.0 }
+		}
 	}
 }
 
@@ -189,6 +201,11 @@ fn plane_status(status: &PlaneStatus, minor: u32) -> wire::PlaneStatus {
 		daemon_starts: status.daemon_starts,
 		started_at_unix_ms: unix_ms(status.started_at),
 		core_version: status.core_version.into(),
+		// A client that negotiated an older minor does not name the
+		// Security audit, so it is not told about its state either
+		// (ADR-0019).
+		security: (minor >= wire::SECURITY_AUDIT_MINOR)
+			.then(|| audit::security(status.security)),
 	}
 }
 
@@ -258,7 +275,7 @@ fn event(event: &Event) -> Result<wire::Event, CoreError> {
 	})
 }
 
-fn actor(actor: &Actor) -> wire::Actor {
+pub(super) fn actor(actor: &Actor) -> wire::Actor {
 	match actor {
 		Actor::InteractiveClient { client_id } => {
 			wire::Actor::InteractiveClient {
@@ -397,3 +414,7 @@ pub(super) fn unix_ms(time: SystemTime) -> i64 {
 			.map_or(i64::MIN, |ms| -ms),
 	}
 }
+
+#[cfg(test)]
+#[path = "minor_tests.rs"]
+mod tests;

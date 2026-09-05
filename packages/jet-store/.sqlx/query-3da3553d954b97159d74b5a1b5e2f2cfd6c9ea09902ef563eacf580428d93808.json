@@ -1,0 +1,182 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sequence AS \"sequence!\", epoch, record_id,\n\t\t\t\trecorded_at_unix_ms, plane_id, actor_kind, actor_id,\n\t\t\t\ttarget_kind, target_reference, target_id, decision, risk,\n\t\t\t\toutcome, entry_hash\n\t\t\t FROM security_audit\n\t\t\t WHERE epoch = ?1 AND sequence > ?2\n\t\t\t ORDER BY sequence\n\t\t\t LIMIT ?3",
+  "describe": {
+    "columns": [
+      {
+        "name": "sequence!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "sequence"
+          }
+        }
+      },
+      {
+        "name": "epoch",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "epoch"
+          }
+        }
+      },
+      {
+        "name": "record_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "record_id"
+          }
+        }
+      },
+      {
+        "name": "recorded_at_unix_ms",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "recorded_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "plane_id",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "plane_id"
+          }
+        }
+      },
+      {
+        "name": "actor_kind",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "actor_kind"
+          }
+        }
+      },
+      {
+        "name": "actor_id",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "actor_id"
+          }
+        }
+      },
+      {
+        "name": "target_kind",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "target_kind"
+          }
+        }
+      },
+      {
+        "name": "target_reference",
+        "ordinal": 8,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "target_reference"
+          }
+        }
+      },
+      {
+        "name": "target_id",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "target_id"
+          }
+        }
+      },
+      {
+        "name": "decision",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "decision"
+          }
+        }
+      },
+      {
+        "name": "risk",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "risk"
+          }
+        }
+      },
+      {
+        "name": "outcome",
+        "ordinal": 12,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "name": "entry_hash",
+        "ordinal": 13,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "entry_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3da3553d954b97159d74b5a1b5e2f2cfd6c9ea09902ef563eacf580428d93808"
+}
