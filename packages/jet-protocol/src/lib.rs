@@ -80,8 +80,8 @@ pub use pairing::{
 	PairingProgress, PairingSnapshot, PendingPairing,
 };
 pub use project::{
-	Checkout, GitLink, Project, ProjectList, ProjectPreview, Registrability,
-	Repository, Worktree,
+	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
+	ProjectPreview, Registrability, Repository, Worktree,
 };
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,

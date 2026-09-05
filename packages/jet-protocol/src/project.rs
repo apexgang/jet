@@ -93,6 +93,39 @@ pub struct GitLink {
 	pub commit: String,
 }
 
+/// One entry inside a registered Project, addressed by the Project and a
+/// path relative to its root. It carries metadata and never content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectEntry {
+	/// Newest Event sequence visible when the Project was read, carried as
+	/// a decimal string (ADR-0089).
+	#[serde(with = "crate::decimal")]
+	pub cursor: u64,
+	/// The Project the path was resolved in.
+	pub project_id: Uuid,
+	/// The path as it was asked for.
+	pub path: String,
+	/// What the path names right now.
+	pub kind: EntryKind,
+}
+
+/// What one path inside a Project names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EntryKind {
+	/// A regular file.
+	File {
+		/// Its length in bytes.
+		bytes: u64,
+	},
+	/// A directory.
+	Directory,
+	/// Something else the filesystem holds, such as a socket.
+	Other,
+	/// Nothing yet.
+	Missing,
+}
+
 /// One registered Project.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {

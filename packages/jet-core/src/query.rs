@@ -14,10 +14,13 @@ use crate::conversation::{
 use crate::error::CoreError;
 use crate::event::{EVENT_PAGE_LIMIT, Event, EventPage, EventSequence};
 use crate::pairing::{self, PairingSnapshot};
-use crate::project::{self, PathGrant, ProjectList, ProjectPreview};
+use crate::project::{
+	self, PathGrant, ProjectEntry, ProjectList, ProjectPreview,
+};
+use crate::relative_path::RelativePath;
 use crate::setting::{self, SettingScope, SettingSelection, SettingSnapshot};
 use crate::status::PlaneStatus;
-use crate::{Actor, CORE_VERSION, Core, PlaneId};
+use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +85,16 @@ pub enum Query {
 		/// Plane or a new one, taken now (ADR-0086).
 		observation: CapabilityObservation,
 	},
+	/// What one path inside a Project names: the shape every ordinary file
+	/// operation takes, a Project and a validated relative path
+	/// (ADR-0101). Workspaces address files the same way once they exist
+	/// (ADR-0025).
+	ProjectEntry {
+		/// The Project to resolve the path in.
+		project_id: ProjectId,
+		/// The path, relative to the Project's root.
+		path: RelativePath,
+	},
 }
 
 /// Snapshots returned by [`Core::query`].
@@ -109,6 +122,8 @@ pub enum QueryResult {
 	Projects(ProjectList),
 	/// What a Path grant would register.
 	ProjectPreview(ProjectPreview),
+	/// What one path inside a Project names.
+	ProjectEntry(ProjectEntry),
 }
 
 impl Core {
@@ -229,6 +244,9 @@ impl Core {
 			}
 			Query::PreviewProject { grant, observation } => {
 				project::preview(self, actor, &grant, observation).await
+			}
+			Query::ProjectEntry { project_id, path } => {
+				project::entry(self, project_id, path).await
 			}
 			Query::Projects => {
 				self.store

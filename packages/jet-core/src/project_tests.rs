@@ -11,10 +11,10 @@ use crate::test_support::{
 };
 use crate::{
 	AuditOutcome, AuditRisk, AuditSequence, CapabilityObservation, Checkout,
-	ClientId, Command, CommandId, CommandOutcome, Core, CoreError,
+	ClientId, Command, CommandId, CommandOutcome, Core, CoreError, EntryKind,
 	ErrorCategory, EventKind, EventSequence, GitLink, PathGrant, Project,
-	ProjectPreview, Query, QueryResult, Registrability, Repository,
-	ToolAvailability, Worktree,
+	ProjectId, ProjectPreview, Query, QueryResult, Registrability,
+	RelativePath, Repository, ToolAvailability, Worktree,
 };
 
 async fn start(dir: &tempfile::TempDir) -> Core {
@@ -551,5 +551,64 @@ async fn a_preview_reports_repository_edges_without_recursing() {
 				lfs: ToolAvailability::Missing,
 			}),
 		)
+	);
+}
+
+async fn entry(
+	core: &Core,
+	project_id: ProjectId,
+	path: &str,
+) -> Result<EntryKind, String> {
+	let result = core
+		.query(
+			&actor(),
+			Query::ProjectEntry {
+				project_id,
+				path: RelativePath::parse(path).unwrap(),
+			},
+		)
+		.await
+		.map_err(|error| error.code)?;
+	let QueryResult::ProjectEntry(entry) = result else {
+		panic!("unexpected result {result:?}");
+	};
+	assert_eq!((entry.project_id, entry.path.as_str()), (project_id, path));
+	Ok(entry.kind)
+}
+
+/// An ordinary file operation names a Project and a relative path, never
+/// an absolute one (ADR-0101). The path resolves under the root the grant
+/// named; a link that leaves it is refused, and so is a root that has
+/// since moved or become a link to somewhere else.
+#[tokio::test]
+async fn a_file_is_addressed_through_its_project_and_a_relative_path() {
+	let dir = tempfile::tempdir().unwrap();
+	let core = start(&dir).await;
+	let repository = init_repository(&dir.path().join("repo"));
+	std::fs::create_dir_all(repository.join("docs")).unwrap();
+	symlink(dir.path(), repository.join("escape")).unwrap();
+	let project_id = register(&core, &repository).await.unwrap().project_id;
+
+	let readme = entry(&core, project_id, "README.md").await;
+	let docs = entry(&core, project_id, "docs").await;
+	let missing = entry(&core, project_id, "docs/missing.md").await;
+	let escaped = entry(&core, project_id, "escape/plane.sqlite3").await;
+	let unknown = entry(&core, ProjectId(Uuid::now_v7()), "README.md").await;
+	std::fs::rename(&repository, dir.path().join("moved")).unwrap();
+	let gone = entry(&core, project_id, "README.md").await;
+	symlink(dir.path().join("moved"), &repository).unwrap();
+	let moved = entry(&core, project_id, "README.md").await;
+
+	assert_eq!(
+		[readme, docs, missing, escaped, unknown, gone, moved],
+		[
+			Ok(EntryKind::File { bytes: 6 }),
+			Ok(EntryKind::Directory),
+			Ok(EntryKind::Missing),
+			Err("path.escapes_root".into()),
+			Err("project.not_found".into()),
+			Err("path.root_unreachable".into()),
+			Err("path.root_moved".into()),
+		]
 	);
 }

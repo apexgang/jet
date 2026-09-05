@@ -22,14 +22,24 @@ use jet_core::{
 	Command, CommandOutcome, ConflictState, Conversation, ConversationId,
 	ConversationList, ConversationSnapshot, CoreError, ErrorCategory, Event,
 	EventPage, EventPayload, EventSequence, PairingOfferId, PairingSecret,
-	PairingSignature, PathGrant, PlaneStatus, ProviderId, Query, QueryResult,
-	RecoveryAction, RetentionPolicy, Revision, RevisionConflict, Run, RunId,
-	RunLifecycle,
+	PairingSignature, PathGrant, PlaneStatus, ProjectId, ProviderId, Query,
+	QueryResult, RecoveryAction, RelativePath, RetentionPolicy, Revision,
+	RevisionConflict, Run, RunId, RunLifecycle,
 };
 use jet_protocol as wire;
 
-pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
-	match request {
+/// The core form of a Query.
+///
+/// # Errors
+///
+/// Returns an `invalid_input` [`CoreError`] when a relative path is not
+/// one the core accepts, so the core never receives an unvalidated path
+/// (ADR-0101).
+pub(crate) fn query(
+	request: &wire::QueryRequest,
+	minor: u32,
+) -> Result<Query, CoreError> {
+	Ok(match request {
 		wire::QueryRequest::Status => Query::Status,
 		wire::QueryRequest::Conversations
 			if minor < wire::FENCED_READS_MINOR =>
@@ -75,7 +85,13 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 				observation: capability::observation(*observation),
 			}
 		}
-	}
+		wire::QueryRequest::ProjectEntry { project_id, path } => {
+			Query::ProjectEntry {
+				project_id: ProjectId(*project_id),
+				path: RelativePath::parse(path)?,
+			}
+		}
+	})
 }
 
 pub(crate) fn query_result(
@@ -117,6 +133,9 @@ pub(crate) fn query_result(
 		}
 		QueryResult::ProjectPreview(preview) => {
 			wire::QueryResponse::ProjectPreview(project::preview(preview))
+		}
+		QueryResult::ProjectEntry(entry) => {
+			wire::QueryResponse::ProjectEntry(project::entry(entry))
 		}
 	})
 }

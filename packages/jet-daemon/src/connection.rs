@@ -324,10 +324,13 @@ pub(super) async fn answer(
 	{
 		return unsupported_minor(id, requirement);
 	}
-	let result = core
-		.query(actor, translate::query(query, minor))
-		.await
-		.and_then(|result| translate::query_result(result, minor));
+	let result = match translate::query(query, minor) {
+		Ok(query) => core
+			.query(actor, query)
+			.await
+			.and_then(|result| translate::query_result(result, minor)),
+		Err(error) => Err(error),
+	};
 	match result {
 		Ok(result) => ServerMessage::QueryResult { id, result },
 		Err(error) => ServerMessage::Error {
@@ -411,6 +414,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 		QueryRequest::PreviewProject { .. } => Some(MinorRequirement {
 			minor: jet_protocol::PROJECTS_MINOR,
 			feature: "the Project preview Query",
+		}),
+		QueryRequest::ProjectEntry { .. } => Some(MinorRequirement {
+			minor: jet_protocol::PROJECTS_MINOR,
+			feature: "the Project entry Query",
 		}),
 		QueryRequest::Status
 		| QueryRequest::Conversations

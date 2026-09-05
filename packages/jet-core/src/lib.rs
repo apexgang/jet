@@ -31,10 +31,6 @@ mod pairing_secret;
 mod preparation;
 mod project;
 mod query;
-#[allow(
-	dead_code,
-	reason = "used by Query::ProjectEntry in the next stage of #15"
-)]
 mod relative_path;
 mod remote;
 mod remote_pairing;
@@ -94,10 +90,11 @@ pub use pairing::{
 	PairingSecret, PairingSignature, PairingSnapshot, PendingPairing,
 };
 pub use project::{
-	Checkout, GitLink, PathGrant, Project, ProjectList, ProjectPreview,
-	Registrability, Repository, Worktree,
+	Checkout, EntryKind, GitLink, PathGrant, Project, ProjectEntry,
+	ProjectList, ProjectPreview, Registrability, Repository, Worktree,
 };
 pub use query::{Query, QueryResult};
+pub use relative_path::RelativePath;
 pub use remote::RemoteSession;
 pub use security::{SecurityDegradation, SecurityState};
 pub use setting::{

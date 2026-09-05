@@ -22,8 +22,8 @@ use crate::pairing::{
 	PendingPairing,
 };
 use crate::project::{
-	Checkout, GitLink, Project, ProjectList, ProjectPreview, Registrability,
-	Repository, Worktree,
+	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
+	ProjectPreview, Registrability, Repository, Worktree,
 };
 use crate::{ControlError, decode_control};
 
@@ -604,6 +604,33 @@ fn a_project_preview_has_the_agreed_wire_shape() {
 				"0".repeat(40)
 			),
 			r#"{"type":"project_preview","root":"/home/jet/repo/src","registrability":{"verdict":"inside_working_tree","toplevel":"/home/jet/repo"}}"#.to_string(),
+		)
+	);
+}
+
+#[test]
+fn a_project_entry_has_the_agreed_wire_shape() {
+	let query = ClientMessage::Query {
+		id: 12,
+		query: QueryRequest::ProjectEntry {
+			project_id: Uuid::nil(),
+			path: "docs/adr/0101.md".into(),
+		},
+	};
+	let result = ServerMessage::QueryResult {
+		id: 12,
+		result: QueryResponse::ProjectEntry(ProjectEntry {
+			cursor: 3,
+			project_id: Uuid::nil(),
+			path: "docs/adr/0101.md".into(),
+			kind: EntryKind::File { bytes: 512 },
+		}),
+	};
+	assert_eq!(
+		(json(&query), json(&result)),
+		(
+			r#"{"kind":"query","id":12,"query":{"type":"project_entry","project_id":"00000000-0000-0000-0000-000000000000","path":"docs/adr/0101.md"}}"#.to_string(),
+			r#"{"kind":"query_result","id":12,"result":{"type":"project_entry","cursor":"3","project_id":"00000000-0000-0000-0000-000000000000","path":"docs/adr/0101.md","kind":{"type":"file","bytes":512}}}"#.to_string(),
 		)
 	);
 }

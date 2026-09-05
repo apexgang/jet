@@ -14,7 +14,7 @@ use crate::conversation::{
 };
 use crate::event::Event;
 use crate::pairing::PairingSnapshot;
-use crate::project::{ProjectList, ProjectPreview};
+use crate::project::{ProjectEntry, ProjectList, ProjectPreview};
 use crate::setting::{SettingScope, SettingSelection, SettingSnapshot};
 
 /// Correlates a client request with its server reply.
@@ -152,6 +152,16 @@ pub enum QueryRequest {
 		/// Plane or a new one, taken now.
 		observation: CapabilityObservation,
 	},
+	/// What one path inside a Project names. This is how every ordinary
+	/// file operation addresses a file: a Project and a path relative to
+	/// its root, which the Plane validates before touching the filesystem.
+	ProjectEntry {
+		/// The Project to resolve the path in.
+		project_id: Uuid,
+		/// The path relative to the Project's root, with `/` between its
+		/// components.
+		path: String,
+	},
 }
 
 /// Query snapshots.
@@ -180,6 +190,8 @@ pub enum QueryResponse {
 	Projects(ProjectList),
 	/// What a Path grant would register.
 	ProjectPreview(ProjectPreview),
+	/// What one path inside a Project names.
+	ProjectEntry(ProjectEntry),
 }
 
 /// One page of journal Events, fenced by the journal position it was read

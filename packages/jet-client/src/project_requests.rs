@@ -2,7 +2,7 @@
 
 use jet_protocol::{
 	CapabilityObservation, CommandRequest, CommandResponse, Project,
-	ProjectList, ProjectPreview, QueryRequest, QueryResponse,
+	ProjectEntry, ProjectList, ProjectPreview, QueryRequest, QueryResponse,
 };
 use uuid::Uuid;
 
@@ -45,7 +45,8 @@ impl Client {
 			| QueryResponse::AccountBindings(_)
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
-			| QueryResponse::Projects(_)) => Err(unexpected(&other)),
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -97,6 +98,46 @@ impl Client {
 		}
 	}
 
+	/// Describes what `path`, relative to the root of `project_id`, names
+	/// right now: the shape every ordinary file operation takes, a Project
+	/// and a relative path the Plane validates before touching anything
+	/// (ADR-0101).
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] with a stable `path.*` code when the
+	/// path is absolute, traverses to a parent, holds a NUL, takes a form
+	/// another platform reads differently, or leads outside the root
+	/// through a link; `project.not_found` for an unknown Project; or the
+	/// transport failure otherwise.
+	pub async fn project_entry(
+		&self,
+		project_id: Uuid,
+		path: &str,
+	) -> Result<ProjectEntry, ClientError> {
+		self.require_minor(jet_protocol::PROJECTS_MINOR)?;
+		match self
+			.query(QueryRequest::ProjectEntry {
+				project_id,
+				path: path.into(),
+			})
+			.await?
+		{
+			QueryResponse::ProjectEntry(entry) => Ok(entry),
+			other @ (QueryResponse::Status(_)
+			| QueryResponse::Conversations(_)
+			| QueryResponse::Conversation(_)
+			| QueryResponse::Events(_)
+			| QueryResponse::Settings(_)
+			| QueryResponse::Capabilities(_)
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
+		}
+	}
+
 	/// Reads every registered Project with the journal cursor the snapshot
 	/// was read at.
 	///
@@ -117,7 +158,8 @@ impl Client {
 			| QueryResponse::AccountBindings(_)
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
-			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectPreview(_)
+			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
 		}
 	}
 }

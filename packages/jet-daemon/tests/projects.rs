@@ -8,10 +8,13 @@ mod support;
 use std::path::{Path, PathBuf};
 
 use jet_client::ClientError;
+use std::os::unix::fs::symlink;
+
 use jet_protocol::{
-	Actor, CapabilityObservation, Checkout, ClientMessage, ErrorCategory,
-	ExternalTool, PAIRING_MINOR, Project, ProjectPreview, QueryRequest,
-	Registrability, Repository, ServerHello, ServerMessage, Worktree,
+	Actor, CapabilityObservation, Checkout, ClientMessage, EntryKind,
+	ErrorCategory, ExternalTool, PAIRING_MINOR, Project, ProjectEntry,
+	ProjectPreview, QueryRequest, Registrability, Repository, ServerHello,
+	ServerMessage, Worktree,
 };
 use pretty_assertions::assert_eq;
 use support::{connect, handshake_raw, hello, start_jetd};
@@ -229,6 +232,66 @@ async fn a_preview_describes_a_working_tree_without_registering_it() {
 				toplevel: repository.display().to_string(),
 			},
 			vec![]
+		)
+	);
+}
+
+/// Every ordinary file operation names a Project and a relative path
+/// (ADR-0101). An absolute path, a parent traversal, a NUL, a form another
+/// platform reads differently, and a link that leaves the root are each
+/// refused with a stable code before the Plane touches anything.
+#[tokio::test]
+async fn a_file_is_addressed_through_its_project_and_a_relative_path() {
+	let dir = tempfile::tempdir().unwrap();
+	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	let client = connect(&daemon, Uuid::new_v4()).await;
+	let repository = init_repository(&dir.path().join("repo"));
+	std::fs::write(repository.join("notes.md"), "hello\n").unwrap();
+	symlink(dir.path(), repository.join("escape")).unwrap();
+	let project = client
+		.register_project(Uuid::now_v7(), repository.to_str().unwrap())
+		.await
+		.unwrap();
+
+	let notes = client
+		.project_entry(project.project_id, "notes.md")
+		.await
+		.unwrap();
+	let mut refused = Vec::new();
+	for path in [
+		"/etc/passwd",
+		"../secrets",
+		"a\0b",
+		"src\\main.rs",
+		"escape/plane.sqlite3",
+	] {
+		let error = client
+			.project_entry(project.project_id, path)
+			.await
+			.unwrap_err();
+		let ClientError::Remote(error) = error else {
+			panic!("expected a stable remote error, got {error:?}");
+		};
+		refused.push((error.category, error.code));
+	}
+
+	let expected = ProjectEntry {
+		cursor: notes.cursor,
+		project_id: project.project_id,
+		path: "notes.md".into(),
+		kind: EntryKind::File { bytes: 6 },
+	};
+	assert_eq!(
+		(notes, refused),
+		(
+			expected,
+			vec![
+				(ErrorCategory::InvalidInput, "path.absolute".into()),
+				(ErrorCategory::InvalidInput, "path.parent_traversal".into()),
+				(ErrorCategory::InvalidInput, "path.nul".into()),
+				(ErrorCategory::InvalidInput, "path.platform_form".into()),
+				(ErrorCategory::InvalidInput, "path.escapes_root".into()),
+			]
 		)
 	);
 }

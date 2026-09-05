@@ -1,12 +1,26 @@
 //! The Project half of the translation seam (ADR-0049, ADR-0101).
 
 use jet_core::{
-	Checkout, GitLink, Project, ProjectList, ProjectPreview, Registrability,
-	Repository, ToolAvailability, Worktree,
+	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
+	ProjectPreview, Registrability, Repository, ToolAvailability, Worktree,
 };
 use jet_protocol as wire;
 
 use super::{actor_of, unix_ms};
+
+pub(super) fn entry(entry: ProjectEntry) -> wire::ProjectEntry {
+	wire::ProjectEntry {
+		cursor: entry.cursor.0,
+		project_id: entry.project_id.0,
+		path: entry.path.as_str().into(),
+		kind: match entry.kind {
+			EntryKind::File { bytes } => wire::EntryKind::File { bytes },
+			EntryKind::Directory => wire::EntryKind::Directory,
+			EntryKind::Other => wire::EntryKind::Other,
+			EntryKind::Missing => wire::EntryKind::Missing,
+		},
+	}
+}
 
 pub(super) fn preview(preview: ProjectPreview) -> wire::ProjectPreview {
 	wire::ProjectPreview {
