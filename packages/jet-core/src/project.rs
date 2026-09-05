@@ -17,13 +17,14 @@ use uuid::Uuid;
 
 use crate::audit::{self, AuditDecision, AuditSubject, Decision};
 use crate::capability::{
-	CapabilityObservation, CapabilitySnapshot, ExternalTool, ToolAvailability,
+	CapabilityObservation, ExternalTool, ToolAvailability,
 };
 use crate::command::CommandOutcome;
 use crate::error::CoreError;
 use crate::event::{EventKind, EventSequence, EventSubject};
+use crate::filesystem::{blocking, canonicalize};
 use crate::query::QueryResult;
-use crate::repository::{self, Inspection, Verdict, blocking, canonicalize};
+use crate::repository::{self, Inspection, Verdict};
 use crate::{Actor, ClientId, Core, ProjectId, system_time};
 
 /// An interactive user's explicit authorization for Jet to register the
@@ -109,7 +110,9 @@ pub struct Repository {
 	pub lfs: ToolAvailability,
 }
 
-/// Which working tree of its repository a Project is.
+/// Which working tree of its repository a Project is. This is Git's
+/// worktree, the thing `git worktree` manages; Jet's Workspace is built on
+/// one but is a different concept (ADR-0025).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Worktree {
 	/// The repository's own working tree.
@@ -170,7 +173,7 @@ impl PathGrant {
 			));
 		}
 		let root = canonicalize(path).await.map_err(|error| {
-			if error.to_string().contains("No such file") {
+			if error.kind() == std::io::ErrorKind::NotFound {
 				CoreError::not_found(
 					"path_grant.unreachable",
 					"the granted path does not exist on this Plane",
@@ -294,7 +297,7 @@ pub(crate) async fn preview(
 				worktree,
 				checkout,
 				submodules,
-				lfs: lfs(&capabilities),
+				lfs: capabilities.availability(ExternalTool::GitLfs),
 			})
 		}
 		Verdict::NotARepository => Registrability::NotARepository,
@@ -311,22 +314,15 @@ pub(crate) async fn preview(
 	}))
 }
 
-/// What the Plane found when it looked for Git LFS. A snapshot names every
-/// tool the core looks for, so one that does not name it was taken by a
-/// core that did not look, and that is a Plane without it.
-fn lfs(capabilities: &CapabilitySnapshot) -> ToolAvailability {
-	capabilities
-		.external_tools
-		.iter()
-		.find(|status| status.tool == ExternalTool::GitLfs)
-		.map_or(ToolAvailability::Missing, |status| {
-			status.availability.clone()
-		})
-}
-
 /// Records a prepared root as a Project, journals it, and records the
 /// widened access in the Security audit, all in the transaction that
 /// commits it (ADR-0105).
+///
+/// One directory is one Project. A working tree inside another Project's
+/// root, such as a submodule checkout or a nested repository, is a Project
+/// of its own all the same: the parent treats it as a Git link or an
+/// opaque directory (ADR-0103), and ADR-0025's one Run in a Local checkout
+/// is a rule of each Project.
 ///
 /// # Errors
 ///

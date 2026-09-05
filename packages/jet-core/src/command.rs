@@ -384,43 +384,9 @@ impl Core {
 		let actor_record = actor.record();
 		let security = *self.security.read().await;
 		let recorded_at_unix_ms = self.now_unix_ms();
-		// A Command whose outcome is already durable is neither revalidated
-		// nor prepared: its work is done, and repeating it must return what
-		// the Plane decided then rather than what the machine would decide
-		// now (ADR-0093).
-		let recorded = self
-			.store
-			.read(async |tx| {
-				Ok::<_, CoreError>(
-					tx.command_receipt(actor_record, command_id.0)
-						.await?
-						.is_some(),
-				)
-			})
+		let prepared = self
+			.admit(actor, command_id, &command, recorded_at_unix_ms)
 			.await?;
-		let prepared = if recorded {
-			Prepared::Nothing
-		} else {
-			let admitted = match self.revalidate_capabilities(&command).await {
-				Ok(()) => self.prepare(actor, &command).await,
-				Err(refusal) => Err(refusal),
-			};
-			match admitted {
-				Ok(prepared) => prepared,
-				Err(refusal) => {
-					// ASVS 16.2.1: a decision the audit would have recorded
-					// is recorded when it is refused as well (ADR-0105).
-					audit::record_refusal(
-						&self.store,
-						actor,
-						&command,
-						recorded_at_unix_ms,
-					)
-					.await?;
-					return Err(refusal);
-				}
-			}
-		};
 		let mut invalidated_client = None;
 		let outcome = self
 			.store
@@ -553,7 +519,8 @@ async fn execute_new(
 			let Prepared::Registration(registrable) = prepared else {
 				return Err(CoreError::internal(
 					"project.unprepared",
-					"a Project registration reached its transaction without 					 its prepared root",
+					"a Project registration reached its transaction without \
+					 its prepared root",
 				));
 			};
 			project::register(tx, actor, registrable, now_unix_ms).await

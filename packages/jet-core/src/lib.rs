@@ -20,6 +20,7 @@ mod conversation;
 mod effect;
 mod error;
 mod event;
+mod filesystem;
 mod lifecycle;
 mod pagination;
 mod paired_client;

@@ -8,6 +8,14 @@
 //! only through an explicit Path grant, and a root is used only while the
 //! filesystem still names the directory that was granted.
 //!
+//! A path travels between Planes, so it is spelled one way: `/` between
+//! components, no empty, current-directory, or parent components, no
+//! control characters. The forms another platform would read as absolute
+//! or as separators (a drive letter, a backslash) are refused rather than
+//! guessed at, which costs a Linux name that begins with a drive-letter
+//! form. Case folding and Unicode normalization on macOS are properties of
+//! the filesystem that resolution meets, not forms this check rewrites.
+//!
 //! Everything here reads the filesystem synchronously. A caller in the
 //! async core runs it inside `tokio::task::spawn_blocking`, so a slow mount
 //! stalls one blocking thread rather than the runtime.
@@ -27,8 +35,8 @@ const MAX_PATH_BYTES: usize = 4096;
 /// A validated path relative to a registered root, with `/` between its
 /// components. It can be built only by [`RelativePath::parse`], so a value
 /// of this type has already been refused if it was absolute, traversed to a
-/// parent, held a NUL, or took a form one supported platform reads
-/// differently from the other.
+/// parent, held a NUL, or took a form some platform reads as absolute or
+/// as a separator.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RelativePath {
 	text: String,
@@ -65,7 +73,8 @@ impl GrantedRoot {
 		if now != granted {
 			return Err(CoreError::conflict(
 				"path.root_moved",
-				"the registered root now resolves to a different directory; 				 register the Project again where it lives now",
+				"the registered root now resolves to a different directory; \
+				 register the Project again where it lives now",
 			));
 		}
 		Ok(Self(now))
@@ -199,8 +208,9 @@ impl RelativePath {
 	}
 }
 
-/// Whether `text` is absolute on either supported platform, or takes the
-/// drive-letter form Windows would read as absolute.
+/// Whether `text` is absolute on a supported platform, or takes a form
+/// another platform reads as absolute: a leading backslash or a drive
+/// letter.
 fn is_absolute_form(text: &str) -> bool {
 	let bytes = text.as_bytes();
 	text.starts_with('/')
@@ -211,8 +221,7 @@ fn is_absolute_form(text: &str) -> bool {
 }
 
 /// Refuses a component that is empty, names the current or parent
-/// directory, is too long, or holds a character one supported platform
-/// would read as a separator or a control code.
+/// directory, is too long, or holds a backslash or a control character.
 fn require_component(component: &str) -> Result<(), CoreError> {
 	match component {
 		"" => Err(CoreError::invalid_input(

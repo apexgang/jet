@@ -16,6 +16,7 @@ use tokio::process::Command;
 
 use crate::capability::{Capability, ExternalTool};
 use crate::error::CoreError;
+use crate::filesystem::{blocking, canonicalize};
 use crate::project::{Checkout, GitLink, Worktree};
 
 /// How long one whole inspection may take before it is reported as having
@@ -308,23 +309,6 @@ fn spawn_failure(error: io::Error) -> CoreError {
 async fn has_git_entry(root: &Path) -> Result<bool, CoreError> {
 	let entry = root.join(".git");
 	blocking(move || std::fs::symlink_metadata(&entry).is_ok()).await
-}
-
-/// Resolves `path` as the filesystem names it, off the runtime.
-pub(crate) async fn canonicalize(path: PathBuf) -> io::Result<PathBuf> {
-	blocking(move || std::fs::canonicalize(path))
-		.await
-		.map_err(|error| io::Error::other(error.to_string()))?
-}
-
-/// Runs filesystem work on a blocking thread, so a slow mount stalls that
-/// thread and not the runtime every connection shares.
-pub(crate) async fn blocking<T: Send + 'static>(
-	work: impl FnOnce() -> T + Send + 'static,
-) -> Result<T, CoreError> {
-	tokio::task::spawn_blocking(work).await.map_err(|error| {
-		CoreError::internal("filesystem.task_failed", error.to_string())
-	})
 }
 
 /// Git answered, but not in a way this core can act on. The native text

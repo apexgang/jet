@@ -13,8 +13,8 @@ use crate::{
 	AuditOutcome, AuditRisk, AuditSequence, CapabilityObservation, Checkout,
 	ClientId, Command, CommandId, CommandOutcome, Core, CoreError, EntryKind,
 	ErrorCategory, EventKind, EventSequence, GitLink, PathGrant, Project,
-	ProjectId, ProjectPreview, Query, QueryResult, Registrability,
-	RelativePath, Repository, ToolAvailability, Worktree,
+	ProjectEntry, ProjectId, ProjectPreview, Query, QueryResult,
+	Registrability, RelativePath, Repository, ToolAvailability, Worktree,
 };
 
 async fn start(dir: &tempfile::TempDir) -> Core {
@@ -558,7 +558,7 @@ async fn entry(
 	core: &Core,
 	project_id: ProjectId,
 	path: &str,
-) -> Result<EntryKind, String> {
+) -> Result<ProjectEntry, String> {
 	let result = core
 		.query(
 			&actor(),
@@ -572,8 +572,18 @@ async fn entry(
 	let QueryResult::ProjectEntry(entry) = result else {
 		panic!("unexpected result {result:?}");
 	};
-	assert_eq!((entry.project_id, entry.path.as_str()), (project_id, path));
-	Ok(entry.kind)
+	Ok(entry)
+}
+
+/// The entry `path` names in `project_id` on a Plane whose journal holds
+/// the one Event that registered it.
+fn found(project_id: ProjectId, path: &str, kind: EntryKind) -> ProjectEntry {
+	ProjectEntry {
+		cursor: EventSequence(1),
+		project_id,
+		path: RelativePath::parse(path).unwrap(),
+		kind,
+	}
 }
 
 /// An ordinary file operation names a Project and a relative path, never
@@ -602,9 +612,9 @@ async fn a_file_is_addressed_through_its_project_and_a_relative_path() {
 	assert_eq!(
 		[readme, docs, missing, escaped, unknown, gone, moved],
 		[
-			Ok(EntryKind::File { bytes: 6 }),
-			Ok(EntryKind::Directory),
-			Ok(EntryKind::Missing),
+			Ok(found(project_id, "README.md", EntryKind::File { bytes: 6 })),
+			Ok(found(project_id, "docs", EntryKind::Directory)),
+			Ok(found(project_id, "docs/missing.md", EntryKind::Missing)),
 			Err("path.escapes_root".into()),
 			Err("project.not_found".into()),
 			Err("path.root_unreachable".into()),

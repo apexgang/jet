@@ -323,6 +323,18 @@ impl CapabilitySnapshot {
 		}
 	}
 
+	/// What the Plane found when it looked for `tool`. A snapshot names
+	/// every tool the core looks for, so one that does not name it was
+	/// taken by a core that did not look, and that is a Plane without it.
+	pub(crate) fn availability(&self, tool: ExternalTool) -> ToolAvailability {
+		self.external_tools
+			.iter()
+			.find(|status| status.tool == tool)
+			.map_or(ToolAvailability::Missing, |status| {
+				status.availability.clone()
+			})
+	}
+
 	/// Whether the Plane could do `capability` when it was observed.
 	///
 	/// A locked credential store still counts as one: locking hides the

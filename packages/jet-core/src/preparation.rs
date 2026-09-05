@@ -7,7 +7,8 @@
 //! the world rather than the Command is not replayed for thirty days
 //! (ADR-0093).
 
-use crate::command::Command;
+use crate::audit;
+use crate::command::{Command, CommandId};
 use crate::error::CoreError;
 use crate::project::{self, Registrable};
 use crate::{Actor, Core};
@@ -21,13 +22,63 @@ pub(crate) enum Prepared {
 }
 
 impl Core {
+	/// Admits `command` to its transaction: revalidates the Capabilities it
+	/// depends on (ADR-0086) and prepares what it needs from outside the
+	/// store.
+	///
+	/// A Command whose outcome is already durable is neither revalidated
+	/// nor prepared: its work is done, and repeating it must return what
+	/// the Plane decided then rather than what the machine would decide now
+	/// (ADR-0093).
+	///
+	/// # Errors
+	///
+	/// Returns the refusal, which is answered without a receipt and, when
+	/// the Command is one the Security audit records, recorded there as
+	/// denied (ADR-0105).
+	pub(crate) async fn admit(
+		&self,
+		actor: &Actor,
+		command_id: CommandId,
+		command: &Command,
+		now_unix_ms: i64,
+	) -> Result<Prepared, CoreError> {
+		let actor_record = actor.record();
+		let recorded = self
+			.store
+			.read(async |tx| {
+				Ok::<_, CoreError>(
+					tx.command_receipt(actor_record, command_id.0)
+						.await?
+						.is_some(),
+				)
+			})
+			.await?;
+		if recorded {
+			return Ok(Prepared::Nothing);
+		}
+		let admitted = match self.revalidate_capabilities(command).await {
+			Ok(()) => self.prepare(actor, command).await,
+			Err(refusal) => Err(refusal),
+		};
+		match admitted {
+			Ok(prepared) => Ok(prepared),
+			Err(refusal) => {
+				// ASVS 16.2.1: a decision the audit would have recorded is
+				// recorded when it is refused as well (ADR-0105).
+				audit::record_refusal(&self.store, actor, command, now_unix_ms)
+					.await?;
+				Err(refusal)
+			}
+		}
+	}
+
 	/// Prepares `command` for its transaction.
 	///
 	/// # Errors
 	///
-	/// Returns the refusal the preparation produced, which is answered
-	/// without a receipt.
-	pub(crate) async fn prepare(
+	/// Returns the refusal the preparation produced.
+	async fn prepare(
 		&self,
 		actor: &Actor,
 		command: &Command,

@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 
 use crate::error::CoreError;
 use crate::event::EventSequence;
+use crate::filesystem::blocking;
 use crate::query::QueryResult;
 use crate::relative_path::{GrantedRoot, RelativePath};
-use crate::repository::blocking;
 use crate::{Core, ProjectId};
 
 /// One entry inside a registered Project, addressed the way every ordinary
