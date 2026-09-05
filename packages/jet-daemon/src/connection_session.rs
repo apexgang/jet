@@ -39,13 +39,21 @@ pub(super) async fn serve(
 	actor: Actor,
 	minor: u32,
 	draining: watch::Receiver<bool>,
+	capacity: Arc<tokio::sync::OwnedSemaphorePermit>,
 ) {
 	let (request_tx, request_rx) = mpsc::channel(MAX_PENDING_REQUESTS);
 	let (reply_tx, reply_rx) = mpsc::channel(MAX_PENDING_REPLIES);
 	let drive_inbound = async {
 		let (stop, ()) = tokio::join!(
 			read_requests(reader, minor, draining, request_tx),
-			process_requests(core, actor, minor, request_rx, reply_tx.clone()),
+			process_requests(
+				core,
+				actor,
+				minor,
+				request_rx,
+				reply_tx.clone(),
+				capacity
+			),
 		);
 		let final_error = match stop {
 			Stop::Disconnected => None,
@@ -156,6 +164,7 @@ async fn process_requests(
 	minor: u32,
 	mut requests: mpsc::Receiver<Request>,
 	replies: mpsc::Sender<Frame>,
+	capacity: Arc<tokio::sync::OwnedSemaphorePermit>,
 ) {
 	while let Some(Request {
 		stream_id,
@@ -165,7 +174,20 @@ async fn process_requests(
 	{
 		// The store runs SQLite on its own worker thread, so the core is
 		// awaited here rather than moved onto a blocking thread.
-		let reply = reply_to(&core, &actor, minor, payload, message).await;
+		let request_core = Arc::clone(&core);
+		let request_actor = actor.clone();
+		let request_capacity = Arc::clone(&capacity);
+		// An admitted transaction must finish publishing revocation even if
+		// its caller disconnects while SQLite commits (ADR-0071, ADR-0093).
+		let Ok(reply) = tokio::spawn(async move {
+			let _capacity = request_capacity;
+			reply_to(&request_core, &request_actor, minor, payload, message)
+				.await
+		})
+		.await
+		else {
+			return;
+		};
 		let Ok(payload) = encode_control(&reply) else {
 			return;
 		};

@@ -8,8 +8,10 @@
 //! already owns the Plane, `1` for any other failure.
 
 mod connection;
+mod connection_pairing;
 mod connection_session;
 mod daemon;
+mod stdio;
 mod translate;
 
 use std::path::PathBuf;
@@ -29,6 +31,15 @@ struct Cli {
 /// an authenticated state change.
 #[derive(clap::Subcommand)]
 enum Subcommand {
+	/// Bridge SSH standard I/O to the running Plane's restricted handshake.
+	Connect {
+		/// Use standard input/output for the Jet protocol.
+		#[arg(long, required = true)]
+		stdio: bool,
+		/// Jet home directory; defaults to `~/.jet`.
+		#[arg(long)]
+		home: Option<PathBuf>,
+	},
 	/// Serve the Plane in the foreground until SIGTERM or SIGINT.
 	Serve {
 		/// Jet home directory; defaults to `~/.jet`.
@@ -61,6 +72,23 @@ impl From<Channel> for InstallationChannel {
 async fn main() -> ExitCode {
 	let Cli { subcommand } = Cli::parse();
 	match subcommand {
+		Subcommand::Connect { home, .. } => {
+			let Some(home) =
+				home.map(JetHome::at).or_else(JetHome::for_current_user)
+			else {
+				return ExitCode::from(1);
+			};
+			let code = match stdio::connect(&home).await {
+				Ok(()) => 0,
+				Err(error) => {
+					eprintln!("jetd: stdio connection failed: {error}");
+					1
+				}
+			};
+			// Tokio's blocking stdin read cannot be canceled at runtime shutdown.
+			// This relay owns no state and has already flushed protocol output.
+			std::process::exit(code)
+		}
 		Subcommand::Serve { home, channel } => {
 			let Some(home) =
 				home.map(JetHome::at).or_else(JetHome::for_current_user)

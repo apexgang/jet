@@ -11,7 +11,7 @@ use jet_runtime::{
 };
 use jet_store::Store;
 use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::watch;
+use tokio::sync::{Semaphore, watch};
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 
@@ -119,6 +119,7 @@ async fn serve(listener: LocalListener, core: &Arc<Core>) -> ExitCode {
 	};
 	let (drain, draining) = watch::channel(false);
 	let mut connections = JoinSet::new();
+	let capacity = Arc::new(Semaphore::new(128));
 	let exit = loop {
 		tokio::select! {
 			_ = terminate.recv() => break ExitCode::SUCCESS,
@@ -126,11 +127,11 @@ async fn serve(listener: LocalListener, core: &Arc<Core>) -> ExitCode {
 			Some(_) = connections.join_next(), if !connections.is_empty() => {}
 			accepted = listener.accept() => match accepted {
 				Ok(stream) => {
-					connections.spawn(crate::connection::serve(
-						Arc::clone(core),
-						stream,
-						draining.clone(),
-					));
+					let Ok(permit) = Arc::clone(&capacity).try_acquire_owned() else { continue; };
+					let (core, draining) = (Arc::clone(core), draining.clone());
+					connections.spawn(async move {
+						crate::connection::serve(core, stream, draining, Arc::new(permit)).await;
+					});
 				}
 				Err(IpcError::PeerRejected { uid }) => {
 					eprintln!("jetd: refused local connection from uid {uid}");
