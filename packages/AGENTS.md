@@ -34,10 +34,10 @@ In the packages directory where the Jet backend Rust code lives:
 
 Run `just fmt` (in the `packages` directory) automatically after you have finished making code changes anywhere in this repository; do not ask for approval to run it. Additionally, run the tests:
 
-1. Do not run `cargo test` directly. Use `just test` so test execution follows the repo defaults.
-2. Run the test for the specific project that was changed. For example, if changes were made in `packages/jet-store`, run `just test -p jet-store`.
+1. Use `just test` to run unit and integration tests through cargo-nextest. Test execution defaults live in [`.config/nextest.toml`](./.config/nextest.toml); keep runner options there and command details in the justfile.
+2. Run the tests for the specific project that was changed. For example, if changes were made in `packages/jet-store`, run `just test -p jet-store`. Run its doctests separately with `just test-doc -p jet-store`, since nextest does not run doctests.
 3. Once those pass, if any changes were made in common, core, or protocol, run the complete test suite with `just test`. Avoid `--all-features` for routine local runs because it expands the build matrix and can significantly increase `target/` disk usage; use it only when you specifically need full feature coverage. Project-specific or individual tests can be run without asking the user, but do ask the user before running the complete test suite.
-4. Never run the release profile to check and test changes. Always use `jet-dev`.
+4. Use the development Cargo profiles selected by the justfile for checks and tests. Never use the release profile to validate changes.
 
 Before initializing a large change to `packages`, run `just fix -p <project>` (in the `packages` directory) to fix any linter issues in the code. Prefer scoping with `-p` to avoid slow workspace-wide Clippy builds; only run `just fix` without `-p` if you changed shared crates. Do not re-run tests after running `fix` or `fmt`.
 
@@ -45,13 +45,14 @@ Before initializing a large change to `packages`, run `just fix -p <project>` (i
 
 `jet-store` is the only crate that touches SQLite, and it does so through `sqlx`.
 
+- Always run SQLx operations through the recipes in `packages/justfile`, from `packages/`. If an operation is missing, add a recipe before running it so its defaults remain centralized.
 - Queries use the compile-time checked macros (`sqlx::query!`, `sqlx::query_scalar!`, `sqlx::query_as!`). They take a string literal, so SQL cannot be assembled with `format!`.
 - Those macros build from `jet-store/.sqlx`, which is committed. Regenerate it with `just sqlx-prepare` in the same commit as any SQL or migration edit, and gate on `just sqlx-check`. Nothing else notices a stale cache. `packages/.cargo/config.toml` pins `SQLX_OFFLINE=true` so a `DATABASE_URL` exported for an unrelated project cannot hijack the build.
-- Add migrations with `sqlx migrate add --timestamp <name>` from `packages/jet-store`. Forward-only: no `-r`, no `.down.sql`. Pass `--timestamp` explicitly: the CLI silently switches to sequential numbering when the latest two versions differ by 1, which turns later versions into a counter anchored to a stale date. Versions have one-second resolution, so after a merge check that `ls migrations | cut -d_ -f1 | sort | uniq -d` is empty.
+- Add migrations with `just sqlx-migrate-add <name>`. The recipe explicitly selects timestamp versioning and simple forward-only migrations: SQLx otherwise infers numbering and reversibility from existing files. Versions have one-second resolution, so run `just sqlx-migrations-check` after a merge to catch duplicate versions and invalid migration conventions. Cache preparation and validation also run this check.
 - Never write `-- no-transaction` in a migration. It cannot roll back, so a failure leaves the store half-migrated with no bookkeeping row and every later start fails on the object it already created.
 - SQLite reports a bare `TEXT PRIMARY KEY` column as nullable. Tell the macro otherwise with `AS "col!"` instead of changing the schema.
 - Keep the `sqlite-bundled` feature and never set `LIBSQLITE3_SYS_USE_PKG_CONFIG`. Either one silently links the distribution's SQLite, which may lack the FTS5 that ADR-0057 requires.
-- `sqlx-cli` is a developer tool, not a dependency: `cargo install sqlx-cli --version 0.9.0 --no-default-features --features sqlite,rustls`.
+- `sqlx-cli` 0.9.0 is a separately installed developer tool with default features disabled and `sqlite,rustls` enabled; keep it out of workspace dependencies.
 
 ## Code review rules
 
@@ -81,7 +82,9 @@ If the change is larger, explore whether it can be split into reviewable stages 
 
 ## Commands
 
-See and use [justfile](./justfile).
+Always use [justfile](./justfile) for backend commands. Run recipes from `packages/`, or use `just --justfile packages/justfile <recipe>` from the repository root. Use `just --list` to discover recipes; add a missing operation to the justfile before using it.
+
+Tests require cargo-nextest to be installed separately. `just test` forwards nextest arguments, including `-p <crate>` and `-E '<filterset>'`; use `just test-list` to inspect the selection. `just test --profile ci` writes a JUnit report to `packages/target/nextest/ci/junit.xml`. The nextest `--profile` flag selects runner configuration, not a Cargo build profile. `just test-doc` forwards Cargo doctest arguments.
 
 ## Tests
 
