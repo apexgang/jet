@@ -5,6 +5,8 @@
 mod capability;
 mod setting;
 
+pub(crate) use capability::snapshot as capabilities;
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_core::{

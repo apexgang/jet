@@ -156,6 +156,10 @@ _Avoid_: Provider, harness, agent
 A computer that runs `jetd` and can host managed processes.
 _Avoid_: Node, machine, host, device
 
+**Setting**:
+A mutable Plane value that changes through authenticated Commands and resolves from built-in defaults through the Plane, Project, and Conversation scopes, except where it is restricted to narrower ones. A restriction says where a value may be stored, not what it applies to. Bootstrap values in `~/.jet/config.toml` are not Settings.
+_Avoid_: Configuration, preference, option
+
 **Capability snapshot**:
 A point-in-time report of a Plane's operating system, core and tool versions, credential availability, installed Crafts, supported Harnesses, and degraded conditions. Commands revalidate required capabilities before acting.
 _Avoid_: Fleet inventory, continuously synchronized status, cached authorization

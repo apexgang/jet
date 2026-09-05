@@ -166,7 +166,7 @@ async fn a_project_resolves_its_own_values_over_the_planes() {
 }
 
 #[tokio::test]
-async fn a_scope_resolves_every_setting_it_may_store() {
+async fn a_scope_resolves_every_setting_that_applies_to_it() {
 	let dir = tempfile::tempdir().unwrap();
 	let core = start(&dir).await;
 	let scope = conversation(&core).await;
@@ -176,6 +176,14 @@ async fn a_scope_resolves_every_setting_it_may_store() {
 		SettingKey::GitAutoCommit,
 		scope,
 		SettingValue::Flag(true),
+	)
+	.await
+	.unwrap();
+	set(
+		&core,
+		SettingKey::GitMessageInstructions,
+		SettingScope::Plane,
+		SettingValue::Text("Explain why, not what".into()),
 	)
 	.await
 	.unwrap();
@@ -199,6 +207,13 @@ async fn a_scope_resolves_every_setting_it_may_store() {
 					SettingValue::Flag(true),
 					SettingSource::Scope(scope)
 				),
+				// Plane-wide guidance applies to the Conversation even
+				// though the Conversation cannot override it.
+				resolved(
+					SettingKey::GitMessageInstructions,
+					SettingValue::Text("Explain why, not what".into()),
+					SettingSource::Scope(SettingScope::Plane)
+				),
 			],
 			vec![
 				resolved(
@@ -206,21 +221,28 @@ async fn a_scope_resolves_every_setting_it_may_store() {
 					SettingValue::Flag(true),
 					SettingSource::BuiltIn
 				),
+				// No scope the Plane resolves through stores Git
+				// automation, so its built-in default is what applies.
+				resolved(
+					SettingKey::GitAutoCommit,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
 				resolved(
 					SettingKey::GitMessageInstructions,
-					SettingValue::Text(String::new()),
-					SettingSource::BuiltIn
+					SettingValue::Text("Explain why, not what".into()),
+					SettingSource::Scope(SettingScope::Plane)
 				),
 			]
 		)
 	);
 }
 
-/// ADR-0085 restricts some Settings to narrower scopes than the full
-/// chain, and a restriction that only the writing path enforced would let a
-/// client read a value it could never store.
+/// ADR-0085 restricts where some Settings may be stored. The restriction
+/// binds the Commands that store them; what a restricted Setting applies to
+/// is unchanged, so a Conversation still resolves the Plane's value.
 #[tokio::test]
-async fn a_restricted_setting_refuses_every_scope_it_is_not_stored_at() {
+async fn a_restricted_setting_refuses_the_scopes_it_is_not_stored_at() {
 	let dir = tempfile::tempdir().unwrap();
 	let core = start(&dir).await;
 	let scope = conversation(&core).await;
@@ -236,30 +258,41 @@ async fn a_restricted_setting_refuses_every_scope_it_is_not_stored_at() {
 	let cleared = clear(&core, SettingKey::GitAutoCommit, SettingScope::Plane)
 		.await
 		.unwrap_err();
-	let read = resolve(
+	set(
 		&core,
-		scope,
-		SettingSelection::Key(SettingKey::GitMessageInstructions),
+		SettingKey::GitMessageInstructions,
+		SettingScope::Plane,
+		SettingValue::Text("Explain why, not what".into()),
 	)
 	.await
-	.unwrap_err();
+	.unwrap();
+	let read =
+		resolve_one(&core, scope, SettingKey::GitMessageInstructions).await;
 
 	assert_eq!(
-		[&written, &cleared, &read].map(|error| (
-			error.category,
-			error.code.as_str(),
-			error.retryable
-		)),
-		[(
-			ErrorCategory::InvalidInput,
-			"setting.scope_unsupported",
-			false
-		); 3]
-	);
-	assert_eq!(
-		written.message,
-		"the Setting git.message_instructions is stored at the Plane scope \
-		 only, not the Conversation scope"
+		(
+			[&written, &cleared].map(|error| (
+				error.category,
+				error.code.as_str(),
+				error.retryable
+			)),
+			written.message.as_str(),
+			read,
+		),
+		(
+			[(
+				ErrorCategory::InvalidInput,
+				"setting.scope_unsupported",
+				false
+			); 2],
+			"the Setting git.message_instructions is stored at the Plane \
+			 scope only, not the Conversation scope",
+			resolved(
+				SettingKey::GitMessageInstructions,
+				SettingValue::Text("Explain why, not what".into()),
+				SettingSource::Scope(SettingScope::Plane)
+			),
+		)
 	);
 }
 

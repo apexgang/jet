@@ -20,7 +20,7 @@ pub(super) fn observation(
 	}
 }
 
-pub(super) fn snapshot(
+pub(crate) fn snapshot(
 	snapshot: CapabilitySnapshot,
 ) -> wire::CapabilitySnapshot {
 	wire::CapabilitySnapshot {

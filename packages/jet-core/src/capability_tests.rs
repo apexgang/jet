@@ -1,26 +1,69 @@
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 use uuid::Uuid;
 
 use crate::capability::{
-	CredentialStoreKind, DegradedCondition, ExternalTool, HarnessId, Platform,
+	CredentialStoreKind, DegradedCondition, ExternalTool, HarnessId,
 };
-use crate::clock::SystemClock;
 use crate::test_support::{
-	FixedProbe, actor, equipped, request, start_core_with, stripped,
+	FixedProbe, ManualClock, actor, equipped, request, start_core_with,
+	stripped,
 };
 use crate::{
-	CapabilityObservation, CapabilitySnapshot, Command, Core, CoreError,
-	ErrorCategory, ProjectId, Query, QueryResult, ResolvedSetting, SettingKey,
-	SettingScope, SettingSelection, SettingSource, SettingValue,
+	CORE_VERSION, CapabilityObservation, CapabilitySnapshot, Command, Core,
+	CoreError, ErrorCategory, ProjectId, Query, QueryResult, ResolvedSetting,
+	SettingKey, SettingScope, SettingSelection, SettingSource, SettingValue,
 };
+
+/// The one instant every observation in these tests is taken at.
+fn observed_at() -> SystemTime {
+	UNIX_EPOCH + Duration::from_secs(1_700_000_000)
+}
+
+/// What the core reports for a Plane that has everything.
+fn equipped_snapshot() -> CapabilitySnapshot {
+	let observed = equipped();
+	CapabilitySnapshot {
+		observed_at: observed_at(),
+		core_version: CORE_VERSION,
+		platform: observed.platform,
+		external_tools: observed.external_tools,
+		credential_store: observed.credential_store,
+		crafts: observed.crafts,
+		harnesses: vec![HarnessId("codex".into())],
+		degraded: vec![],
+	}
+}
+
+/// What it reports once Git, the Craft, and the session bus are gone.
+/// Tailscale is missing too, but only some features need it.
+fn stripped_snapshot() -> CapabilitySnapshot {
+	let observed = stripped();
+	CapabilitySnapshot {
+		external_tools: observed.external_tools,
+		credential_store: observed.credential_store,
+		crafts: observed.crafts,
+		harnesses: vec![],
+		degraded: vec![
+			DegradedCondition::MissingExternalTool {
+				tool: ExternalTool::Git,
+			},
+			DegradedCondition::NoHarnessAvailable,
+			DegradedCondition::CredentialStoreUnavailable {
+				kind: CredentialStoreKind::SecretService,
+			},
+		],
+		..equipped_snapshot()
+	}
+}
 
 async fn start(dir: &TempDir, probe: Arc<FixedProbe>) -> Core {
 	start_core_with(
 		&dir.path().join("plane.sqlite3"),
-		Arc::new(SystemClock),
+		ManualClock::at(observed_at()),
 		probe,
 	)
 	.await
@@ -79,41 +122,15 @@ async fn a_snapshot_reports_the_plane_and_what_leaves_it_degraded() {
 	let probe = FixedProbe::new(equipped());
 	let core = start(&dir, Arc::clone(&probe)).await;
 
-	let equipped_snapshot =
+	let at_startup =
 		capabilities(&core, CapabilityObservation::LastObserved).await;
 	probe.answer_with(stripped());
-	let stripped_snapshot =
+	let after_losing_them =
 		capabilities(&core, CapabilityObservation::Fresh).await;
 
 	assert_eq!(
-		(
-			equipped_snapshot.harnesses,
-			equipped_snapshot.degraded,
-			equipped_snapshot.platform,
-			equipped_snapshot.core_version,
-			stripped_snapshot.harnesses,
-			stripped_snapshot.degraded,
-		),
-		(
-			vec![HarnessId("codex".into())],
-			vec![],
-			Platform {
-				operating_system: "linux",
-				architecture: "aarch64"
-			},
-			crate::CORE_VERSION,
-			vec![],
-			vec![
-				// Tailscale is missing too, but only some features need it.
-				DegradedCondition::MissingExternalTool {
-					tool: ExternalTool::Git
-				},
-				DegradedCondition::NoHarnessAvailable,
-				DegradedCondition::CredentialStoreUnavailable {
-					kind: CredentialStoreKind::SecretService
-				},
-			],
-		)
+		(at_startup, after_losing_them),
+		(equipped_snapshot(), stripped_snapshot())
 	);
 }
 
@@ -131,21 +148,13 @@ async fn the_last_observation_stands_until_the_plane_is_observed_again() {
 	let kept = capabilities(&core, CapabilityObservation::LastObserved).await;
 
 	assert_eq!(
-		(stale.degraded.is_empty(), fresh.degraded, kept.degraded),
-		(true, stripped_degraded(), stripped_degraded())
+		(stale, fresh, kept),
+		(
+			equipped_snapshot(),
+			stripped_snapshot(),
+			stripped_snapshot()
+		)
 	);
-}
-
-fn stripped_degraded() -> Vec<DegradedCondition> {
-	vec![
-		DegradedCondition::MissingExternalTool {
-			tool: ExternalTool::Git,
-		},
-		DegradedCondition::NoHarnessAvailable,
-		DegradedCondition::CredentialStoreUnavailable {
-			kind: CredentialStoreKind::SecretService,
-		},
-	]
 }
 
 /// A client prepares a Command against the Capabilities it just read. The
@@ -170,25 +179,31 @@ async fn a_command_whose_capability_disappeared_commits_nothing() {
 	let stored = auto_commit(&core, scope).await;
 
 	assert_eq!(
+		(observed, refused, unchanged, accepted, stored),
 		(
-			observed.degraded.is_empty(),
-			(refused.category, refused.code.as_str(), refused.retryable),
-			refused.message.as_str(),
-			unchanged.value,
-			unchanged.source,
-			accepted,
-			stored.value,
-			stored.source,
-		),
-		(
-			true,
-			(ErrorCategory::Unavailable, "capability.unavailable", false),
-			"this Plane cannot use the git command-line tool right now",
-			SettingValue::Flag(false),
-			SettingSource::BuiltIn,
+			equipped_snapshot(),
+			CoreError {
+				category: ErrorCategory::Unavailable,
+				code: "capability.unavailable".into(),
+				retryable: false,
+				message: "this Plane cannot use the git command-line tool \
+				          right now"
+					.into(),
+				detail: None,
+				revision_conflict: None,
+				recovery_actions: vec![],
+			},
+			ResolvedSetting {
+				key: SettingKey::GitAutoCommit,
+				value: SettingValue::Flag(false),
+				source: SettingSource::BuiltIn,
+			},
 			Ok(()),
-			SettingValue::Flag(true),
-			SettingSource::Scope(scope),
+			ResolvedSetting {
+				key: SettingKey::GitAutoCommit,
+				value: SettingValue::Flag(true),
+				source: SettingSource::Scope(scope),
+			},
 		)
 	);
 }

@@ -96,13 +96,13 @@ pub enum ExternalTool {
 	Tailscale,
 }
 
-/// Whether the core can work at all without one external tool.
+/// Whether ordinary local work needs one external tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolNeed {
-	/// Ordinary local work needs it, so its absence degrades the Plane.
-	Core,
+pub(crate) enum ToolNeed {
+	/// Every Plane needs it, so its absence degrades this one.
+	Always,
 	/// Only some features need it, so its absence is reported plainly.
-	Feature,
+	SomeFeatures,
 }
 
 /// Whether one external tool answered, and with which version.
@@ -200,7 +200,7 @@ pub enum CapabilityObservation {
 
 /// One thing a Command may depend on the Plane being able to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Capability {
+pub(crate) enum Capability {
 	/// One of the external command-line tools the core invokes.
 	ExternalTool(ExternalTool),
 }
@@ -223,9 +223,9 @@ impl ExternalTool {
 	pub(crate) fn need(self) -> ToolNeed {
 		match self {
 			// Workspaces are worktrees and checkpoints are commits.
-			Self::Git => ToolNeed::Core,
+			Self::Git => ToolNeed::Always,
 			// Both serve Planes the user has paired, not this one alone.
-			Self::Ssh | Self::Tailscale => ToolNeed::Feature,
+			Self::Ssh | Self::Tailscale => ToolNeed::SomeFeatures,
 		}
 	}
 }
@@ -263,7 +263,7 @@ impl CapabilitySnapshot {
 			.iter()
 			.filter(|status| {
 				status.availability == ToolAvailability::Missing
-					&& status.tool.need() == ToolNeed::Core
+					&& status.tool.need() == ToolNeed::Always
 			})
 			.map(|status| DegradedCondition::MissingExternalTool {
 				tool: status.tool,

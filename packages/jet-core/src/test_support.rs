@@ -4,6 +4,7 @@ use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 
 use jet_store::Store;
 use uuid::Uuid;
@@ -42,6 +43,28 @@ pub(crate) async fn start_core_with(
 ) -> Core {
 	let store = Store::open(path).await.unwrap();
 	Core::start_with(store, clock, probe).await.unwrap()
+}
+
+/// A clock a test moves by hand, so a retention window or an observation
+/// has an exact time instead of whatever the machine's clock said.
+#[derive(Debug)]
+pub(crate) struct ManualClock(Mutex<SystemTime>);
+
+impl ManualClock {
+	pub(crate) fn at(now: SystemTime) -> Arc<Self> {
+		Arc::new(Self(Mutex::new(now)))
+	}
+
+	pub(crate) fn advance(&self, duration: Duration) {
+		let mut now = self.0.lock().unwrap();
+		*now += duration;
+	}
+}
+
+impl Clock for ManualClock {
+	fn now(&self) -> SystemTime {
+		*self.0.lock().unwrap()
+	}
 }
 
 /// A Capability probe whose answer a test changes between observations, the

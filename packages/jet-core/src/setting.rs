@@ -6,6 +6,11 @@
 //! through authenticated Commands and resolves from built-in defaults
 //! through the Plane, Project, and Conversation scopes, except where a key
 //! is restricted to narrower ones.
+//!
+//! A restriction says where a value may be *stored*, so a Command that
+//! names an unsupported scope is refused. It never narrows what applies: a
+//! Plane-wide value still resolves for a Conversation that cannot override
+//! it.
 
 use std::fmt::Write as _;
 
@@ -260,13 +265,9 @@ impl SettingKey {
 		}
 	}
 
-	/// Every Setting `scope` may store, in catalog order.
-	fn stored_at(scope: SettingScope) -> Vec<Self> {
-		CATALOG
-			.iter()
-			.filter(|entry| entry.key.accepts(scope.kind()))
-			.map(|entry| entry.key)
-			.collect()
+	/// Every Setting the core understands, in catalog order.
+	fn all() -> Vec<Self> {
+		CATALOG.iter().map(|entry| entry.key).collect()
 	}
 }
 
@@ -335,9 +336,9 @@ pub struct ResolvedSetting {
 /// Which Settings one Query resolves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingSelection {
-	/// Every Setting the addressed scope may store.
+	/// Every Setting the core understands.
 	All,
-	/// One Setting, refused when the addressed scope may not store it.
+	/// One named Setting.
 	Key(SettingKey),
 }
 
@@ -354,22 +355,11 @@ pub struct SettingSnapshot {
 }
 
 impl SettingSelection {
-	/// The keys this selection resolves at `scope`.
-	///
-	/// # Errors
-	///
-	/// Returns an `invalid_input` [`CoreError`] when one named Setting is
-	/// restricted to scopes that do not include `scope`.
-	pub(crate) fn keys(
-		self,
-		scope: SettingScope,
-	) -> Result<Vec<SettingKey>, CoreError> {
+	/// The keys this selection resolves.
+	pub(crate) fn keys(self) -> Vec<SettingKey> {
 		match self {
-			Self::All => Ok(SettingKey::stored_at(scope)),
-			Self::Key(key) => {
-				key.require_scope(scope)?;
-				Ok(vec![key])
-			}
+			Self::All => SettingKey::all(),
+			Self::Key(key) => vec![key],
 		}
 	}
 }

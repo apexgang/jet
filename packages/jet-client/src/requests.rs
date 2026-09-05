@@ -217,6 +217,7 @@ impl Client {
 			| CommandResponse::SettingCleared { .. }) => Err(unexpected(&other)),
 		}
 	}
+
 	/// Resolves Settings for `scope`, the scope's own values winning over
 	/// the Plane's and built-in defaults beneath both (ADR-0085).
 	///
@@ -303,6 +304,7 @@ impl Client {
 			| CommandResponse::SettingSet { .. }) => Err(unexpected(&other)),
 		}
 	}
+
 	/// Reports what the Plane can do: its platform, the external tools it
 	/// found, whether credentials resolve, its Crafts and Harnesses, and
 	/// what leaves it degraded (ADR-0086).

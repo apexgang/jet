@@ -1,14 +1,12 @@
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use jet_store::{EventClass, NewEvent};
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
-use crate::clock::Clock;
 use crate::test_support::{
-	FixedProbe, actor, command_id, equipped, request, request_with_id,
-	start_core, start_core_with,
+	FixedProbe, ManualClock, actor, command_id, equipped, request,
+	request_with_id, start_core, start_core_with,
 };
 use crate::{
 	Command, CommandEnvelope, CommandOutcome, Conversation, ConversationId,
@@ -16,22 +14,6 @@ use crate::{
 	EventPayload, EventSequence, Query, QueryResult, RetentionPolicy, Revision,
 	Run, RunId, RunLifecycle,
 };
-
-#[derive(Debug)]
-struct ManualClock(Mutex<SystemTime>);
-
-impl ManualClock {
-	fn advance(&self, duration: Duration) {
-		let mut now = self.0.lock().unwrap();
-		*now += duration;
-	}
-}
-
-impl Clock for ManualClock {
-	fn now(&self) -> SystemTime {
-		*self.0.lock().unwrap()
-	}
-}
 
 async fn create_conversation(
 	core: &Core,
@@ -336,7 +318,7 @@ async fn an_unknown_conversation_or_run_is_not_found() {
 async fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 	let dir = tempfile::tempdir().unwrap();
 	let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-	let clock = Arc::new(ManualClock(Mutex::new(start)));
+	let clock = ManualClock::at(start);
 	let core = start_core_with(
 		&dir.path().join("p.sqlite3"),
 		clock.clone(),

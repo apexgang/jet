@@ -160,7 +160,7 @@ async fn settings(
 	scope: SettingScope,
 	selection: SettingSelection,
 ) -> Result<QueryResult, CoreError> {
-	let keys = selection.keys(scope)?;
+	let keys = selection.keys();
 	// ASVS 2.3.3: the resolved values and their Event fence come from one
 	// SQLite snapshot, so a Command committed between them cannot show up
 	// in one and not the other.

@@ -7,8 +7,9 @@ mod support;
 
 use jet_client::ClientError;
 use jet_protocol::{
-	CapabilityObservation, DegradedCondition, ErrorCategory, ExternalTool,
-	Platform, SettingKey, SettingScope, SettingValue, ToolAvailability,
+	CapabilityObservation, CapabilitySnapshot, DegradedCondition,
+	ErrorCategory, ExternalTool, Platform, SettingKey, SettingScope,
+	SettingValue, ToolAvailability, WireError,
 };
 use pretty_assertions::assert_eq;
 use support::{connect, start_jetd, start_jetd_without_external_tools};
@@ -20,6 +21,10 @@ async fn a_plane_reports_the_machine_it_runs_on() {
 	let daemon = start_jetd(&dir.path().join(".jet")).await;
 	let client = connect(&daemon, Uuid::new_v4()).await;
 
+	// ADR-0086 has the Plane report at startup as well as on demand, so the
+	// line that says jetd can serve already carries a whole snapshot.
+	let at_startup: CapabilitySnapshot =
+		serde_json::from_value(daemon.ready["capabilities"].clone()).unwrap();
 	let observed = client
 		.capabilities(CapabilityObservation::Fresh)
 		.await
@@ -43,6 +48,8 @@ async fn a_plane_reports_the_machine_it_runs_on() {
 				.degraded
 				.contains(&DegradedCondition::NoHarnessAvailable),
 			last == observed,
+			at_startup.platform == observed.platform,
+			at_startup.external_tools == observed.external_tools,
 		),
 		(
 			Platform {
@@ -58,6 +65,8 @@ async fn a_plane_reports_the_machine_it_runs_on() {
 			// reports none and says plainly that it can run no Harness.
 			vec![],
 			vec![],
+			true,
+			true,
 			true,
 			true,
 		)
@@ -96,9 +105,7 @@ async fn a_command_that_needs_a_missing_tool_is_refused() {
 	};
 	assert_eq!(
 		(
-			error.category,
-			error.code.as_str(),
-			error.message.as_str(),
+			error,
 			observed
 				.external_tools
 				.iter()
@@ -111,9 +118,17 @@ async fn a_command_that_needs_a_missing_tool_is_refused() {
 			),
 		),
 		(
-			ErrorCategory::Unavailable,
-			"capability.unavailable",
-			"this Plane cannot use the git command-line tool right now",
+			WireError {
+				category: ErrorCategory::Unavailable,
+				code: "capability.unavailable".into(),
+				retryable: false,
+				message: "this Plane cannot use the git command-line tool \
+				          right now"
+					.into(),
+				revision_conflict: None,
+				restart: None,
+				recovery_actions: vec![],
+			},
 			vec![ToolAvailability::Missing; 3],
 			true,
 		)

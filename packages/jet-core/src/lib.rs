@@ -38,10 +38,9 @@ use capability_probe::SystemCapabilityProbe;
 use clock::{Clock, SystemClock};
 
 pub use capability::{
-	Capability, CapabilityObservation, CapabilitySnapshot, CraftId,
-	CredentialStoreKind, CredentialStoreStatus, DegradedCondition,
-	ExternalTool, ExternalToolStatus, HarnessId, InstalledCraft, Platform,
-	ToolAvailability, ToolNeed,
+	CapabilityObservation, CapabilitySnapshot, CraftId, CredentialStoreKind,
+	CredentialStoreStatus, DegradedCondition, ExternalTool, ExternalToolStatus,
+	HarnessId, InstalledCraft, Platform, ToolAvailability,
 };
 pub use command::{Command, CommandEnvelope, CommandId, CommandOutcome};
 pub use conversation::{
@@ -184,6 +183,13 @@ impl Core {
 			effect_reconciliation: tokio::sync::Mutex::new(()),
 			conversation_pages: pagination::ConversationPages::default(),
 		})
+	}
+
+	/// What the Plane could do when it was last observed. `jetd` reports
+	/// this at startup, before any client has connected to ask for it
+	/// (ADR-0086).
+	pub async fn capabilities(&self) -> CapabilitySnapshot {
+		self.capabilities.read().await.clone()
 	}
 
 	/// Observes the Plane again and keeps the result as its latest
