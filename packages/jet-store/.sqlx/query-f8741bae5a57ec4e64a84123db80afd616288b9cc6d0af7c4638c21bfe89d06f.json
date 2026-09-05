@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT binding_id AS \"binding_id!\", provider, label,\n\t\t\t\tprovider_account, credential_source, credential_helper,\n\t\t\t\testablished_at_daemon_start, created_at_unix_ms\n\t\t\t FROM account_bindings\n\t\t\t ORDER BY rowid",
+  "describe": {
+    "columns": [
+      {
+        "name": "binding_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_bindings",
+            "name": "binding_id"
+          }
+        }
+      },
+      {
+        "name": "provider",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_bindings",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "name": "label",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_bindings",
+            "name": "label"
+          }
+        }
+      },
+      {
+        "name": "provider_account",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_bindings",
+            "name": "provider_account"
+          }
+        }
+      },
+      {
+        "name": "credential_source",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_bindings",
+            "name": "credential_source"
+          }
+        }
+      },
+      {
+        "name": "credential_helper",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_bindings",
+            "name": "credential_helper"
+          }
+        }
+      },
+      {
+        "name": "established_at_daemon_start",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "account_bindings",
+            "name": "established_at_daemon_start"
+          }
+        }
+      },
+      {
+        "name": "created_at_unix_ms",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "account_bindings",
+            "name": "created_at_unix_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "f8741bae5a57ec4e64a84123db80afd616288b9cc6d0af7c4638c21bfe89d06f"
+}

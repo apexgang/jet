@@ -3,6 +3,9 @@
 
 use jet_store::{ConversationPageStart, ReadTransaction};
 
+use crate::account::{
+	AccountBindingList, AccountBindingStatus, CredentialState,
+};
 use crate::capability::{CapabilityObservation, CapabilitySnapshot};
 use crate::conversation::{
 	ConversationId, ConversationList, ConversationSnapshot, PageCursor,
@@ -37,6 +40,14 @@ pub enum Query {
 		/// Whether to report the last observation or take a new one.
 		observation: CapabilityObservation,
 	},
+	/// Every Account binding on the Plane, with the state of the Credential
+	/// each one resolves (ADR-0016, ADR-0076).
+	AccountBindings {
+		/// Whether the Credential states follow the last observation of the
+		/// Plane or a new one, taken now. A GUI that has just unlocked the
+		/// credential store asks for a new one (ADR-0086).
+		observation: CapabilityObservation,
+	},
 	/// Settings resolved for one scope (ADR-0085).
 	Settings {
 		/// The scope to resolve for; its own values win over the Plane's.
@@ -63,6 +74,8 @@ pub enum QueryResult {
 	Conversation(ConversationSnapshot),
 	/// What the Plane can do.
 	Capabilities(CapabilitySnapshot),
+	/// Every Account binding on the Plane.
+	AccountBindings(AccountBindingList),
 	/// Settings resolved for one scope.
 	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.
@@ -133,6 +146,9 @@ impl Core {
 					}
 				}))
 			}
+			Query::AccountBindings { observation } => {
+				account_bindings(self, observation).await
+			}
 			Query::Settings { scope, selection } => {
 				settings(self, scope, selection).await
 			}
@@ -153,6 +169,50 @@ impl Core {
 			}
 		}
 	}
+}
+
+/// Reads the bindings and pairs each with the state of its Credential.
+///
+/// The bindings, the daemon start that decides whether a session-only
+/// Credential is still held, and the Event fence all come from one SQLite
+/// snapshot (ASVS 2.3.3); the credential store's own state comes from the
+/// observation `observation` selects.
+async fn account_bindings(
+	core: &Core,
+	observation: CapabilityObservation,
+) -> Result<QueryResult, CoreError> {
+	let store = match observation {
+		CapabilityObservation::LastObserved => {
+			core.capabilities.read().await.credential_store
+		}
+		CapabilityObservation::Fresh => {
+			core.observe_capabilities().await.credential_store
+		}
+	};
+	core.store
+		.read(async |tx| {
+			let cursor = EventSequence(tx.event_cursor().await?);
+			let daemon_start = tx.plane().await?.daemon_starts;
+			let bindings = tx.account_bindings().await?;
+			Ok(QueryResult::AccountBindings(AccountBindingList {
+				cursor,
+				bindings: bindings
+					.into_iter()
+					.map(|record| {
+						let binding: crate::AccountBinding = record.into();
+						AccountBindingStatus {
+							credential_state: CredentialState::of(
+								&binding.credential_reference,
+								store,
+								daemon_start,
+							),
+							binding,
+						}
+					})
+					.collect(),
+			}))
+		})
+		.await
 }
 
 async fn settings(

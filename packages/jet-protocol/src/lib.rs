@@ -9,6 +9,7 @@
 //! the wire as decimal strings (ADR-0089). Every connection
 //! starts with a fixed preface and a restricted handshake (ADR-0090).
 
+mod account;
 mod artifact;
 mod capability;
 mod control;
@@ -23,6 +24,10 @@ mod stream;
 mod stream_control;
 mod stream_error;
 
+pub use account::{
+	AccountBinding, AccountBindingList, AccountBindingStatus, CredentialItem,
+	CredentialReference, CredentialSource, CredentialState,
+};
 pub use artifact::{
 	ArtifactError, ArtifactVerifier, DigestError, Sha256Digest,
 };
@@ -46,9 +51,9 @@ pub use frame::{
 	FrameWriter, MAX_CONTROL_FRAME, MAX_DATA_FRAME, StreamId,
 };
 pub use handshake::{
-	CODEC_JSON_V1, ClientHello, FENCED_READS_MINOR, MULTIPLEXED_STREAMS_MINOR,
-	PREFACE, PROTOCOL_MINOR, PROTOCOL_VERSION, SETTINGS_AND_CAPABILITIES_MINOR,
-	ServerHello, VersionRange,
+	ACCOUNT_BINDINGS_MINOR, CODEC_JSON_V1, ClientHello, FENCED_READS_MINOR,
+	MULTIPLEXED_STREAMS_MINOR, PREFACE, PROTOCOL_MINOR, PROTOCOL_VERSION,
+	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, VersionRange,
 };
 pub use message::{
 	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,

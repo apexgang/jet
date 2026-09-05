@@ -1,7 +1,9 @@
 //! Translation between core domain types and versioned wire types
 //! (ADR-0049). This is the only place the two vocabularies meet; its
-//! Capability and Setting halves sit in the submodules beside it.
+//! Account binding, Capability, and Setting parts sit in the submodules
+//! beside it.
 
+mod account;
 mod capability;
 mod setting;
 
@@ -10,11 +12,11 @@ pub(crate) use capability::snapshot as capabilities;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_core::{
-	Actor, Command, CommandOutcome, ConflictState, Conversation,
-	ConversationId, ConversationList, ConversationSnapshot, CoreError,
-	ErrorCategory, Event, EventPage, EventPayload, EventSequence, PlaneStatus,
-	Query, QueryResult, RecoveryAction, RetentionPolicy, Revision,
-	RevisionConflict, Run, RunId, RunLifecycle,
+	AccountBindingId, Actor, Command, CommandOutcome, ConflictState,
+	Conversation, ConversationId, ConversationList, ConversationSnapshot,
+	CoreError, ErrorCategory, Event, EventPage, EventPayload, EventSequence,
+	PlaneStatus, ProviderId, Query, QueryResult, RecoveryAction,
+	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
 };
 use jet_protocol as wire;
 
@@ -39,6 +41,11 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 		}
 		wire::QueryRequest::Capabilities { observation } => {
 			Query::Capabilities {
+				observation: capability::observation(*observation),
+			}
+		}
+		wire::QueryRequest::AccountBindings { observation } => {
+			Query::AccountBindings {
 				observation: capability::observation(*observation),
 			}
 		}
@@ -68,6 +75,9 @@ pub(crate) fn query_result(
 		}
 		QueryResult::Capabilities(snapshot) => {
 			wire::QueryResponse::Capabilities(capability::snapshot(snapshot))
+		}
+		QueryResult::AccountBindings(bindings) => {
+			wire::QueryResponse::AccountBindings(account::list(bindings))
 		}
 		QueryResult::Settings(snapshot) => {
 			wire::QueryResponse::Settings(setting::snapshot(snapshot))
@@ -101,6 +111,24 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 			Command::ClearSetting {
 				key: setting::key_from_wire(*key),
 				scope: setting::scope_from_wire(*scope),
+			}
+		}
+		wire::CommandRequest::BindAccount {
+			provider,
+			label,
+			provider_account,
+			credential_source,
+		} => Command::BindAccount {
+			provider: ProviderId(provider.clone()),
+			label: label.clone(),
+			provider_account: account::provider_account(
+				provider_account.as_ref(),
+			),
+			credential_source: account::source_from_wire(credential_source),
+		},
+		wire::CommandRequest::UnbindAccount { binding_id } => {
+			Command::UnbindAccount {
+				binding_id: AccountBindingId(*binding_id),
 			}
 		}
 		wire::CommandRequest::TransitionRun {
@@ -141,6 +169,16 @@ pub(crate) fn command_outcome(
 				scope: setting::scope(scope),
 			}
 		}
+		CommandOutcome::AccountBound(bound) => {
+			wire::CommandResponse::AccountBound(account::binding(bound))
+		}
+		CommandOutcome::AccountUnbound {
+			binding_id,
+			credential_reference,
+		} => wire::CommandResponse::AccountUnbound {
+			binding_id: binding_id.0,
+			credential_reference: account::reference(credential_reference),
+		},
 	}
 }
 

@@ -8,6 +8,7 @@
 //! system crash or power loss. SQL and migrations stay private; callers see
 //! typed records and stable errors.
 
+mod account;
 mod command;
 mod conversation;
 mod effect;
@@ -28,6 +29,9 @@ use sqlx::sqlite::{
 };
 use sqlx::{Connection, SqlitePool};
 
+pub use account::{
+	AccountBindingRecord, CredentialSourceRecord, NewAccountBinding,
+};
 pub use conversation::CONVERSATION_PAGE_LIMIT;
 pub use journal::EVENT_COMPACTION_BATCH_LIMIT;
 pub use plane::PlaneRecord;

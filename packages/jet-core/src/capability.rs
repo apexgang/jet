@@ -135,13 +135,21 @@ pub enum CredentialStoreKind {
 	SecretService,
 }
 
-/// Whether the platform credential store can be reached. Jet never falls
-/// back to plaintext, so this is reported rather than worked around.
+/// Whether the platform credential store can be reached, and whether it
+/// will answer. Jet never falls back to plaintext, so each of these is
+/// reported rather than worked around (ADR-0076).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CredentialStoreStatus {
 	/// The store is present and can be asked for credentials.
 	Available {
 		/// Which store the Plane resolves through.
+		kind: CredentialStoreKind,
+	},
+	/// The store is present but locked: it answers nothing until the user
+	/// unlocks it through the operating system. `jetd` never asks for that
+	/// itself, so work that needs a Credential waits instead.
+	Locked {
+		/// Which store is locked.
 		kind: CredentialStoreKind,
 	},
 	/// The store cannot be reached on this Plane right now.
@@ -185,6 +193,12 @@ pub enum DegradedCondition {
 		/// The store that was expected.
 		kind: CredentialStoreKind,
 	},
+	/// The credential store is locked, so Credentials resolve only after
+	/// the user unlocks it through the operating system.
+	CredentialStoreLocked {
+		/// The store that is locked.
+		kind: CredentialStoreKind,
+	},
 }
 
 /// Which Capability snapshot a Query answers with. `jetd` never polls, so
@@ -203,6 +217,8 @@ pub enum CapabilityObservation {
 pub(crate) enum Capability {
 	/// One of the external command-line tools the core invokes.
 	ExternalTool(ExternalTool),
+	/// A platform credential store that can hold a Credential durably.
+	CredentialStore,
 }
 
 impl ExternalTool {
@@ -237,6 +253,7 @@ impl Capability {
 			Self::ExternalTool(tool) => {
 				format!("the {} command-line tool", tool.as_str())
 			}
+			Self::CredentialStore => "the platform credential store".into(),
 		}
 	}
 }
@@ -272,9 +289,17 @@ impl CapabilitySnapshot {
 		if harnesses.is_empty() {
 			degraded.push(DegradedCondition::NoHarnessAvailable);
 		}
-		if let CredentialStoreStatus::Unavailable { kind } = credential_store {
-			degraded
-				.push(DegradedCondition::CredentialStoreUnavailable { kind });
+		match credential_store {
+			CredentialStoreStatus::Available { .. } => {}
+			CredentialStoreStatus::Locked { kind } => {
+				degraded
+					.push(DegradedCondition::CredentialStoreLocked { kind });
+			}
+			CredentialStoreStatus::Unavailable { kind } => {
+				degraded.push(DegradedCondition::CredentialStoreUnavailable {
+					kind,
+				});
+			}
 		}
 		Self {
 			observed_at,
@@ -289,6 +314,10 @@ impl CapabilitySnapshot {
 	}
 
 	/// Whether the Plane could do `capability` when it was observed.
+	///
+	/// A locked credential store still counts as one: locking hides the
+	/// secrets it holds, not the store itself, so a binding may be recorded
+	/// against it and waits for the unlock the user performs (ADR-0076).
 	pub(crate) fn supports(&self, capability: Capability) -> bool {
 		match capability {
 			Capability::ExternalTool(tool) => {
@@ -297,6 +326,11 @@ impl CapabilitySnapshot {
 						&& status.availability != ToolAvailability::Missing
 				})
 			}
+			Capability::CredentialStore => match self.credential_store {
+				CredentialStoreStatus::Available { .. }
+				| CredentialStoreStatus::Locked { .. } => true,
+				CredentialStoreStatus::Unavailable { .. } => false,
+			},
 		}
 	}
 }

@@ -81,6 +81,11 @@ fn credential_store(
 				kind: credential_store_kind(kind),
 			}
 		}
+		CredentialStoreStatus::Locked { kind } => {
+			wire::CredentialStoreStatus::Locked {
+				kind: credential_store_kind(kind),
+			}
+		}
 		CredentialStoreStatus::Unavailable { kind } => {
 			wire::CredentialStoreStatus::Unavailable {
 				kind: credential_store_kind(kind),
@@ -89,7 +94,7 @@ fn credential_store(
 	}
 }
 
-fn credential_store_kind(
+pub(super) fn credential_store_kind(
 	kind: CredentialStoreKind,
 ) -> wire::CredentialStoreKind {
 	match kind {
@@ -127,6 +132,11 @@ fn degraded_condition(condition: DegradedCondition) -> wire::DegradedCondition {
 		}
 		DegradedCondition::CredentialStoreUnavailable { kind } => {
 			wire::DegradedCondition::CredentialStoreUnavailable {
+				kind: credential_store_kind(kind),
+			}
+		}
+		DegradedCondition::CredentialStoreLocked { kind } => {
+			wire::DegradedCondition::CredentialStoreLocked {
 				kind: credential_store_kind(kind),
 			}
 		}

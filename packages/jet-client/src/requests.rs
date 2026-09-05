@@ -1,11 +1,12 @@
 //! The Queries and Commands a client can issue once connected.
 
 use jet_protocol::{
-	CapabilityObservation, CapabilitySnapshot, CommandRequest, CommandResponse,
-	Conversation, ConversationList, ConversationSnapshot, EventPage,
-	PageCursor, PlaneStatus, QueryRequest, QueryResponse, RetentionPolicy, Run,
-	RunLifecycle, SettingKey, SettingScope, SettingSelection, SettingSnapshot,
-	SettingValue,
+	AccountBinding, AccountBindingList, CapabilityObservation,
+	CapabilitySnapshot, CommandRequest, CommandResponse, Conversation,
+	ConversationList, ConversationSnapshot, CredentialReference,
+	CredentialSource, EventPage, PageCursor, PlaneStatus, QueryRequest,
+	QueryResponse, RetentionPolicy, Run, RunLifecycle, SettingKey,
+	SettingScope, SettingSelection, SettingSnapshot, SettingValue,
 };
 use uuid::Uuid;
 
@@ -34,7 +35,8 @@ impl Client {
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
-			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
+			| QueryResponse::Capabilities(_)
+			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -52,7 +54,8 @@ impl Client {
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
-			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
+			| QueryResponse::Capabilities(_)
+			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -77,7 +80,8 @@ impl Client {
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
-			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
+			| QueryResponse::Capabilities(_)
+			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -102,7 +106,8 @@ impl Client {
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
-			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
+			| QueryResponse::Capabilities(_)
+			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -124,7 +129,8 @@ impl Client {
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Settings(_)
-			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
+			| QueryResponse::Capabilities(_)
+			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -153,7 +159,9 @@ impl Client {
 			other @ (CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
-			| CommandResponse::SettingCleared { .. }) => Err(unexpected(&other)),
+			| CommandResponse::SettingCleared { .. }
+			| CommandResponse::AccountBound(_)
+			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -180,7 +188,9 @@ impl Client {
 			other @ (CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
-			| CommandResponse::SettingCleared { .. }) => Err(unexpected(&other)),
+			| CommandResponse::SettingCleared { .. }
+			| CommandResponse::AccountBound(_)
+			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -214,7 +224,9 @@ impl Client {
 			other @ (CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::SettingSet { .. }
-			| CommandResponse::SettingCleared { .. }) => Err(unexpected(&other)),
+			| CommandResponse::SettingCleared { .. }
+			| CommandResponse::AccountBound(_)
+			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -241,7 +253,8 @@ impl Client {
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
-			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
+			| QueryResponse::Capabilities(_)
+			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -272,7 +285,9 @@ impl Client {
 			other @ (CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
-			| CommandResponse::SettingCleared { .. }) => Err(unexpected(&other)),
+			| CommandResponse::SettingCleared { .. }
+			| CommandResponse::AccountBound(_)
+			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -301,7 +316,9 @@ impl Client {
 			other @ (CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
-			| CommandResponse::SettingSet { .. }) => Err(unexpected(&other)),
+			| CommandResponse::SettingSet { .. }
+			| CommandResponse::AccountBound(_)
+			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -330,7 +347,120 @@ impl Client {
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
-			| QueryResponse::Settings(_)) => Err(unexpected(&other)),
+			| QueryResponse::Settings(_)
+			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Reads every Account binding on the Plane with the journal cursor the
+	/// snapshot was read at. A binding carries non-secret metadata and the
+	/// opaque reference its Credential resolves through, never the
+	/// Credential itself (ADR-0016, ADR-0076).
+	///
+	/// Beside each binding is whether its Credential resolves right now,
+	/// taken from the last observation of the Plane or from a new one, as
+	/// `observation` chooses. A client that has just unlocked the credential
+	/// store asks for a new one.
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the daemon reports a stable
+	/// error, or the transport failure otherwise.
+	pub async fn account_bindings(
+		&self,
+		observation: CapabilityObservation,
+	) -> Result<AccountBindingList, ClientError> {
+		self.require_minor(jet_protocol::ACCOUNT_BINDINGS_MINOR)?;
+		match self
+			.query(QueryRequest::AccountBindings { observation })
+			.await?
+		{
+			QueryResponse::AccountBindings(list) => Ok(list),
+			other @ (QueryResponse::Status(_)
+			| QueryResponse::Conversations(_)
+			| QueryResponse::Conversation(_)
+			| QueryResponse::Events(_)
+			| QueryResponse::Settings(_)
+			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Binds a Provider account to the Plane under the Command identity
+	/// `command_id`, which a retry must reuse (ADR-0093).
+	///
+	/// The request carries no secret: where the binding resolves through the
+	/// platform credential store, the answer names the item the Plane will
+	/// look in, and writing the secret there is the caller's to do
+	/// (ADR-0076).
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the metadata is not the metadata
+	/// a binding carries or the Provider account is already bound, or the
+	/// transport failure otherwise.
+	pub async fn bind_account(
+		&self,
+		command_id: Uuid,
+		provider: &str,
+		label: &str,
+		provider_account: Option<&str>,
+		credential_source: CredentialSource,
+	) -> Result<AccountBinding, ClientError> {
+		self.require_minor(jet_protocol::ACCOUNT_BINDINGS_MINOR)?;
+		match self
+			.execute_command(
+				command_id,
+				CommandRequest::BindAccount {
+					provider: provider.into(),
+					label: label.into(),
+					provider_account: provider_account.map(Into::into),
+					credential_source,
+				},
+			)
+			.await?
+		{
+			CommandResponse::AccountBound(binding) => Ok(binding),
+			other @ (CommandResponse::ConversationCreated(_)
+			| CommandResponse::RunCreated(_)
+			| CommandResponse::RunTransitioned(_)
+			| CommandResponse::SettingSet { .. }
+			| CommandResponse::SettingCleared { .. }
+			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Removes an Account binding under the Command identity `command_id`,
+	/// which a retry must reuse (ADR-0093). The answer returns the reference
+	/// the Plane forgot, so the caller can remove the secret it owns from
+	/// the backend that holds it.
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the Plane has no such binding,
+	/// or the transport failure otherwise.
+	pub async fn unbind_account(
+		&self,
+		command_id: Uuid,
+		binding_id: Uuid,
+	) -> Result<CredentialReference, ClientError> {
+		self.require_minor(jet_protocol::ACCOUNT_BINDINGS_MINOR)?;
+		match self
+			.execute_command(
+				command_id,
+				CommandRequest::UnbindAccount { binding_id },
+			)
+			.await?
+		{
+			CommandResponse::AccountUnbound {
+				credential_reference,
+				..
+			} => Ok(credential_reference),
+			other @ (CommandResponse::ConversationCreated(_)
+			| CommandResponse::RunCreated(_)
+			| CommandResponse::RunTransitioned(_)
+			| CommandResponse::SettingSet { .. }
+			| CommandResponse::SettingCleared { .. }
+			| CommandResponse::AccountBound(_)) => Err(unexpected(&other)),
 		}
 	}
 }

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use uuid::Uuid;
 
+use crate::account::AccountBindingList;
 use crate::capability::{CapabilityObservation, CapabilitySnapshot};
 use crate::control::{ControlError, decode_control};
 use crate::conversation::{
@@ -106,6 +107,13 @@ pub enum QueryRequest {
 		/// Whether to report the last observation or take a new one.
 		observation: CapabilityObservation,
 	},
+	/// Every Account binding on the Plane, with the state of the Credential
+	/// each one resolves.
+	AccountBindings {
+		/// Whether the Credential states follow the last observation of the
+		/// Plane or a new one, taken now.
+		observation: CapabilityObservation,
+	},
 	/// Settings resolved for one scope.
 	Settings {
 		/// The scope to resolve for; its own values win over the Plane's.
@@ -134,6 +142,8 @@ pub enum QueryResponse {
 	Conversation(ConversationSnapshot),
 	/// What the Plane can do.
 	Capabilities(CapabilitySnapshot),
+	/// Every Account binding on the Plane.
+	AccountBindings(AccountBindingList),
 	/// Settings resolved for one scope.
 	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.

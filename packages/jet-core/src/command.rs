@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use crate::account::{
+	self, AccountBinding, AccountBindingId, CredentialReference,
+	CredentialSource, ProviderAccount, ProviderId,
+};
 use crate::capability::{Capability, ExternalTool};
 use crate::command_receipt::{
 	COMMAND_RETENTION_MS, OUTCOME_VERSION, encode_result, replay,
@@ -24,6 +28,12 @@ use crate::{Actor, Core, lifecycle};
 /// Automatic Git delivery is carried out with the Git the core invokes, so
 /// turning it on depends on that tool being installed (ADR-0029, ADR-0056).
 const GIT: &[Capability] = &[Capability::ExternalTool(ExternalTool::Git)];
+
+/// A binding that resolves through the platform credential store depends on
+/// there being one. Jet keeps no secret of its own instead, so a Plane
+/// without a store refuses the binding rather than falling back to
+/// plaintext (ADR-0076).
+const CREDENTIAL_STORE: &[Capability] = &[Capability::CredentialStore];
 
 /// Actor-scoped identity of a Command, retained for retry safety.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -104,6 +114,25 @@ pub enum Command {
 		/// The scope that stops storing a value.
 		scope: SettingScope,
 	},
+	/// Bind a Provider account to this Plane, storing only non-secret
+	/// metadata and an opaque Credential reference (ADR-0016, ADR-0076).
+	BindAccount {
+		/// The Provider the binding authenticates to.
+		provider: ProviderId,
+		/// The user-facing name of the binding.
+		label: String,
+		/// The Provider's own account identity, when it supplies one.
+		provider_account: Option<ProviderAccount>,
+		/// The backend that resolves the binding's Credential.
+		credential_source: CredentialSource,
+	},
+	/// Remove an Account binding from this Plane. The secret it referred to
+	/// belongs to its backend, so Jet forgets the reference and leaves the
+	/// backend to the client that wrote it.
+	UnbindAccount {
+		/// The binding to remove.
+		binding_id: AccountBindingId,
+	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -126,7 +155,13 @@ impl Command {
 				value: SettingValue::Flag(true),
 				..
 			} => GIT,
-			Self::CreateConversation { .. }
+			Self::BindAccount {
+				credential_source: CredentialSource::PlatformStore,
+				..
+			} => CREDENTIAL_STORE,
+			Self::BindAccount { .. }
+			| Self::UnbindAccount { .. }
+			| Self::CreateConversation { .. }
 			| Self::CreateRun { .. }
 			| Self::SetSetting { .. }
 			| Self::ClearSetting { .. }
@@ -159,6 +194,16 @@ pub enum CommandOutcome {
 		key: SettingKey,
 		/// The scope that no longer stores a value.
 		scope: SettingScope,
+	},
+	/// The Account binding as established.
+	AccountBound(AccountBinding),
+	/// The Plane no longer has the binding, and the reference whose secret
+	/// its owner may now remove from the backend.
+	AccountUnbound {
+		/// The binding that was removed.
+		binding_id: AccountBindingId,
+		/// The reference it resolved through.
+		credential_reference: CredentialReference,
 	},
 }
 
@@ -253,6 +298,28 @@ async fn execute_new(
 		}
 		Command::ClearSetting { key, scope } => {
 			clear_setting(tx, actor, key, scope, now_unix_ms).await
+		}
+		Command::BindAccount {
+			provider,
+			label,
+			provider_account,
+			credential_source,
+		} => {
+			account::bind(
+				tx,
+				actor,
+				account::Requested {
+					provider,
+					label,
+					provider_account,
+					credential_source,
+				},
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::UnbindAccount { binding_id } => {
+			account::unbind(tx, actor, binding_id, now_unix_ms).await
 		}
 		Command::TransitionRun {
 			run_id,
