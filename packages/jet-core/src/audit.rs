@@ -26,8 +26,10 @@ use crate::account::AccountBindingId;
 use crate::command::Command;
 use crate::conversation::ConversationId;
 use crate::error::CoreError;
+use crate::paired_client;
+use crate::pairing::{self, PairingOfferId};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
-use crate::{Actor, PlaneId, ProjectId, system_time};
+use crate::{Actor, ClientId, PlaneId, ProjectId, system_time};
 
 /// Most records one `Query::SecurityAudit` page returns.
 pub(crate) const AUDIT_PAGE_LIMIT: usize = jet_store::AUDIT_PAGE_LIMIT;
@@ -74,6 +76,34 @@ pub enum AuditDecision {
 	/// An owner carried on past an integrity failure, beginning an
 	/// authority epoch that records the gap it leaves behind.
 	AuditEpochBegun,
+	/// The Plane began accepting new Pairings, so a GUI client that holds a
+	/// current pairing code may take control of it (ADR-0017).
+	PairingGateOpened,
+	/// It stopped accepting them. The clients already Paired are unaffected.
+	PairingGateClosed,
+	/// The Plane issued a Pairing offer, so a client that presents its
+	/// secret in the next two minutes can take control of it (ADR-0017).
+	PairingOffered,
+	/// A client presented that secret and its durable public key.
+	PairingClaimed,
+	/// An offer was killed after too many wrong secrets, which is what an
+	/// attempt to guess one looks like.
+	PairingOfferInvalidated,
+	/// The person at the target agreed that both screens showed the same
+	/// authentication string.
+	PairingConfirmed,
+	/// A Pairing completed, so a GUI client now controls this Plane with
+	/// full trust (ADR-0017).
+	PairingCompleted,
+	/// A Paired client was allowed to control this Plane again.
+	PairedClientEnabled,
+	/// A Paired client was stopped from controlling it. The Plane keeps its
+	/// key, so this is not the end of the pairing.
+	PairedClientDisabled,
+	/// A Paired client and its key were forgotten. Nothing in Jet brings
+	/// either back: the installation pairs again or it does not control
+	/// this Plane.
+	PairedClientRevoked,
 }
 
 /// What a decision is about. The core turns each one into the durable kind
@@ -88,6 +118,10 @@ pub(crate) enum AuditSubject {
 	Conversation(ConversationId),
 	/// One Account binding.
 	AccountBinding(AccountBindingId),
+	/// One Pairing offer.
+	PairingOffer(PairingOfferId),
+	/// One Paired client.
+	PairedClient(ClientId),
 }
 
 /// One decision to record beside the change that carried it out.
@@ -184,6 +218,16 @@ impl AuditDecision {
 			Self::AuditRetentionChanged => "policy.audit_retention_changed",
 			Self::AuditRetentionCleared => "policy.audit_retention_cleared",
 			Self::AuditEpochBegun => "audit.epoch_begun",
+			Self::PairingGateOpened => "pairing.gate_opened",
+			Self::PairingGateClosed => "pairing.gate_closed",
+			Self::PairingOffered => "pairing.offered",
+			Self::PairingClaimed => "pairing.claimed",
+			Self::PairingOfferInvalidated => "pairing.offer_invalidated",
+			Self::PairingConfirmed => "pairing.confirmed",
+			Self::PairingCompleted => "pairing.completed",
+			Self::PairedClientEnabled => "pairing.client_enabled",
+			Self::PairedClientDisabled => "pairing.client_disabled",
+			Self::PairedClientRevoked => "pairing.client_revoked",
 		}
 	}
 
@@ -203,13 +247,31 @@ impl AuditDecision {
 			| Self::GitAutomationCleared
 			// Beginning an epoch is how a Plane stops vouching for
 			// everything before it.
-			| Self::AuditEpochBegun => AuditRisk::Elevated,
+			| Self::AuditEpochBegun
+			// An open gate is the window in which an unknown client can
+			// come to control the Plane, and an offer is that window
+			// standing open with a secret in it.
+			| Self::PairingGateOpened
+			| Self::PairingOffered
+			| Self::PairingClaimed
+			| Self::PairingOfferInvalidated
+			| Self::PairingConfirmed
+			| Self::PairingCompleted
+			| Self::PairedClientEnabled => AuditRisk::Elevated,
+			// Revoking destroys the key the pairing was, and no part of Jet
+			// can put it back: the installation pairs again or it does not
+			// control this Plane.
+			Self::PairedClientRevoked => AuditRisk::Destructive,
 			// Shortening the window destroys evidence the Plane already
 			// holds, which is the one policy change the audit itself is at
 			// stake in.
 			Self::AuditRetentionChanged
 			| Self::AuditRetentionCleared => AuditRisk::Destructive,
-			Self::GitAutomationDisabled => AuditRisk::Routine,
+			Self::GitAutomationDisabled
+			| Self::PairingGateClosed
+			// Stopping a client is the safe direction, and its key stays
+			// where it is.
+			| Self::PairedClientDisabled => AuditRisk::Routine,
 		}
 	}
 }
@@ -233,6 +295,8 @@ impl AuditSubject {
 			Self::Project(_) => "project",
 			Self::Conversation(_) => "conversation",
 			Self::AccountBinding(_) => "account_binding",
+			Self::PairingOffer(_) => "pairing_offer",
+			Self::PairedClient(_) => "paired_client",
 		}
 	}
 
@@ -241,7 +305,9 @@ impl AuditSubject {
 			Self::Plane => None,
 			Self::Project(ProjectId(id))
 			| Self::Conversation(ConversationId(id))
-			| Self::AccountBinding(AccountBindingId(id)) => Some(id.to_string()),
+			| Self::AccountBinding(AccountBindingId(id))
+			| Self::PairingOffer(PairingOfferId(id))
+			| Self::PairedClient(ClientId(id)) => Some(id.to_string()),
 		}
 	}
 }
@@ -257,6 +323,19 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::UnbindAccount { .. } => Some(AuditDecision::AccountUnbound),
 		Command::SetSetting { key, value, .. } => stored_setting(*key, value),
 		Command::ClearSetting { key, .. } => cleared_setting(*key),
+		Command::SetPairingGate { gate } => Some(pairing::gate_decision(*gate)),
+		Command::OpenPairing { .. } => Some(AuditDecision::PairingOffered),
+		Command::ClaimPairing { .. } => Some(AuditDecision::PairingClaimed),
+		Command::ConfirmPairing { .. } => Some(AuditDecision::PairingConfirmed),
+		Command::CompletePairing { .. } => {
+			Some(AuditDecision::PairingCompleted)
+		}
+		Command::SetPairedClientAccess { access, .. } => {
+			Some(paired_client::access_decision(*access))
+		}
+		Command::RevokePairedClient { .. } => {
+			Some(AuditDecision::PairedClientRevoked)
+		}
 		Command::BeginAuditEpoch
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
@@ -274,10 +353,19 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		Command::UnbindAccount { binding_id } => {
 			AuditSubject::AccountBinding(*binding_id)
 		}
+		Command::SetPairedClientAccess { client_id, .. }
+		| Command::RevokePairedClient { client_id } => {
+			AuditSubject::PairedClient(*client_id)
+		}
 		Command::SetSetting { scope, .. }
 		| Command::ClearSetting { scope, .. } => AuditSubject::of_scope(*scope),
 		Command::BindAccount { .. }
 		| Command::BeginAuditEpoch
+		| Command::SetPairingGate { .. }
+		| Command::OpenPairing { .. }
+		| Command::ClaimPairing { .. }
+		| Command::ConfirmPairing { .. }
+		| Command::CompletePairing { .. }
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::TransitionRun { .. } => AuditSubject::Plane,

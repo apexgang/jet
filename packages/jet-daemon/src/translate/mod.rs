@@ -6,6 +6,7 @@
 mod account;
 mod audit;
 mod capability;
+mod pairing;
 mod setting;
 
 pub(crate) use capability::snapshot as capabilities;
@@ -13,10 +14,11 @@ pub(crate) use capability::snapshot as capabilities;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_core::{
-	AccountBindingId, Actor, AuditSequence, Command, CommandOutcome,
-	ConflictState, Conversation, ConversationId, ConversationList,
-	ConversationSnapshot, CoreError, ErrorCategory, Event, EventPage,
-	EventPayload, EventSequence, PlaneStatus, ProviderId, Query, QueryResult,
+	AccountBindingId, Actor, AuditSequence, AuthenticationString, ClientId,
+	Command, CommandOutcome, ConflictState, Conversation, ConversationId,
+	ConversationList, ConversationSnapshot, CoreError, ErrorCategory, Event,
+	EventPage, EventPayload, EventSequence, PairingOfferId, PairingSecret,
+	PairingSignature, PlaneStatus, ProviderId, Query, QueryResult,
 	RecoveryAction, RetentionPolicy, Revision, RevisionConflict, Run, RunId,
 	RunLifecycle,
 };
@@ -58,6 +60,7 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 		wire::QueryRequest::Events { after } => Query::Events {
 			after: EventSequence(*after),
 		},
+		wire::QueryRequest::Pairing => Query::Pairing,
 		wire::QueryRequest::SecurityAudit { after } => Query::SecurityAudit {
 			after: AuditSequence(*after),
 		},
@@ -89,6 +92,9 @@ pub(crate) fn query_result(
 		}
 		QueryResult::Events(page) => {
 			wire::QueryResponse::Events(event_page(&page)?)
+		}
+		QueryResult::Pairing(snapshot) => {
+			wire::QueryResponse::Pairing(pairing::snapshot(snapshot))
 		}
 		QueryResult::SecurityAudit(page) => {
 			wire::QueryResponse::SecurityAudit(audit::page(page))
@@ -140,6 +146,47 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 			}
 		}
 		wire::CommandRequest::BeginAuditEpoch => Command::BeginAuditEpoch,
+		wire::CommandRequest::SetPairingGate { gate } => {
+			Command::SetPairingGate {
+				gate: pairing::gate_from_wire(*gate),
+			}
+		}
+		wire::CommandRequest::OpenPairing { method } => Command::OpenPairing {
+			method: pairing::method_from_wire(method),
+		},
+		wire::CommandRequest::ClaimPairing { secret, key } => {
+			Command::ClaimPairing {
+				secret: PairingSecret(secret.clone()),
+				key: pairing::key_from_wire(key),
+			}
+		}
+		wire::CommandRequest::ConfirmPairing {
+			offer_id,
+			authentication_string,
+		} => Command::ConfirmPairing {
+			offer_id: PairingOfferId(*offer_id),
+			authentication_string: AuthenticationString(
+				authentication_string.clone(),
+			),
+		},
+		wire::CommandRequest::CompletePairing {
+			offer_id,
+			signature,
+		} => Command::CompletePairing {
+			offer_id: PairingOfferId(*offer_id),
+			signature: PairingSignature(*signature),
+		},
+		wire::CommandRequest::SetPairedClientAccess { client_id, access } => {
+			Command::SetPairedClientAccess {
+				client_id: ClientId(*client_id),
+				access: pairing::access_from_wire(*access),
+			}
+		}
+		wire::CommandRequest::RevokePairedClient { client_id } => {
+			Command::RevokePairedClient {
+				client_id: ClientId(*client_id),
+			}
+		}
 		wire::CommandRequest::TransitionRun {
 			run_id,
 			expected_revision,
@@ -190,6 +237,44 @@ pub(crate) fn command_outcome(
 		},
 		CommandOutcome::AuditEpochBegun { epoch } => {
 			wire::CommandResponse::AuditEpochBegun { epoch: epoch.0 }
+		}
+		CommandOutcome::PairingGateSet { gate } => {
+			wire::CommandResponse::PairingGateSet {
+				gate: pairing::gate(gate),
+			}
+		}
+		CommandOutcome::PairingOpened {
+			pending,
+			disclosure,
+		} => wire::CommandResponse::PairingOpened {
+			pending: pairing::pending(pending),
+			disclosure: pairing::disclosure(disclosure),
+		},
+		CommandOutcome::PairingClaimed { pending, challenge } => {
+			wire::CommandResponse::PairingClaimed {
+				pending: pairing::pending(pending),
+				challenge: challenge.0,
+			}
+		}
+		CommandOutcome::PairingConfirmed { pending } => {
+			wire::CommandResponse::PairingConfirmed {
+				pending: pairing::pending(pending),
+			}
+		}
+		CommandOutcome::PairingCompleted { client } => {
+			wire::CommandResponse::PairingCompleted {
+				client: pairing::client(client),
+			}
+		}
+		CommandOutcome::PairedClientAccessSet { client } => {
+			wire::CommandResponse::PairedClientAccessSet {
+				client: pairing::client(client),
+			}
+		}
+		CommandOutcome::PairedClientRevoked { client_id } => {
+			wire::CommandResponse::PairedClientRevoked {
+				client_id: client_id.0,
+			}
 		}
 	}
 }

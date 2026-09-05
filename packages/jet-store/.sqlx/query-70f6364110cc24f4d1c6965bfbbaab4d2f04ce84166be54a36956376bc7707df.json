@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE paired_clients SET access = ?1 WHERE client_id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "70f6364110cc24f4d1c6965bfbbaab4d2f04ce84166be54a36956376bc7707df"
+}

@@ -4,8 +4,8 @@
 
 use jet_store::{
 	EffectKindRecord, EffectSafetyRecord, NewCommandReceipt, NewConversation,
-	NewEffect, NewRun, RetentionPolicy, RunLifecycle, SettingRecord,
-	WriteTransaction,
+	NewEffect, NewRun, PairedClientAccess, PairingGate, PairingMethod,
+	RetentionPolicy, RunLifecycle, SettingRecord, WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -23,9 +23,15 @@ use crate::command_receipt::{
 use crate::conversation::{Conversation, ConversationId, Revision, Run, RunId};
 use crate::error::{ConflictState, CoreError, RevisionConflict};
 use crate::event::{EventKind, EventSubject};
+use crate::pairing::{
+	self, AuthenticationString, ClientPublicKey, PairedClient,
+	PairingChallenge, PairingDisclosure, PairingOfferId, PairingSecret,
+	PairingSignature, PendingPairing,
+};
 use crate::security::{self, SecurityClass, SecurityState};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
-use crate::{Actor, Core, lifecycle};
+use crate::{Actor, ClientId, Core, lifecycle};
+use crate::{paired_client, pairing_completion, pairing_offer};
 
 /// Automatic Git delivery is carried out with the Git the core invokes, so
 /// turning it on depends on that tool being installed (ADR-0029, ADR-0056).
@@ -138,6 +144,62 @@ pub enum Command {
 	/// Begin a new authority epoch of the Security audit, carrying on past
 	/// an integrity failure and recording the gap it leaves (ADR-0105).
 	BeginAuditEpoch,
+	/// Open or close this Plane's Pairing gate, which decides whether a new
+	/// GUI client may begin Pairing at all (ADR-0017). It does not alter the
+	/// clients that are already Paired.
+	SetPairingGate {
+		/// Where to leave the gate.
+		gate: PairingGate,
+	},
+	/// Issue this Plane's one Pairing offer, replacing whatever it had
+	/// open, and disclose its one-time secret to the owner who asked for it
+	/// (ADR-0017).
+	OpenPairing {
+		/// How the secret reaches the person pairing.
+		method: PairingMethod,
+	},
+	/// Claim the open Pairing offer with the secret a person presented and
+	/// the public key of the Client identity presenting it.
+	ClaimPairing {
+		/// The secret as it was presented.
+		secret: PairingSecret,
+		/// The durable public key that becomes the credential once Pairing
+		/// completes.
+		key: ClientPublicKey,
+	},
+	/// Confirm, on the Plane being Paired with, that both screens show the
+	/// same authentication string. The client being Paired cannot confirm
+	/// its own Pairing (ADR-0017).
+	ConfirmPairing {
+		/// The offer being confirmed, which must be the one the Plane has
+		/// open.
+		offer_id: PairingOfferId,
+		/// The string as the person confirming reads it.
+		authentication_string: AuthenticationString,
+	},
+	/// Complete the Pairing by signing the transcript of the claim with the
+	/// Client identity that made it (ADR-0090).
+	CompletePairing {
+		/// The offer being completed, which must be the one the Plane has
+		/// open.
+		offer_id: PairingOfferId,
+		/// The signature over the claim's transcript.
+		signature: PairingSignature,
+	},
+	/// Stop a Paired client controlling this Plane, or let it control the
+	/// Plane again. The Plane keeps its key either way (ADR-0017).
+	SetPairedClientAccess {
+		/// The Paired client to decide about.
+		client_id: ClientId,
+		/// What it may do from now on.
+		access: PairedClientAccess,
+	},
+	/// Forget a Paired client and the key it was Paired with. The
+	/// installation has to be Paired again to control this Plane.
+	RevokePairedClient {
+		/// The client to forget.
+		client_id: ClientId,
+	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -167,6 +229,13 @@ impl Command {
 			Self::BindAccount { .. }
 			| Self::UnbindAccount { .. }
 			| Self::BeginAuditEpoch
+			| Self::SetPairingGate { .. }
+			| Self::OpenPairing { .. }
+			| Self::ClaimPairing { .. }
+			| Self::ConfirmPairing { .. }
+			| Self::CompletePairing { .. }
+			| Self::SetPairedClientAccess { .. }
+			| Self::RevokePairedClient { .. }
 			| Self::CreateConversation { .. }
 			| Self::CreateRun { .. }
 			| Self::SetSetting { .. }
@@ -214,6 +283,47 @@ pub enum CommandOutcome {
 	},
 	/// The Account binding as established.
 	AccountBound(AccountBinding),
+	/// Where the Plane's Pairing gate now stands.
+	PairingGateSet {
+		/// The gate as the Plane now records it.
+		gate: PairingGate,
+	},
+	/// The Pairing offer the Plane now has open, and its one-time secret as
+	/// it is disclosed once.
+	PairingOpened {
+		/// The offer, without the secret it was issued with.
+		pending: PendingPairing,
+		/// The secret, in the form the owner hands it over in.
+		disclosure: PairingDisclosure,
+	},
+	/// The Pairing offer after a client claimed it, and the fresh challenge
+	/// that client's key signs to complete the Pairing.
+	PairingClaimed {
+		/// The offer, now waiting for the people at both ends.
+		pending: PendingPairing,
+		/// The challenge to sign.
+		challenge: PairingChallenge,
+	},
+	/// The Pairing offer after the person at the target confirmed it.
+	PairingConfirmed {
+		/// The offer, now waiting for the client to prove its key.
+		pending: PendingPairing,
+	},
+	/// The client this Plane is now Paired with.
+	PairingCompleted {
+		/// The Paired client the Pairing left behind.
+		client: PairedClient,
+	},
+	/// The Paired client as the Plane now records it.
+	PairedClientAccessSet {
+		/// The client, with the access it now has.
+		client: PairedClient,
+	},
+	/// The Plane no longer holds that client or its key.
+	PairedClientRevoked {
+		/// The client that is no longer Paired.
+		client_id: ClientId,
+	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {
 		/// The epoch that holds the chain the Plane vouches for.
@@ -306,17 +416,21 @@ impl Core {
 				{
 					return Err(error.clone());
 				}
-				// An authoritative error is raised before the Command writes
-				// any state, so committing its receipt commits nothing else.
-				// A Command that must fail authoritatively after writing
-				// wraps its writes in a savepoint first.
+				// An authoritative error is a durable answer, so its receipt
+				// commits together with whatever the Command wrote before
+				// raising it. Most write nothing; a refused Pairing claim
+				// deliberately writes the attempt it counted, because a
+				// Plane that rolled that back would let a client guess for
+				// as long as the offer lasts. A Command whose partial
+				// writes must not survive its own failure wraps them in a
+				// savepoint.
 				tx.insert_command_receipt(&NewCommandReceipt {
 					actor: actor_record,
 					command_id: command_id.0,
 					request_digest,
 					recorded_at_unix_ms,
 					outcome_version: OUTCOME_VERSION,
-					outcome: encode_result(&result)?,
+					outcome: encode_result(&redacted_for_receipt(&result))?,
 				})
 				.await?;
 				Ok(result)
@@ -329,6 +443,42 @@ impl Core {
 				SecurityState::of(self.store.validate_audit().await?);
 		}
 		Ok(outcome)
+	}
+}
+
+/// What the durable receipt keeps of a Command's result.
+///
+/// Everything, except a secret the Plane discloses once: the receipt
+/// outlives the offer it belongs to by thirty days (ADR-0093), and a
+/// pairing code that lived for two minutes has no business being there.
+/// The retry is answered with the offer, and its owner opens another one.
+fn redacted_for_receipt(
+	result: &Result<CommandOutcome, CoreError>,
+) -> Result<CommandOutcome, CoreError> {
+	match result {
+		Ok(CommandOutcome::PairingOpened { pending, .. }) => {
+			Ok(CommandOutcome::PairingOpened {
+				pending: pending.clone(),
+				disclosure: PairingDisclosure::AlreadyDisclosed,
+			})
+		}
+		Ok(
+			outcome @ (CommandOutcome::ConversationCreated(_)
+			| CommandOutcome::RunCreated(_)
+			| CommandOutcome::RunTransitioned(_)
+			| CommandOutcome::SettingSet { .. }
+			| CommandOutcome::SettingCleared { .. }
+			| CommandOutcome::AccountBound(_)
+			| CommandOutcome::AccountUnbound { .. }
+			| CommandOutcome::AuditEpochBegun { .. }
+			| CommandOutcome::PairingGateSet { .. }
+			| CommandOutcome::PairingClaimed { .. }
+			| CommandOutcome::PairingConfirmed { .. }
+			| CommandOutcome::PairingCompleted { .. }
+			| CommandOutcome::PairedClientAccessSet { .. }
+			| CommandOutcome::PairedClientRevoked { .. }),
+		) => Ok(outcome.clone()),
+		Err(error) => Err(error.clone()),
 	}
 }
 
@@ -377,6 +527,48 @@ async fn execute_new(
 		}
 		Command::BeginAuditEpoch => {
 			security::begin_epoch(tx, actor, security, now_unix_ms).await
+		}
+		Command::SetPairingGate { gate } => {
+			pairing::set_gate(tx, actor, gate, now_unix_ms).await
+		}
+		Command::OpenPairing { method } => {
+			pairing_offer::open(tx, actor, method, now_unix_ms).await
+		}
+		Command::ClaimPairing { secret, key } => {
+			pairing_offer::claim(tx, actor, secret, key, now_unix_ms).await
+		}
+		Command::ConfirmPairing {
+			offer_id,
+			authentication_string,
+		} => {
+			pairing_completion::confirm(
+				tx,
+				actor,
+				offer_id,
+				authentication_string,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::SetPairedClientAccess { client_id, access } => {
+			paired_client::set_access(tx, actor, client_id, access, now_unix_ms)
+				.await
+		}
+		Command::RevokePairedClient { client_id } => {
+			paired_client::revoke(tx, actor, client_id, now_unix_ms).await
+		}
+		Command::CompletePairing {
+			offer_id,
+			signature,
+		} => {
+			pairing_completion::complete(
+				tx,
+				actor,
+				offer_id,
+				signature,
+				now_unix_ms,
+			)
+			.await
 		}
 		Command::TransitionRun {
 			run_id,

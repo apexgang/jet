@@ -13,6 +13,7 @@ use crate::conversation::{
 	PageCursor, RevisionConflict,
 };
 use crate::event::Event;
+use crate::pairing::PairingSnapshot;
 use crate::setting::{SettingScope, SettingSelection, SettingSnapshot};
 
 /// Correlates a client request with its server reply.
@@ -129,6 +130,8 @@ pub enum QueryRequest {
 		#[serde(with = "crate::decimal")]
 		after: u64,
 	},
+	/// The Plane's Pairing: whether it accepts new GUI clients.
+	Pairing,
 	/// A page of the owner-only Security audit strictly after a position.
 	SecurityAudit {
 		/// The position to resume after, carried as a decimal string
@@ -156,6 +159,8 @@ pub enum QueryResponse {
 	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.
 	Events(EventPage),
+	/// The Plane's Pairing as it stands.
+	Pairing(PairingSnapshot),
 	/// One page of the Security audit, oldest first.
 	SecurityAudit(SecurityAudit),
 }

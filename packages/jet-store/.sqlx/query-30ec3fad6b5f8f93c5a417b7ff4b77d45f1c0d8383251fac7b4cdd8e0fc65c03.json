@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE pairing_gate\n\t\t\t SET state = ?1, changed_at_unix_ms = ?2\n\t\t\t WHERE singleton = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "30ec3fad6b5f8f93c5a417b7ff4b77d45f1c0d8383251fac7b4cdd8e0fc65c03"
+}

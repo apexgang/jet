@@ -8,10 +8,13 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+ed25519-dalek.workspace = true
+getrandom.workspace = true
 jet-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+subtle.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true

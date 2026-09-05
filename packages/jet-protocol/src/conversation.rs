@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::account::{AccountBinding, CredentialReference, CredentialSource};
+use crate::pairing::{
+	ClientPublicKey, PairedClient, PairedClientAccess, PairingDisclosure,
+	PairingGate, PairingMethod, PendingPairing,
+};
 use crate::setting::{SettingKey, SettingScope, SettingValue};
 
 /// Opaque token for continuing one fenced keyset snapshot page.
@@ -157,6 +161,63 @@ pub enum CommandRequest {
 	/// Begin a new authority epoch of the Security audit, carrying on past
 	/// an integrity failure and recording the gap it leaves behind.
 	BeginAuditEpoch,
+	/// Open or close the Plane's Pairing gate, which decides whether a new
+	/// GUI client may begin Pairing at all. It does not alter the clients
+	/// that are already Paired.
+	SetPairingGate {
+		/// Where to leave the gate.
+		gate: PairingGate,
+	},
+	/// Issue the Plane's one Pairing offer, replacing whatever it had open,
+	/// and disclose its one-time secret to the owner who asked for it.
+	OpenPairing {
+		/// How the secret reaches the person pairing.
+		method: PairingMethod,
+	},
+	/// Claim the open Pairing offer with the secret a person presented and
+	/// the public key of the Client identity presenting it.
+	ClaimPairing {
+		/// The secret as it was presented.
+		secret: String,
+		/// The durable public key that becomes the credential once Pairing
+		/// completes.
+		key: ClientPublicKey,
+	},
+	/// Confirm, on the Plane being Paired with, that both screens show the
+	/// same authentication string. The client being Paired cannot confirm
+	/// its own Pairing.
+	ConfirmPairing {
+		/// The offer being confirmed, which must be the one the Plane has
+		/// open.
+		offer_id: Uuid,
+		/// The string as the person confirming reads it.
+		authentication_string: String,
+	},
+	/// Complete the Pairing by signing the transcript of the claim with the
+	/// Client identity that made it.
+	CompletePairing {
+		/// The offer being completed, which must be the one the Plane has
+		/// open.
+		offer_id: Uuid,
+		/// The signature over the claim's transcript, as 128 lowercase
+		/// hexadecimal characters.
+		#[serde(with = "crate::hex")]
+		signature: [u8; 64],
+	},
+	/// Stop a Paired client controlling the Plane, or let it control the
+	/// Plane again. The Plane keeps its key either way.
+	SetPairedClientAccess {
+		/// The Paired client to decide about.
+		client_id: Uuid,
+		/// What it may do from now on.
+		access: PairedClientAccess,
+	},
+	/// Forget a Paired client and the key it was Paired with. The
+	/// installation has to be Paired again to control the Plane.
+	RevokePairedClient {
+		/// The client to forget.
+		client_id: Uuid,
+	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -205,6 +266,48 @@ pub enum CommandResponse {
 		binding_id: Uuid,
 		/// The reference it resolved through.
 		credential_reference: CredentialReference,
+	},
+	/// Where the Plane's Pairing gate now stands.
+	PairingGateSet {
+		/// The gate as the Plane now records it.
+		gate: PairingGate,
+	},
+	/// The Pairing offer the Plane now has open, and its one-time secret as
+	/// it is disclosed once.
+	PairingOpened {
+		/// The offer, without the secret it was issued with.
+		pending: PendingPairing,
+		/// The secret, in the form the owner hands it over in.
+		disclosure: PairingDisclosure,
+	},
+	/// The Pairing offer after a client claimed it, and the fresh challenge
+	/// that client's key signs to complete the Pairing.
+	PairingClaimed {
+		/// The offer, now waiting for the people at both ends.
+		pending: PendingPairing,
+		/// The challenge to sign, as 64 lowercase hexadecimal characters.
+		#[serde(with = "crate::hex")]
+		challenge: [u8; 32],
+	},
+	/// The Pairing offer after the person at the target confirmed it.
+	PairingConfirmed {
+		/// The offer, now waiting for the client to prove its key.
+		pending: PendingPairing,
+	},
+	/// The client the Plane is now Paired with.
+	PairingCompleted {
+		/// The Paired client the Pairing left behind.
+		client: PairedClient,
+	},
+	/// The Paired client as the Plane now records it.
+	PairedClientAccessSet {
+		/// The client, with the access it now has.
+		client: PairedClient,
+	},
+	/// The Plane no longer holds that client or its key.
+	PairedClientRevoked {
+		/// The client that is no longer Paired.
+		client_id: Uuid,
 	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {

@@ -19,7 +19,9 @@ mod decimal;
 mod event;
 mod frame;
 mod handshake;
+mod hex;
 mod message;
+mod pairing;
 mod setting;
 mod stream;
 mod stream_control;
@@ -57,14 +59,19 @@ pub use frame::{
 };
 pub use handshake::{
 	ACCOUNT_BINDINGS_MINOR, CODEC_JSON_V1, ClientHello, FENCED_READS_MINOR,
-	MULTIPLEXED_STREAMS_MINOR, PREFACE, PROTOCOL_MINOR, PROTOCOL_VERSION,
-	SECURITY_AUDIT_MINOR, SETTINGS_AND_CAPABILITIES_MINOR, ServerHello,
-	VersionRange,
+	MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE, PROTOCOL_MINOR,
+	PROTOCOL_VERSION, SECURITY_AUDIT_MINOR, SETTINGS_AND_CAPABILITIES_MINOR,
+	ServerHello, VersionRange,
 };
 pub use message::{
 	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,
 	QueryResponse, RecoveryAction, RequestId, RestartMetadata, ServerMessage,
 	WireError, raw_command,
+};
+pub use pairing::{
+	ClientPublicKey, PairedClient, PairedClientAccess, PairingDisclosure,
+	PairingEnd, PairingGate, PairingKeyAlgorithm, PairingMethod,
+	PairingProgress, PairingSnapshot, PendingPairing,
 };
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,

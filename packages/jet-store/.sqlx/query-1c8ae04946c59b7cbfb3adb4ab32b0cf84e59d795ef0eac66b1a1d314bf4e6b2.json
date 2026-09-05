@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE pairing_offers\n\t\t\t SET confirmed_by = ?1, expires_at_unix_ms = ?2\n\t\t\t WHERE singleton = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "1c8ae04946c59b7cbfb3adb4ab32b0cf84e59d795ef0eac66b1a1d314bf4e6b2"
+}

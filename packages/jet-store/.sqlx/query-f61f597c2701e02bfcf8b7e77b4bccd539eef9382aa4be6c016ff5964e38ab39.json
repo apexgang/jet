@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE pairing_offers\n\t\t\t SET failed_attempts = failed_attempts + 1\n\t\t\t WHERE singleton = 1\n\t\t\t RETURNING failed_attempts",
+  "describe": {
+    "columns": [
+      {
+        "name": "failed_attempts",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "pairing_offers",
+            "name": "failed_attempts"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f61f597c2701e02bfcf8b7e77b4bccd539eef9382aa4be6c016ff5964e38ab39"
+}

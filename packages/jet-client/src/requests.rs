@@ -37,7 +37,8 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -57,7 +58,8 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -84,7 +86,8 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -111,7 +114,8 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -135,7 +139,8 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -162,7 +167,14 @@ impl Client {
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
-			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AccountUnbound { .. }
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }
+			| CommandResponse::PairingConfirmed { .. }
+			| CommandResponse::PairingCompleted { .. }
+			| CommandResponse::PairedClientAccessSet { .. }
+			| CommandResponse::PairedClientRevoked { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -189,7 +201,8 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
-			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -221,7 +234,14 @@ impl Client {
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }
+			| CommandResponse::PairingConfirmed { .. }
+			| CommandResponse::PairingCompleted { .. }
+			| CommandResponse::PairedClientAccessSet { .. }
+			| CommandResponse::PairedClientRevoked { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -251,7 +271,14 @@ impl Client {
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }
+			| CommandResponse::PairingConfirmed { .. }
+			| CommandResponse::PairingCompleted { .. }
+			| CommandResponse::PairedClientAccessSet { .. }
+			| CommandResponse::PairedClientRevoked { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -288,7 +315,14 @@ impl Client {
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }
+			| CommandResponse::PairingConfirmed { .. }
+			| CommandResponse::PairingCompleted { .. }
+			| CommandResponse::PairedClientAccessSet { .. }
+			| CommandResponse::PairedClientRevoked { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -317,7 +351,8 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -351,7 +386,14 @@ impl Client {
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }
+			| CommandResponse::PairingConfirmed { .. }
+			| CommandResponse::PairingCompleted { .. }
+			| CommandResponse::PairedClientAccessSet { .. }
+			| CommandResponse::PairedClientRevoked { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -383,7 +425,14 @@ impl Client {
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }
+			| CommandResponse::PairingConfirmed { .. }
+			| CommandResponse::PairingCompleted { .. }
+			| CommandResponse::PairedClientAccessSet { .. }
+			| CommandResponse::PairedClientRevoked { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -414,7 +463,8 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
 			| QueryResponse::AccountBindings(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -448,7 +498,8 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
-			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -493,7 +544,14 @@ impl Client {
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }
+			| CommandResponse::PairingConfirmed { .. }
+			| CommandResponse::PairingCompleted { .. }
+			| CommandResponse::PairedClientAccessSet { .. }
+			| CommandResponse::PairedClientRevoked { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -529,11 +587,18 @@ impl Client {
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }
+			| CommandResponse::PairingConfirmed { .. }
+			| CommandResponse::PairingCompleted { .. }
+			| CommandResponse::PairedClientAccessSet { .. }
+			| CommandResponse::PairedClientRevoked { .. }) => Err(unexpected(&other)),
 		}
 	}
 }
 
-fn unexpected(reply: &impl std::fmt::Debug) -> ClientError {
+pub(crate) fn unexpected(reply: &impl std::fmt::Debug) -> ClientError {
 	ClientError::Unexpected(format!("{reply:?}"))
 }

@@ -21,6 +21,9 @@ mod conversation;
 mod effect;
 mod journal;
 mod migrations;
+mod paired_client;
+mod pairing;
+mod pairing_offer;
 mod plane;
 mod records;
 mod run;
@@ -50,6 +53,14 @@ pub use audit_head::{AuditHead, audit_head_path};
 pub use audit_integrity::{AuditBreach, AuditIntegrity, AuditIntegrityFailure};
 pub use conversation::CONVERSATION_PAGE_LIMIT;
 pub use journal::EVENT_COMPACTION_BATCH_LIMIT;
+pub use paired_client::{
+	NewPairedClient, PairedClientAccess, PairedClientRecord,
+};
+pub use pairing::PairingGate;
+pub use pairing_offer::{
+	NewPairingClaim, NewPairingOffer, PairingInvalidation, PairingKeyAlgorithm,
+	PairingMethod, PairingOfferRecord, PairingOfferState,
+};
 pub use plane::PlaneRecord;
 pub use records::{
 	ActorRecord, CommandReceiptRecord, ConversationPageKey,

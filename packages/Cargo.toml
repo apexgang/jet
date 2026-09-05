@@ -30,6 +30,8 @@ jet-runtime = { path = "jet-runtime" }
 jet-store = { path = "jet-store" }
 
 clap = { version = "4", features = ["derive"] }
+ed25519-dalek = "3"
+getrandom = "0.4"
 libfuzzer-sys = "0.4"
 pretty_assertions = "1"
 rustix = { version = "1", features = ["fs", "process"] }
@@ -42,6 +44,7 @@ sqlx = { version = "0.9", default-features = false, features = [
 	"runtime-tokio",
 	"sqlite-bundled",
 ] }
+subtle = "2"
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = [

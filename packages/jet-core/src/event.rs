@@ -3,7 +3,8 @@
 use std::time::SystemTime;
 
 use jet_store::{
-	EventClass, EventRecord, NewEvent, RetentionPolicy, RunLifecycle,
+	EventClass, EventRecord, NewEvent, PairedClientAccess, PairingGate,
+	PairingMethod, RetentionPolicy, RunLifecycle,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -12,8 +13,9 @@ use crate::account::{AccountBindingId, CredentialSource, ProviderId};
 use crate::audit::AuditEpoch;
 use crate::conversation::{ConversationId, RunId};
 use crate::error::CoreError;
+use crate::pairing::{PairingEnd, PairingOfferId};
 use crate::setting::{SettingKey, SettingScope, SettingValue};
-use crate::{Actor, system_time};
+use crate::{Actor, ClientId, system_time};
 
 /// Most Events one `Query::Events` page returns.
 pub(crate) const EVENT_PAGE_LIMIT: usize = 256;
@@ -159,6 +161,74 @@ pub enum EventKind {
 		/// The epoch that now holds the chain the Plane vouches for.
 		epoch: AuditEpoch,
 	},
+	/// The Plane's Pairing gate was opened or closed, deciding whether a
+	/// new GUI client may begin Pairing (ADR-0017). It says nothing about
+	/// the clients that are already Paired.
+	#[serde(rename = "pairing.gate_changed")]
+	PairingGateChanged {
+		/// Where the owner left the gate.
+		gate: PairingGate,
+	},
+	/// The Plane issued a Pairing offer, replacing whatever it had open
+	/// (ADR-0017). The Event names the offer and how its secret was handed
+	/// over; no part of the secret itself is recorded.
+	#[serde(rename = "pairing.offered")]
+	PairingOffered {
+		/// The offer that was made.
+		offer_id: PairingOfferId,
+		/// How its secret reached the person pairing.
+		method: PairingMethod,
+	},
+	/// A GUI client presented the offer's secret and its durable public
+	/// key. The Pairing now waits for the people at both ends.
+	#[serde(rename = "pairing.claimed")]
+	PairingClaimed {
+		/// The offer that was claimed.
+		offer_id: PairingOfferId,
+		/// The Client identity that claimed it.
+		client_id: ClientId,
+	},
+	/// The person at the target confirmed that both screens showed the same
+	/// authentication string.
+	#[serde(rename = "pairing.confirmed")]
+	PairingConfirmed {
+		/// The offer that was confirmed.
+		offer_id: PairingOfferId,
+		/// The Client identity being Paired.
+		client_id: ClientId,
+	},
+	/// A Pairing completed: the client proved it holds the identity it
+	/// presented, and the Plane now holds its durable public key.
+	#[serde(rename = "pairing.completed")]
+	PairingCompleted {
+		/// The offer that completed.
+		offer_id: PairingOfferId,
+		/// The Client identity that is now Paired.
+		client_id: ClientId,
+	},
+	/// A Paired client was allowed to control this Plane again, or stopped
+	/// from controlling it. The Plane keeps its key either way (ADR-0017).
+	#[serde(rename = "pairing.client_access_changed")]
+	PairedClientAccessChanged {
+		/// The Paired client whose access changed.
+		client_id: ClientId,
+		/// What it may do now.
+		access: PairedClientAccess,
+	},
+	/// A Paired client and the key it was Paired with were forgotten.
+	#[serde(rename = "pairing.client_revoked")]
+	PairedClientRevoked {
+		/// The client that is no longer Paired.
+		client_id: ClientId,
+	},
+	/// A Pairing offer stopped being usable before it completed.
+	#[serde(rename = "pairing.offer_ended")]
+	PairingOfferEnded {
+		/// The offer that ended.
+		offer_id: PairingOfferId,
+		/// Why it ended.
+		reason: PairingEnd,
+	},
 	/// A Run moved to a later lifecycle state.
 	#[serde(rename = "run.lifecycle_changed")]
 	RunLifecycleChanged {
@@ -192,7 +262,15 @@ impl EventKind {
 			| Self::SettingCleared { .. }
 			| Self::AccountBound { .. }
 			| Self::AccountUnbound { .. }
-			| Self::AuditEpochBegun { .. } => {
+			| Self::AuditEpochBegun { .. }
+			| Self::PairingGateChanged { .. }
+			| Self::PairingOffered { .. }
+			| Self::PairingClaimed { .. }
+			| Self::PairingConfirmed { .. }
+			| Self::PairingCompleted { .. }
+			| Self::PairingOfferEnded { .. }
+			| Self::PairedClientAccessChanged { .. }
+			| Self::PairedClientRevoked { .. } => {
 				let encoded = serde_json::to_value(self).map_err(|error| {
 					CoreError::internal("event.unencodable", error.to_string())
 				})?;
