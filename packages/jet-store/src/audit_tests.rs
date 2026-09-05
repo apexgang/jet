@@ -4,9 +4,9 @@ use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
 use crate::{
-	ActorRecord, AuditBreach, AuditHead, AuditIntegrity, AuditIntegrityFailure,
-	AuditOutcome, AuditRecord, AuditRisk, NewAuditRecord, Store, StoreError,
-	audit_head_path,
+	ActorRecord, AuditBreach, AuditGap, AuditHead, AuditIntegrity,
+	AuditIntegrityFailure, AuditOutcome, AuditRecord, AuditRisk,
+	NewAuditRecord, Store, StoreError, audit_head_path,
 };
 
 const NOW_UNIX_MS: i64 = 1_700_000_000_000;
@@ -461,6 +461,41 @@ async fn anonymizing_a_target_forgets_its_name_and_keeps_the_chain() {
 			true,
 			AuditIntegrity::Verified {
 				head: Some(head_of(&second))
+			}
+		)
+	);
+}
+
+#[tokio::test]
+async fn a_new_epoch_records_its_gap_and_validates_from_its_own_genesis() {
+	let dir = tempfile::tempdir().unwrap();
+	let path = dir.path().join("plane.sqlite3");
+	let store = Store::open(&path).await.unwrap();
+	let abandoned = append(&store).await;
+
+	let epoch = store
+		.write(async |tx| {
+			tx.begin_audit_epoch(
+				AuditGap {
+					sequence: abandoned.sequence,
+					entry_hash: abandoned.entry_hash,
+					reason: AuditBreach::HeadDiverged.as_str().into(),
+				},
+				NOW_UNIX_MS,
+			)
+			.await
+		})
+		.await
+		.unwrap();
+	let first = append(&store).await;
+
+	assert_eq!(
+		(epoch, first.epoch, store.validate_audit().await.unwrap()),
+		(
+			2,
+			2,
+			AuditIntegrity::Verified {
+				head: Some(head_of(&first))
 			}
 		)
 	);

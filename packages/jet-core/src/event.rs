@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::account::{AccountBindingId, CredentialSource, ProviderId};
+use crate::audit::AuditEpoch;
 use crate::conversation::{ConversationId, RunId};
 use crate::error::CoreError;
 use crate::setting::{SettingKey, SettingScope, SettingValue};
@@ -150,6 +151,14 @@ pub enum EventKind {
 		/// The binding that was removed.
 		binding_id: AccountBindingId,
 	},
+	/// An owner began a new authority epoch of the Security audit after it
+	/// failed to validate (ADR-0105). The gap it leaves behind is recorded
+	/// in the audit itself; the journal only says that it happened.
+	#[serde(rename = "audit.epoch_begun")]
+	AuditEpochBegun {
+		/// The epoch that now holds the chain the Plane vouches for.
+		epoch: AuditEpoch,
+	},
 	/// A Run moved to a later lifecycle state.
 	#[serde(rename = "run.lifecycle_changed")]
 	RunLifecycleChanged {
@@ -182,7 +191,8 @@ impl EventKind {
 			| Self::SettingChanged { .. }
 			| Self::SettingCleared { .. }
 			| Self::AccountBound { .. }
-			| Self::AccountUnbound { .. } => {
+			| Self::AccountUnbound { .. }
+			| Self::AuditEpochBegun { .. } => {
 				let encoded = serde_json::to_value(self).map_err(|error| {
 					CoreError::internal("event.unencodable", error.to_string())
 				})?;

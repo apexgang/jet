@@ -110,10 +110,13 @@ pub struct AuditRecord {
 
 /// Where the audit chain has reached inside the store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct AuditTip {
-	pub(crate) epoch: u64,
-	pub(crate) sequence: u64,
-	pub(crate) entry_hash: AuditEntryHash,
+pub struct AuditTip {
+	/// The authority epoch the newest record belongs to.
+	pub epoch: u64,
+	/// Its position.
+	pub sequence: u64,
+	/// The chain link it folded to.
+	pub entry_hash: AuditEntryHash,
 }
 
 /// The record retention last removed, whose link the remaining chain

@@ -139,6 +139,33 @@ impl Client {
 		}
 	}
 
+	/// Begins a new authority epoch of the Security audit under the Command
+	/// identity `command_id`, which a retry must reuse (ADR-0093). It is
+	/// refused unless the Plane is in Security-degraded mode (ADR-0105).
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the daemon reports a stable
+	/// error, or the transport failure otherwise.
+	pub async fn begin_audit_epoch(
+		&self,
+		command_id: Uuid,
+	) -> Result<u64, ClientError> {
+		match self
+			.execute_command(command_id, CommandRequest::BeginAuditEpoch)
+			.await?
+		{
+			CommandResponse::AuditEpochBegun { epoch } => Ok(epoch),
+			other @ (CommandResponse::ConversationCreated(_)
+			| CommandResponse::RunCreated(_)
+			| CommandResponse::RunTransitioned(_)
+			| CommandResponse::SettingSet { .. }
+			| CommandResponse::SettingCleared { .. }
+			| CommandResponse::AccountBound(_)
+			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
+		}
+	}
+
 	/// Reads one page of the owner-only Security audit strictly after
 	/// `sequence`; zero starts from the oldest retained record. The page's
 	/// cursor tells whether later pages exist (ADR-0105).
@@ -193,7 +220,8 @@ impl Client {
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
-			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AccountUnbound { .. }
+			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -222,7 +250,8 @@ impl Client {
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
-			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AccountUnbound { .. }
+			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -258,7 +287,8 @@ impl Client {
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
-			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AccountUnbound { .. }
+			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -320,7 +350,8 @@ impl Client {
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
-			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AccountUnbound { .. }
+			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -351,7 +382,8 @@ impl Client {
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::AccountBound(_)
-			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AccountUnbound { .. }
+			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -460,7 +492,8 @@ impl Client {
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
-			| CommandResponse::AccountUnbound { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AccountUnbound { .. }
+			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -495,7 +528,8 @@ impl Client {
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
-			| CommandResponse::AccountBound(_)) => Err(unexpected(&other)),
+			| CommandResponse::AccountBound(_)
+			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
 		}
 	}
 }

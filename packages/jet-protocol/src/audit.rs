@@ -93,3 +93,73 @@ pub struct SecurityAudit {
 	/// The records strictly after the requested position, oldest first.
 	pub entries: Vec<AuditEntry>,
 }
+
+/// Whether a Plane can vouch for its own Security audit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SecurityState {
+	/// The audit chain folds through the head kept outside the store.
+	Trusted,
+	/// It does not, and the Plane is in Security-degraded mode: reads,
+	/// exports and Runs already under way continue, while changes to
+	/// trust, policy, Craft, and anything destructive wait for an owner to
+	/// export the evidence and begin a new audit epoch.
+	Degraded {
+		/// What validation found.
+		breach: AuditBreach,
+		/// The authority epoch that failed to validate, carried as a
+		/// decimal string (ADR-0089).
+		#[serde(with = "crate::decimal")]
+		epoch: u64,
+		/// The head published outside the store, when there still is one.
+		#[serde(default, skip_serializing_if = "Option::is_none")]
+		head: Option<AuditHead>,
+		/// The newest position the store itself holds, carried as a
+		/// decimal string.
+		#[serde(with = "crate::decimal")]
+		store_sequence: u64,
+	},
+}
+
+/// How the Security audit failed to validate. It names positions and
+/// hashes and quotes no record content, because the audit holds none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "breach", rename_all = "snake_case")]
+pub enum AuditBreach {
+	/// The Plane has recorded decisions, but nothing outside the store says
+	/// how far its chain had reached.
+	HeadMissing,
+	/// The store does not hold the record the head names, so it moved
+	/// backwards behind the audit.
+	HeadNotInStore,
+	/// The store holds that record, and it is not the one the head names,
+	/// so the history behind it was rewritten.
+	HeadDiverged,
+	/// The record at this position no longer folds to its own link.
+	RecordAltered {
+		/// Where the fold first disagreed, as a decimal string.
+		#[serde(with = "crate::decimal")]
+		sequence: u64,
+	},
+	/// The identity at this position is not the one its opaque target
+	/// reference was derived from.
+	TargetAltered {
+		/// Where the target and its reference first disagreed, as a
+		/// decimal string.
+		#[serde(with = "crate::decimal")]
+		sequence: u64,
+	},
+}
+
+/// How far the audit chain had reached when its head was last published.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditHead {
+	/// The epoch the record it names belongs to, as a decimal string.
+	#[serde(with = "crate::decimal")]
+	pub epoch: u64,
+	/// That record's position, as a decimal string.
+	#[serde(with = "crate::decimal")]
+	pub sequence: u64,
+	/// Lowercase hexadecimal of the chain link it folded to.
+	pub entry_hash: String,
+}

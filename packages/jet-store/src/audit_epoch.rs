@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::StoreError;
 use crate::audit_chain::{AuditEntryHash, EpochGenesis, genesis_hash};
+use crate::audit_head::AuditHead;
 use crate::transaction::{ReadTransaction, WriteTransaction};
 
 /// One recorded epoch of the audit chain.
@@ -20,15 +21,20 @@ pub(crate) struct EpochRow {
 	pub(crate) started_at_unix_ms: i64,
 	/// The head the preceding epoch was last known to have, and the reason
 	/// this one succeeds it. Absent for the first epoch.
-	pub(crate) preceding: Option<PrecedingEpoch>,
+	pub(crate) preceding: Option<AuditGap>,
 }
 
-/// What an epoch records about the one it replaced.
+/// The break one epoch records in the audit that came before it: where that
+/// audit was last known to have reached, and why it stops being vouched
+/// for there.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PrecedingEpoch {
-	pub(crate) sequence: u64,
-	pub(crate) entry_hash: AuditEntryHash,
-	pub(crate) gap_reason: String,
+pub struct AuditGap {
+	/// The position the preceding epoch was last known to have reached.
+	pub sequence: u64,
+	/// The chain link it was last known to have folded to.
+	pub entry_hash: AuditEntryHash,
+	/// Why the chain restarts, as the stable code validation reported.
+	pub reason: String,
 }
 
 impl EpochRow {
@@ -45,7 +51,7 @@ impl EpochRow {
 			gap_reason: self
 				.preceding
 				.as_ref()
-				.map(|preceding| preceding.gap_reason.as_str()),
+				.map(|preceding| preceding.reason.as_str()),
 		})
 	}
 }
@@ -98,11 +104,46 @@ impl WriteTransaction {
 		}
 	}
 
-	pub(crate) async fn insert_audit_epoch(
+	/// Begins the next authority epoch, recording `gap` as the break it
+	/// leaves in the audit that came before it, and publishes the link its
+	/// first record will follow as the new head.
+	///
+	/// A new epoch is what an owner chooses after validation failed: the
+	/// Plane stops vouching for what came before and starts a chain it can
+	/// vouch for, with the break itself part of the record (ADR-0105).
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the epoch cannot be read or written.
+	pub async fn begin_audit_epoch(
+		&mut self,
+		gap: AuditGap,
+		started_at_unix_ms: i64,
+	) -> Result<u64, StoreError> {
+		let plane_id = self.plane().await?.plane_id;
+		let epoch = self
+			.newest_audit_epoch()
+			.await?
+			.map_or(1, |newest| newest.epoch.saturating_add(1));
+		let row = self
+			.insert_audit_epoch(epoch, started_at_unix_ms, Some(gap))
+			.await?;
+		self.publish_audit_head(AuditHead {
+			epoch,
+			sequence: row
+				.preceding
+				.as_ref()
+				.map_or(0, |preceding| preceding.sequence),
+			entry_hash: row.genesis(plane_id),
+		});
+		Ok(epoch)
+	}
+
+	async fn insert_audit_epoch(
 		&mut self,
 		epoch: u64,
 		started_at_unix_ms: i64,
-		preceding: Option<PrecedingEpoch>,
+		preceding: Option<AuditGap>,
 	) -> Result<EpochRow, StoreError> {
 		let number = epoch_column(epoch)?;
 		let sequence = preceding
@@ -112,9 +153,8 @@ impl WriteTransaction {
 		let hash = preceding
 			.as_ref()
 			.map(|preceding| preceding.entry_hash.0.to_vec());
-		let reason = preceding
-			.as_ref()
-			.map(|preceding| preceding.gap_reason.clone());
+		let reason =
+			preceding.as_ref().map(|preceding| preceding.reason.clone());
 		sqlx::query!(
 			"INSERT INTO audit_epochs (epoch, started_at_unix_ms,
 				preceding_sequence, preceding_entry_hash, gap_reason)
@@ -145,13 +185,11 @@ fn read_epoch(
 	let preceding = match (preceding_sequence, preceding_entry_hash, gap_reason)
 	{
 		(None, None, None) => None,
-		(Some(sequence), Some(hash), Some(gap_reason)) => {
-			Some(PrecedingEpoch {
-				sequence: parse_sequence(sequence)?,
-				entry_hash: parse_entry_hash(&hash)?,
-				gap_reason,
-			})
-		}
+		(Some(sequence), Some(hash), Some(reason)) => Some(AuditGap {
+			sequence: parse_sequence(sequence)?,
+			entry_hash: parse_entry_hash(&hash)?,
+			reason,
+		}),
 		_ => {
 			return Err(StoreError::Integrity(format!(
 				"audit epoch {epoch} records an incomplete predecessor"

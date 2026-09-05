@@ -115,14 +115,13 @@ impl ReadTransaction {
 		Ok(self.audit_tip().await?.map_or(0, |tip| tip.sequence))
 	}
 
-	/// The newest record's epoch, position, and chain link.
+	/// The newest record's epoch, position, and chain link, or `None`
+	/// before the audit's first record.
 	///
 	/// # Errors
 	///
 	/// Returns a [`StoreError`] when the row cannot be read.
-	pub(crate) async fn audit_tip(
-		&mut self,
-	) -> Result<Option<AuditTip>, StoreError> {
+	pub async fn audit_tip(&mut self) -> Result<Option<AuditTip>, StoreError> {
 		let row = sqlx::query!(
 			r#"SELECT sequence AS "sequence!", epoch, entry_hash
 			 FROM security_audit

@@ -134,6 +134,7 @@ async fn a_current_client_switches_to_numbered_streams_after_the_handshake() {
 						daemon_starts: 1,
 						started_at_unix_ms: 0,
 						core_version: "0.2.0".into(),
+						security: None,
 					}),
 				})
 				.unwrap(),
@@ -152,6 +153,7 @@ async fn a_current_client_switches_to_numbered_streams_after_the_handshake() {
 			daemon_starts: 1,
 			started_at_unix_ms: 0,
 			core_version: "0.2.0".into(),
+			security: None,
 		}
 	);
 	server.await.unwrap();
@@ -218,6 +220,7 @@ async fn concurrent_requests_are_demultiplexed_by_numbered_stream() {
 							daemon_starts: id,
 							started_at_unix_ms: 0,
 							core_version: format!("reply-{id}"),
+							security: None,
 						}),
 					})
 					.unwrap(),
@@ -238,6 +241,7 @@ async fn concurrent_requests_are_demultiplexed_by_numbered_stream() {
 				daemon_starts: 1,
 				started_at_unix_ms: 0,
 				core_version: "reply-1".into(),
+				security: None,
 			},
 			PlaneStatus {
 				cursor: Some(2),
@@ -245,6 +249,7 @@ async fn concurrent_requests_are_demultiplexed_by_numbered_stream() {
 				daemon_starts: 2,
 				started_at_unix_ms: 0,
 				core_version: "reply-2".into(),
+				security: None,
 			},
 		)
 	);
@@ -386,5 +391,6 @@ fn status() -> PlaneStatus {
 		daemon_starts: 1,
 		started_at_unix_ms: 0,
 		core_version: "0.2.0".into(),
+		security: None,
 	}
 }

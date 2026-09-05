@@ -79,6 +79,21 @@ pub enum AuditBreach {
 	},
 }
 
+impl AuditBreach {
+	/// The stable code a new epoch records as the reason it succeeds a
+	/// chain the Plane stopped vouching for.
+	#[must_use]
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::HeadMissing => "audit.head_missing",
+			Self::HeadNotInStore => "audit.head_not_in_store",
+			Self::HeadDiverged => "audit.head_diverged",
+			Self::RecordAltered { .. } => "audit.record_altered",
+			Self::TargetAltered { .. } => "audit.target_altered",
+		}
+	}
+}
+
 /// Whether the head has been met while folding the chain.
 enum HeadMatch {
 	/// Not reached yet, or never present.

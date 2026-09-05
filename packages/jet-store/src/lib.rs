@@ -41,9 +41,11 @@ pub use account::{
 	AccountBindingRecord, CredentialSourceRecord, NewAccountBinding,
 };
 pub use audit::{
-	AUDIT_PAGE_LIMIT, AuditOutcome, AuditRecord, AuditRisk, NewAuditRecord,
+	AUDIT_PAGE_LIMIT, AuditOutcome, AuditRecord, AuditRisk, AuditTip,
+	NewAuditRecord,
 };
 pub use audit_chain::{AuditEntryHash, AuditTargetRef};
+pub use audit_epoch::AuditGap;
 pub use audit_head::{AuditHead, audit_head_path};
 pub use audit_integrity::{AuditBreach, AuditIntegrity, AuditIntegrityFailure};
 pub use conversation::CONVERSATION_PAGE_LIMIT;

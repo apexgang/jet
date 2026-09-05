@@ -78,6 +78,7 @@ fn status_query_and_result_have_the_agreed_wire_shape() {
 			daemon_starts: 2,
 			started_at_unix_ms: 1_700_000_000_000,
 			core_version: "0.1.0".into(),
+			security: None,
 		}),
 	};
 	assert_eq!(

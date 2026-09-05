@@ -323,6 +323,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::ACCOUNT_BINDINGS_MINOR,
 			feature: "Account binding Commands",
 		}),
+		CommandRequest::BeginAuditEpoch => Some(MinorRequirement {
+			minor: jet_protocol::SECURITY_AUDIT_MINOR,
+			feature: "beginning a Security audit epoch",
+		}),
 		CommandRequest::CreateConversation { .. }
 		| CommandRequest::CreateRun { .. }
 		| CommandRequest::TransitionRun { .. } => None,

@@ -139,6 +139,7 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 				binding_id: AccountBindingId(*binding_id),
 			}
 		}
+		wire::CommandRequest::BeginAuditEpoch => Command::BeginAuditEpoch,
 		wire::CommandRequest::TransitionRun {
 			run_id,
 			expected_revision,
@@ -187,6 +188,9 @@ pub(crate) fn command_outcome(
 			binding_id: binding_id.0,
 			credential_reference: account::reference(credential_reference),
 		},
+		CommandOutcome::AuditEpochBegun { epoch } => {
+			wire::CommandResponse::AuditEpochBegun { epoch: epoch.0 }
+		}
 	}
 }
 
@@ -197,6 +201,11 @@ fn plane_status(status: &PlaneStatus, minor: u32) -> wire::PlaneStatus {
 		daemon_starts: status.daemon_starts,
 		started_at_unix_ms: unix_ms(status.started_at),
 		core_version: status.core_version.into(),
+		// A client that negotiated an older minor does not name the
+		// Security audit, so it is not told about its state either
+		// (ADR-0019).
+		security: (minor >= wire::SECURITY_AUDIT_MINOR)
+			.then(|| audit::security(status.security)),
 	}
 }
 

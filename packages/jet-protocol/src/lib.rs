@@ -33,7 +33,8 @@ pub use artifact::{
 	ArtifactError, ArtifactVerifier, DigestError, Sha256Digest,
 };
 pub use audit::{
-	AuditEntry, AuditOutcome, AuditRisk, AuditTarget, SecurityAudit,
+	AuditBreach, AuditEntry, AuditHead, AuditOutcome, AuditRisk, AuditTarget,
+	SecurityAudit, SecurityState,
 };
 pub use capability::{
 	CapabilityObservation, CapabilitySnapshot, CredentialStoreKind,

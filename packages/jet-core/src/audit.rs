@@ -19,6 +19,7 @@ use jet_store::{
 	AuditOutcome, AuditRecord, AuditRisk, AuditTargetRef, NewAuditRecord,
 	Store, WriteTransaction,
 };
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::account::AccountBindingId;
@@ -41,7 +42,7 @@ pub struct AuditSequence(pub u64);
 
 /// One authority epoch of the audit chain. It changes only when an owner
 /// explicitly carries on past an integrity failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AuditEpoch(pub u64);
 
 /// Durable identity of one audit record.
@@ -69,6 +70,9 @@ pub enum AuditDecision {
 	AuditRetentionChanged,
 	/// The Plane went back to keeping it for the built-in window.
 	AuditRetentionCleared,
+	/// An owner carried on past an integrity failure, beginning an
+	/// authority epoch that records the gap it leaves behind.
+	AuditEpochBegun,
 }
 
 /// What a decision is about. The core turns each one into the durable kind
@@ -162,6 +166,7 @@ impl AuditDecision {
 			Self::GitAutomationCleared => "policy.git_automation_cleared",
 			Self::AuditRetentionChanged => "policy.audit_retention_changed",
 			Self::AuditRetentionCleared => "policy.audit_retention_cleared",
+			Self::AuditEpochBegun => "audit.epoch_begun",
 		}
 	}
 
@@ -178,7 +183,10 @@ impl AuditDecision {
 			| Self::GitAutomationEnabled
 			// Unpinning a policy hands the choice back to the scope above,
 			// which may turn it on.
-			| Self::GitAutomationCleared => AuditRisk::Elevated,
+			| Self::GitAutomationCleared
+			// Beginning an epoch is how a Plane stops vouching for
+			// everything before it.
+			| Self::AuditEpochBegun => AuditRisk::Elevated,
 			// Shortening the window destroys evidence the Plane already
 			// holds, which is the one policy change the audit itself is at
 			// stake in.

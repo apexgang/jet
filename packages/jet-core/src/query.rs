@@ -106,6 +106,7 @@ impl Core {
 		actor.authorize()?;
 		match query {
 			Query::Status => {
+				let security = *self.security.read().await;
 				self.store
 					.read(async |tx| {
 						let plane = tx.plane().await?;
@@ -116,6 +117,7 @@ impl Core {
 							daemon_starts: plane.daemon_starts,
 							started_at: self.started_at,
 							core_version: CORE_VERSION,
+							security,
 						}))
 					})
 					.await
