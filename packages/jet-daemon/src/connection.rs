@@ -331,7 +331,9 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::SECURITY_AUDIT_MINOR,
 			feature: "beginning a Security audit epoch",
 		}),
-		CommandRequest::SetPairingGate { .. } => Some(MinorRequirement {
+		CommandRequest::SetPairingGate { .. }
+		| CommandRequest::OpenPairing { .. }
+		| CommandRequest::ClaimPairing { .. } => Some(MinorRequirement {
 			minor: jet_protocol::PAIRING_MINOR,
 			feature: "Pairing Commands",
 		}),

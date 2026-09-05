@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::account::{AccountBinding, CredentialReference, CredentialSource};
-use crate::pairing::PairingGate;
+use crate::pairing::{
+	ClientPublicKey, PairingDisclosure, PairingGate, PairingMethod,
+	PendingPairing,
+};
 use crate::setting::{SettingKey, SettingScope, SettingValue};
 
 /// Opaque token for continuing one fenced keyset snapshot page.
@@ -165,6 +168,21 @@ pub enum CommandRequest {
 		/// Where to leave the gate.
 		gate: PairingGate,
 	},
+	/// Issue the Plane's one Pairing offer, replacing whatever it had open,
+	/// and disclose its one-time secret to the owner who asked for it.
+	OpenPairing {
+		/// How the secret reaches the person pairing.
+		method: PairingMethod,
+	},
+	/// Claim the open Pairing offer with the secret a person presented and
+	/// the public key of the Client identity presenting it.
+	ClaimPairing {
+		/// The secret as it was presented.
+		secret: String,
+		/// The durable public key that becomes the credential once Pairing
+		/// completes.
+		key: ClientPublicKey,
+	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -218,6 +236,23 @@ pub enum CommandResponse {
 	PairingGateSet {
 		/// The gate as the Plane now records it.
 		gate: PairingGate,
+	},
+	/// The Pairing offer the Plane now has open, and its one-time secret as
+	/// it is disclosed once.
+	PairingOpened {
+		/// The offer, without the secret it was issued with.
+		pending: PendingPairing,
+		/// The secret, in the form the owner hands it over in.
+		disclosure: PairingDisclosure,
+	},
+	/// The Pairing offer after a client claimed it, and the fresh challenge
+	/// that client's key signs to complete the Pairing.
+	PairingClaimed {
+		/// The offer, now waiting for the people at both ends.
+		pending: PendingPairing,
+		/// The challenge to sign, as 64 lowercase hexadecimal characters.
+		#[serde(with = "crate::hex")]
+		challenge: [u8; 32],
 	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {

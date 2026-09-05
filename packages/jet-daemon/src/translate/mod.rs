@@ -17,9 +17,9 @@ use jet_core::{
 	AccountBindingId, Actor, AuditSequence, Command, CommandOutcome,
 	ConflictState, Conversation, ConversationId, ConversationList,
 	ConversationSnapshot, CoreError, ErrorCategory, Event, EventPage,
-	EventPayload, EventSequence, PlaneStatus, ProviderId, Query, QueryResult,
-	RecoveryAction, RetentionPolicy, Revision, RevisionConflict, Run, RunId,
-	RunLifecycle,
+	EventPayload, EventSequence, PairingSecret, PlaneStatus, ProviderId, Query,
+	QueryResult, RecoveryAction, RetentionPolicy, Revision, RevisionConflict,
+	Run, RunId, RunLifecycle,
 };
 use jet_protocol as wire;
 
@@ -150,6 +150,15 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 				gate: pairing::gate_from_wire(*gate),
 			}
 		}
+		wire::CommandRequest::OpenPairing { method } => Command::OpenPairing {
+			method: pairing::method_from_wire(method),
+		},
+		wire::CommandRequest::ClaimPairing { secret, key } => {
+			Command::ClaimPairing {
+				secret: PairingSecret(secret.clone()),
+				key: pairing::key_from_wire(key),
+			}
+		}
 		wire::CommandRequest::TransitionRun {
 			run_id,
 			expected_revision,
@@ -204,6 +213,19 @@ pub(crate) fn command_outcome(
 		CommandOutcome::PairingGateSet { gate } => {
 			wire::CommandResponse::PairingGateSet {
 				gate: pairing::gate(gate),
+			}
+		}
+		CommandOutcome::PairingOpened {
+			pending,
+			disclosure,
+		} => wire::CommandResponse::PairingOpened {
+			pending: pairing::pending(pending),
+			disclosure: pairing::disclosure(disclosure),
+		},
+		CommandOutcome::PairingClaimed { pending, challenge } => {
+			wire::CommandResponse::PairingClaimed {
+				pending: pairing::pending(pending),
+				challenge: challenge.0,
 			}
 		}
 	}

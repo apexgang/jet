@@ -2,12 +2,12 @@
 
 use jet_protocol::{
 	AccountBinding, AccountBindingList, CapabilityObservation,
-	CapabilitySnapshot, CommandRequest, CommandResponse, Conversation,
-	ConversationList, ConversationSnapshot, CredentialReference,
-	CredentialSource, EventPage, PageCursor, PairingGate, PairingSnapshot,
-	PlaneStatus, QueryRequest, QueryResponse, RetentionPolicy, Run,
-	RunLifecycle, SecurityAudit, SettingKey, SettingScope, SettingSelection,
-	SettingSnapshot, SettingValue,
+	CapabilitySnapshot, ClientPublicKey, CommandRequest, CommandResponse,
+	Conversation, ConversationList, ConversationSnapshot, CredentialReference,
+	CredentialSource, EventPage, PageCursor, PairingDisclosure, PairingGate,
+	PairingMethod, PairingSnapshot, PendingPairing, PlaneStatus, QueryRequest,
+	QueryResponse, RetentionPolicy, Run, RunLifecycle, SecurityAudit,
+	SettingKey, SettingScope, SettingSelection, SettingSnapshot, SettingValue,
 };
 use uuid::Uuid;
 
@@ -169,7 +169,9 @@ impl Client {
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -230,7 +232,9 @@ impl Client {
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
 			| CommandResponse::AuditEpochBegun { .. }
-			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -261,7 +265,9 @@ impl Client {
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
 			| CommandResponse::AuditEpochBegun { .. }
-			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -299,7 +305,9 @@ impl Client {
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
 			| CommandResponse::AuditEpochBegun { .. }
-			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -364,7 +372,9 @@ impl Client {
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
 			| CommandResponse::AuditEpochBegun { .. }
-			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -397,7 +407,9 @@ impl Client {
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
 			| CommandResponse::AuditEpochBegun { .. }
-			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -510,7 +522,9 @@ impl Client {
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountUnbound { .. }
 			| CommandResponse::AuditEpochBegun { .. }
-			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -547,7 +561,9 @@ impl Client {
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AuditEpochBegun { .. }
-			| CommandResponse::PairingGateSet { .. }) => Err(unexpected(&other)),
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }) => Err(unexpected(&other)),
 		}
 	}
 
@@ -606,7 +622,95 @@ impl Client {
 			| CommandResponse::SettingCleared { .. }
 			| CommandResponse::AccountBound(_)
 			| CommandResponse::AccountUnbound { .. }
-			| CommandResponse::AuditEpochBegun { .. }) => Err(unexpected(&other)),
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Issues the Plane's one Pairing offer under the Command identity
+	/// `command_id`, which a retry must reuse (ADR-0093), and returns it
+	/// beside the one-time secret to hand over.
+	///
+	/// The secret is disclosed once: a retry is answered with the same
+	/// offer and [`PairingDisclosure::AlreadyDisclosed`], because the
+	/// receipt that makes the retry idempotent outlives the secret
+	/// (ADR-0017).
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the Pairing gate is closed or
+	/// the endpoint is not an endpoint, or the transport failure otherwise.
+	pub async fn open_pairing(
+		&self,
+		command_id: Uuid,
+		method: PairingMethod,
+	) -> Result<(PendingPairing, PairingDisclosure), ClientError> {
+		self.require_minor(jet_protocol::PAIRING_MINOR)?;
+		match self
+			.execute_command(command_id, CommandRequest::OpenPairing { method })
+			.await?
+		{
+			CommandResponse::PairingOpened {
+				pending,
+				disclosure,
+			} => Ok((pending, disclosure)),
+			other @ (CommandResponse::ConversationCreated(_)
+			| CommandResponse::RunCreated(_)
+			| CommandResponse::RunTransitioned(_)
+			| CommandResponse::SettingSet { .. }
+			| CommandResponse::SettingCleared { .. }
+			| CommandResponse::AccountBound(_)
+			| CommandResponse::AccountUnbound { .. }
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingClaimed { .. }) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Claims the Plane's open Pairing offer with the secret a person
+	/// presented and this installation's public key, under the Command
+	/// identity `command_id`, which a retry must reuse (ADR-0093).
+	///
+	/// The answer carries the offer, whose progress now holds the
+	/// authentication string to display, and the fresh challenge this
+	/// installation's key signs to complete the Pairing (ADR-0090).
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when no offer is open, the offer is
+	/// over or already claimed, or the secret does not match, or the
+	/// transport failure otherwise.
+	pub async fn claim_pairing(
+		&self,
+		command_id: Uuid,
+		secret: &str,
+		key: ClientPublicKey,
+	) -> Result<(PendingPairing, [u8; 32]), ClientError> {
+		self.require_minor(jet_protocol::PAIRING_MINOR)?;
+		match self
+			.execute_command(
+				command_id,
+				CommandRequest::ClaimPairing {
+					secret: secret.into(),
+					key,
+				},
+			)
+			.await?
+		{
+			CommandResponse::PairingClaimed { pending, challenge } => {
+				Ok((pending, challenge))
+			}
+			other @ (CommandResponse::ConversationCreated(_)
+			| CommandResponse::RunCreated(_)
+			| CommandResponse::RunTransitioned(_)
+			| CommandResponse::SettingSet { .. }
+			| CommandResponse::SettingCleared { .. }
+			| CommandResponse::AccountBound(_)
+			| CommandResponse::AccountUnbound { .. }
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }) => Err(unexpected(&other)),
 		}
 	}
 }

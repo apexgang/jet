@@ -26,7 +26,7 @@ use crate::account::AccountBindingId;
 use crate::command::Command;
 use crate::conversation::ConversationId;
 use crate::error::CoreError;
-use crate::pairing;
+use crate::pairing::{self, PairingOfferId};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
 use crate::{Actor, PlaneId, ProjectId, system_time};
 
@@ -80,6 +80,14 @@ pub enum AuditDecision {
 	PairingGateOpened,
 	/// It stopped accepting them. The clients already Paired are unaffected.
 	PairingGateClosed,
+	/// The Plane issued a Pairing offer, so a client that presents its
+	/// secret in the next two minutes can take control of it (ADR-0017).
+	PairingOffered,
+	/// A client presented that secret and its durable public key.
+	PairingClaimed,
+	/// An offer was killed after too many wrong secrets, which is what an
+	/// attempt to guess one looks like.
+	PairingOfferInvalidated,
 }
 
 /// What a decision is about. The core turns each one into the durable kind
@@ -94,6 +102,8 @@ pub(crate) enum AuditSubject {
 	Conversation(ConversationId),
 	/// One Account binding.
 	AccountBinding(AccountBindingId),
+	/// One Pairing offer.
+	PairingOffer(PairingOfferId),
 }
 
 /// One decision to record beside the change that carried it out.
@@ -192,6 +202,9 @@ impl AuditDecision {
 			Self::AuditEpochBegun => "audit.epoch_begun",
 			Self::PairingGateOpened => "pairing.gate_opened",
 			Self::PairingGateClosed => "pairing.gate_closed",
+			Self::PairingOffered => "pairing.offered",
+			Self::PairingClaimed => "pairing.claimed",
+			Self::PairingOfferInvalidated => "pairing.offer_invalidated",
 		}
 	}
 
@@ -213,8 +226,12 @@ impl AuditDecision {
 			// everything before it.
 			| Self::AuditEpochBegun
 			// An open gate is the window in which an unknown client can
-			// come to control the Plane.
-			| Self::PairingGateOpened => AuditRisk::Elevated,
+			// come to control the Plane, and an offer is that window
+			// standing open with a secret in it.
+			| Self::PairingGateOpened
+			| Self::PairingOffered
+			| Self::PairingClaimed
+			| Self::PairingOfferInvalidated => AuditRisk::Elevated,
 			// Shortening the window destroys evidence the Plane already
 			// holds, which is the one policy change the audit itself is at
 			// stake in.
@@ -246,6 +263,7 @@ impl AuditSubject {
 			Self::Project(_) => "project",
 			Self::Conversation(_) => "conversation",
 			Self::AccountBinding(_) => "account_binding",
+			Self::PairingOffer(_) => "pairing_offer",
 		}
 	}
 
@@ -254,7 +272,8 @@ impl AuditSubject {
 			Self::Plane => None,
 			Self::Project(ProjectId(id))
 			| Self::Conversation(ConversationId(id))
-			| Self::AccountBinding(AccountBindingId(id)) => Some(id.to_string()),
+			| Self::AccountBinding(AccountBindingId(id))
+			| Self::PairingOffer(PairingOfferId(id)) => Some(id.to_string()),
 		}
 	}
 }
@@ -271,6 +290,8 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::SetSetting { key, value, .. } => stored_setting(*key, value),
 		Command::ClearSetting { key, .. } => cleared_setting(*key),
 		Command::SetPairingGate { gate } => Some(pairing::gate_decision(*gate)),
+		Command::OpenPairing { .. } => Some(AuditDecision::PairingOffered),
+		Command::ClaimPairing { .. } => Some(AuditDecision::PairingClaimed),
 		Command::BeginAuditEpoch
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
@@ -293,6 +314,8 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		Command::BindAccount { .. }
 		| Command::BeginAuditEpoch
 		| Command::SetPairingGate { .. }
+		| Command::OpenPairing { .. }
+		| Command::ClaimPairing { .. }
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::TransitionRun { .. } => AuditSubject::Plane,

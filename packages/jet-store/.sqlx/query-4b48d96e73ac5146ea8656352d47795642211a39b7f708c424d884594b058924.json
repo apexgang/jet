@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO pairing_offers\n\t\t\t\t(singleton, offer_id, method, endpoint, secret_salt,\n\t\t\t\t secret_digest, state, failed_attempts, opened_by,\n\t\t\t\t opened_at_unix_ms, expires_at_unix_ms)\n\t\t\t VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8, ?9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "4b48d96e73ac5146ea8656352d47795642211a39b7f708c424d884594b058924"
+}

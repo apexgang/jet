@@ -4,8 +4,8 @@
 
 use jet_store::{
 	EffectKindRecord, EffectSafetyRecord, NewCommandReceipt, NewConversation,
-	NewEffect, NewRun, PairingGate, RetentionPolicy, RunLifecycle,
-	SettingRecord, WriteTransaction,
+	NewEffect, NewRun, PairingGate, PairingMethod, RetentionPolicy,
+	RunLifecycle, SettingRecord, WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -23,7 +23,11 @@ use crate::command_receipt::{
 use crate::conversation::{Conversation, ConversationId, Revision, Run, RunId};
 use crate::error::{ConflictState, CoreError, RevisionConflict};
 use crate::event::{EventKind, EventSubject};
-use crate::pairing;
+use crate::pairing::{
+	self, ClientPublicKey, PairingChallenge, PairingDisclosure, PairingSecret,
+	PendingPairing,
+};
+use crate::pairing_offer;
 use crate::security::{self, SecurityClass, SecurityState};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
 use crate::{Actor, Core, lifecycle};
@@ -146,6 +150,22 @@ pub enum Command {
 		/// Where to leave the gate.
 		gate: PairingGate,
 	},
+	/// Issue this Plane's one Pairing offer, replacing whatever it had
+	/// open, and disclose its one-time secret to the owner who asked for it
+	/// (ADR-0017).
+	OpenPairing {
+		/// How the secret reaches the person pairing.
+		method: PairingMethod,
+	},
+	/// Claim the open Pairing offer with the secret a person presented and
+	/// the public key of the Client identity presenting it.
+	ClaimPairing {
+		/// The secret as it was presented.
+		secret: PairingSecret,
+		/// The durable public key that becomes the credential once Pairing
+		/// completes.
+		key: ClientPublicKey,
+	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -176,6 +196,8 @@ impl Command {
 			| Self::UnbindAccount { .. }
 			| Self::BeginAuditEpoch
 			| Self::SetPairingGate { .. }
+			| Self::OpenPairing { .. }
+			| Self::ClaimPairing { .. }
 			| Self::CreateConversation { .. }
 			| Self::CreateRun { .. }
 			| Self::SetSetting { .. }
@@ -227,6 +249,22 @@ pub enum CommandOutcome {
 	PairingGateSet {
 		/// The gate as the Plane now records it.
 		gate: PairingGate,
+	},
+	/// The Pairing offer the Plane now has open, and its one-time secret as
+	/// it is disclosed once.
+	PairingOpened {
+		/// The offer, without the secret it was issued with.
+		pending: PendingPairing,
+		/// The secret, in the form the owner hands it over in.
+		disclosure: PairingDisclosure,
+	},
+	/// The Pairing offer after a client claimed it, and the fresh challenge
+	/// that client's key signs to complete the Pairing.
+	PairingClaimed {
+		/// The offer, now waiting for the people at both ends.
+		pending: PendingPairing,
+		/// The challenge to sign.
+		challenge: PairingChallenge,
 	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {
@@ -330,7 +368,7 @@ impl Core {
 					request_digest,
 					recorded_at_unix_ms,
 					outcome_version: OUTCOME_VERSION,
-					outcome: encode_result(&result)?,
+					outcome: encode_result(&for_receipt(&result))?,
 				})
 				.await?;
 				Ok(result)
@@ -343,6 +381,38 @@ impl Core {
 				SecurityState::of(self.store.validate_audit().await?);
 		}
 		Ok(outcome)
+	}
+}
+
+/// What the durable receipt keeps of a Command's result.
+///
+/// Everything, except a secret the Plane discloses once: the receipt
+/// outlives the offer it belongs to by thirty days (ADR-0093), and a
+/// pairing code that lived for two minutes has no business being there.
+/// The retry is answered with the offer, and its owner opens another one.
+fn for_receipt(
+	result: &Result<CommandOutcome, CoreError>,
+) -> Result<CommandOutcome, CoreError> {
+	match result {
+		Ok(CommandOutcome::PairingOpened { pending, .. }) => {
+			Ok(CommandOutcome::PairingOpened {
+				pending: pending.clone(),
+				disclosure: PairingDisclosure::AlreadyDisclosed,
+			})
+		}
+		Ok(
+			outcome @ (CommandOutcome::ConversationCreated(_)
+			| CommandOutcome::RunCreated(_)
+			| CommandOutcome::RunTransitioned(_)
+			| CommandOutcome::SettingSet { .. }
+			| CommandOutcome::SettingCleared { .. }
+			| CommandOutcome::AccountBound(_)
+			| CommandOutcome::AccountUnbound { .. }
+			| CommandOutcome::AuditEpochBegun { .. }
+			| CommandOutcome::PairingGateSet { .. }
+			| CommandOutcome::PairingClaimed { .. }),
+		) => Ok(outcome.clone()),
+		Err(error) => Err(error.clone()),
 	}
 }
 
@@ -394,6 +464,12 @@ async fn execute_new(
 		}
 		Command::SetPairingGate { gate } => {
 			pairing::set_gate(tx, actor, gate, now_unix_ms).await
+		}
+		Command::OpenPairing { method } => {
+			pairing_offer::open(tx, actor, method, now_unix_ms).await
+		}
+		Command::ClaimPairing { secret, key } => {
+			pairing_offer::claim(tx, actor, secret, key, now_unix_ms).await
 		}
 		Command::TransitionRun {
 			run_id,

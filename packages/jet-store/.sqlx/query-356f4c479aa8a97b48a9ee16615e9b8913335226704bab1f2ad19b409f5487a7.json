@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE pairing_offers\n\t\t\t SET state = ?1, invalidation = ?2\n\t\t\t WHERE singleton = 1 AND state <> ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "356f4c479aa8a97b48a9ee16615e9b8913335226704bab1f2ad19b409f5487a7"
+}

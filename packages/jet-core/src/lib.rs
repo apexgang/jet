@@ -23,6 +23,8 @@ mod event;
 mod lifecycle;
 mod pagination;
 mod pairing;
+mod pairing_offer;
+mod pairing_secret;
 mod query;
 mod security;
 mod setting;
@@ -70,9 +72,13 @@ pub use event::{
 pub use jet_store::{AuditBreach, AuditHead};
 pub use jet_store::{
 	AuditEntryHash, AuditOutcome, AuditRisk, AuditTargetRef, PairingGate,
-	RetentionPolicy, RunLifecycle,
+	PairingKeyAlgorithm, PairingMethod, RetentionPolicy, RunLifecycle,
 };
-pub use pairing::PairingSnapshot;
+pub use pairing::{
+	AuthenticationString, ClientPublicKey, PairingChallenge, PairingDisclosure,
+	PairingEnd, PairingOfferId, PairingProgress, PairingSecret,
+	PairingSnapshot, PendingPairing,
+};
 pub use query::{Query, QueryResult};
 pub use security::{SecurityDegradation, SecurityState};
 pub use setting::{
@@ -85,7 +91,7 @@ pub use status::PlaneStatus;
 pub(crate) const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Durable identity of one Jet installation (see `Client identity`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ClientId(pub Uuid);
 
 /// Durable identity of one Plane.
@@ -119,6 +125,13 @@ impl Actor {
 	fn authorize(&self) -> Result<(), CoreError> {
 		match self {
 			Self::InteractiveClient { .. } => Ok(()),
+		}
+	}
+
+	/// The Client identity this Actor acts through.
+	pub(crate) fn client_id(&self) -> ClientId {
+		match self {
+			Self::InteractiveClient { client_id } => *client_id,
 		}
 	}
 
@@ -297,3 +310,7 @@ mod security_tests;
 #[cfg(test)]
 #[path = "pairing_tests.rs"]
 mod pairing_tests;
+
+#[cfg(test)]
+#[path = "pairing_offer_tests.rs"]
+mod pairing_offer_tests;

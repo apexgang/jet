@@ -13,7 +13,7 @@ use crate::conversation::{
 };
 use crate::error::CoreError;
 use crate::event::{EVENT_PAGE_LIMIT, Event, EventPage, EventSequence};
-use crate::pairing::PairingSnapshot;
+use crate::pairing::{self, PairingSnapshot};
 use crate::setting::{self, SettingScope, SettingSelection, SettingSnapshot};
 use crate::status::PlaneStatus;
 use crate::{Actor, CORE_VERSION, Core, PlaneId};
@@ -184,14 +184,20 @@ impl Core {
 					.await
 			}
 			Query::Pairing => {
-				// ASVS 2.3.3: the gate and the position that fences it come
-				// from one SQLite snapshot.
+				let now_unix_ms = self.now_unix_ms();
+				// ASVS 2.3.3: the gate, the offer, and the position that
+				// fences them come from one SQLite snapshot.
 				self.store
 					.read(async |tx| {
 						let cursor = EventSequence(tx.event_cursor().await?);
+						let gate = tx.pairing_gate().await?;
+						let offer = tx.pairing_offer().await?;
 						Ok(QueryResult::Pairing(PairingSnapshot {
 							cursor,
-							gate: tx.pairing_gate().await?,
+							gate,
+							pending: offer.as_ref().map(|record| {
+								pairing::pending(record, now_unix_ms)
+							}),
 						}))
 					})
 					.await

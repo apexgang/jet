@@ -3,8 +3,8 @@
 use std::time::SystemTime;
 
 use jet_store::{
-	EventClass, EventRecord, NewEvent, PairingGate, RetentionPolicy,
-	RunLifecycle,
+	EventClass, EventRecord, NewEvent, PairingGate, PairingMethod,
+	RetentionPolicy, RunLifecycle,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -13,8 +13,9 @@ use crate::account::{AccountBindingId, CredentialSource, ProviderId};
 use crate::audit::AuditEpoch;
 use crate::conversation::{ConversationId, RunId};
 use crate::error::CoreError;
+use crate::pairing::{PairingEnd, PairingOfferId};
 use crate::setting::{SettingKey, SettingScope, SettingValue};
-use crate::{Actor, system_time};
+use crate::{Actor, ClientId, system_time};
 
 /// Most Events one `Query::Events` page returns.
 pub(crate) const EVENT_PAGE_LIMIT: usize = 256;
@@ -168,6 +169,33 @@ pub enum EventKind {
 		/// Where the owner left the gate.
 		gate: PairingGate,
 	},
+	/// The Plane issued a Pairing offer, replacing whatever it had open
+	/// (ADR-0017). The Event names the offer and how its secret was handed
+	/// over; no part of the secret itself is recorded.
+	#[serde(rename = "pairing.offered")]
+	PairingOffered {
+		/// The offer that was made.
+		offer_id: PairingOfferId,
+		/// How its secret reached the person pairing.
+		method: PairingMethod,
+	},
+	/// A GUI client presented the offer's secret and its durable public
+	/// key. The Pairing now waits for the people at both ends.
+	#[serde(rename = "pairing.claimed")]
+	PairingClaimed {
+		/// The offer that was claimed.
+		offer_id: PairingOfferId,
+		/// The Client identity that claimed it.
+		client_id: ClientId,
+	},
+	/// A Pairing offer stopped being usable before it completed.
+	#[serde(rename = "pairing.offer_ended")]
+	PairingOfferEnded {
+		/// The offer that ended.
+		offer_id: PairingOfferId,
+		/// Why it ended.
+		reason: PairingEnd,
+	},
 	/// A Run moved to a later lifecycle state.
 	#[serde(rename = "run.lifecycle_changed")]
 	RunLifecycleChanged {
@@ -202,7 +230,10 @@ impl EventKind {
 			| Self::AccountBound { .. }
 			| Self::AccountUnbound { .. }
 			| Self::AuditEpochBegun { .. }
-			| Self::PairingGateChanged { .. } => {
+			| Self::PairingGateChanged { .. }
+			| Self::PairingOffered { .. }
+			| Self::PairingClaimed { .. }
+			| Self::PairingOfferEnded { .. } => {
 				let encoded = serde_json::to_value(self).map_err(|error| {
 					CoreError::internal("event.unencodable", error.to_string())
 				})?;

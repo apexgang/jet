@@ -15,6 +15,10 @@ use crate::conversation::{
 };
 use crate::event::{Actor, Event};
 use crate::handshake::{ClientHello, ServerHello, VersionRange};
+use crate::pairing::{
+	ClientPublicKey, PairingGate, PairingKeyAlgorithm, PairingMethod,
+	PairingProgress, PairingSnapshot, PendingPairing,
+};
 use crate::{ControlError, decode_control};
 
 fn json(value: &impl serde::Serialize) -> String {
@@ -425,5 +429,75 @@ fn a_whole_number_setting_value_has_the_agreed_wire_shape() {
 	assert_eq!(
 		json(&crate::setting::SettingValue::Count(365)),
 		r#"{"type":"count","value":365}"#
+	);
+}
+
+#[test]
+fn pairing_commands_and_snapshots_have_the_agreed_wire_shape() {
+	let claim = CommandRequest::ClaimPairing {
+		secret: "1234-5678".into(),
+		key: ClientPublicKey {
+			algorithm: PairingKeyAlgorithm::Ed25519,
+			key: [17; 32],
+		},
+	};
+	let snapshot = QueryResponse::Pairing(PairingSnapshot {
+		cursor: 4,
+		gate: PairingGate::Open,
+		pending: Some(PendingPairing {
+			offer_id: Uuid::nil(),
+			method: PairingMethod::QrPayload {
+				endpoint: "alex@studio.example".into(),
+			},
+			progress: PairingProgress::AwaitingConfirmation {
+				client_id: Uuid::nil(),
+				authentication_string: "418-273".into(),
+			},
+			attempts_remaining: 5,
+			opened_at_unix_ms: 1,
+			expires_at_unix_ms: 121,
+		}),
+	});
+
+	assert_eq!(
+		(json(&claim), json(&snapshot)),
+		(
+			r#"{"type":"claim_pairing","secret":"1234-5678","key":{"algorithm":"ed25519","key":"1111111111111111111111111111111111111111111111111111111111111111"}}"#.to_owned(),
+			r#"{"type":"pairing","cursor":"4","gate":"open","pending":{"offer_id":"00000000-0000-0000-0000-000000000000","method":{"method":"qr_payload","endpoint":"alex@studio.example"},"progress":{"progress":"awaiting_confirmation","client_id":"00000000-0000-0000-0000-000000000000","authentication_string":"418-273"},"attempts_remaining":5,"opened_at_unix_ms":1,"expires_at_unix_ms":121}}"#.to_owned()
+		)
+	);
+}
+
+/// A key crosses as lowercase hexadecimal of exactly the width its
+/// algorithm fixes, so one key has one encoding and anything else is a
+/// protocol error rather than something the Plane decides about later.
+#[test]
+fn only_lowercase_hexadecimal_of_the_fixed_width_is_a_key() {
+	let claim = |key: &str| {
+		format!(
+			r#"{{"kind":"command","id":1,"command_id":"00000000-0000-0000-0000-000000000000","command":{{"type":"claim_pairing","secret":"1234-5678","key":{{"algorithm":"ed25519","key":"{key}"}}}}}}"#
+		)
+	};
+	let lowercase =
+		"1111111111111111111111111111111111111111111111111111111111111111";
+	let uppercase =
+		"AAAA111111111111111111111111111111111111111111111111111111111111";
+	let short = "1111";
+
+	let accepted = decode_control::<ClientMessage>(claim(lowercase).as_bytes());
+	let refused = [
+		decode_control::<ClientMessage>(claim(uppercase).as_bytes()),
+		decode_control::<ClientMessage>(claim(short).as_bytes()),
+	];
+
+	assert_eq!(
+		(
+			accepted.is_ok(),
+			refused.iter().all(|result| matches!(
+				result,
+				Err(ControlError::Malformed(_))
+			))
+		),
+		(true, true)
 	);
 }

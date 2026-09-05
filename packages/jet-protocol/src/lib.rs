@@ -19,6 +19,7 @@ mod decimal;
 mod event;
 mod frame;
 mod handshake;
+mod hex;
 mod message;
 mod pairing;
 mod setting;
@@ -67,7 +68,11 @@ pub use message::{
 	QueryResponse, RecoveryAction, RequestId, RestartMetadata, ServerMessage,
 	WireError, raw_command,
 };
-pub use pairing::{PairingGate, PairingSnapshot};
+pub use pairing::{
+	ClientPublicKey, PairingDisclosure, PairingEnd, PairingGate,
+	PairingKeyAlgorithm, PairingMethod, PairingProgress, PairingSnapshot,
+	PendingPairing,
+};
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,
 	SettingSnapshot, SettingSource, SettingValue,

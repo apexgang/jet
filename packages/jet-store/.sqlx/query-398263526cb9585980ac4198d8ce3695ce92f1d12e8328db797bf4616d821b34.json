@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE pairing_offers\n\t\t\t SET state = ?1, claimed_by = ?2, key_algorithm = ?3,\n\t\t\t\t public_key = ?4, challenge = ?5, authentication_string = ?6,\n\t\t\t\t expires_at_unix_ms = ?7\n\t\t\t WHERE singleton = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "398263526cb9585980ac4198d8ce3695ce92f1d12e8328db797bf4616d821b34"
+}

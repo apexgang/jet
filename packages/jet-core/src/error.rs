@@ -262,6 +262,24 @@ impl CoreError {
 		}
 	}
 
+	/// A stable refusal because something the Plane depends on could not
+	/// answer. The native detail stays local (ADR-0061, ADR-0068).
+	pub(crate) fn unavailable(
+		code: &'static str,
+		message: impl Into<String>,
+		detail: impl Into<String>,
+	) -> Self {
+		Self {
+			category: ErrorCategory::Unavailable,
+			code: code.into(),
+			retryable: true,
+			message: message.into(),
+			detail: Some(detail.into()),
+			revision_conflict: None,
+			recovery_actions: vec![],
+		}
+	}
+
 	pub(crate) fn internal(
 		code: &'static str,
 		detail: impl Into<String>,
