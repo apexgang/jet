@@ -7,8 +7,10 @@ use jet_core::{
 	Actor, Command, CommandOutcome, ConflictState, Conversation,
 	ConversationId, ConversationList, ConversationSnapshot, CoreError,
 	ErrorCategory, Event, EventPage, EventPayload, EventSequence, PlaneStatus,
-	Query, QueryResult, RecoveryAction, RetentionPolicy, Revision,
-	RevisionConflict, Run, RunId, RunLifecycle,
+	ProjectId, Query, QueryResult, RecoveryAction, ResolvedSetting,
+	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
+	SettingKey, SettingScope, SettingSelection, SettingSnapshot, SettingSource,
+	SettingValue,
 };
 use jet_protocol as wire;
 
@@ -31,6 +33,10 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 				conversation_id: ConversationId(*conversation_id),
 			}
 		}
+		wire::QueryRequest::Settings { scope, selection } => Query::Settings {
+			scope: setting_scope_from_wire(*scope),
+			selection: setting_selection_from_wire(*selection),
+		},
 		wire::QueryRequest::Events { after } => Query::Events {
 			after: EventSequence(*after),
 		},
@@ -51,6 +57,9 @@ pub(crate) fn query_result(
 		QueryResult::Conversation(snapshot) => {
 			wire::QueryResponse::Conversation(conversation_snapshot(&snapshot))
 		}
+		QueryResult::Settings(snapshot) => {
+			wire::QueryResponse::Settings(setting_snapshot(snapshot))
+		}
 		QueryResult::Events(page) => {
 			wire::QueryResponse::Events(event_page(&page)?)
 		}
@@ -58,15 +67,28 @@ pub(crate) fn query_result(
 }
 
 pub(crate) fn command(request: &wire::CommandRequest) -> Command {
-	match *request {
+	match request {
 		wire::CommandRequest::CreateConversation { retention } => {
 			Command::CreateConversation {
-				retention: retention_from_wire(retention),
+				retention: retention_from_wire(*retention),
 			}
 		}
 		wire::CommandRequest::CreateRun { conversation_id } => {
 			Command::CreateRun {
-				conversation_id: ConversationId(conversation_id),
+				conversation_id: ConversationId(*conversation_id),
+			}
+		}
+		wire::CommandRequest::SetSetting { key, scope, value } => {
+			Command::SetSetting {
+				key: setting_key_from_wire(*key),
+				scope: setting_scope_from_wire(*scope),
+				value: setting_value_from_wire(value.clone()),
+			}
+		}
+		wire::CommandRequest::ClearSetting { key, scope } => {
+			Command::ClearSetting {
+				key: setting_key_from_wire(*key),
+				scope: setting_scope_from_wire(*scope),
 			}
 		}
 		wire::CommandRequest::TransitionRun {
@@ -74,9 +96,9 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 			expected_revision,
 			lifecycle,
 		} => Command::TransitionRun {
-			run_id: RunId(run_id),
-			expected_revision: Revision(expected_revision),
-			lifecycle: lifecycle_from_wire(lifecycle),
+			run_id: RunId(*run_id),
+			expected_revision: Revision(*expected_revision),
+			lifecycle: lifecycle_from_wire(*lifecycle),
 		},
 	}
 }
@@ -93,6 +115,117 @@ pub(crate) fn command_outcome(
 		}
 		CommandOutcome::RunTransitioned(transitioned) => {
 			wire::CommandResponse::RunTransitioned(run(&transitioned))
+		}
+		CommandOutcome::SettingSet { key, scope, value } => {
+			wire::CommandResponse::SettingSet {
+				key: setting_key(key),
+				scope: setting_scope(scope),
+				value: setting_value(value),
+			}
+		}
+		CommandOutcome::SettingCleared { key, scope } => {
+			wire::CommandResponse::SettingCleared {
+				key: setting_key(key),
+				scope: setting_scope(scope),
+			}
+		}
+	}
+}
+
+fn setting_snapshot(snapshot: SettingSnapshot) -> wire::SettingSnapshot {
+	wire::SettingSnapshot {
+		cursor: snapshot.cursor.0,
+		scope: setting_scope(snapshot.scope),
+		settings: snapshot.settings.into_iter().map(setting).collect(),
+	}
+}
+
+fn setting(resolved: ResolvedSetting) -> wire::ResolvedSetting {
+	wire::ResolvedSetting {
+		key: setting_key(resolved.key),
+		value: setting_value(resolved.value),
+		source: match resolved.source {
+			SettingSource::BuiltIn => wire::SettingSource::BuiltIn,
+			SettingSource::Scope(scope) => wire::SettingSource::Scope {
+				scope: setting_scope(scope),
+			},
+		},
+	}
+}
+
+fn setting_key(key: SettingKey) -> wire::SettingKey {
+	match key {
+		SettingKey::UtilityAutomaticNaming => {
+			wire::SettingKey::UtilityAutomaticNaming
+		}
+		SettingKey::GitAutoCommit => wire::SettingKey::GitAutoCommit,
+		SettingKey::GitMessageInstructions => {
+			wire::SettingKey::GitMessageInstructions
+		}
+	}
+}
+
+fn setting_key_from_wire(key: wire::SettingKey) -> SettingKey {
+	match key {
+		wire::SettingKey::UtilityAutomaticNaming => {
+			SettingKey::UtilityAutomaticNaming
+		}
+		wire::SettingKey::GitAutoCommit => SettingKey::GitAutoCommit,
+		wire::SettingKey::GitMessageInstructions => {
+			SettingKey::GitMessageInstructions
+		}
+	}
+}
+
+fn setting_value(value: SettingValue) -> wire::SettingValue {
+	match value {
+		SettingValue::Flag(flag) => wire::SettingValue::Flag(flag),
+		SettingValue::Text(text) => wire::SettingValue::Text(text),
+	}
+}
+
+fn setting_value_from_wire(value: wire::SettingValue) -> SettingValue {
+	match value {
+		wire::SettingValue::Flag(flag) => SettingValue::Flag(flag),
+		wire::SettingValue::Text(text) => SettingValue::Text(text),
+	}
+}
+
+fn setting_scope(scope: SettingScope) -> wire::SettingScope {
+	match scope {
+		SettingScope::Plane => wire::SettingScope::Plane,
+		SettingScope::Project { project_id } => wire::SettingScope::Project {
+			project_id: project_id.0,
+		},
+		SettingScope::Conversation { conversation_id } => {
+			wire::SettingScope::Conversation {
+				conversation_id: conversation_id.0,
+			}
+		}
+	}
+}
+
+fn setting_scope_from_wire(scope: wire::SettingScope) -> SettingScope {
+	match scope {
+		wire::SettingScope::Plane => SettingScope::Plane,
+		wire::SettingScope::Project { project_id } => SettingScope::Project {
+			project_id: ProjectId(project_id),
+		},
+		wire::SettingScope::Conversation { conversation_id } => {
+			SettingScope::Conversation {
+				conversation_id: ConversationId(conversation_id),
+			}
+		}
+	}
+}
+
+fn setting_selection_from_wire(
+	selection: wire::SettingSelection,
+) -> SettingSelection {
+	match selection {
+		wire::SettingSelection::All => SettingSelection::All,
+		wire::SettingSelection::Key { key } => {
+			SettingSelection::Key(setting_key_from_wire(key))
 		}
 	}
 }

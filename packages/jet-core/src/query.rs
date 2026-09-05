@@ -8,6 +8,7 @@ use crate::conversation::{
 };
 use crate::error::CoreError;
 use crate::event::{EVENT_PAGE_LIMIT, Event, EventPage, EventSequence};
+use crate::setting::{self, SettingScope, SettingSelection, SettingSnapshot};
 use crate::status::PlaneStatus;
 use crate::{Actor, CORE_VERSION, Core, PlaneId};
 
@@ -30,6 +31,13 @@ pub enum Query {
 		/// The Conversation to read.
 		conversation_id: ConversationId,
 	},
+	/// Settings resolved for one scope (ADR-0085).
+	Settings {
+		/// The scope to resolve for; its own values win over the Plane's.
+		scope: SettingScope,
+		/// Which Settings to resolve.
+		selection: SettingSelection,
+	},
 	/// One page of journal Events strictly after a position, with the
 	/// journal cursor the page was read at.
 	Events {
@@ -47,6 +55,8 @@ pub enum QueryResult {
 	Conversations(ConversationList),
 	/// One Conversation with all of its Runs.
 	Conversation(ConversationSnapshot),
+	/// Settings resolved for one scope.
+	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.
 	Events(EventPage),
 }
@@ -105,6 +115,9 @@ impl Core {
 					.read(async |tx| conversation(tx, conversation_id).await)
 					.await
 			}
+			Query::Settings { scope, selection } => {
+				settings(self, scope, selection).await
+			}
 			Query::Events { after } => {
 				self.store
 					.read(async |tx| {
@@ -122,6 +135,29 @@ impl Core {
 			}
 		}
 	}
+}
+
+async fn settings(
+	core: &Core,
+	scope: SettingScope,
+	selection: SettingSelection,
+) -> Result<QueryResult, CoreError> {
+	let keys = selection.keys(scope)?;
+	// ASVS 2.3.3: the resolved values and their Event fence come from one
+	// SQLite snapshot, so a Command committed between them cannot show up
+	// in one and not the other.
+	core.store
+		.read(async |tx| {
+			setting::require_subject(tx, scope).await?;
+			let cursor = EventSequence(tx.event_cursor().await?);
+			let stored = tx.settings_for_scope(scope.record()).await?;
+			Ok(QueryResult::Settings(SettingSnapshot {
+				cursor,
+				scope,
+				settings: setting::resolve(&keys, &stored),
+			}))
+		})
+		.await
 }
 
 async fn first_conversations(core: &Core) -> Result<QueryResult, CoreError> {

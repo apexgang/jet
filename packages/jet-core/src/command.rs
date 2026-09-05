@@ -5,7 +5,7 @@
 use jet_store::{
 	CommandReceiptRecord, EffectKindRecord, EffectSafetyRecord,
 	NewCommandReceipt, NewConversation, NewEffect, NewRun, RetentionPolicy,
-	RunLifecycle, WriteTransaction,
+	RunLifecycle, SettingRecord, WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::conversation::{Conversation, ConversationId, Revision, Run, RunId};
 use crate::error::{ConflictState, CoreError, RevisionConflict};
 use crate::event::{EventKind, EventSubject};
+use crate::setting::{self, SettingKey, SettingScope, SettingValue};
 use crate::{Actor, Core, lifecycle};
 
 const OUTCOME_VERSION: u32 = 1;
@@ -25,7 +26,7 @@ pub struct CommandId(pub Uuid);
 
 /// One Command with the identity and exact request bytes used for retry
 /// safety.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandEnvelope {
 	/// Actor-scoped identity of the Command.
 	command_id: CommandId,
@@ -69,7 +70,7 @@ impl CommandEnvelope {
 }
 
 /// A state-changing request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
 	/// Create a Conversation with no Runs.
 	CreateConversation {
@@ -80,6 +81,23 @@ pub enum Command {
 	CreateRun {
 		/// The Conversation to execute.
 		conversation_id: ConversationId,
+	},
+	/// Store a Setting value at one scope (ADR-0085).
+	SetSetting {
+		/// The Setting to store.
+		key: SettingKey,
+		/// The scope that stores the value.
+		scope: SettingScope,
+		/// The value to store.
+		value: SettingValue,
+	},
+	/// Remove whatever value one scope stores for a Setting, leaving the
+	/// scopes above it untouched.
+	ClearSetting {
+		/// The Setting to clear.
+		key: SettingKey,
+		/// The scope that stops storing a value.
+		scope: SettingScope,
 	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
@@ -93,7 +111,7 @@ pub enum Command {
 }
 
 /// The durable result of a [`Command`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
 	/// The Conversation as created.
 	ConversationCreated(Conversation),
@@ -101,6 +119,22 @@ pub enum CommandOutcome {
 	RunCreated(Run),
 	/// The Run after its transition.
 	RunTransitioned(Run),
+	/// The Setting value the named scope now stores.
+	SettingSet {
+		/// The Setting that was stored.
+		key: SettingKey,
+		/// The scope that stores it.
+		scope: SettingScope,
+		/// The stored value.
+		value: SettingValue,
+	},
+	/// The named scope no longer stores its own value for the Setting.
+	SettingCleared {
+		/// The Setting that was cleared.
+		key: SettingKey,
+		/// The scope that no longer stores a value.
+		scope: SettingScope,
+	},
 }
 
 impl Core {
@@ -233,6 +267,12 @@ async fn execute_new(
 		Command::CreateRun { conversation_id } => {
 			create_run(tx, actor, conversation_id, now_unix_ms).await
 		}
+		Command::SetSetting { key, scope, value } => {
+			set_setting(tx, actor, key, scope, value, now_unix_ms).await
+		}
+		Command::ClearSetting { key, scope } => {
+			clear_setting(tx, actor, key, scope, now_unix_ms).await
+		}
 		Command::TransitionRun {
 			run_id,
 			expected_revision,
@@ -325,6 +365,57 @@ async fn create_run(
 	)?)
 	.await?;
 	Ok(CommandOutcome::RunCreated(run))
+}
+
+async fn set_setting(
+	tx: &mut WriteTransaction,
+	actor: &Actor,
+	key: SettingKey,
+	scope: SettingScope,
+	value: SettingValue,
+	now_unix_ms: i64,
+) -> Result<CommandOutcome, CoreError> {
+	let encoded = setting::prepare_write(key, scope, &value)?;
+	setting::require_subject(tx, scope).await?;
+	tx.upsert_setting(&SettingRecord {
+		key: key.as_str().into(),
+		scope: scope.record(),
+		value: encoded,
+		updated_at_unix_ms: now_unix_ms,
+	})
+	.await?;
+	let event = EventKind::SettingChanged {
+		key,
+		scope,
+		value: value.clone(),
+	};
+	tx.append_event(event.to_record(
+		actor,
+		setting::event_subject(scope),
+		now_unix_ms,
+	)?)
+	.await?;
+	Ok(CommandOutcome::SettingSet { key, scope, value })
+}
+
+async fn clear_setting(
+	tx: &mut WriteTransaction,
+	actor: &Actor,
+	key: SettingKey,
+	scope: SettingScope,
+	now_unix_ms: i64,
+) -> Result<CommandOutcome, CoreError> {
+	setting::prepare_clear(key, scope)?;
+	setting::require_subject(tx, scope).await?;
+	tx.delete_setting(key.as_str(), scope.record()).await?;
+	let event = EventKind::SettingCleared { key, scope };
+	tx.append_event(event.to_record(
+		actor,
+		setting::event_subject(scope),
+		now_unix_ms,
+	)?)
+	.await?;
+	Ok(CommandOutcome::SettingCleared { key, scope })
 }
 
 async fn transition_run(

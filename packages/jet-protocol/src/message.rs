@@ -10,6 +10,7 @@ use crate::conversation::{
 	PageCursor, RevisionConflict,
 };
 use crate::event::Event;
+use crate::setting::{SettingScope, SettingSelection, SettingSnapshot};
 
 /// Correlates a client request with its server reply.
 pub type RequestId = u64;
@@ -99,6 +100,13 @@ pub enum QueryRequest {
 		/// The Conversation to read.
 		conversation_id: Uuid,
 	},
+	/// Settings resolved for one scope.
+	Settings {
+		/// The scope to resolve for; its own values win over the Plane's.
+		scope: SettingScope,
+		/// Which Settings to resolve.
+		selection: SettingSelection,
+	},
 	/// A page of journal Events strictly after a sequence.
 	Events {
 		/// The sequence to resume after, carried as a decimal string
@@ -118,6 +126,8 @@ pub enum QueryResponse {
 	Conversations(ConversationList),
 	/// One Conversation with all of its Runs.
 	Conversation(ConversationSnapshot),
+	/// Settings resolved for one scope.
+	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.
 	Events(EventPage),
 }

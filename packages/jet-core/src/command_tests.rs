@@ -6,27 +6,16 @@ use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
 use crate::clock::Clock;
-use crate::test_support::{actor, start_core};
+use crate::test_support::{
+	actor, command_id, request, request_with_id, start_core,
+};
 use crate::{
-	Command, CommandEnvelope, CommandId, CommandOutcome, Conversation,
-	ConversationId, ConversationSnapshot, Core, CoreError, ErrorCategory,
-	EventKind, EventPage, EventPayload, EventSequence, Query, QueryResult,
-	RetentionPolicy, Revision, Run, RunId, RunLifecycle,
+	Command, CommandEnvelope, CommandOutcome, Conversation, ConversationId,
+	ConversationSnapshot, Core, CoreError, ErrorCategory, EventKind, EventPage,
+	EventPayload, EventSequence, Query, QueryResult, RetentionPolicy, Revision,
+	Run, RunId, RunLifecycle,
 };
 use jet_store::Store;
-
-fn command_id() -> CommandId {
-	CommandId(Uuid::now_v7())
-}
-
-fn request(command: Command) -> CommandEnvelope {
-	request_with_id(command_id(), command)
-}
-
-fn request_with_id(command_id: CommandId, command: Command) -> CommandEnvelope {
-	let bytes = serde_json::to_vec(&command).unwrap();
-	CommandEnvelope::new(command_id, command, &bytes).unwrap()
-}
 
 #[derive(Debug)]
 struct ManualClock(Mutex<SystemTime>);
@@ -359,12 +348,12 @@ async fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 		retention: RetentionPolicy::Retain,
 	};
 	let original = core
-		.execute(&actor(), request_with_id(command_id, command))
+		.execute(&actor(), request_with_id(command_id, command.clone()))
 		.await
 		.unwrap();
 	clock.advance(Duration::from_hours(30 * 24));
 	let within_window = core
-		.execute(&actor(), request_with_id(command_id, command))
+		.execute(&actor(), request_with_id(command_id, command.clone()))
 		.await
 		.unwrap();
 	clock.advance(Duration::from_millis(1));

@@ -16,6 +16,7 @@ mod migrations;
 mod plane;
 mod records;
 mod run;
+mod setting;
 mod transaction;
 
 use std::path::Path;
@@ -35,7 +36,8 @@ pub use records::{
 	ConversationPageStart, ConversationRecord, EffectKindRecord, EffectRecord,
 	EffectSafetyRecord, EffectStateRecord, EventClass, EventRecord,
 	NewCommandReceipt, NewConversation, NewEffect, NewEvent, NewRun,
-	RetentionPolicy, RunLifecycle, RunRecord, VerifiedSnapshotCoverage,
+	RetentionPolicy, RunLifecycle, RunRecord, SettingRecord,
+	SettingScopeRecord, VerifiedSnapshotCoverage,
 };
 pub use transaction::{ReadTransaction, WriteTransaction};
 

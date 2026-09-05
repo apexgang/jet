@@ -223,17 +223,10 @@ pub(super) async fn answer(
 	id: RequestId,
 	query: &QueryRequest,
 ) -> ServerMessage {
-	if minor < jet_protocol::FENCED_READS_MINOR
-		&& matches!(query, QueryRequest::NextConversations { .. })
+	if let Some(requirement) = query_minor(query)
+		&& minor < requirement.minor
 	{
-		return ServerMessage::Error {
-			id: Some(id),
-			error: wire_error(
-				ErrorCategory::Incompatible,
-				"protocol.unsupported_minor",
-				"Conversation pagination requires protocol minor 1".into(),
-			),
-		};
+		return unsupported_minor(id, requirement);
 	}
 	let result = core
 		.query(actor, translate::query(query, minor))
@@ -257,6 +250,11 @@ pub(super) async fn execute(
 	command: &CommandRequest,
 	request_bytes: &[u8],
 ) -> ServerMessage {
+	if let Some(requirement) = command_minor(command)
+		&& minor < requirement.minor
+	{
+		return unsupported_minor(id, requirement);
+	}
 	let envelope = CommandEnvelope::new(
 		CommandId(command_id),
 		translate::command(command),
@@ -275,6 +273,57 @@ pub(super) async fn execute(
 			id: Some(id),
 			error: translate::error(error, minor),
 		},
+	}
+}
+
+/// The protocol minor one request needs, named as the refusal spells it.
+struct MinorRequirement {
+	minor: u32,
+	feature: &'static str,
+}
+
+fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
+	match query {
+		QueryRequest::NextConversations { .. } => Some(MinorRequirement {
+			minor: jet_protocol::FENCED_READS_MINOR,
+			feature: "Conversation pagination",
+		}),
+		QueryRequest::Settings { .. } => Some(MinorRequirement {
+			minor: jet_protocol::SETTINGS_MINOR,
+			feature: "Setting Queries",
+		}),
+		QueryRequest::Status
+		| QueryRequest::Conversations
+		| QueryRequest::Conversation { .. }
+		| QueryRequest::Events { .. } => None,
+	}
+}
+
+fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
+	match command {
+		CommandRequest::SetSetting { .. }
+		| CommandRequest::ClearSetting { .. } => Some(MinorRequirement {
+			minor: jet_protocol::SETTINGS_MINOR,
+			feature: "Setting Commands",
+		}),
+		CommandRequest::CreateConversation { .. }
+		| CommandRequest::CreateRun { .. }
+		| CommandRequest::TransitionRun { .. } => None,
+	}
+}
+
+fn unsupported_minor(
+	id: RequestId,
+	requirement: MinorRequirement,
+) -> ServerMessage {
+	let MinorRequirement { minor, feature } = requirement;
+	ServerMessage::Error {
+		id: Some(id),
+		error: wire_error(
+			ErrorCategory::Incompatible,
+			"protocol.unsupported_minor",
+			format!("{feature} needs protocol minor {minor}"),
+		),
 	}
 }
 

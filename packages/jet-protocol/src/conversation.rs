@@ -1,7 +1,9 @@
-//! Wire form of Conversations, Runs, and their Commands.
+//! Wire form of Conversations and Runs, and the Commands clients execute.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::setting::{SettingKey, SettingScope, SettingValue};
 
 /// Opaque token for continuing one fenced keyset snapshot page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +118,23 @@ pub enum CommandRequest {
 		/// The Conversation to execute.
 		conversation_id: Uuid,
 	},
+	/// Store a Setting value at one scope.
+	SetSetting {
+		/// The Setting to store.
+		key: SettingKey,
+		/// The scope that stores the value.
+		scope: SettingScope,
+		/// The value to store.
+		value: SettingValue,
+	},
+	/// Remove whatever value one scope stores for a Setting, leaving the
+	/// scopes above it untouched.
+	ClearSetting {
+		/// The Setting to clear.
+		key: SettingKey,
+		/// The scope that stops storing a value.
+		scope: SettingScope,
+	},
 	/// Move a Run forward through its lifecycle.
 	TransitionRun {
 		/// The Run to move.
@@ -139,6 +158,22 @@ pub enum CommandResponse {
 	RunCreated(Run),
 	/// The Run after its transition.
 	RunTransitioned(Run),
+	/// The Setting value the named scope now stores.
+	SettingSet {
+		/// The Setting that was stored.
+		key: SettingKey,
+		/// The scope that stores it.
+		scope: SettingScope,
+		/// The stored value.
+		value: SettingValue,
+	},
+	/// The named scope no longer stores its own value for the Setting.
+	SettingCleared {
+		/// The Setting that was cleared.
+		key: SettingKey,
+		/// The scope that no longer stores a value.
+		scope: SettingScope,
+	},
 }
 
 /// Structured state returned when a Revision precondition is stale.

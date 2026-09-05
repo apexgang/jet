@@ -18,6 +18,7 @@ mod event;
 mod lifecycle;
 mod pagination;
 mod query;
+mod setting;
 mod status;
 #[cfg(test)]
 mod test_support;
@@ -26,6 +27,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use jet_store::{ActorRecord, Store};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use clock::{Clock, SystemClock};
@@ -44,6 +46,10 @@ pub use event::{
 };
 pub use jet_store::{RetentionPolicy, RunLifecycle};
 pub use query::{Query, QueryResult};
+pub use setting::{
+	ResolvedSetting, SettingKey, SettingScope, SettingSelection,
+	SettingSnapshot, SettingSource, SettingValue,
+};
 pub use status::PlaneStatus;
 
 /// Version of the running core, reported in status snapshots.
@@ -56,6 +62,12 @@ pub struct ClientId(pub Uuid);
 /// Durable identity of one Plane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PlaneId(pub Uuid);
+
+/// Durable identity of one registered Project. The Project registry itself
+/// arrives with Project registration; Settings already resolve through the
+/// scope it names (ADR-0085).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ProjectId(pub Uuid);
 
 /// The authenticated origin of a Command or Query (ADR-0063).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,3 +191,7 @@ mod tests;
 #[cfg(test)]
 #[path = "effect_tests.rs"]
 mod effect_tests;
+
+#[cfg(test)]
+#[path = "setting_tests.rs"]
+mod setting_tests;

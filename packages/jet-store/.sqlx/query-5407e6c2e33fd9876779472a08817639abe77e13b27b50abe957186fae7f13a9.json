@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM settings\n\t\t\t WHERE key = ?1 AND scope = ?2 AND scope_id IS ?3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "5407e6c2e33fd9876779472a08817639abe77e13b27b50abe957186fae7f13a9"
+}
