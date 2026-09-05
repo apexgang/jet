@@ -58,6 +58,7 @@ async fn a_plane_reports_the_machine_it_runs_on() {
 			},
 			vec![
 				ExternalTool::Git,
+				ExternalTool::GitLfs,
 				ExternalTool::Ssh,
 				ExternalTool::Tailscale
 			],
@@ -129,7 +130,7 @@ async fn a_command_that_needs_a_missing_tool_is_refused() {
 				restart: None,
 				recovery_actions: vec![],
 			},
-			vec![ToolAvailability::Missing; 3],
+			vec![ToolAvailability::Missing; 4],
 			true,
 		)
 	);

@@ -4,15 +4,17 @@
 use std::time::{Duration, UNIX_EPOCH};
 
 use jet_core::{
-	AuditBreach, AuditEpoch, AuditHead, AuditSequence, EventSequence, PlaneId,
-	PlaneStatus, ResolvedSetting, SecurityDegradation, SecurityState,
-	SettingKey, SettingScope, SettingSnapshot, SettingSource, SettingValue,
+	AuditBreach, AuditEpoch, AuditHead, AuditSequence, CapabilitySnapshot,
+	CredentialStoreKind, CredentialStoreStatus, EventSequence, ExternalTool,
+	ExternalToolStatus, PlaneId, PlaneStatus, Platform, ResolvedSetting,
+	SecurityDegradation, SecurityState, SettingKey, SettingScope,
+	SettingSnapshot, SettingSource, SettingValue, ToolAvailability,
 };
 use jet_protocol as wire;
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
-use super::{plane_status, setting};
+use super::{capability, plane_status, setting};
 
 fn degraded() -> PlaneStatus {
 	PlaneStatus {
@@ -51,6 +53,69 @@ fn resolved() -> SettingSnapshot {
 			},
 		],
 	}
+}
+
+/// A Plane observed once, with every tool the core looks for missing.
+fn observed() -> CapabilitySnapshot {
+	CapabilitySnapshot {
+		observed_at: UNIX_EPOCH + Duration::from_secs(1),
+		core_version: "0.2.0",
+		platform: Platform {
+			operating_system: "linux",
+			architecture: "aarch64",
+		},
+		external_tools: [
+			ExternalTool::Git,
+			ExternalTool::GitLfs,
+			ExternalTool::Ssh,
+			ExternalTool::Tailscale,
+		]
+		.into_iter()
+		.map(|tool| ExternalToolStatus {
+			tool,
+			availability: ToolAvailability::Missing,
+		})
+		.collect(),
+		credential_store: CredentialStoreStatus::Available {
+			kind: CredentialStoreKind::SecretService,
+		},
+		crafts: vec![],
+		harnesses: vec![],
+		degraded: vec![],
+	}
+}
+
+fn tools(snapshot: wire::CapabilitySnapshot) -> Vec<wire::ExternalTool> {
+	snapshot
+		.external_tools
+		.into_iter()
+		.map(|status| status.tool)
+		.collect()
+}
+
+/// An enum variant is not a field an older reader can skip, so a tool the
+/// negotiated minor does not name is left out of the snapshot (ADR-0019).
+#[test]
+fn a_tool_is_reported_only_to_a_minor_that_names_it() {
+	assert_eq!(
+		(
+			tools(capability::snapshot(observed(), wire::PROJECTS_MINOR - 1)),
+			tools(capability::snapshot(observed(), wire::PROJECTS_MINOR)),
+		),
+		(
+			vec![
+				wire::ExternalTool::Git,
+				wire::ExternalTool::Ssh,
+				wire::ExternalTool::Tailscale
+			],
+			vec![
+				wire::ExternalTool::Git,
+				wire::ExternalTool::GitLfs,
+				wire::ExternalTool::Ssh,
+				wire::ExternalTool::Tailscale
+			],
+		)
+	);
 }
 
 #[test]

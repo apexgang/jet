@@ -76,8 +76,10 @@ pub(crate) async fn run(
 	};
 	// ADR-0086: the Plane reports what it can do at startup, on the one
 	// line a launcher reads, and on demand afterwards.
-	let capabilities =
-		crate::translate::capabilities(core.capabilities().await);
+	let capabilities = crate::translate::capabilities(
+		core.capabilities().await,
+		jet_protocol::PROTOCOL_MINOR,
+	);
 	println!(
 		"{}",
 		serde_json::json!({

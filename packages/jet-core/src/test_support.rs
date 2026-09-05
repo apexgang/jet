@@ -100,6 +100,7 @@ pub(crate) fn equipped() -> ObservedCapabilities {
 		},
 		external_tools: vec![
 			tool(ExternalTool::Git, present()),
+			tool(ExternalTool::GitLfs, present()),
 			tool(ExternalTool::Ssh, present()),
 			tool(ExternalTool::Tailscale, present()),
 		],
@@ -125,12 +126,13 @@ pub(crate) fn locked() -> ObservedCapabilities {
 	}
 }
 
-/// The same Plane after Git and Tailscale were uninstalled, its Craft
-/// removed, and its session bus lost.
+/// The same Plane after Git, Git LFS, and Tailscale were uninstalled, its
+/// Craft removed, and its session bus lost.
 pub(crate) fn stripped() -> ObservedCapabilities {
 	ObservedCapabilities {
 		external_tools: vec![
 			tool(ExternalTool::Git, ToolAvailability::Missing),
+			tool(ExternalTool::GitLfs, ToolAvailability::Missing),
 			tool(ExternalTool::Ssh, present()),
 			tool(ExternalTool::Tailscale, ToolAvailability::Missing),
 		],

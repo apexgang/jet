@@ -83,7 +83,9 @@ pub(crate) fn query_result(
 			wire::QueryResponse::Conversation(conversation_snapshot(&snapshot))
 		}
 		QueryResult::Capabilities(snapshot) => {
-			wire::QueryResponse::Capabilities(capability::snapshot(snapshot))
+			wire::QueryResponse::Capabilities(capability::snapshot(
+				snapshot, minor,
+			))
 		}
 		QueryResult::AccountBindings(bindings) => {
 			wire::QueryResponse::AccountBindings(account::list(bindings))
