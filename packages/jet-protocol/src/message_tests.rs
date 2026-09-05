@@ -20,6 +20,7 @@ use crate::pairing::{
 	PairingKeyAlgorithm, PairingMethod, PairingProgress, PairingSnapshot,
 	PendingPairing,
 };
+use crate::project::{Project, ProjectList};
 use crate::{ControlError, decode_control};
 
 fn json(value: &impl serde::Serialize) -> String {
@@ -510,5 +511,48 @@ fn only_lowercase_hexadecimal_of_the_fixed_width_is_a_key() {
 			))
 		),
 		(true, true)
+	);
+}
+
+#[test]
+fn project_registration_and_listing_have_the_agreed_wire_shape() {
+	let command = ClientMessage::Command {
+		id: 9,
+		command_id: Uuid::nil(),
+		command: CommandRequest::RegisterProject {
+			path: "/home/jet/repo".into(),
+		},
+	};
+	let project = Project {
+		project_id: Uuid::nil(),
+		root: "/home/jet/repo".into(),
+		registered_by: Actor::InteractiveClient {
+			client_id: Uuid::nil(),
+		},
+		registered_at_unix_ms: 1_700_000_000_000,
+	};
+	let result = ServerMessage::CommandResult {
+		id: 9,
+		result: CommandResponse::ProjectRegistered(project.clone()),
+	};
+	let query = ClientMessage::Query {
+		id: 10,
+		query: QueryRequest::Projects,
+	};
+	let list = ServerMessage::QueryResult {
+		id: 10,
+		result: QueryResponse::Projects(ProjectList {
+			cursor: 3,
+			projects: vec![project],
+		}),
+	};
+	assert_eq!(
+		(json(&command), json(&result), json(&query), json(&list)),
+		(
+			r#"{"kind":"command","id":9,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"register_project","path":"/home/jet/repo"}}"#.to_string(),
+			r#"{"kind":"command_result","id":9,"result":{"type":"project_registered","project_id":"00000000-0000-0000-0000-000000000000","root":"/home/jet/repo","registered_by":{"type":"interactive_client","client_id":"00000000-0000-0000-0000-000000000000"},"registered_at_unix_ms":1700000000000}}"#.to_string(),
+			r#"{"kind":"query","id":10,"query":{"type":"projects"}}"#.to_string(),
+			r#"{"kind":"query_result","id":10,"result":{"type":"projects","cursor":"3","projects":[{"project_id":"00000000-0000-0000-0000-000000000000","root":"/home/jet/repo","registered_by":{"type":"interactive_client","client_id":"00000000-0000-0000-0000-000000000000"},"registered_at_unix_ms":1700000000000}]}}"#.to_string(),
+		)
 	);
 }

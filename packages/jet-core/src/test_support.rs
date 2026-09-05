@@ -177,3 +177,50 @@ pub(crate) fn request_with_id(
 	let bytes = serde_json::to_vec(&command).unwrap();
 	CommandEnvelope::new(command_id, command, &bytes).unwrap()
 }
+
+/// Runs one `git` command in `dir` with the configuration a test needs and
+/// nothing the host's own configuration could add, and returns what it
+/// printed. Tests that touch repositories need `git` on the host, as CI
+/// provisions it (ADR-0056).
+pub(crate) fn git(dir: &Path, args: &[&str]) -> String {
+	let output = std::process::Command::new("git")
+		.env("GIT_CONFIG_NOSYSTEM", "1")
+		.env("GIT_CONFIG_GLOBAL", "/dev/null")
+		.env("LC_ALL", "C")
+		.arg("-C")
+		.arg(dir)
+		.args([
+			"-c",
+			"user.name=Jet",
+			"-c",
+			"user.email=jet@example.invalid",
+			"-c",
+			"init.defaultBranch=main",
+			"-c",
+			"commit.gpgsign=false",
+			"-c",
+			"protocol.file.allow=always",
+		])
+		.args(args)
+		.output()
+		.expect("git runs on the test host");
+	assert!(
+		output.status.success(),
+		"git {args:?} in {} failed: {}",
+		dir.display(),
+		String::from_utf8_lossy(&output.stderr)
+	);
+	String::from_utf8(output.stdout).unwrap()
+}
+
+/// Creates an ordinary repository at `dir` with one commit and returns its
+/// canonical path, which on macOS differs from the temporary path a test
+/// was handed.
+pub(crate) fn init_repository(dir: &Path) -> std::path::PathBuf {
+	std::fs::create_dir_all(dir).unwrap();
+	git(dir, &["init", "-q"]);
+	std::fs::write(dir.join("README.md"), "# Jet\n").unwrap();
+	git(dir, &["add", "-A"]);
+	git(dir, &["commit", "-q", "-m", "Initial"]);
+	dir.canonicalize().unwrap()
+}

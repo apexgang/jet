@@ -1,5 +1,6 @@
 //! Journal Events as the core sees them (ADR-0020, ADR-0096).
 
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 use jet_store::{
@@ -15,7 +16,7 @@ use crate::conversation::{ConversationId, RunId};
 use crate::error::CoreError;
 use crate::pairing::{PairingEnd, PairingOfferId};
 use crate::setting::{SettingKey, SettingScope, SettingValue};
-use crate::{Actor, ClientId, system_time};
+use crate::{Actor, ClientId, ProjectId, system_time};
 
 /// Most Events one `Query::Events` page returns.
 pub(crate) const EVENT_PAGE_LIMIT: usize = 256;
@@ -237,6 +238,15 @@ pub enum EventKind {
 		/// The state it entered.
 		to: RunLifecycle,
 	},
+	/// An interactive user's Path grant registered a Git working tree as a
+	/// Project (ADR-0025, ADR-0101).
+	#[serde(rename = "project.registered")]
+	ProjectRegistered {
+		/// The Project that was registered.
+		project_id: ProjectId,
+		/// The canonical root the grant resolved to.
+		root: PathBuf,
+	},
 	/// An Event this core cannot interpret: a kind or payload version
 	/// written by a newer core that shared the store (ADR-0073). It is
 	/// retained and forwarded as recorded so a previous release still serves
@@ -270,7 +280,8 @@ impl EventKind {
 			| Self::PairingCompleted { .. }
 			| Self::PairingOfferEnded { .. }
 			| Self::PairedClientAccessChanged { .. }
-			| Self::PairedClientRevoked { .. } => {
+			| Self::PairedClientRevoked { .. }
+			| Self::ProjectRegistered { .. } => {
 				let encoded = serde_json::to_value(self).map_err(|error| {
 					CoreError::internal("event.unencodable", error.to_string())
 				})?;

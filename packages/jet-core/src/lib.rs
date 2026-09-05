@@ -28,6 +28,8 @@ mod pairing_completion;
 mod pairing_identity;
 mod pairing_offer;
 mod pairing_secret;
+mod preparation;
+mod project;
 mod query;
 #[allow(
 	dead_code,
@@ -36,6 +38,7 @@ mod query;
 mod relative_path;
 mod remote;
 mod remote_pairing;
+mod repository;
 mod security;
 mod setting;
 mod status;
@@ -90,6 +93,7 @@ pub use pairing::{
 	PairingDisclosure, PairingEnd, PairingOfferId, PairingProgress,
 	PairingSecret, PairingSignature, PairingSnapshot, PendingPairing,
 };
+pub use project::{PathGrant, Project, ProjectList};
 pub use query::{Query, QueryResult};
 pub use remote::RemoteSession;
 pub use security::{SecurityDegradation, SecurityState};
@@ -110,9 +114,7 @@ pub struct ClientId(pub Uuid);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PlaneId(pub Uuid);
 
-/// Durable identity of one registered Project. The Project registry itself
-/// arrives with Project registration; Settings already resolve through the
-/// scope it names (ADR-0085).
+/// Durable identity of one registered Project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ProjectId(pub Uuid);
 

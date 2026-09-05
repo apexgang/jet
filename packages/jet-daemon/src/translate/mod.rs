@@ -1,12 +1,13 @@
 //! Translation between core domain types and versioned wire types
 //! (ADR-0049). This is the only place the two vocabularies meet; its
-//! Account binding, Capability, and Setting parts sit in the submodules
-//! beside it.
+//! Account binding, Capability, Pairing, Project, and Setting parts sit in
+//! the submodules beside it.
 
 mod account;
 mod audit;
 mod capability;
 mod pairing;
+mod project;
 mod setting;
 
 pub(crate) use capability::snapshot as capabilities;
@@ -14,12 +15,14 @@ pub(crate) use pairing::{client as paired_client, pending as pairing_pending};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use std::path::PathBuf;
+
 use jet_core::{
 	AccountBindingId, Actor, AuditSequence, AuthenticationString, ClientId,
 	Command, CommandOutcome, ConflictState, Conversation, ConversationId,
 	ConversationList, ConversationSnapshot, CoreError, ErrorCategory, Event,
 	EventPage, EventPayload, EventSequence, PairingOfferId, PairingSecret,
-	PairingSignature, PlaneStatus, ProviderId, Query, QueryResult,
+	PairingSignature, PathGrant, PlaneStatus, ProviderId, Query, QueryResult,
 	RecoveryAction, RetentionPolicy, Revision, RevisionConflict, Run, RunId,
 	RunLifecycle,
 };
@@ -65,6 +68,7 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 		wire::QueryRequest::SecurityAudit { after } => Query::SecurityAudit {
 			after: AuditSequence(*after),
 		},
+		wire::QueryRequest::Projects => Query::Projects,
 	}
 }
 
@@ -101,6 +105,9 @@ pub(crate) fn query_result(
 		}
 		QueryResult::SecurityAudit(page) => {
 			wire::QueryResponse::SecurityAudit(audit::page(page))
+		}
+		QueryResult::Projects(list) => {
+			wire::QueryResponse::Projects(project::list(list))
 		}
 	})
 }
@@ -199,6 +206,11 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 			expected_revision: Revision(*expected_revision),
 			lifecycle: lifecycle_from_wire(*lifecycle),
 		},
+		wire::CommandRequest::RegisterProject { path } => {
+			Command::RegisterProject {
+				grant: PathGrant(PathBuf::from(path)),
+			}
+		}
 	}
 }
 
@@ -278,6 +290,9 @@ pub(crate) fn command_outcome(
 			wire::CommandResponse::PairedClientRevoked {
 				client_id: client_id.0,
 			}
+		}
+		CommandOutcome::ProjectRegistered(project) => {
+			wire::CommandResponse::ProjectRegistered(project::project(project))
 		}
 	}
 }
@@ -364,8 +379,15 @@ fn event(event: &Event) -> Result<wire::Event, CoreError> {
 }
 
 pub(super) fn actor(actor: &Actor) -> wire::Actor {
+	actor_of(actor.client_id())
+}
+
+/// The wire attribution of the Client identity an Actor acted through.
+/// Every Actor this core knows is an interactive client, so this is the
+/// one place that collapse is spelled.
+pub(super) fn actor_of(client_id: ClientId) -> wire::Actor {
 	wire::Actor::InteractiveClient {
-		client_id: actor.client_id().0,
+		client_id: client_id.0,
 	}
 }
 

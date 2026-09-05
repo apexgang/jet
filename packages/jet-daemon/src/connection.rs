@@ -404,6 +404,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::PAIRING_MINOR,
 			feature: "the Pairing Query",
 		}),
+		QueryRequest::Projects => Some(MinorRequirement {
+			minor: jet_protocol::PROJECTS_MINOR,
+			feature: "the Project Query",
+		}),
 		QueryRequest::Status
 		| QueryRequest::Conversations
 		| QueryRequest::Conversation { .. }
@@ -436,6 +440,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		| CommandRequest::RevokePairedClient { .. } => Some(MinorRequirement {
 			minor: jet_protocol::PAIRING_MINOR,
 			feature: "Pairing Commands",
+		}),
+		CommandRequest::RegisterProject { .. } => Some(MinorRequirement {
+			minor: jet_protocol::PROJECTS_MINOR,
+			feature: "Project registration",
 		}),
 		CommandRequest::CreateConversation { .. }
 		| CommandRequest::CreateRun { .. }

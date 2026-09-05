@@ -84,7 +84,8 @@ async fn apply(
 		| CommandOutcome::PairedClientAccessSet { .. }
 		| CommandOutcome::PairingConfirmed { .. }
 		| CommandOutcome::AuditEpochBegun { .. }
-		| CommandOutcome::PairedClientRevoked { .. } => Err(malformed()),
+		| CommandOutcome::PairedClientRevoked { .. }
+		| CommandOutcome::ProjectRegistered(_) => Err(malformed()),
 	}
 }
 

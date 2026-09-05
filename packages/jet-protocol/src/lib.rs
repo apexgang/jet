@@ -23,6 +23,7 @@ mod handshake;
 mod hex;
 mod message;
 mod pairing;
+mod project;
 mod setting;
 mod stream;
 mod stream_control;
@@ -78,6 +79,7 @@ pub use pairing::{
 	PairingEnd, PairingGate, PairingKeyAlgorithm, PairingMethod,
 	PairingProgress, PairingSnapshot, PendingPairing,
 };
+pub use project::{Project, ProjectList};
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,
 	SettingSnapshot, SettingSource, SettingValue,

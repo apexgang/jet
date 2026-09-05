@@ -14,6 +14,7 @@ use crate::conversation::{
 };
 use crate::event::Event;
 use crate::pairing::PairingSnapshot;
+use crate::project::ProjectList;
 use crate::setting::{SettingScope, SettingSelection, SettingSnapshot};
 
 /// Correlates a client request with its server reply.
@@ -139,6 +140,8 @@ pub enum QueryRequest {
 		#[serde(with = "crate::decimal")]
 		after: u64,
 	},
+	/// Every registered Project on the Plane.
+	Projects,
 }
 
 /// Query snapshots.
@@ -163,6 +166,8 @@ pub enum QueryResponse {
 	Pairing(PairingSnapshot),
 	/// One page of the Security audit, oldest first.
 	SecurityAudit(SecurityAudit),
+	/// Every registered Project on the Plane.
+	Projects(ProjectList),
 }
 
 /// One page of journal Events, fenced by the journal position it was read

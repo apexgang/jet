@@ -14,6 +14,7 @@ use crate::conversation::{
 use crate::error::CoreError;
 use crate::event::{EVENT_PAGE_LIMIT, Event, EventPage, EventSequence};
 use crate::pairing::{self, PairingSnapshot};
+use crate::project::ProjectList;
 use crate::setting::{self, SettingScope, SettingSelection, SettingSnapshot};
 use crate::status::PlaneStatus;
 use crate::{Actor, CORE_VERSION, Core, PlaneId};
@@ -71,6 +72,8 @@ pub enum Query {
 		/// The position to resume after; zero for the whole audit.
 		after: AuditSequence,
 	},
+	/// Every registered Project on the Plane (ADR-0025).
+	Projects,
 }
 
 /// Snapshots returned by [`Core::query`].
@@ -94,6 +97,8 @@ pub enum QueryResult {
 	Pairing(PairingSnapshot),
 	/// One page of the Security audit, oldest first.
 	SecurityAudit(AuditPage),
+	/// Every registered Project on the Plane.
+	Projects(ProjectList),
 }
 
 impl Core {
@@ -207,6 +212,21 @@ impl Core {
 							clients: clients
 								.into_iter()
 								.map(pairing::paired_client)
+								.collect(),
+						}))
+					})
+					.await
+			}
+			Query::Projects => {
+				self.store
+					.read(async |tx| {
+						let cursor = EventSequence(tx.event_cursor().await?);
+						let projects = tx.projects().await?;
+						Ok(QueryResult::Projects(ProjectList {
+							cursor,
+							projects: projects
+								.into_iter()
+								.map(Into::into)
 								.collect(),
 						}))
 					})

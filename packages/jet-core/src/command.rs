@@ -28,13 +28,17 @@ use crate::pairing::{
 	PairingChallenge, PairingDisclosure, PairingOfferId, PairingSecret,
 	PairingSignature, PendingPairing,
 };
+use crate::preparation::Prepared;
+use crate::project::{self, PathGrant, Project};
 use crate::security::{self, SecurityClass, SecurityState};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
 use crate::{Actor, ClientId, Core, lifecycle};
 use crate::{paired_client, pairing_completion, pairing_offer};
 
 /// Automatic Git delivery is carried out with the Git the core invokes, so
-/// turning it on depends on that tool being installed (ADR-0029, ADR-0056).
+/// turning it on depends on that tool being installed, and a Project is
+/// registered only after that Git has looked at it (ADR-0029, ADR-0056,
+/// ADR-0103).
 const GIT: &[Capability] = &[Capability::ExternalTool(ExternalTool::Git)];
 
 /// A binding that resolves through the platform credential store depends on
@@ -209,6 +213,14 @@ pub enum Command {
 		/// The state to enter.
 		lifecycle: RunLifecycle,
 	},
+	/// Register the Git working tree an interactive user granted as a
+	/// Project (ADR-0025, ADR-0101). The grant is resolved and inspected
+	/// before the transaction opens; a directory that is not an ordinary
+	/// working tree is refused (ADR-0103).
+	RegisterProject {
+		/// The user's explicit authorization for one absolute path.
+		grant: PathGrant,
+	},
 }
 
 impl Command {
@@ -221,7 +233,8 @@ impl Command {
 				key: SettingKey::GitAutoCommit,
 				value: SettingValue::Flag(true),
 				..
-			} => GIT,
+			}
+			| Self::RegisterProject { .. } => GIT,
 			Self::BindAccount {
 				credential_source: CredentialSource::PlatformStore,
 				..
@@ -337,6 +350,8 @@ pub enum CommandOutcome {
 		/// The reference it resolved through.
 		credential_reference: CredentialReference,
 	},
+	/// The Project as registered.
+	ProjectRegistered(Project),
 }
 
 impl Core {
@@ -369,21 +384,43 @@ impl Core {
 		let actor_record = actor.record();
 		let security = *self.security.read().await;
 		let recorded_at_unix_ms = self.now_unix_ms();
-		if let Err(refusal) = self
-			.revalidate_capabilities(actor_record, command_id, &command)
-			.await
-		{
-			// ASVS 16.2.1: a decision the audit would have recorded is
-			// recorded when it is refused as well (ADR-0105).
-			audit::record_refusal(
-				&self.store,
-				actor,
-				&command,
-				recorded_at_unix_ms,
-			)
+		// A Command whose outcome is already durable is neither revalidated
+		// nor prepared: its work is done, and repeating it must return what
+		// the Plane decided then rather than what the machine would decide
+		// now (ADR-0093).
+		let recorded = self
+			.store
+			.read(async |tx| {
+				Ok::<_, CoreError>(
+					tx.command_receipt(actor_record, command_id.0)
+						.await?
+						.is_some(),
+				)
+			})
 			.await?;
-			return Err(refusal);
-		}
+		let prepared = if recorded {
+			Prepared::Nothing
+		} else {
+			let admitted = match self.revalidate_capabilities(&command).await {
+				Ok(()) => self.prepare(actor, &command).await,
+				Err(refusal) => Err(refusal),
+			};
+			match admitted {
+				Ok(prepared) => prepared,
+				Err(refusal) => {
+					// ASVS 16.2.1: a decision the audit would have recorded
+					// is recorded when it is refused as well (ADR-0105).
+					audit::record_refusal(
+						&self.store,
+						actor,
+						&command,
+						recorded_at_unix_ms,
+					)
+					.await?;
+					return Err(refusal);
+				}
+			}
+		};
 		let mut invalidated_client = None;
 		let outcome = self
 			.store
@@ -415,6 +452,7 @@ impl Core {
 					actor,
 					command_id,
 					command,
+					prepared,
 					security,
 					recorded_at_unix_ms,
 				)
@@ -494,7 +532,8 @@ fn redacted_for_receipt(
 			| CommandOutcome::PairingConfirmed { .. }
 			| CommandOutcome::PairingCompleted { .. }
 			| CommandOutcome::PairedClientAccessSet { .. }
-			| CommandOutcome::PairedClientRevoked { .. }),
+			| CommandOutcome::PairedClientRevoked { .. }
+			| CommandOutcome::ProjectRegistered(_)),
 		) => Ok(outcome.clone()),
 		Err(error) => Err(error.clone()),
 	}
@@ -505,10 +544,20 @@ async fn execute_new(
 	actor: &Actor,
 	command_id: CommandId,
 	command: Command,
+	prepared: Prepared,
 	security: SecurityState,
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
 	match command {
+		Command::RegisterProject { .. } => {
+			let Prepared::Registration(registrable) = prepared else {
+				return Err(CoreError::internal(
+					"project.unprepared",
+					"a Project registration reached its transaction without 					 its prepared root",
+				));
+			};
+			project::register(tx, actor, registrable, now_unix_ms).await
+		}
 		Command::CreateConversation { retention } => {
 			create_conversation(tx, actor, retention, now_unix_ms).await
 		}
