@@ -6,15 +6,31 @@ use jet_core::{
 };
 use jet_protocol as wire;
 
-pub(super) fn snapshot(snapshot: SettingSnapshot) -> wire::SettingSnapshot {
+pub(super) fn snapshot(
+	snapshot: SettingSnapshot,
+	minor: u32,
+) -> wire::SettingSnapshot {
 	wire::SettingSnapshot {
 		cursor: snapshot.cursor.0,
 		scope: scope(snapshot.scope),
+		// A Setting introduced after the negotiated minor is left out
+		// rather than sent in a shape the peer cannot read (ADR-0019).
 		settings: snapshot
 			.settings
 			.into_iter()
+			.filter(|resolved| introduced_in(resolved.key) <= minor)
 			.map(resolved_setting)
 			.collect(),
+	}
+}
+
+/// The protocol minor that first named each Setting.
+fn introduced_in(key: SettingKey) -> u32 {
+	match key {
+		SettingKey::UtilityAutomaticNaming
+		| SettingKey::GitAutoCommit
+		| SettingKey::GitMessageInstructions => wire::SETTINGS_AND_CAPABILITIES_MINOR,
+		SettingKey::SecurityAuditRetentionDays => wire::SECURITY_AUDIT_MINOR,
 	}
 }
 
@@ -40,6 +56,9 @@ pub(super) fn key(key: SettingKey) -> wire::SettingKey {
 		SettingKey::GitMessageInstructions => {
 			wire::SettingKey::GitMessageInstructions
 		}
+		SettingKey::SecurityAuditRetentionDays => {
+			wire::SettingKey::SecurityAuditRetentionDays
+		}
 	}
 }
 
@@ -52,6 +71,9 @@ pub(super) fn key_from_wire(key: wire::SettingKey) -> SettingKey {
 		wire::SettingKey::GitMessageInstructions => {
 			SettingKey::GitMessageInstructions
 		}
+		wire::SettingKey::SecurityAuditRetentionDays => {
+			SettingKey::SecurityAuditRetentionDays
+		}
 	}
 }
 
@@ -59,6 +81,7 @@ pub(super) fn value(value: SettingValue) -> wire::SettingValue {
 	match value {
 		SettingValue::Flag(flag) => wire::SettingValue::Flag(flag),
 		SettingValue::Text(text) => wire::SettingValue::Text(text),
+		SettingValue::Count(count) => wire::SettingValue::Count(count),
 	}
 }
 
@@ -66,6 +89,7 @@ pub(super) fn value_from_wire(value: wire::SettingValue) -> SettingValue {
 	match value {
 		wire::SettingValue::Flag(flag) => SettingValue::Flag(flag),
 		wire::SettingValue::Text(text) => SettingValue::Text(text),
+		wire::SettingValue::Count(count) => SettingValue::Count(count),
 	}
 }
 

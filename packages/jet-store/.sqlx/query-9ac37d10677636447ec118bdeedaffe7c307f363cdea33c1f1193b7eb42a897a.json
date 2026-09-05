@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MAX(sequence) AS \"last_removed?: i64\" FROM (\n\t\t\t\tSELECT sequence FROM security_audit\n\t\t\t\tWHERE sequence < ?1 AND recorded_at_unix_ms < ?2\n\t\t\t\t\tAND sequence < COALESCE((\n\t\t\t\t\t\tSELECT MIN(sequence) FROM security_audit\n\t\t\t\t\t\tWHERE sequence < ?1\n\t\t\t\t\t\t\tAND recorded_at_unix_ms >= ?2\n\t\t\t\t\t), ?1)\n\t\t\t\tORDER BY sequence\n\t\t\t\tLIMIT ?3\n\t\t\t)",
+  "describe": {
+    "columns": [
+      {
+        "name": "last_removed?: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "9ac37d10677636447ec118bdeedaffe7c307f363cdea33c1f1193b7eb42a897a"
+}

@@ -10,16 +10,21 @@ use crate::{
 };
 
 const NOW_UNIX_MS: i64 = 1_700_000_000_000;
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
 fn decision() -> NewAuditRecord {
+	decision_about(&Uuid::now_v7().to_string(), NOW_UNIX_MS)
+}
+
+fn decision_about(target_id: &str, recorded_at_unix_ms: i64) -> NewAuditRecord {
 	NewAuditRecord {
 		record_id: Uuid::now_v7(),
-		recorded_at_unix_ms: NOW_UNIX_MS,
+		recorded_at_unix_ms,
 		actor: ActorRecord::InteractiveClient {
 			client_id: Uuid::nil(),
 		},
 		target_kind: "account_binding".into(),
-		target_id: Some(Uuid::now_v7().to_string()),
+		target_id: Some(target_id.into()),
 		decision: "account.bound".into(),
 		risk: AuditRisk::Elevated,
 		outcome: AuditOutcome::Succeeded,
@@ -27,8 +32,19 @@ fn decision() -> NewAuditRecord {
 }
 
 async fn append(store: &Store) -> AuditRecord {
+	append_record(store, decision()).await
+}
+
+async fn append_record(store: &Store, record: NewAuditRecord) -> AuditRecord {
 	store
-		.write(async |tx| tx.append_audit_record(decision()).await)
+		.write(async |tx| tx.append_audit_record(record).await)
+		.await
+		.unwrap()
+}
+
+async fn page(store: &Store) -> (u64, Vec<AuditRecord>) {
+	store
+		.read(async |tx| tx.audit_page(0, 16).await)
 		.await
 		.unwrap()
 }
@@ -68,8 +84,7 @@ async fn a_recorded_decision_is_read_back_whole() {
 
 	let appended = append(&store).await;
 
-	let page = store.read(async |tx| tx.audit_page(0, 16).await).await;
-	assert_eq!(page.unwrap(), (1, vec![appended]));
+	assert_eq!(page(&store).await, (1, vec![appended]));
 }
 
 #[tokio::test]
@@ -292,5 +307,161 @@ async fn a_target_swapped_under_its_reference_fails_validation() {
 			head: Some(head_of(&swapped)),
 			store_sequence: 1,
 		})
+	);
+}
+
+#[tokio::test]
+async fn retention_removes_expired_records_and_leaves_a_whole_chain() {
+	let dir = tempfile::tempdir().unwrap();
+	let path = dir.path().join("plane.sqlite3");
+	let store = Store::open(&path).await.unwrap();
+
+	append_record(&store, decision_about("first", NOW_UNIX_MS - 9 * DAY_MS))
+		.await;
+	append_record(&store, decision_about("second", NOW_UNIX_MS - 8 * DAY_MS))
+		.await;
+	let kept =
+		append_record(&store, decision_about("third", NOW_UNIX_MS)).await;
+
+	let removed = store
+		.prune_audit_before(NOW_UNIX_MS - DAY_MS)
+		.await
+		.unwrap();
+
+	assert_eq!(
+		(
+			removed,
+			page(&store).await,
+			store.validate_audit().await.unwrap()
+		),
+		(
+			2,
+			(kept.sequence, vec![kept.clone()]),
+			AuditIntegrity::Verified {
+				head: Some(head_of(&kept))
+			}
+		)
+	);
+}
+
+#[tokio::test]
+async fn retention_keeps_the_record_the_head_names() {
+	let dir = tempfile::tempdir().unwrap();
+	let path = dir.path().join("plane.sqlite3");
+	let store = Store::open(&path).await.unwrap();
+
+	append_record(&store, decision_about("first", NOW_UNIX_MS - 9 * DAY_MS))
+		.await;
+	let newest = append_record(
+		&store,
+		decision_about("second", NOW_UNIX_MS - 8 * DAY_MS),
+	)
+	.await;
+
+	// Every record has expired, and the one the head names still cannot go.
+	let removed = store.prune_audit_before(NOW_UNIX_MS).await.unwrap();
+
+	assert_eq!(
+		(
+			removed,
+			page(&store).await,
+			store.validate_audit().await.unwrap()
+		),
+		(
+			1,
+			(newest.sequence, vec![newest.clone()]),
+			AuditIntegrity::Verified {
+				head: Some(head_of(&newest))
+			}
+		)
+	);
+}
+
+#[tokio::test]
+async fn retention_stops_at_the_first_record_it_may_not_remove() {
+	let dir = tempfile::tempdir().unwrap();
+	let path = dir.path().join("plane.sqlite3");
+	let store = Store::open(&path).await.unwrap();
+
+	append_record(&store, decision_about("expired", NOW_UNIX_MS - 9 * DAY_MS))
+		.await;
+	// A clock that moved backwards leaves a fresh record among expired
+	// ones. Removing around it would leave a hole the chain cannot be
+	// folded across.
+	let recent =
+		append_record(&store, decision_about("recent", NOW_UNIX_MS)).await;
+	let behind = append_record(
+		&store,
+		decision_about("behind", NOW_UNIX_MS - 9 * DAY_MS),
+	)
+	.await;
+
+	let removed = store
+		.prune_audit_before(NOW_UNIX_MS - DAY_MS)
+		.await
+		.unwrap();
+
+	assert_eq!(
+		(
+			removed,
+			page(&store).await,
+			store.validate_audit().await.unwrap()
+		),
+		(
+			1,
+			(behind.sequence, vec![recent, behind.clone()]),
+			AuditIntegrity::Verified {
+				head: Some(head_of(&behind))
+			}
+		)
+	);
+}
+
+#[tokio::test]
+async fn anonymizing_a_target_forgets_its_name_and_keeps_the_chain() {
+	let dir = tempfile::tempdir().unwrap();
+	let path = dir.path().join("plane.sqlite3");
+	let store = Store::open(&path).await.unwrap();
+	let deleted = Uuid::now_v7().to_string();
+
+	let first =
+		append_record(&store, decision_about(&deleted, NOW_UNIX_MS)).await;
+	let other = append_record(&store, decision()).await;
+	let second =
+		append_record(&store, decision_about(&deleted, NOW_UNIX_MS)).await;
+
+	let anonymized = store
+		.write(async |tx| {
+			tx.anonymize_audit_target("account_binding", &deleted).await
+		})
+		.await
+		.unwrap();
+
+	let expected = vec![
+		AuditRecord {
+			target_id: None,
+			..first.clone()
+		},
+		other,
+		AuditRecord {
+			target_id: None,
+			..second.clone()
+		},
+	];
+	assert_eq!(
+		(
+			anonymized,
+			page(&store).await,
+			first.target_reference == second.target_reference,
+			store.validate_audit().await.unwrap()
+		),
+		(
+			2,
+			(second.sequence, expected),
+			true,
+			AuditIntegrity::Verified {
+				head: Some(head_of(&second))
+			}
+		)
 	);
 }

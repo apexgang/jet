@@ -85,7 +85,7 @@ pub(crate) fn query_result(
 			wire::QueryResponse::AccountBindings(account::list(bindings))
 		}
 		QueryResult::Settings(snapshot) => {
-			wire::QueryResponse::Settings(setting::snapshot(snapshot))
+			wire::QueryResponse::Settings(setting::snapshot(snapshot, minor))
 		}
 		QueryResult::Events(page) => {
 			wire::QueryResponse::Events(event_page(&page)?)

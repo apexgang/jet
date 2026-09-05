@@ -14,6 +14,8 @@ mod audit_chain;
 mod audit_epoch;
 mod audit_head;
 mod audit_integrity;
+mod audit_read;
+mod audit_retention;
 mod command;
 mod conversation;
 mod effect;

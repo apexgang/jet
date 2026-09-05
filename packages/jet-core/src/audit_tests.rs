@@ -4,15 +4,20 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
+use crate::audit::{self, AuditSubject};
+use crate::clock::Clock;
 use crate::test_support::{
 	FixedProbe, ManualClock, actor, equipped, request, start_core_with,
 };
 use crate::{
 	AuditDecision, AuditEntry, AuditEpoch, AuditOutcome, AuditPage, AuditRisk,
 	AuditSequence, AuditTarget, ClientId, Command, CommandOutcome, Core,
-	CredentialSource, PlaneId, ProjectId, Query, QueryResult, SettingKey,
-	SettingScope, SettingValue,
+	CredentialSource, ErrorCategory, PlaneId, ProjectId, Query, QueryResult,
+	SettingKey, SettingScope, SettingValue,
 };
+
+/// The built-in retention window, so a test can step past it.
+const RETAINED_FOR: Duration = Duration::from_secs(365 * 24 * 60 * 60);
 
 /// A fixed instant, so a recorded decision has an exact time rather than
 /// whatever the machine's clock said.
@@ -283,5 +288,193 @@ async fn a_decision_is_recorded_at_the_time_its_command_read() {
 			.map(|entry| entry.recorded_at)
 			.collect::<Vec<SystemTime>>(),
 		vec![UNIX_EPOCH + NOW, UNIX_EPOCH + NOW + Duration::from_secs(60)]
+	);
+}
+
+#[tokio::test]
+async fn the_retention_window_is_a_destructive_decision_with_a_floor() {
+	let dir = tempfile::tempdir().unwrap();
+	let core = start(&dir).await;
+
+	let accepted = core
+		.execute(
+			&actor(),
+			request(Command::SetSetting {
+				key: SettingKey::SecurityAuditRetentionDays,
+				scope: SettingScope::Plane,
+				value: SettingValue::Count(120),
+			}),
+		)
+		.await;
+	let refused = core
+		.execute(
+			&actor(),
+			request(Command::SetSetting {
+				key: SettingKey::SecurityAuditRetentionDays,
+				scope: SettingScope::Plane,
+				value: SettingValue::Count(30),
+			}),
+		)
+		.await
+		.unwrap_err();
+
+	assert_eq!(
+		(
+			accepted.is_ok(),
+			(refused.category, refused.code.as_str()),
+			decisions(&audit(&core, AuditSequence(0)).await)
+		),
+		(
+			true,
+			(ErrorCategory::InvalidInput, "setting.value_below_minimum"),
+			vec![(
+				"policy.audit_retention_changed",
+				AuditRisk::Destructive,
+				AuditOutcome::Succeeded
+			)]
+		)
+	);
+}
+
+#[tokio::test]
+async fn expired_decisions_are_gone_when_the_daemon_starts_again() {
+	let dir = tempfile::tempdir().unwrap();
+	let path = dir.path().join("plane.sqlite3");
+	let clock = ManualClock::at(UNIX_EPOCH + NOW);
+	let core = start_core_with(
+		&path,
+		Arc::clone(&clock) as Arc<dyn Clock>,
+		FixedProbe::new(equipped()),
+	)
+	.await;
+
+	bind(&core, "First").await;
+	bind(&core, "Second").await;
+	let kept = bind(&core, "Third").await;
+	drop(core);
+
+	clock.advance(RETAINED_FOR + Duration::from_secs(1));
+	let restarted = start_core_with(
+		&path,
+		Arc::clone(&clock) as Arc<dyn Clock>,
+		FixedProbe::new(equipped()),
+	)
+	.await;
+
+	let page = audit(&restarted, AuditSequence(0)).await;
+	assert_eq!(
+		page.entries
+			.iter()
+			.map(|entry| (
+				entry.sequence,
+				entry.target.identity.clone().unwrap()
+			))
+			.collect::<Vec<_>>(),
+		vec![(AuditSequence(3), kept.to_string())]
+	);
+}
+
+#[tokio::test]
+async fn a_deleted_target_keeps_its_reference_and_loses_its_name() {
+	let dir = tempfile::tempdir().unwrap();
+	let core = start(&dir).await;
+	let binding_id = bind(&core, "Work account").await;
+	let before = audit(&core, AuditSequence(0)).await;
+
+	let anonymized = core
+		.store
+		.write(async |tx| {
+			audit::anonymize(
+				tx,
+				AuditSubject::AccountBinding(crate::AccountBindingId(
+					binding_id,
+				)),
+			)
+			.await
+		})
+		.await
+		.unwrap();
+
+	let after = audit(&core, AuditSequence(0)).await;
+	assert_eq!(
+		(anonymized, after),
+		(
+			1,
+			AuditPage {
+				cursor: before.cursor,
+				entries: vec![AuditEntry {
+					target: AuditTarget {
+						identity: None,
+						..before.entries[0].target.clone()
+					},
+					..before.entries[0].clone()
+				}],
+			}
+		)
+	);
+}
+
+/// The retention window and the audit that records changing it must agree
+/// about which Plane they belong to, so the value a Plane resolves is the
+/// one its own scope stores.
+#[tokio::test]
+async fn clearing_the_retention_window_returns_to_the_built_in_one() {
+	let dir = tempfile::tempdir().unwrap();
+	let core = start(&dir).await;
+
+	for command in [
+		Command::SetSetting {
+			key: SettingKey::SecurityAuditRetentionDays,
+			scope: SettingScope::Plane,
+			value: SettingValue::Count(120),
+		},
+		Command::ClearSetting {
+			key: SettingKey::SecurityAuditRetentionDays,
+			scope: SettingScope::Plane,
+		},
+	] {
+		core.execute(&actor(), request(command)).await.unwrap();
+	}
+
+	let resolved = match core
+		.query(
+			&actor(),
+			Query::Settings {
+				scope: SettingScope::Plane,
+				selection: crate::SettingSelection::Key(
+					SettingKey::SecurityAuditRetentionDays,
+				),
+			},
+		)
+		.await
+		.unwrap()
+	{
+		QueryResult::Settings(snapshot) => snapshot.settings,
+		result => panic!("unexpected result {result:?}"),
+	};
+
+	assert_eq!(
+		(
+			resolved
+				.into_iter()
+				.map(|setting| setting.value)
+				.collect::<Vec<_>>(),
+			decisions(&audit(&core, AuditSequence(0)).await)
+		),
+		(
+			vec![SettingValue::Count(365)],
+			vec![
+				(
+					"policy.audit_retention_changed",
+					AuditRisk::Destructive,
+					AuditOutcome::Succeeded
+				),
+				(
+					"policy.audit_retention_cleared",
+					AuditRisk::Destructive,
+					AuditOutcome::Succeeded
+				),
+			]
+		)
 	);
 }

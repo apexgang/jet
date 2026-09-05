@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE audit_state\n\t\t\t SET retained_after_epoch = ?1, retained_after_sequence = ?2,\n\t\t\t\tretained_after_hash = ?3\n\t\t\t WHERE singleton = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "31156dadb304c862d2b05db256a2d5811ce9da8cbb8953e6654dca0fa183ec7a"
+}

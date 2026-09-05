@@ -31,7 +31,7 @@ mod test_support;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use jet_store::{ActorRecord, Store};
+use jet_store::{ActorRecord, AuditIntegrity, Store};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -183,6 +183,15 @@ impl Core {
 	) -> Result<Self, CoreError> {
 		store.record_daemon_start().await?;
 		let started_at = clock.now();
+		// Retention runs only behind a whole chain. A store that moved
+		// backwards keeps every record it still has until an owner has
+		// seen the evidence and decided what to do (ADR-0105).
+		if matches!(
+			store.validate_audit().await?,
+			AuditIntegrity::Verified { .. }
+		) {
+			audit::sweep_retention(&store, unix_ms(started_at)).await?;
+		}
 		let capabilities = CapabilitySnapshot::from_observation(
 			probe.observe().await,
 			started_at,

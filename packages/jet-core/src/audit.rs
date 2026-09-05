@@ -17,18 +17,22 @@ use std::time::SystemTime;
 
 use jet_store::{
 	AuditOutcome, AuditRecord, AuditRisk, AuditTargetRef, NewAuditRecord,
-	WriteTransaction,
+	Store, WriteTransaction,
 };
 use uuid::Uuid;
 
 use crate::account::AccountBindingId;
 use crate::conversation::ConversationId;
 use crate::error::CoreError;
-use crate::setting::{SettingKey, SettingScope, SettingValue};
+use crate::setting::{self, SettingKey, SettingScope, SettingValue};
 use crate::{Actor, PlaneId, ProjectId, system_time};
 
 /// Most records one `Query::SecurityAudit` page returns.
 pub(crate) const AUDIT_PAGE_LIMIT: usize = jet_store::AUDIT_PAGE_LIMIT;
+
+/// Milliseconds in one day, which is the unit the retention window is set
+/// in.
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// A position in this Plane's Security audit. Positions are never reused,
 /// including by the records retention has removed.
@@ -61,6 +65,10 @@ pub enum AuditDecision {
 	GitAutomationDisabled,
 	/// A scope stopped pinning it, so the scope above decides again.
 	GitAutomationCleared,
+	/// The Plane changed how long it keeps this audit (ADR-0105).
+	AuditRetentionChanged,
+	/// The Plane went back to keeping it for the built-in window.
+	AuditRetentionCleared,
 }
 
 /// What a decision is about. The core turns each one into the durable kind
@@ -152,6 +160,8 @@ impl AuditDecision {
 			Self::GitAutomationEnabled => "policy.git_automation_enabled",
 			Self::GitAutomationDisabled => "policy.git_automation_disabled",
 			Self::GitAutomationCleared => "policy.git_automation_cleared",
+			Self::AuditRetentionChanged => "policy.audit_retention_changed",
+			Self::AuditRetentionCleared => "policy.audit_retention_cleared",
 		}
 	}
 
@@ -169,6 +179,11 @@ impl AuditDecision {
 			// Unpinning a policy hands the choice back to the scope above,
 			// which may turn it on.
 			| Self::GitAutomationCleared => AuditRisk::Elevated,
+			// Shortening the window destroys evidence the Plane already
+			// holds, which is the one policy change the audit itself is at
+			// stake in.
+			Self::AuditRetentionChanged
+			| Self::AuditRetentionCleared => AuditRisk::Destructive,
 			Self::GitAutomationDisabled => AuditRisk::Routine,
 		}
 	}
@@ -220,7 +235,17 @@ pub(crate) fn stored_setting(
 		(SettingKey::GitAutoCommit, SettingValue::Flag(false)) => {
 			Some(AuditDecision::GitAutomationDisabled)
 		}
-		(SettingKey::GitAutoCommit, SettingValue::Text(_))
+		(SettingKey::SecurityAuditRetentionDays, SettingValue::Count(_)) => {
+			Some(AuditDecision::AuditRetentionChanged)
+		}
+		(
+			SettingKey::GitAutoCommit,
+			SettingValue::Text(_) | SettingValue::Count(_),
+		)
+		| (
+			SettingKey::SecurityAuditRetentionDays,
+			SettingValue::Flag(_) | SettingValue::Text(_),
+		)
 		| (SettingKey::UtilityAutomaticNaming, _)
 		| (SettingKey::GitMessageInstructions, _) => None,
 	}
@@ -230,9 +255,73 @@ pub(crate) fn stored_setting(
 pub(crate) fn cleared_setting(key: SettingKey) -> Option<AuditDecision> {
 	match key {
 		SettingKey::GitAutoCommit => Some(AuditDecision::GitAutomationCleared),
+		SettingKey::SecurityAuditRetentionDays => {
+			Some(AuditDecision::AuditRetentionCleared)
+		}
 		SettingKey::UtilityAutomaticNaming
 		| SettingKey::GitMessageInstructions => None,
 	}
+}
+
+/// Removes Security audit records the Plane has stopped keeping, and
+/// returns how many.
+///
+/// Retention is enforced when the daemon starts. The audit is written by
+/// decisions a person makes rather than by activity, so waking an idle
+/// Plane on a timer to sweep it would cost more than it saves (ADR-0055);
+/// a Plane left running for longer than its window keeps expired records
+/// until its next start.
+///
+/// # Errors
+///
+/// Returns a store category [`CoreError`] when the window cannot be read
+/// or a batch cannot be removed.
+pub(crate) async fn sweep_retention(
+	store: &Store,
+	now_unix_ms: i64,
+) -> Result<usize, CoreError> {
+	let window = store
+		.read(async |tx| {
+			setting::resolve_plane(tx, SettingKey::SecurityAuditRetentionDays)
+				.await
+		})
+		.await?;
+	let SettingValue::Count(days) = window else {
+		return Err(CoreError::internal(
+			"audit.retention_unreadable",
+			format!("the retention window resolved to {window:?}"),
+		));
+	};
+	let cutoff =
+		now_unix_ms.saturating_sub(i64::from(days).saturating_mul(DAY_MS));
+	Ok(store.prune_audit_before(cutoff).await?)
+}
+
+/// Forgets what the target of `subject` was called, wherever the Security
+/// audit recorded a decision about it, and returns how many records that
+/// was.
+///
+/// The opaque reference each of those records is chained over stays, so
+/// the chain is untouched and the audit still says that some Conversation
+/// was deleted and which decisions were about the same one (ADR-0105). The
+/// count is what a deletion preview discloses.
+///
+/// # Errors
+///
+/// Returns a store category [`CoreError`] when the records cannot be
+/// updated.
+#[allow(
+	dead_code,
+	reason = "called by Conversation deletion in follow-up issue #53"
+)]
+pub(crate) async fn anonymize(
+	tx: &mut WriteTransaction,
+	subject: AuditSubject,
+) -> Result<usize, CoreError> {
+	let Some(identity) = subject.identity() else {
+		return Ok(0);
+	};
+	Ok(tx.anonymize_audit_target(subject.kind(), &identity).await?)
 }
 
 /// Records `decision` in the Security audit inside the transaction that

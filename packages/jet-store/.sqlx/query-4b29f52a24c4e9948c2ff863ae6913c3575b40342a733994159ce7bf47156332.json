@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT epoch, entry_hash FROM security_audit WHERE sequence = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "epoch",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "epoch"
+          }
+        }
+      },
+      {
+        "name": "entry_hash",
+        "ordinal": 1,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "entry_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "4b29f52a24c4e9948c2ff863ae6913c3575b40342a733994159ce7bf47156332"
+}
