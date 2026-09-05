@@ -6,7 +6,6 @@ rust_min_stack := "8388608" # 8 MiB
 help:
 	just -l
 
-# `jet-dev`
 jet *args:
 	cargo run --bin jet -- {{ args }}
 
@@ -29,7 +28,17 @@ install:
 
 [unix]
 test *args:
-	RUST_MIN_STACK={{ rust_min_stack }} cargo test --no-fail-fast {{ args }}
+	RUST_MIN_STACK={{ rust_min_stack }} cargo nextest run "$@"
+
+# List tests without running them; accepts nextest package and filter arguments.
+[unix]
+test-list *args:
+	RUST_MIN_STACK={{ rust_min_stack }} cargo nextest list "$@"
+
+# Nextest does not run doctests; accepts cargo test arguments.
+[unix]
+test-doc *args:
+	RUST_MIN_STACK={{ rust_min_stack }} cargo test --doc --no-fail-fast "$@"
 
 bench *args:
 	cargo bench --workspace --bench '*' {{ args }}
@@ -49,8 +58,37 @@ build-release:
 clean:
 	cargo clean
 
+# Create a forward-only timestamped migration in jet-store.
+sqlx-migrate-add name: && sqlx-migrations-check
+	# ASVS 1.2.5: pass the name as one argument, never as shell source.
+	cd jet-store && sqlx migrate add --source ./migrations --timestamp --simple -- "$1"
+
+# Check migration conventions without building or opening a database.
+sqlx-migrations-check:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	cd jet-store
+	duplicates="$(printf '%s\n' migrations/*.sql | sed 's|.*/||; s/_.*//' | sort | uniq -d)"
+	if [[ -n "$duplicates" ]]; then
+		printf 'Duplicate migration versions:\n%s\n' "$duplicates" >&2
+		exit 1
+	fi
+	for migration in migrations/*.sql; do
+		case "$migration" in
+			*.up.sql|*.down.sql)
+				printf 'Use a simple forward-only .sql migration: %s\n' "$migration" >&2
+				exit 1
+				;;
+		esac
+	done
+	# Nontransactional migrations can leave the store half-migrated on failure.
+	if grep -n '^-- no-transaction' migrations/*.sql; then
+		echo 'Migrations must run inside a transaction.' >&2
+		exit 1
+	fi
+
 # Regenerate the committed compile-time query cache in jet-store/.sqlx.
-sqlx-prepare:
+sqlx-prepare: sqlx-migrations-check
 	#!/usr/bin/env bash
 	set -euo pipefail
 	scratch="$(mktemp -d)"
@@ -61,7 +99,7 @@ sqlx-prepare:
 	cargo sqlx prepare -- --lib --tests
 
 # Fail when jet-store/.sqlx no longer matches the migrations and the queries.
-sqlx-check:
+sqlx-check: sqlx-migrations-check
 	#!/usr/bin/env bash
 	set -euo pipefail
 	scratch="$(mktemp -d)"
@@ -70,9 +108,3 @@ sqlx-check:
 	cd jet-store
 	sqlx migrate run --source ./migrations
 	cargo sqlx prepare --check -- --lib --tests
-	# A version prefix used twice commits the first migration and wedges the
-	# second, so refuse a set that carries one.
-	test -z "$(ls migrations | cut -d_ -f1 | sort | uniq -d)"
-	# A migration outside a transaction cannot roll back, so it can leave the
-	# store half-migrated with no bookkeeping row.
-	! grep -l '^-- no-transaction' migrations/*.sql

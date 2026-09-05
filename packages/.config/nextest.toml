@@ -1,0 +1,13 @@
+# Shared runner settings for `just test` (https://nexte.st/docs/configuration/).
+[profile.default]
+# Preserve the previous test recipe's --no-fail-fast behavior.
+fail-fast = false
+# Report failures directly instead of hiding them behind successful retries.
+retries = 0
+failure-output = "immediate-final"
+# Report slow tests without terminating them during local development.
+slow-timeout = "60s"
+
+# Select with `just test --profile ci`; inherits the default runner settings.
+[profile.ci.junit]
+path = "junit.xml"
