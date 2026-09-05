@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE security_audit SET target_id = ?1 WHERE sequence = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "5d4ad88db278f389e1ec9313a6fa1a435418cf857756d54f475dbe1efae9a060"
+}

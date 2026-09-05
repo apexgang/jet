@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sequence AS \"sequence!\", epoch, entry_hash\n\t\t\t FROM security_audit\n\t\t\t ORDER BY sequence DESC\n\t\t\t LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "sequence!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "sequence"
+          }
+        }
+      },
+      {
+        "name": "epoch",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "epoch"
+          }
+        }
+      },
+      {
+        "name": "entry_hash",
+        "ordinal": 2,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "security_audit",
+            "name": "entry_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3ddd1d9dce240d0dd479fe25aa9b000e2c17b623a13c4c024858e2ebfa3cb0fc"
+}

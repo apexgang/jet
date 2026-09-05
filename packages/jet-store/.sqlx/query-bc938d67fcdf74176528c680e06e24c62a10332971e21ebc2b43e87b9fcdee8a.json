@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO audit_epochs (epoch, started_at_unix_ms,\n\t\t\t\tpreceding_sequence, preceding_entry_hash, gap_reason)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "bc938d67fcdf74176528c680e06e24c62a10332971e21ebc2b43e87b9fcdee8a"
+}

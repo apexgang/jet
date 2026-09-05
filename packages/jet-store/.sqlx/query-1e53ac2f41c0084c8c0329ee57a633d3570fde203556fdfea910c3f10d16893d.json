@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE security_audit SET outcome = 'denied'\n\t\t\t\t WHERE sequence = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1e53ac2f41c0084c8c0329ee57a633d3570fde203556fdfea910c3f10d16893d"
+}

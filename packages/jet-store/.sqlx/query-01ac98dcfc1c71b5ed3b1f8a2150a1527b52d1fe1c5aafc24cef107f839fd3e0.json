@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT retained_after_epoch, retained_after_sequence,\n\t\t\t\tretained_after_hash\n\t\t\t FROM audit_state WHERE singleton = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "retained_after_epoch",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "audit_state",
+            "name": "retained_after_epoch"
+          }
+        }
+      },
+      {
+        "name": "retained_after_sequence",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "audit_state",
+            "name": "retained_after_sequence"
+          }
+        }
+      },
+      {
+        "name": "retained_after_hash",
+        "ordinal": 2,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "audit_state",
+            "name": "retained_after_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "01ac98dcfc1c71b5ed3b1f8a2150a1527b52d1fe1c5aafc24cef107f839fd3e0"
+}

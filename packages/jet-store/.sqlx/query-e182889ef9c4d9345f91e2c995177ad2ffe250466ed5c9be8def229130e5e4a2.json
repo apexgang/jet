@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT epoch AS \"epoch!\", started_at_unix_ms,\n\t\t\t\tpreceding_sequence, preceding_entry_hash, gap_reason\n\t\t\t FROM audit_epochs\n\t\t\t ORDER BY epoch DESC\n\t\t\t LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "epoch!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "audit_epochs",
+            "name": "epoch"
+          }
+        }
+      },
+      {
+        "name": "started_at_unix_ms",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "audit_epochs",
+            "name": "started_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "preceding_sequence",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "audit_epochs",
+            "name": "preceding_sequence"
+          }
+        }
+      },
+      {
+        "name": "preceding_entry_hash",
+        "ordinal": 3,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "audit_epochs",
+            "name": "preceding_entry_hash"
+          }
+        }
+      },
+      {
+        "name": "gap_reason",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_epochs",
+            "name": "gap_reason"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e182889ef9c4d9345f91e2c995177ad2ffe250466ed5c9be8def229130e5e4a2"
+}
