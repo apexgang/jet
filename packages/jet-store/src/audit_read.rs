@@ -10,8 +10,8 @@ use crate::audit::{
 	AUDIT_PAGE_LIMIT, AuditOutcome, AuditRecord, AuditRisk, AuditTip,
 	RetentionAnchor,
 };
-use crate::audit_chain::AuditTargetRef;
-use crate::audit_epoch::{parse_entry_hash, parse_sequence, sequence_column};
+use crate::audit_chain::{AuditEntryHash, AuditTargetRef};
+use crate::audit_epoch::{counter_column, parse_counter};
 use crate::records::{ActorRecord, parse_uuid};
 use crate::transaction::ReadTransaction;
 
@@ -49,7 +49,7 @@ impl ReadTransaction {
 		// ASVS 2.2.1/2.2.2: cap allocation-driving input again at the
 		// trusted store seam, even when the caller already applies a limit.
 		let limit = i64::try_from(limit.min(AUDIT_PAGE_LIMIT)).unwrap_or(1);
-		let after = sequence_column(after)?;
+		let after = counter_column(after)?;
 		let rows = sqlx::query_as!(
 			Row,
 			r#"SELECT sequence AS "sequence!", epoch, record_id,
@@ -84,8 +84,8 @@ impl ReadTransaction {
 		limit: usize,
 	) -> Result<Vec<AuditRecord>, StoreError> {
 		let limit = i64::try_from(limit.min(AUDIT_PAGE_LIMIT)).unwrap_or(1);
-		let epoch = sequence_column(epoch)?;
-		let after = sequence_column(after)?;
+		let epoch = counter_column(epoch)?;
+		let after = counter_column(after)?;
 		let rows = sqlx::query_as!(
 			Row,
 			r#"SELECT sequence AS "sequence!", epoch, record_id,
@@ -132,9 +132,9 @@ impl ReadTransaction {
 		.await?;
 		row.map(|row| {
 			Ok(AuditTip {
-				epoch: parse_sequence(row.epoch)?,
-				sequence: parse_sequence(row.sequence)?,
-				entry_hash: parse_entry_hash(&row.entry_hash)?,
+				epoch: parse_counter(row.epoch)?,
+				sequence: parse_counter(row.sequence)?,
+				entry_hash: AuditEntryHash::from_column(&row.entry_hash)?,
 			})
 		})
 		.transpose()
@@ -160,9 +160,9 @@ impl ReadTransaction {
 			return Ok(None);
 		};
 		Ok(Some(RetentionAnchor {
-			epoch: parse_sequence(row.retained_after_epoch)?,
-			sequence: parse_sequence(row.retained_after_sequence)?,
-			entry_hash: parse_entry_hash(&hash)?,
+			epoch: parse_counter(row.retained_after_epoch)?,
+			sequence: parse_counter(row.retained_after_sequence)?,
+			entry_hash: AuditEntryHash::from_column(&hash)?,
 		}))
 	}
 }
@@ -178,28 +178,18 @@ fn read_row(row: Row) -> Result<AuditRecord, StoreError> {
 		))
 	})?;
 	Ok(AuditRecord {
-		sequence: parse_sequence(row.sequence)?,
-		epoch: parse_sequence(row.epoch)?,
+		sequence: parse_counter(row.sequence)?,
+		epoch: parse_counter(row.epoch)?,
 		record_id: parse_uuid("record_id", &row.record_id)?,
 		recorded_at_unix_ms: row.recorded_at_unix_ms,
 		plane_id: parse_uuid("plane_id", &row.plane_id)?,
 		actor: ActorRecord::parse(&row.actor_kind, &row.actor_id)?,
 		target_kind: row.target_kind,
-		target_reference: parse_target_reference(&row.target_reference)?,
+		target_reference: AuditTargetRef::from_column(&row.target_reference)?,
 		target_id: row.target_id,
 		decision: row.decision,
 		risk,
 		outcome,
-		entry_hash: parse_entry_hash(&row.entry_hash)?,
+		entry_hash: AuditEntryHash::from_column(&row.entry_hash)?,
 	})
-}
-fn parse_target_reference(bytes: &[u8]) -> Result<AuditTargetRef, StoreError> {
-	<[u8; 32]>::try_from(bytes)
-		.map(AuditTargetRef)
-		.map_err(|_| {
-			StoreError::Integrity(format!(
-				"an audit target reference is 32 bytes, not {}",
-				bytes.len()
-			))
-		})
 }

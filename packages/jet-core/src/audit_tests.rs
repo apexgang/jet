@@ -8,6 +8,7 @@ use crate::audit::{self, AuditSubject};
 use crate::clock::Clock;
 use crate::test_support::{
 	FixedProbe, ManualClock, actor, equipped, request, start_core_with,
+	stripped,
 };
 use crate::{
 	AuditDecision, AuditEntry, AuditEpoch, AuditOutcome, AuditPage, AuditRisk,
@@ -231,7 +232,7 @@ async fn the_audit_keeps_no_text_a_client_supplied() {
 
 	let page = audit(&core, AuditSequence(0)).await;
 	let recorded = format!("{page:?}");
-	assert_eq!(recorded.contains(secret_looking_label), false);
+	assert!(!recorded.contains(secret_looking_label));
 }
 
 #[tokio::test]
@@ -475,6 +476,48 @@ async fn clearing_the_retention_window_returns_to_the_built_in_one() {
 					AuditOutcome::Succeeded
 				),
 			]
+		)
+	);
+}
+
+/// ADR-0105 asks for the failures as much as the successes. A Plane with no
+/// credential store cannot bind an account through one, and refusing to is
+/// how an authentication setup fails here.
+#[tokio::test]
+async fn a_binding_refused_by_the_plane_is_recorded_as_denied() {
+	let dir = tempfile::tempdir().unwrap();
+	let probe = FixedProbe::new(stripped());
+	let core = start_core_with(
+		&dir.path().join("plane.sqlite3"),
+		ManualClock::at(UNIX_EPOCH + NOW),
+		Arc::clone(&probe),
+	)
+	.await;
+
+	let refused = core
+		.execute(
+			&actor(),
+			request(Command::BindAccount {
+				provider: crate::ProviderId("anthropic".into()),
+				label: "Work account".into(),
+				provider_account: None,
+				credential_source: CredentialSource::PlatformStore,
+			}),
+		)
+		.await
+		.unwrap_err();
+
+	let page = audit(&core, AuditSequence(0)).await;
+	assert_eq!(
+		(
+			refused.code.as_str(),
+			decisions(&page),
+			page.entries[0].target.kind.as_str(),
+		),
+		(
+			"capability.unavailable",
+			vec![("account.bound", AuditRisk::Elevated, AuditOutcome::Denied)],
+			"plane",
 		)
 	);
 }

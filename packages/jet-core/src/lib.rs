@@ -68,7 +68,8 @@ pub use event::{
 };
 pub use jet_store::{AuditBreach, AuditHead};
 pub use jet_store::{
-	AuditOutcome, AuditRisk, AuditTargetRef, RetentionPolicy, RunLifecycle,
+	AuditEntryHash, AuditOutcome, AuditRisk, AuditTargetRef, RetentionPolicy,
+	RunLifecycle,
 };
 pub use query::{Query, QueryResult};
 pub use security::{SecurityDegradation, SecurityState};

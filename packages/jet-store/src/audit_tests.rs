@@ -500,3 +500,54 @@ async fn a_new_epoch_records_its_gap_and_validates_from_its_own_genesis() {
 		)
 	);
 }
+
+/// A rollback puts the position counter back with the database while the
+/// head, which lives outside it, stays where it was. The epoch that carries
+/// on from that head has to carry on past it, or its records land on
+/// positions the abandoned chain already used and the fold never sees them.
+#[tokio::test]
+async fn a_new_epoch_continues_past_the_head_a_rollback_left_behind() {
+	let dir = tempfile::tempdir().unwrap();
+	let path = dir.path().join("plane.sqlite3");
+	let snapshot = dir.path().join("snapshot.sqlite3");
+
+	let store = Store::open(&path).await.unwrap();
+	append(&store).await;
+	store.close().await;
+	copy_store(&path, &snapshot);
+
+	let store = Store::open(&path).await.unwrap();
+	let lost = append(&store).await;
+	store.close().await;
+	copy_store(&snapshot, &path);
+
+	let store = Store::open(&path).await.unwrap();
+	store
+		.write(async |tx| {
+			tx.begin_audit_epoch(
+				AuditGap {
+					sequence: lost.sequence,
+					entry_hash: lost.entry_hash,
+					reason: AuditBreach::HeadNotInStore.as_str().into(),
+				},
+				NOW_UNIX_MS,
+			)
+			.await
+		})
+		.await
+		.unwrap();
+	let first = append(&store).await;
+
+	assert_eq!(
+		(
+			first.sequence > lost.sequence,
+			store.validate_audit().await.unwrap()
+		),
+		(
+			true,
+			AuditIntegrity::Verified {
+				head: Some(head_of(&first))
+			}
+		)
+	);
+}

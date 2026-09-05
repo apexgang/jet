@@ -16,8 +16,8 @@
 use std::time::SystemTime;
 
 use jet_store::{
-	AccountBindingRecord, AuditOutcome, CredentialSourceRecord,
-	NewAccountBinding, WriteTransaction,
+	AccountBindingRecord, CredentialSourceRecord, NewAccountBinding,
+	WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -400,11 +400,10 @@ pub(crate) async fn bind(
 	audit::record(
 		tx,
 		actor,
-		Decision {
-			decision: AuditDecision::AccountBound,
-			subject: AuditSubject::AccountBinding(binding.binding_id),
-			outcome: AuditOutcome::Succeeded,
-		},
+		Decision::succeeded(
+			AuditDecision::AccountBound,
+			AuditSubject::AccountBinding(binding.binding_id),
+		),
 		now_unix_ms,
 	)
 	.await?;
@@ -443,11 +442,10 @@ pub(crate) async fn unbind(
 	audit::record(
 		tx,
 		actor,
-		Decision {
-			decision: AuditDecision::AccountUnbound,
-			subject: AuditSubject::AccountBinding(binding_id),
-			outcome: AuditOutcome::Succeeded,
-		},
+		Decision::succeeded(
+			AuditDecision::AccountUnbound,
+			AuditSubject::AccountBinding(binding_id),
+		),
 		now_unix_ms,
 	)
 	.await?;

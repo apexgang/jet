@@ -414,3 +414,7 @@ pub(super) fn unix_ms(time: SystemTime) -> i64 {
 			.map_or(i64::MIN, |ms| -ms),
 	}
 }
+
+#[cfg(test)]
+#[path = "minor_tests.rs"]
+mod tests;

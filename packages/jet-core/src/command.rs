@@ -3,9 +3,9 @@
 //! acknowledged only after that commit (ADR-0020, ADR-0071).
 
 use jet_store::{
-	AuditOutcome, EffectKindRecord, EffectSafetyRecord, NewCommandReceipt,
-	NewConversation, NewEffect, NewRun, RetentionPolicy, RunLifecycle,
-	SettingRecord, WriteTransaction,
+	EffectKindRecord, EffectSafetyRecord, NewCommandReceipt, NewConversation,
+	NewEffect, NewRun, RetentionPolicy, RunLifecycle, SettingRecord,
+	WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -182,31 +182,8 @@ impl Command {
 	/// an audit worth recording it in, so the two answers come from the
 	/// same place. Beginning an epoch is the way out and is never guarded.
 	pub(crate) fn security_class(&self) -> SecurityClass {
-		match self {
-			Self::BindAccount { .. } | Self::UnbindAccount { .. } => {
-				SecurityClass::Guarded
-			}
-			Self::SetSetting { key, value, .. } => {
-				guarded_when_recorded(audit::stored_setting(*key, value))
-			}
-			Self::ClearSetting { key, .. } => {
-				guarded_when_recorded(audit::cleared_setting(*key))
-			}
-			Self::BeginAuditEpoch
-			| Self::CreateConversation { .. }
-			| Self::CreateRun { .. }
-			| Self::TransitionRun { .. } => SecurityClass::Ordinary,
-		}
-	}
-}
-
-/// A Setting change the audit records is guarded; a preference is not.
-fn guarded_when_recorded(
-	decision: Option<crate::audit::AuditDecision>,
-) -> SecurityClass {
-	match decision {
-		Some(_) => SecurityClass::Guarded,
-		None => SecurityClass::Ordinary,
+		audit::decision_for(self)
+			.map_or(SecurityClass::Ordinary, |_| SecurityClass::Guarded)
 	}
 }
 
@@ -273,14 +250,23 @@ impl Core {
 			request_digest,
 		} = envelope;
 		let actor_record = actor.record();
-		// ASVS 16.2.1: a Plane that cannot vouch for its Security audit
-		// records nothing worth relying on, so it changes nothing worth
-		// recording until an owner has dealt with it (ADR-0105).
 		let security = *self.security.read().await;
-		security.admit(command.security_class())?;
-		self.revalidate_capabilities(actor_record, command_id, &command)
-			.await?;
 		let recorded_at_unix_ms = self.now_unix_ms();
+		if let Err(refusal) = self
+			.revalidate_capabilities(actor_record, command_id, &command)
+			.await
+		{
+			// ASVS 16.2.1: a decision the audit would have recorded is
+			// recorded when it is refused as well (ADR-0105).
+			audit::record_refusal(
+				&self.store,
+				actor,
+				&command,
+				recorded_at_unix_ms,
+			)
+			.await?;
+			return Err(refusal);
+		}
 		let outcome = self
 			.store
 			.write(async |tx| {
@@ -297,6 +283,14 @@ impl Core {
 						recorded_at_unix_ms,
 					);
 				}
+				// ASVS 16.2.1: a Plane that cannot vouch for its Security
+				// audit changes nothing worth recording until an owner has
+				// dealt with it (ADR-0105). The check sits behind the
+				// receipt above, because a retry of a Command that already
+				// committed is not a new mutation (ADR-0093), and it takes
+				// the transaction down with it rather than recording an
+				// outcome the audit could not be trusted to hold.
+				security.admit(command.security_class())?;
 
 				let result = execute_new(
 					tx,
@@ -504,11 +498,7 @@ async fn set_setting(
 		audit::record(
 			tx,
 			actor,
-			Decision {
-				decision,
-				subject: AuditSubject::of_scope(scope),
-				outcome: AuditOutcome::Succeeded,
-			},
+			Decision::succeeded(decision, AuditSubject::of_scope(scope)),
 			now_unix_ms,
 		)
 		.await?;
@@ -537,11 +527,7 @@ async fn clear_setting(
 		audit::record(
 			tx,
 			actor,
-			Decision {
-				decision,
-				subject: AuditSubject::of_scope(scope),
-				outcome: AuditOutcome::Succeeded,
-			},
+			Decision::succeeded(decision, AuditSubject::of_scope(scope)),
 			now_unix_ms,
 		)
 		.await?;

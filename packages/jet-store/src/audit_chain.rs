@@ -134,7 +134,27 @@ fn field(hasher: &mut Sha256, bytes: &[u8]) {
 	hasher.update(bytes);
 }
 
+impl AuditTargetRef {
+	/// Reads a stored reference.
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Integrity`] when the column is not 32 bytes.
+	pub(crate) fn from_column(bytes: &[u8]) -> Result<Self, StoreError> {
+		thirty_two("an audit target reference", bytes).map(Self)
+	}
+}
+
 impl AuditEntryHash {
+	/// Reads a stored link.
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Integrity`] when the column is not 32 bytes.
+	pub(crate) fn from_column(bytes: &[u8]) -> Result<Self, StoreError> {
+		thirty_two("an audit chain hash", bytes).map(Self)
+	}
+
 	/// Reads the lowercase hexadecimal spelling written by [`fmt::Display`].
 	///
 	/// # Errors
@@ -175,6 +195,16 @@ impl fmt::Display for AuditTargetRef {
 	fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write_hex(formatter, self.0)
 	}
+}
+
+/// The width every identifier here is stored at.
+fn thirty_two(described: &str, bytes: &[u8]) -> Result<[u8; 32], StoreError> {
+	<[u8; 32]>::try_from(bytes).map_err(|_| {
+		StoreError::Integrity(format!(
+			"{described} is 32 bytes, not {}",
+			bytes.len()
+		))
+	})
 }
 
 /// The lowercase hexadecimal spelling both identifiers cross a seam in.

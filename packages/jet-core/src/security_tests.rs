@@ -36,6 +36,24 @@ async fn start_without_a_head(path: &Path) -> Core {
 	start_core(path).await
 }
 
+/// Copies a closed store the way a Recovery snapshot does, taking the
+/// write-ahead log with it when one is still there.
+fn copy_store(from: &Path, to: &Path) {
+	std::fs::copy(from, to).unwrap();
+	for suffix in ["-wal", "-shm"] {
+		let mut source = from.as_os_str().to_owned();
+		source.push(suffix);
+		let mut target = to.as_os_str().to_owned();
+		target.push(suffix);
+		let (source, target) = (Path::new(&source), Path::new(&target));
+		if source.exists() {
+			std::fs::copy(source, target).unwrap();
+		} else if target.exists() {
+			std::fs::remove_file(target).unwrap();
+		}
+	}
+}
+
 fn degradation(state: SecurityState) -> SecurityDegradation {
 	match state {
 		SecurityState::Degraded(degradation) => degradation,
@@ -202,5 +220,74 @@ async fn a_plane_that_vouches_for_its_audit_has_no_gap_to_carry_on_from() {
 	assert_eq!(
 		(core.security().await, refused.code.as_str()),
 		(SecurityState::Trusted, "security.audit_trusted")
+	);
+}
+
+/// A store put back from a snapshot is the failure Security-degraded mode
+/// exists for, and one epoch is what the owner is told it costs.
+#[tokio::test]
+async fn one_epoch_is_enough_to_carry_on_from_a_restored_store() {
+	let dir = tempfile::tempdir().unwrap();
+	let path = dir.path().join("plane.sqlite3");
+	let snapshot = dir.path().join("snapshot.sqlite3");
+
+	let core = start_core(&path).await;
+	bind(&core).await.unwrap();
+	core.close().await;
+	drop(core);
+	copy_store(&path, &snapshot);
+
+	let core = start_core(&path).await;
+	bind(&core).await.unwrap();
+	core.close().await;
+	drop(core);
+	copy_store(&snapshot, &path);
+
+	let core = start_core(&path).await;
+	let breach = degradation(core.security().await).breach;
+	core.execute(&actor(), request(Command::BeginAuditEpoch))
+		.await
+		.unwrap();
+	let recovered = core.security().await;
+	let bound = bind(&core).await;
+
+	assert_eq!(
+		(
+			breach,
+			recovered,
+			matches!(bound, Ok(CommandOutcome::AccountBound(_)))
+		),
+		(AuditBreach::HeadNotInStore, SecurityState::Trusted, true)
+	);
+}
+
+/// A retry is not a new mutation. A guarded Command that already committed
+/// replays its recorded outcome even after the audit fell into doubt
+/// (ADR-0093).
+#[tokio::test]
+async fn a_guarded_command_that_already_committed_still_replays() {
+	let dir = tempfile::tempdir().unwrap();
+	let path = dir.path().join("plane.sqlite3");
+	let recorded = start_core(&path).await;
+	let envelope = request(Command::BindAccount {
+		provider: ProviderId("anthropic".into()),
+		label: "Work account".into(),
+		provider_account: None,
+		credential_source: CredentialSource::PlatformStore,
+	});
+	let committed = recorded.execute(&actor(), envelope.clone()).await.unwrap();
+	recorded.close().await;
+	drop(recorded);
+	std::fs::remove_file(audit_head_path(&path)).unwrap();
+	let core = start_core(&path).await;
+
+	let replayed = core.execute(&actor(), envelope).await;
+
+	assert_eq!(
+		(
+			matches!(core.security().await, SecurityState::Degraded(_)),
+			replayed
+		),
+		(true, Ok(committed))
 	);
 }

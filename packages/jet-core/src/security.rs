@@ -18,13 +18,13 @@ use jet_store::{
 	WriteTransaction,
 };
 
+use crate::Actor;
 use crate::audit::{
 	self, AuditDecision, AuditEpoch, AuditSequence, AuditSubject, Decision,
 };
 use crate::command::CommandOutcome;
 use crate::error::CoreError;
 use crate::event::{EventKind, EventSubject};
-use crate::{Actor, AuditOutcome};
 
 /// Whether the Plane can vouch for its own Security audit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,11 +147,10 @@ pub(crate) async fn begin_epoch(
 	audit::record(
 		tx,
 		actor,
-		Decision {
-			decision: AuditDecision::AuditEpochBegun,
-			subject: AuditSubject::Plane,
-			outcome: AuditOutcome::Succeeded,
-		},
+		Decision::succeeded(
+			AuditDecision::AuditEpochBegun,
+			AuditSubject::Plane,
+		),
 		now_unix_ms,
 	)
 	.await?;

@@ -18,7 +18,7 @@ use crate::StoreError;
 use crate::audit_chain::{
 	AuditEntryHash, AuditTargetRef, ChainedFields, entry_hash, target_reference,
 };
-use crate::audit_epoch::{parse_sequence, sequence_column};
+use crate::audit_epoch::{counter_column, parse_counter};
 use crate::audit_head::AuditHead;
 use crate::records::ActorRecord;
 use crate::transaction::WriteTransaction;
@@ -192,8 +192,8 @@ impl WriteTransaction {
 	) -> Result<(), StoreError> {
 		let (actor_kind, actor_id) = record.actor.columns();
 		let actor_id = actor_id.to_string();
-		let sequence = sequence_column(record.sequence)?;
-		let epoch = sequence_column(record.epoch)?;
+		let sequence = counter_column(record.sequence)?;
+		let epoch = counter_column(record.epoch)?;
 		let record_id = record.record_id.to_string();
 		let plane_id = record.plane_id.to_string();
 		let reference = record.target_reference.0.to_vec();
@@ -240,7 +240,7 @@ impl WriteTransaction {
 		)
 		.fetch_one(self.connection())
 		.await?;
-		parse_sequence(assigned)
+		parse_counter(assigned)
 	}
 }
 

@@ -15,8 +15,8 @@
 //! exactly what it was. What remains says that some Conversation was
 //! deleted and which records were about the same one, and nothing else.
 
-use crate::audit_chain::target_reference;
-use crate::audit_epoch::{parse_entry_hash, parse_sequence, sequence_column};
+use crate::audit_chain::{AuditEntryHash, target_reference};
+use crate::audit_epoch::{counter_column, parse_counter};
 use crate::audit_head::{self, AuditHead};
 use crate::transaction::WriteTransaction;
 use crate::{Store, StoreError};
@@ -24,7 +24,7 @@ use crate::{Store, StoreError};
 /// Most records one retention transaction removes. Retention repeats until
 /// nothing is left to remove, so a long-idle Plane catches up without
 /// holding the write lock for the whole backlog.
-pub const AUDIT_RETENTION_BATCH_LIMIT: usize = 256;
+const AUDIT_RETENTION_BATCH_LIMIT: usize = 256;
 
 impl Store {
 	/// Removes Security audit records recorded before `cutoff_unix_ms`,
@@ -97,7 +97,7 @@ impl WriteTransaction {
 		head: AuditHead,
 		cutoff_unix_ms: i64,
 	) -> Result<usize, StoreError> {
-		let keep_from = sequence_column(head.sequence)?;
+		let keep_from = counter_column(head.sequence)?;
 		let batch =
 			i64::try_from(AUDIT_RETENTION_BATCH_LIMIT).unwrap_or(i64::MAX);
 		// The eligible records are the unbroken run of expired ones from
@@ -131,8 +131,8 @@ impl WriteTransaction {
 		)
 		.fetch_one(self.connection())
 		.await?;
-		let epoch = parse_sequence(anchor.epoch)?;
-		let entry_hash = parse_entry_hash(&anchor.entry_hash)?;
+		let epoch = parse_counter(anchor.epoch)?;
+		let entry_hash = AuditEntryHash::from_column(&anchor.entry_hash)?;
 		let removed = sqlx::query!(
 			"DELETE FROM security_audit WHERE sequence <= ?1",
 			last_removed
@@ -140,7 +140,7 @@ impl WriteTransaction {
 		.execute(self.connection())
 		.await?
 		.rows_affected();
-		let epoch_column = sequence_column(epoch)?;
+		let epoch_column = counter_column(epoch)?;
 		let hash_column = entry_hash.0.to_vec();
 		sqlx::query!(
 			"UPDATE audit_state

@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::account::AccountBindingId;
+use crate::command::Command;
 use crate::conversation::ConversationId;
 use crate::error::CoreError;
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
@@ -97,6 +98,22 @@ pub(crate) struct Decision {
 	pub(crate) subject: AuditSubject,
 	/// What became of it.
 	pub(crate) outcome: AuditOutcome,
+}
+
+impl Decision {
+	/// A decision that was carried out. It is the only outcome a Command
+	/// records from inside its own transaction, because a Command that
+	/// failed never reaches the commit that would have kept the record.
+	pub(crate) fn succeeded(
+		decision: AuditDecision,
+		subject: AuditSubject,
+	) -> Self {
+		Self {
+			decision,
+			subject,
+			outcome: AuditOutcome::Succeeded,
+		}
+	}
 }
 
 /// What one recorded decision was about.
@@ -227,6 +244,87 @@ impl AuditSubject {
 			| Self::AccountBinding(AccountBindingId(id)) => Some(id.to_string()),
 		}
 	}
+}
+
+/// What `command` would record, when it is one the audit records at all.
+///
+/// This is the single place that decides whether a Command is the audit's
+/// business, so what the audit writes and what Security-degraded mode
+/// guards can never drift apart.
+pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
+	match command {
+		Command::BindAccount { .. } => Some(AuditDecision::AccountBound),
+		Command::UnbindAccount { .. } => Some(AuditDecision::AccountUnbound),
+		Command::SetSetting { key, value, .. } => stored_setting(*key, value),
+		Command::ClearSetting { key, .. } => cleared_setting(*key),
+		Command::BeginAuditEpoch
+		| Command::CreateConversation { .. }
+		| Command::CreateRun { .. }
+		| Command::TransitionRun { .. } => None,
+	}
+}
+
+/// What a Command that never ran was about.
+///
+/// A binding that was not made has no identity yet, so a refused one is
+/// recorded against the Plane it was refused on. Everything else already
+/// names something that exists.
+fn refused_subject(command: &Command) -> AuditSubject {
+	match command {
+		Command::UnbindAccount { binding_id } => {
+			AuditSubject::AccountBinding(*binding_id)
+		}
+		Command::SetSetting { scope, .. }
+		| Command::ClearSetting { scope, .. } => AuditSubject::of_scope(*scope),
+		Command::BindAccount { .. }
+		| Command::BeginAuditEpoch
+		| Command::CreateConversation { .. }
+		| Command::CreateRun { .. }
+		| Command::TransitionRun { .. } => AuditSubject::Plane,
+	}
+}
+
+/// Records that `command` was refused before it changed anything, when it
+/// is one the audit records.
+///
+/// A Command turned away because the Plane can no longer do what it needs
+/// is an outcome worth keeping: an Account binding refused for want of a
+/// credential store is how an authentication setup fails on this Plane, and
+/// ADR-0105 asks for the failures as much as the successes.
+///
+/// A Command refused because the audit itself is in doubt is not recorded.
+/// There would be nothing to rely on in the record, and writing one would
+/// let a client grow an audit the Plane has already stopped vouching for.
+///
+/// # Errors
+///
+/// Returns a store category [`CoreError`] when the record cannot be
+/// written.
+pub(crate) async fn record_refusal(
+	store: &Store,
+	actor: &Actor,
+	command: &Command,
+	now_unix_ms: i64,
+) -> Result<(), CoreError> {
+	let Some(decision) = decision_for(command) else {
+		return Ok(());
+	};
+	let subject = refused_subject(command);
+	store
+		.write(async |tx| {
+			record(
+				tx,
+				actor,
+				Decision {
+					decision,
+					subject,
+					outcome: AuditOutcome::Denied,
+				},
+				now_unix_ms,
+			)
+			.await
+		})
+		.await
 }
 
 /// What storing `value` for `key` decides, when that Setting is one the

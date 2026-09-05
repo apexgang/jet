@@ -5,6 +5,10 @@ use super::{
 	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,
 	QueryResponse, RecoveryAction, ServerMessage, WireError, raw_command,
 };
+use crate::audit::{
+	AuditBreach, AuditEntry, AuditHead, AuditOutcome, AuditRisk, AuditTarget,
+	SecurityAudit, SecurityState,
+};
 use crate::conversation::{
 	CommandRequest, CommandResponse, ConflictState, Conversation,
 	ConversationSnapshot, RetentionPolicy, RevisionConflict, Run, RunLifecycle,
@@ -321,5 +325,105 @@ fn only_canonical_decimal_strings_are_accepted_for_sequences() {
 			.iter()
 			.all(|error| matches!(error, ControlError::Malformed(_))),
 		"{rejected:?}"
+	);
+}
+
+#[test]
+fn the_security_audit_query_and_page_have_the_agreed_wire_shape() {
+	let query = ClientMessage::Query {
+		id: 7,
+		query: QueryRequest::SecurityAudit { after: 0 },
+	};
+	let result = ServerMessage::QueryResult {
+		id: 7,
+		result: QueryResponse::SecurityAudit(SecurityAudit {
+			cursor: 1,
+			entries: vec![AuditEntry {
+				sequence: 1,
+				epoch: 1,
+				record_id: Uuid::nil(),
+				recorded_at_unix_ms: 1_700_000_000_000,
+				plane_id: Uuid::nil(),
+				actor: Actor::InteractiveClient {
+					client_id: Uuid::nil(),
+				},
+				target: AuditTarget {
+					kind: "account_binding".into(),
+					reference: "00".repeat(32),
+					identity: None,
+				},
+				decision: "account.bound".into(),
+				risk: AuditRisk::Elevated,
+				outcome: AuditOutcome::Succeeded,
+			}],
+		}),
+	};
+	assert_eq!(
+		(json(&query), json(&result)),
+		(
+			r#"{"kind":"query","id":7,"query":{"type":"security_audit","after":"0"}}"#.to_string(),
+			format!(
+				r#"{{"kind":"query_result","id":7,"result":{{"type":"security_audit","cursor":"1","entries":[{{"sequence":"1","epoch":"1","record_id":"00000000-0000-0000-0000-000000000000","recorded_at_unix_ms":1700000000000,"plane_id":"00000000-0000-0000-0000-000000000000","actor":{{"type":"interactive_client","client_id":"00000000-0000-0000-0000-000000000000"}},"target":{{"kind":"account_binding","reference":"{}"}},"decision":"account.bound","risk":"elevated","outcome":"succeeded"}}]}}}}"#,
+				"00".repeat(32)
+			),
+		)
+	);
+}
+
+#[test]
+fn beginning_an_audit_epoch_has_the_agreed_wire_shape() {
+	let command = ClientMessage::Command {
+		id: 8,
+		command_id: Uuid::nil(),
+		command: CommandRequest::BeginAuditEpoch,
+	};
+	let result = ServerMessage::CommandResult {
+		id: 8,
+		result: CommandResponse::AuditEpochBegun { epoch: 2 },
+	};
+	assert_eq!(
+		(json(&command), json(&result)),
+		(
+			r#"{"kind":"command","id":8,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"begin_audit_epoch"}}"#.to_string(),
+			r#"{"kind":"command_result","id":8,"result":{"type":"audit_epoch_begun","epoch":"2"}}"#.to_string(),
+		)
+	);
+}
+
+#[test]
+fn a_degraded_plane_reports_its_evidence_in_the_agreed_wire_shape() {
+	let status = PlaneStatus {
+		cursor: Some(4),
+		plane_id: Uuid::nil(),
+		daemon_starts: 2,
+		started_at_unix_ms: 1_700_000_000_000,
+		core_version: "0.2.0".into(),
+		security: Some(SecurityState::Degraded {
+			breach: AuditBreach::HeadNotInStore,
+			epoch: 1,
+			head: Some(AuditHead {
+				epoch: 1,
+				sequence: 2,
+				entry_hash: "ab".repeat(32),
+			}),
+			store_sequence: 1,
+		}),
+	};
+	assert_eq!(
+		json(&status),
+		format!(
+			r#"{{"cursor":"4","plane_id":"00000000-0000-0000-0000-000000000000","daemon_starts":2,"started_at_unix_ms":1700000000000,"core_version":"0.2.0","security":{{"state":"degraded","breach":{{"breach":"head_not_in_store"}},"epoch":"1","head":{{"epoch":"1","sequence":"2","entry_hash":"{}"}},"store_sequence":"1"}}}}"#,
+			"ab".repeat(32)
+		)
+	);
+}
+
+/// A Setting value the audit retention window needs, in the shape a client
+/// that negotiated minor 5 reads it.
+#[test]
+fn a_whole_number_setting_value_has_the_agreed_wire_shape() {
+	assert_eq!(
+		json(&crate::setting::SettingValue::Count(365)),
+		r#"{"type":"count","value":365}"#
 	);
 }

@@ -125,6 +125,11 @@ impl WriteTransaction {
 			.newest_audit_epoch()
 			.await?
 			.map_or(1, |newest| newest.epoch.saturating_add(1));
+		// The counter lives in the database and goes back with it; the head
+		// the gap names does not. Carrying on from that head means carrying
+		// on past it, or the new epoch's records land on positions the
+		// abandoned chain already used and validation never reaches them.
+		self.reserve_audit_positions_through(gap.sequence).await?;
 		let row = self
 			.insert_audit_epoch(epoch, started_at_unix_ms, Some(gap))
 			.await?;
@@ -139,16 +144,33 @@ impl WriteTransaction {
 		Ok(epoch)
 	}
 
+	/// Moves the audit's position counter past `sequence`, so nothing it
+	/// hands out afterwards can collide with a position already used.
+	async fn reserve_audit_positions_through(
+		&mut self,
+		sequence: u64,
+	) -> Result<(), StoreError> {
+		let next = counter_column(sequence.saturating_add(1))?;
+		sqlx::query!(
+			"UPDATE audit_state SET next_sequence = MAX(next_sequence, ?1)
+			 WHERE singleton = 1",
+			next
+		)
+		.execute(self.connection())
+		.await?;
+		Ok(())
+	}
+
 	async fn insert_audit_epoch(
 		&mut self,
 		epoch: u64,
 		started_at_unix_ms: i64,
 		preceding: Option<AuditGap>,
 	) -> Result<EpochRow, StoreError> {
-		let number = epoch_column(epoch)?;
+		let number = counter_column(epoch)?;
 		let sequence = preceding
 			.as_ref()
-			.map(|preceding| sequence_column(preceding.sequence))
+			.map(|preceding| counter_column(preceding.sequence))
 			.transpose()?;
 		let hash = preceding
 			.as_ref()
@@ -186,8 +208,8 @@ fn read_epoch(
 	{
 		(None, None, None) => None,
 		(Some(sequence), Some(hash), Some(reason)) => Some(AuditGap {
-			sequence: parse_sequence(sequence)?,
-			entry_hash: parse_entry_hash(&hash)?,
+			sequence: parse_counter(sequence)?,
+			entry_hash: AuditEntryHash::from_column(&hash)?,
 			reason,
 		}),
 		_ => {
@@ -197,39 +219,24 @@ fn read_epoch(
 		}
 	};
 	Ok(EpochRow {
-		epoch: parse_sequence(epoch)?,
+		epoch: parse_counter(epoch)?,
 		started_at_unix_ms,
 		preceding,
 	})
 }
 
-pub(crate) fn parse_entry_hash(
-	bytes: &[u8],
-) -> Result<AuditEntryHash, StoreError> {
-	<[u8; 32]>::try_from(bytes)
-		.map(AuditEntryHash)
-		.map_err(|_| {
-			StoreError::Integrity(format!(
-				"an audit chain hash is 32 bytes, not {}",
-				bytes.len()
-			))
-		})
-}
-
-pub(crate) fn parse_sequence(value: i64) -> Result<u64, StoreError> {
+/// Reads a counter the audit keeps as a SQLite integer. Positions, epochs,
+/// and the batch bounds derived from them all count upwards from one, so a
+/// negative one is a broken row rather than a value with a meaning.
+pub(crate) fn parse_counter(value: i64) -> Result<u64, StoreError> {
 	u64::try_from(value).map_err(|_| {
-		StoreError::Integrity(format!("audit position {value} is negative"))
+		StoreError::Integrity(format!("audit counter {value} is negative"))
 	})
 }
 
-pub(crate) fn sequence_column(sequence: u64) -> Result<i64, StoreError> {
-	i64::try_from(sequence).map_err(|_| {
-		StoreError::Integrity(format!("audit position {sequence} overflows"))
-	})
-}
-
-fn epoch_column(epoch: u64) -> Result<i64, StoreError> {
-	i64::try_from(epoch).map_err(|_| {
-		StoreError::Integrity(format!("audit epoch {epoch} overflows"))
+/// Writes one back, refusing a value SQLite has no room for.
+pub(crate) fn counter_column(counter: u64) -> Result<i64, StoreError> {
+	i64::try_from(counter).map_err(|_| {
+		StoreError::Integrity(format!("audit counter {counter} overflows"))
 	})
 }
