@@ -109,7 +109,7 @@ pub struct Core {
 	clock: Arc<dyn Clock>,
 	started_at: SystemTime,
 	#[allow(dead_code, reason = "used by Effect reconciliation in issue #20")]
-	effect_reconciliation: std::sync::Mutex<()>,
+	effect_reconciliation: tokio::sync::Mutex<()>,
 	conversation_pages: pagination::ConversationPages,
 }
 
@@ -120,8 +120,8 @@ impl Core {
 	///
 	/// Returns [`CoreError`] with an `unavailable` or `internal` category
 	/// when the start cannot be committed.
-	pub fn start(store: Store) -> Result<Self, CoreError> {
-		Self::start_with_clock(store, Arc::new(SystemClock))
+	pub async fn start(store: Store) -> Result<Self, CoreError> {
+		Self::start_with_clock(store, Arc::new(SystemClock)).await
 	}
 
 	/// Starts the core with an injected wall clock.
@@ -130,17 +130,17 @@ impl Core {
 	///
 	/// Returns [`CoreError`] with an `unavailable` or `internal` category
 	/// when the start cannot be committed.
-	pub(crate) fn start_with_clock(
+	pub(crate) async fn start_with_clock(
 		store: Store,
 		clock: Arc<dyn Clock>,
 	) -> Result<Self, CoreError> {
-		store.record_daemon_start()?;
+		store.record_daemon_start().await?;
 		let started_at = clock.now();
 		Ok(Self {
 			store,
 			clock,
 			started_at,
-			effect_reconciliation: std::sync::Mutex::new(()),
+			effect_reconciliation: tokio::sync::Mutex::new(()),
 			conversation_pages: pagination::ConversationPages::default(),
 		})
 	}
@@ -149,6 +149,13 @@ impl Core {
 	/// written by one Command comes from this one reading.
 	pub(crate) fn now_unix_ms(&self) -> i64 {
 		unix_ms(self.clock.now())
+	}
+
+	/// Closes the Plane store, letting SQLite finish its write-ahead log
+	/// checkpoint before the process exits. The core answers nothing
+	/// afterwards, so only a daemon that has stopped serving calls this.
+	pub async fn close(&self) {
+		self.store.close().await;
 	}
 }
 

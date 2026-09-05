@@ -1,6 +1,5 @@
 //! Current state of Conversations, independent of any Run (ADR-0001).
 
-use rusqlite::{OptionalExtension, Row};
 use uuid::Uuid;
 
 use crate::StoreError;
@@ -10,32 +9,39 @@ use crate::records::{
 };
 use crate::transaction::{ReadTransaction, WriteTransaction};
 
-const COLUMNS: &str = "conversation_id, retention, created_at_unix_ms";
-
 /// Most Conversations returned by one keyset page.
 pub const CONVERSATION_PAGE_LIMIT: usize = 256;
 
-impl ReadTransaction<'_> {
+/// One `conversations` row as SQLite stores it, before its text columns are
+/// parsed back into domain types.
+struct Row {
+	conversation_id: String,
+	retention: String,
+	created_at_unix_ms: i64,
+}
+
+impl ReadTransaction {
 	/// The Conversation identified by `conversation_id`, if recorded.
 	///
 	/// # Errors
 	///
 	/// Returns a [`StoreError`] when the row cannot be read.
-	pub fn conversation(
-		&self,
+	pub async fn conversation(
+		&mut self,
 		conversation_id: Uuid,
 	) -> Result<Option<ConversationRecord>, StoreError> {
-		Ok(self
-			.transaction
-			.query_row(
-				&format!(
-					"SELECT {COLUMNS} FROM conversations
-					 WHERE conversation_id = ?1"
-				),
-				[conversation_id.to_string()],
-				read_row,
-			)
-			.optional()?)
+		let conversation_id = conversation_id.to_string();
+		let row = sqlx::query_as!(
+			Row,
+			r#"SELECT conversation_id AS "conversation_id!", retention,
+				created_at_unix_ms
+			 FROM conversations
+			 WHERE conversation_id = ?1"#,
+			conversation_id
+		)
+		.fetch_optional(self.connection())
+		.await?;
+		row.map(read_row).transpose()
 	}
 
 	/// Every recorded Conversation in creation order.
@@ -43,12 +49,19 @@ impl ReadTransaction<'_> {
 	/// # Errors
 	///
 	/// Returns a [`StoreError`] when the rows cannot be read.
-	pub fn conversations(&self) -> Result<Vec<ConversationRecord>, StoreError> {
-		let mut statement = self.transaction.prepare(&format!(
-			"SELECT {COLUMNS} FROM conversations ORDER BY rowid"
-		))?;
-		let rows = statement.query_map([], read_row)?;
-		Ok(rows.collect::<Result<_, _>>()?)
+	pub async fn conversations(
+		&mut self,
+	) -> Result<Vec<ConversationRecord>, StoreError> {
+		let rows = sqlx::query_as!(
+			Row,
+			r#"SELECT conversation_id AS "conversation_id!", retention,
+				created_at_unix_ms
+			 FROM conversations
+			 ORDER BY rowid"#
+		)
+		.fetch_all(self.connection())
+		.await?;
+		rows.into_iter().map(read_row).collect()
 	}
 
 	/// One bounded keyset page of Conversations in creation order.
@@ -56,8 +69,8 @@ impl ReadTransaction<'_> {
 	/// # Errors
 	///
 	/// Returns a [`StoreError`] when the rows cannot be read.
-	pub fn conversation_page(
-		&self,
+	pub async fn conversation_page(
+		&mut self,
 		start: ConversationPageStart,
 	) -> Result<
 		(Vec<ConversationRecord>, Option<ConversationPageKey>),
@@ -70,18 +83,32 @@ impl ReadTransaction<'_> {
 		// ASVS 1.2.4 and 2.2.2: the key is parameterized and the trusted
 		// store fixes the allocation bound rather than accepting one from a
 		// protocol caller.
-		let mut statement = self.transaction.prepare(&format!(
-			"SELECT rowid, {COLUMNS} FROM conversations
-			 WHERE rowid > ?1 ORDER BY rowid LIMIT ?2"
-		))?;
-		let rows = statement.query_map(
-			(
-				after,
-				i64::try_from(CONVERSATION_PAGE_LIMIT + 1).unwrap_or(i64::MAX),
-			),
-			|row| Ok((ConversationPageKey(row.get(0)?), read_row_at(row, 1)?)),
-		)?;
-		let mut rows = rows.collect::<Result<Vec<_>, _>>()?;
+		let limit =
+			i64::try_from(CONVERSATION_PAGE_LIMIT + 1).unwrap_or(i64::MAX);
+		let rows = sqlx::query!(
+			r#"SELECT rowid AS "rowid!",
+				conversation_id AS "conversation_id!", retention,
+				created_at_unix_ms
+			 FROM conversations
+			 WHERE rowid > ?1 ORDER BY rowid LIMIT ?2"#,
+			after,
+			limit
+		)
+		.fetch_all(self.connection())
+		.await?;
+		let mut rows = rows
+			.into_iter()
+			.map(|row| {
+				Ok((
+					ConversationPageKey(row.rowid),
+					read_row(Row {
+						conversation_id: row.conversation_id,
+						retention: row.retention,
+						created_at_unix_ms: row.created_at_unix_ms,
+					})?,
+				))
+			})
+			.collect::<Result<Vec<_>, StoreError>>()?;
 		let next = (rows.len() > CONVERSATION_PAGE_LIMIT)
 			.then(|| rows[CONVERSATION_PAGE_LIMIT - 1].0);
 		rows.truncate(CONVERSATION_PAGE_LIMIT);
@@ -89,15 +116,15 @@ impl ReadTransaction<'_> {
 	}
 }
 
-impl WriteTransaction<'_> {
+impl WriteTransaction {
 	/// Records a new Conversation with no Runs.
 	///
 	/// # Errors
 	///
 	/// Returns a [`StoreError`] when the row cannot be written, including
 	/// when the identity is already taken.
-	pub fn insert_conversation(
-		&self,
+	pub async fn insert_conversation(
+		&mut self,
 		conversation: NewConversation,
 	) -> Result<ConversationRecord, StoreError> {
 		let record = ConversationRecord {
@@ -105,39 +132,32 @@ impl WriteTransaction<'_> {
 			retention: conversation.retention,
 			created_at_unix_ms: conversation.created_at_unix_ms,
 		};
-		self.transaction.execute(
-			&format!(
-				"INSERT INTO conversations ({COLUMNS}) VALUES (?1, ?2, ?3)"
-			),
-			(
-				record.conversation_id.to_string(),
-				record.retention.as_str(),
-				record.created_at_unix_ms,
-			),
-		)?;
+		let conversation_id = record.conversation_id.to_string();
+		let retention = record.retention.as_str();
+		sqlx::query!(
+			"INSERT INTO conversations
+				(conversation_id, retention, created_at_unix_ms)
+			 VALUES (?1, ?2, ?3)",
+			conversation_id,
+			retention,
+			record.created_at_unix_ms
+		)
+		.execute(self.connection())
+		.await?;
 		Ok(record)
 	}
 }
 
-fn read_row(row: &Row<'_>) -> rusqlite::Result<ConversationRecord> {
-	read_row_at(row, 0)
-}
-
-fn read_row_at(
-	row: &Row<'_>,
-	offset: usize,
-) -> rusqlite::Result<ConversationRecord> {
-	let conversation_id: String = row.get(offset)?;
-	let retention: String = row.get(offset + 1)?;
+fn read_row(row: Row) -> Result<ConversationRecord, StoreError> {
 	Ok(ConversationRecord {
-		conversation_id: parse_uuid(offset, &conversation_id)?,
-		retention: parse_retention(&retention)?,
-		created_at_unix_ms: row.get(offset + 2)?,
+		conversation_id: parse_uuid("conversation_id", &row.conversation_id)?,
+		retention: parse_retention(&row.retention)?,
+		created_at_unix_ms: row.created_at_unix_ms,
 	})
 }
 
-fn parse_retention(text: &str) -> rusqlite::Result<RetentionPolicy> {
+fn parse_retention(text: &str) -> Result<RetentionPolicy, StoreError> {
 	RetentionPolicy::parse(text).ok_or_else(|| {
-		column_error(1, format!("unknown retention value {text:?}"))
+		column_error("retention", format!("unknown retention value {text:?}"))
 	})
 }

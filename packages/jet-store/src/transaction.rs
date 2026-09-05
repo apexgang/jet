@@ -3,70 +3,112 @@
 //! so current state and its journal Events always land together
 //! (ADR-0020, ADR-0071).
 
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
-use rusqlite::{Transaction, TransactionBehavior};
+use sqlx::{SqliteConnection, SqliteTransaction};
 
 use crate::{Store, StoreError};
 
 /// One consistent read snapshot of the store.
-pub struct ReadTransaction<'a> {
-	pub(crate) transaction: Transaction<'a>,
+pub struct ReadTransaction {
+	transaction: SqliteTransaction<'static>,
 }
 
 /// One atomic set of changes, readable while it is being built.
-pub struct WriteTransaction<'a>(ReadTransaction<'a>);
+pub struct WriteTransaction(ReadTransaction);
 
-impl WriteTransaction<'_> {
-	fn commit(self) -> Result<(), StoreError> {
-		Ok(self.0.transaction.commit()?)
+impl ReadTransaction {
+	/// The connection every statement in this unit of work runs on. SQLite
+	/// executes statements on one connection in order, and borrowing the
+	/// transaction exclusively is what makes the compiler agree.
+	pub(crate) fn connection(&mut self) -> &mut SqliteConnection {
+		&mut self.transaction
 	}
 }
 
-impl<'a> Deref for WriteTransaction<'a> {
-	type Target = ReadTransaction<'a>;
+impl Deref for WriteTransaction {
+	type Target = ReadTransaction;
 
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
+impl DerefMut for WriteTransaction {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0
+	}
+}
+
 impl Store {
 	/// Runs `work` against one consistent snapshot.
+	///
+	/// `work` is an async closure, so the call reads
+	/// `store.read(async |tx| { .. }).await`. A plain closure returning an
+	/// async block does not satisfy the bound.
 	///
 	/// # Errors
 	///
 	/// Returns the error `work` produced, or a [`StoreError`] converted into
 	/// `E` when the snapshot cannot be opened.
-	pub fn read<T, E: From<StoreError>>(
+	pub async fn read<T, E: From<StoreError>>(
 		&self,
-		work: impl FnOnce(&ReadTransaction<'_>) -> Result<T, E>,
+		work: impl AsyncFnOnce(&mut ReadTransaction) -> Result<T, E>,
 	) -> Result<T, E> {
-		let mut connection = self.lock();
-		let transaction = connection
-			.transaction_with_behavior(TransactionBehavior::Deferred)
+		let transaction = self
+			.pool
+			.begin_with("BEGIN DEFERRED")
+			.await
 			.map_err(StoreError::from)?;
-		work(&ReadTransaction { transaction })
+		let mut transaction = ReadTransaction { transaction };
+		let result = work(&mut transaction).await;
+		// A read snapshot ends by releasing its read mark. Awaiting that
+		// rollback keeps it from outliving the call; a rollback that fails
+		// must not mask what the caller produced.
+		let _ = transaction.transaction.rollback().await;
+		result
 	}
 
 	/// Runs `work` as one durable transaction: every change commits when
 	/// `work` returns `Ok`, and none of them persist when it returns `Err`.
 	///
+	/// `work` is an async closure, so the call reads
+	/// `store.write(async |tx| { .. }).await`.
+	///
 	/// # Errors
 	///
 	/// Returns the error `work` produced, or a [`StoreError`] converted into
 	/// `E` when the transaction cannot be opened or committed.
-	pub fn write<T, E: From<StoreError>>(
+	pub async fn write<T, E: From<StoreError>>(
 		&self,
-		work: impl FnOnce(&WriteTransaction<'_>) -> Result<T, E>,
+		work: impl AsyncFnOnce(&mut WriteTransaction) -> Result<T, E>,
 	) -> Result<T, E> {
-		let mut connection = self.lock();
-		let transaction = connection
-			.transaction_with_behavior(TransactionBehavior::Immediate)
+		// A write takes its lock up front. A deferred transaction that reads
+		// before it writes cannot upgrade, and SQLite refuses it outright
+		// rather than waiting on the busy handler.
+		let transaction = self
+			.pool
+			.begin_with("BEGIN IMMEDIATE")
+			.await
 			.map_err(StoreError::from)?;
-		let transaction = WriteTransaction(ReadTransaction { transaction });
-		let result = work(&transaction)?;
-		transaction.commit()?;
-		Ok(result)
+		let mut transaction = WriteTransaction(ReadTransaction { transaction });
+		match work(&mut transaction).await {
+			Ok(value) => {
+				transaction
+					.0
+					.transaction
+					.commit()
+					.await
+					.map_err(|error| E::from(StoreError::from(error)))?;
+				Ok(value)
+			}
+			Err(error) => {
+				// Dropping the transaction only enqueues its rollback;
+				// awaiting it releases the write lock before the caller sees
+				// the error.
+				let _ = transaction.0.transaction.rollback().await;
+				Err(error)
+			}
+		}
 	}
 }

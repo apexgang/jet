@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT high_water_sequence, minimum_replay_cursor\n\t\t\t FROM event_journal_state WHERE singleton = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "high_water_sequence",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "event_journal_state",
+            "name": "high_water_sequence"
+          }
+        }
+      },
+      {
+        "name": "minimum_replay_cursor",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "event_journal_state",
+            "name": "minimum_replay_cursor"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "30c5e686a2a2aeba5515f37ac7114814e57aec20ee5e4d420c4dc1e009318ed8"
+}

@@ -48,3 +48,31 @@ build-release:
 
 clean:
 	cargo clean
+
+# Regenerate the committed compile-time query cache in jet-store/.sqlx.
+sqlx-prepare:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	scratch="$(mktemp -d)"
+	trap 'rm -rf "$scratch"' EXIT
+	export DATABASE_URL="sqlite://$scratch/prepare.sqlite3?mode=rwc"
+	cd jet-store
+	sqlx migrate run --source ./migrations
+	cargo sqlx prepare -- --lib --tests
+
+# Fail when jet-store/.sqlx no longer matches the migrations and the queries.
+sqlx-check:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	scratch="$(mktemp -d)"
+	trap 'rm -rf "$scratch"' EXIT
+	export DATABASE_URL="sqlite://$scratch/prepare.sqlite3?mode=rwc"
+	cd jet-store
+	sqlx migrate run --source ./migrations
+	cargo sqlx prepare --check -- --lib --tests
+	# A version prefix used twice commits the first migration and wedges the
+	# second, so refuse a set that carries one.
+	test -z "$(ls migrations | cut -d_ -f1 | sort | uniq -d)"
+	# A migration outside a transaction cannot roll back, so it can leave the
+	# store half-migrated with no bookkeeping row.
+	! grep -l '^-- no-transaction' migrations/*.sql

@@ -1,0 +1,6 @@
+[env]
+# Build the compile-time checked queries from the committed jet-store/.sqlx
+# cache, so a DATABASE_URL exported for an unrelated project cannot hijack
+# the build. `cargo sqlx prepare` sets SQLX_OFFLINE=false on the `cargo
+# check` it spawns, which wins over this, so `just sqlx-prepare` still works.
+SQLX_OFFLINE = "true"

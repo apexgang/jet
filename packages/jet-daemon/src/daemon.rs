@@ -21,6 +21,10 @@ const EXIT_PLANE_OWNED: u8 = 2;
 /// How long draining connections may hold up the exit (ADR-0088).
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long closing the store may hold up the exit once no connection is
+/// being served.
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub(crate) async fn run(
 	home: JetHome,
 	channel: InstallationChannel,
@@ -48,7 +52,7 @@ pub(crate) async fn run(
 			return ExitCode::from(EXIT_FAILURE);
 		}
 	};
-	let store = match Store::open(&home.store_path()) {
+	let store = match Store::open(&home.store_path()).await {
 		Ok(store) => store,
 		Err(error) => {
 			eprintln!("jetd: cannot open the Plane store: {error}");
@@ -63,7 +67,7 @@ pub(crate) async fn run(
 		}
 	};
 	// The start is recorded only once the daemon can actually serve.
-	let core = match Core::start(store) {
+	let core = match Core::start(store).await {
 		Ok(core) => Arc::new(core),
 		Err(error) => {
 			eprintln!("jetd: cannot start the core: {error}");
@@ -78,8 +82,21 @@ pub(crate) async fn run(
 		})
 	);
 	let exit = serve(listener, &core).await;
+	close_store(&core).await;
 	drop(lock);
 	exit
+}
+
+/// Closes the store so SQLite checkpoints its write-ahead log on the way
+/// out. An unclosed store loses nothing (ADR-0071), so the exit is never
+/// held up for long on its account.
+async fn close_store(core: &Core) {
+	if timeout(CLOSE_TIMEOUT, core.close()).await.is_err() {
+		eprintln!(
+			"jetd: the Plane store did not close within {} s; exiting anyway",
+			CLOSE_TIMEOUT.as_secs()
+		);
+	}
 }
 
 /// Accepts connections until a stop signal or a listener failure, then

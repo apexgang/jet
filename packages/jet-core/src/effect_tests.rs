@@ -12,7 +12,7 @@ use crate::{
 	Query, QueryResult, RetentionPolicy, Run, RunLifecycle,
 };
 
-fn execute(
+async fn execute(
 	core: &Core,
 	command_id: CommandId,
 	command: Command,
@@ -22,17 +22,20 @@ fn execute(
 		&actor(),
 		CommandEnvelope::new(command_id, command, &bytes).unwrap(),
 	)
+	.await
 	.unwrap()
 }
 
-fn create_run(core: &Core) -> (ConversationId, Run) {
+async fn create_run(core: &Core) -> (ConversationId, Run) {
 	let CommandOutcome::ConversationCreated(conversation) = execute(
 		core,
 		CommandId(Uuid::now_v7()),
 		Command::CreateConversation {
 			retention: RetentionPolicy::Retain,
 		},
-	) else {
+	)
+	.await
+	else {
 		panic!("expected a Conversation");
 	};
 	let CommandOutcome::RunCreated(run) = execute(
@@ -41,13 +44,15 @@ fn create_run(core: &Core) -> (ConversationId, Run) {
 		Command::CreateRun {
 			conversation_id: conversation.conversation_id,
 		},
-	) else {
+	)
+	.await
+	else {
 		panic!("expected a Run");
 	};
 	(conversation.conversation_id, run)
 }
 
-fn queue_start(core: &Core, run: Run) -> CommandId {
+async fn queue_start(core: &Core, run: Run) -> CommandId {
 	let command_id = CommandId(Uuid::now_v7());
 	execute(
 		core,
@@ -57,13 +62,18 @@ fn queue_start(core: &Core, run: Run) -> CommandId {
 			expected_revision: run.revision,
 			lifecycle: RunLifecycle::Starting,
 		},
-	);
+	)
+	.await;
 	command_id
 }
 
-fn lifecycle(core: &Core, conversation_id: ConversationId) -> RunLifecycle {
+async fn lifecycle(
+	core: &Core,
+	conversation_id: ConversationId,
+) -> RunLifecycle {
 	let QueryResult::Conversation(snapshot) = core
 		.query(&actor(), Query::Conversation { conversation_id })
+		.await
 		.unwrap()
 	else {
 		panic!("expected a Conversation snapshot");
@@ -99,30 +109,33 @@ impl EffectAdapter for RecordingAdapter {
 	}
 }
 
-fn assert_no_work_remains(path: &std::path::Path) {
-	let core = start_core(path);
+async fn assert_no_work_remains(path: &std::path::Path) {
+	let core = start_core(path).await;
 	let mut adapter = RecordingAdapter::new(EffectResult::Unknown);
-	assert_eq!(core.reconcile_effects(&mut adapter).unwrap(), vec![]);
+	assert_eq!(core.reconcile_effects(&mut adapter).await.unwrap(), vec![]);
 	assert_eq!((adapter.executed, adapter.reconciled), (vec![], vec![]));
 }
 
-#[test]
-fn a_starting_run_and_its_effect_commit_before_external_work_begins() {
+#[tokio::test]
+async fn a_starting_run_and_its_effect_commit_before_external_work_begins() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("plane.sqlite3");
-	let first = start_core(&path);
-	let (conversation_id, run) = create_run(&first);
-	let command_id = queue_start(&first, run);
-	assert_eq!(lifecycle(&first, conversation_id), RunLifecycle::Starting);
+	let first = start_core(&path).await;
+	let (conversation_id, run) = create_run(&first).await;
+	let command_id = queue_start(&first, run).await;
+	assert_eq!(
+		lifecycle(&first, conversation_id).await,
+		RunLifecycle::Starting
+	);
 	drop(first);
 
-	let restarted = start_core(&path);
+	let restarted = start_core(&path).await;
 	assert_eq!(
-		lifecycle(&restarted, conversation_id),
+		lifecycle(&restarted, conversation_id).await,
 		RunLifecycle::Starting
 	);
 	let mut adapter = RecordingAdapter::new(EffectResult::Completed);
-	let reconciled = restarted.reconcile_effects(&mut adapter).unwrap();
+	let reconciled = restarted.reconcile_effects(&mut adapter).await.unwrap();
 	let attempted = adapter.executed[0].clone();
 	let expected_attempt = Effect {
 		effect_id: attempted.effect_id,
@@ -145,18 +158,22 @@ fn a_starting_run_and_its_effect_commit_before_external_work_begins() {
 		}]
 	);
 	drop(restarted);
-	assert_no_work_remains(&path);
+	assert_no_work_remains(&path).await;
 }
 
-#[test]
-fn an_idempotent_effect_resumes_under_the_same_identity_after_interruption() {
+#[tokio::test]
+async fn an_idempotent_effect_resumes_under_the_same_identity_after_interruption()
+ {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("plane.sqlite3");
-	let first = start_core(&path);
-	let (_, run) = create_run(&first);
-	let command_id = queue_start(&first, run);
+	let first = start_core(&path).await;
+	let (_, run) = create_run(&first).await;
+	let command_id = queue_start(&first, run).await;
 	let mut interrupted_adapter = RecordingAdapter::new(EffectResult::Unknown);
-	let first_pass = first.reconcile_effects(&mut interrupted_adapter).unwrap();
+	let first_pass = first
+		.reconcile_effects(&mut interrupted_adapter)
+		.await
+		.unwrap();
 	let interrupted = interrupted_adapter.executed[0].clone();
 	let expected_interrupted = Effect {
 		effect_id: interrupted.effect_id,
@@ -174,9 +191,10 @@ fn an_idempotent_effect_resumes_under_the_same_identity_after_interruption() {
 	assert_eq!(first_pass, vec![expected_interrupted.clone()]);
 	drop(first);
 
-	let second = start_core(&path);
+	let second = start_core(&path).await;
 	let mut retry_adapter = RecordingAdapter::new(EffectResult::Failed);
-	let second_pass = second.reconcile_effects(&mut retry_adapter).unwrap();
+	let second_pass =
+		second.reconcile_effects(&mut retry_adapter).await.unwrap();
 	let retried = retry_adapter.executed[0].clone();
 	let expected_retried = Effect {
 		attempt_count: 2,
@@ -193,18 +211,19 @@ fn an_idempotent_effect_resumes_under_the_same_identity_after_interruption() {
 		}]
 	);
 	drop(second);
-	assert_no_work_remains(&path);
+	assert_no_work_remains(&path).await;
 }
 
-#[test]
-fn an_ambiguous_interrupted_effect_becomes_outcome_unknown_without_retry() {
+#[tokio::test]
+async fn an_ambiguous_interrupted_effect_becomes_outcome_unknown_without_retry()
+{
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join("plane.sqlite3");
-	let first = start_core(&path);
-	let (_, run) = create_run(&first);
+	let first = start_core(&path).await;
+	let (_, run) = create_run(&first).await;
 	first
 		.store
-		.write(|tx| {
+		.write(async |tx| {
 			tx.insert_effect(&NewEffect {
 				effect_id: Uuid::now_v7(),
 				command_id: Uuid::now_v7(),
@@ -212,16 +231,24 @@ fn an_ambiguous_interrupted_effect_becomes_outcome_unknown_without_retry() {
 				kind: EffectKindRecord::StartRun,
 				safety: EffectSafetyRecord::Ambiguous,
 			})
+			.await
 		})
+		.await
 		.unwrap();
 	let mut interrupted_adapter = RecordingAdapter::new(EffectResult::Unknown);
-	first.reconcile_effects(&mut interrupted_adapter).unwrap();
+	first
+		.reconcile_effects(&mut interrupted_adapter)
+		.await
+		.unwrap();
 	let interrupted = interrupted_adapter.executed[0].clone();
 	drop(first);
 
-	let second = start_core(&path);
+	let second = start_core(&path).await;
 	let mut unknown_adapter = RecordingAdapter::new(EffectResult::Completed);
-	let second_pass = second.reconcile_effects(&mut unknown_adapter).unwrap();
+	let second_pass = second
+		.reconcile_effects(&mut unknown_adapter)
+		.await
+		.unwrap();
 
 	assert_eq!(unknown_adapter.reconciled, vec![interrupted.clone()]);
 	assert_eq!(unknown_adapter.executed, vec![]);
@@ -233,5 +260,5 @@ fn an_ambiguous_interrupted_effect_becomes_outcome_unknown_without_retry() {
 		}]
 	);
 	drop(second);
-	assert_no_work_remains(&path);
+	assert_no_work_remains(&path).await;
 }

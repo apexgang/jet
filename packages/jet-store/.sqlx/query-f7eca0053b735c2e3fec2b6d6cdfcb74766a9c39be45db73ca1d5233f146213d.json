@@ -1,0 +1,122 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT effect_id AS \"effect_id!\", command_id, run_id, kind,\n\t\t\t\tsafety, external_key, max_attempts, state, attempt_count\n\t\t\t FROM effects\n\t\t\t WHERE state IN ('pending', 'in_flight')\n\t\t\t ORDER BY rowid",
+  "describe": {
+    "columns": [
+      {
+        "name": "effect_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "effects",
+            "name": "effect_id"
+          }
+        }
+      },
+      {
+        "name": "command_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "effects",
+            "name": "command_id"
+          }
+        }
+      },
+      {
+        "name": "run_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "effects",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "name": "kind",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "effects",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "name": "safety",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "effects",
+            "name": "safety"
+          }
+        }
+      },
+      {
+        "name": "external_key",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "effects",
+            "name": "external_key"
+          }
+        }
+      },
+      {
+        "name": "max_attempts",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "effects",
+            "name": "max_attempts"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "effects",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "name": "attempt_count",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "effects",
+            "name": "attempt_count"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f7eca0053b735c2e3fec2b6d6cdfcb74766a9c39be45db73ca1d5233f146213d"
+}

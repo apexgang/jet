@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE plane SET daemon_starts = daemon_starts + 1\n\t\t WHERE singleton = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "5da7b1b9d7632d078bd88f7059a72c9685d7f12451cd62f14f117e668cb8918c"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE event_journal_state\n\t\t\t SET minimum_replay_cursor = MAX(minimum_replay_cursor, ?1)\n\t\t\t WHERE singleton = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "7855fed9278d82519b0228e2643adfc2ae0e6c2c705ba734718a20ba6a9152ba"
+}

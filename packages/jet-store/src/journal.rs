@@ -7,28 +7,38 @@ use crate::records::{
 	parse_optional_uuid, parse_uuid,
 };
 use crate::transaction::{ReadTransaction, WriteTransaction};
-use rusqlite::{Row, params};
 
 /// Most operational Events removed in one compaction transaction.
 pub const EVENT_COMPACTION_BATCH_LIMIT: usize = 256;
 
-const COLUMNS: &str = "sequence, event_id, actor_kind, actor_id, \
-	recorded_at_unix_ms, conversation_id, run_id, kind, payload_version, \
-	payload";
+/// One `events` row as SQLite stores it, before its text columns are parsed
+/// back into domain types.
+struct Row {
+	sequence: i64,
+	event_id: String,
+	actor_kind: String,
+	actor_id: Option<String>,
+	recorded_at_unix_ms: i64,
+	conversation_id: Option<String>,
+	run_id: Option<String>,
+	kind: String,
+	payload_version: i64,
+	payload: String,
+}
 
-impl ReadTransaction<'_> {
+impl ReadTransaction {
 	/// Up to `limit` Events strictly after `cursor`, in sequence order.
 	///
 	/// # Errors
 	///
 	/// Returns a [`StoreError`] when the rows cannot be read.
-	pub fn events_after(
-		&self,
+	pub async fn events_after(
+		&mut self,
 		cursor: u64,
 		limit: usize,
 	) -> Result<(u64, Vec<EventRecord>), StoreError> {
 		let (current_snapshot_revision, minimum_available_cursor) =
-			self.journal_position()?;
+			self.journal_position().await?;
 		if cursor < minimum_available_cursor {
 			return Err(StoreError::CursorExpired {
 				minimum_available_cursor,
@@ -43,18 +53,25 @@ impl ReadTransaction<'_> {
 		// ASVS 2.2.1/2.2.2: cap allocation-driving input again at the
 		// trusted store seam, even when the caller already applies a limit.
 		let limit = limit.min(EVENT_COMPACTION_BATCH_LIMIT);
-		let mut statement = self.transaction.prepare(&format!(
-			"SELECT {COLUMNS} FROM events WHERE sequence > ?1
-			 ORDER BY sequence LIMIT ?2"
-		))?;
-		let rows = statement.query_map(
-			(
-				sequence_column(cursor)?,
-				i64::try_from(limit).unwrap_or(i64::MAX),
-			),
-			read_row,
-		)?;
-		Ok((current_snapshot_revision, rows.collect::<Result<_, _>>()?))
+		let cursor = sequence_column(cursor)?;
+		let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+		let rows = sqlx::query_as!(
+			Row,
+			r#"SELECT sequence AS "sequence!", event_id, actor_kind, actor_id,
+				recorded_at_unix_ms, conversation_id, run_id, kind,
+				payload_version, payload
+			 FROM events
+			 WHERE sequence > ?1
+			 ORDER BY sequence
+			 LIMIT ?2"#,
+			cursor,
+			limit
+		)
+		.fetch_all(self.connection())
+		.await?;
+		let events =
+			rows.into_iter().map(read_row).collect::<Result<_, _>>()?;
+		Ok((current_snapshot_revision, events))
 	}
 
 	/// The sequence of the newest Event, or zero before any Event exists.
@@ -64,35 +81,37 @@ impl ReadTransaction<'_> {
 	/// # Errors
 	///
 	/// Returns a [`StoreError`] when the journal cannot be read.
-	pub fn event_cursor(&self) -> Result<u64, StoreError> {
-		Ok(self.journal_position()?.0)
+	pub async fn event_cursor(&mut self) -> Result<u64, StoreError> {
+		Ok(self.journal_position().await?.0)
 	}
 
-	fn journal_position(&self) -> Result<(u64, u64), StoreError> {
-		let (high_water, minimum): (i64, i64) = self.transaction.query_row(
+	async fn journal_position(&mut self) -> Result<(u64, u64), StoreError> {
+		let row = sqlx::query!(
 			"SELECT high_water_sequence, minimum_replay_cursor
-			 FROM event_journal_state WHERE singleton = 1",
-			[],
-			|row| Ok((row.get(0)?, row.get(1)?)),
-		)?;
-		Ok((parse_sequence(high_water)?, parse_sequence(minimum)?))
+			 FROM event_journal_state WHERE singleton = 1"
+		)
+		.fetch_one(self.connection())
+		.await?;
+		Ok((
+			parse_sequence(row.high_water_sequence)?,
+			parse_sequence(row.minimum_replay_cursor)?,
+		))
 	}
 }
 
-impl WriteTransaction<'_> {
+impl WriteTransaction {
 	/// Verifies coverage of the current Event high-water mark by the durable
 	/// normalized projection in this transaction.
 	///
 	/// # Errors
 	///
 	/// Returns a [`StoreError`] when the journal position cannot be read.
-	pub fn verified_projection_coverage(
-		&self,
+	pub async fn verified_projection_coverage(
+		&mut self,
 	) -> Result<VerifiedSnapshotCoverage, StoreError> {
-		Ok(VerifiedSnapshotCoverage {
-			plane_id: self.plane()?.plane_id,
-			sequence: self.event_cursor()?,
-		})
+		let plane_id = self.plane().await?.plane_id;
+		let sequence = self.event_cursor().await?;
+		Ok(VerifiedSnapshotCoverage { plane_id, sequence })
 	}
 
 	/// Appends `event` at the next Plane sequence and returns the row.
@@ -101,31 +120,39 @@ impl WriteTransaction<'_> {
 	///
 	/// Returns a [`StoreError`] when the row cannot be written, including
 	/// when the payload exceeds the journal bound.
-	pub fn append_event(
-		&self,
+	pub async fn append_event(
+		&mut self,
 		event: NewEvent,
 	) -> Result<EventRecord, StoreError> {
 		let (actor_kind, actor_id) = event.actor.columns();
-		self.transaction.execute(
-			"INSERT INTO events (event_id, actor_kind, actor_id,
+		let event_id = event.event_id.to_string();
+		let actor_id = actor_id.to_string();
+		let conversation_id =
+			event.conversation_id.as_ref().map(ToString::to_string);
+		let run_id = event.run_id.as_ref().map(ToString::to_string);
+		let payload_version = i64::from(event.payload_version);
+		let class = event.class.as_str();
+		let sequence = sqlx::query_scalar!(
+			r#"INSERT INTO events (event_id, actor_kind, actor_id,
 				recorded_at_unix_ms, conversation_id, run_id, kind,
 				payload_version, payload, class)
-			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-			(
-				event.event_id.to_string(),
-				actor_kind,
-				actor_id.to_string(),
-				event.recorded_at_unix_ms,
-				event.conversation_id.as_ref().map(ToString::to_string),
-				event.run_id.as_ref().map(ToString::to_string),
-				&event.kind,
-				event.payload_version,
-				&event.payload,
-				event.class.as_str(),
-			),
-		)?;
+			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+			 RETURNING sequence AS "sequence!""#,
+			event_id,
+			actor_kind,
+			actor_id,
+			event.recorded_at_unix_ms,
+			conversation_id,
+			run_id,
+			event.kind,
+			payload_version,
+			event.payload,
+			class
+		)
+		.fetch_one(self.connection())
+		.await?;
 		Ok(EventRecord {
-			sequence: parse_sequence(self.transaction.last_insert_rowid())?,
+			sequence: parse_sequence(sequence)?,
 			event_id: event.event_id,
 			actor: event.actor,
 			recorded_at_unix_ms: event.recorded_at_unix_ms,
@@ -145,28 +172,32 @@ impl WriteTransaction<'_> {
 	///
 	/// Returns a [`StoreError`] when the coverage is ahead of the journal or
 	/// the compaction transaction cannot be completed.
-	pub fn compact_operational_events(
-		&self,
+	pub async fn compact_operational_events(
+		&mut self,
 		coverage: VerifiedSnapshotCoverage,
 		grace_before_unix_ms: i64,
 	) -> Result<usize, StoreError> {
 		let (coverage_plane_id, covered_through) = coverage.parts();
-		let plane_id = self.plane()?.plane_id;
+		let plane_id = self.plane().await?.plane_id;
 		if coverage_plane_id != plane_id {
 			return Err(StoreError::Integrity(format!(
 				"snapshot coverage belongs to Plane {coverage_plane_id}, not {plane_id}"
 			)));
 		}
-		let (high_water, _) = self.journal_position()?;
+		let (high_water, _) = self.journal_position().await?;
 		if covered_through > high_water {
 			return Err(StoreError::Integrity(format!(
 				"snapshot coverage {covered_through} is ahead of Event cursor {high_water}"
 			)));
 		}
 		// ASVS 1.2.4: all compaction bounds are parameterized. ASVS 2.3.3
-		// and 15.4.2: deletion and its cursor tombstone share this transaction.
-		let last_removed: Option<i64> = self.transaction.query_row(
-			"SELECT MAX(sequence) FROM (
+		// and 15.4.2: deletion and its cursor tombstone share this
+		// transaction.
+		let covered_through = sequence_column(covered_through)?;
+		let batch =
+			i64::try_from(EVENT_COMPACTION_BATCH_LIMIT).unwrap_or(i64::MAX);
+		let last_removed = sqlx::query_scalar!(
+			r#"SELECT MAX(sequence) AS "last_removed?: i64" FROM (
 				SELECT sequence FROM events
 				WHERE class = 'operational'
 					AND sequence <= ?1 AND recorded_at_unix_ms < ?2
@@ -178,57 +209,66 @@ impl WriteTransaction<'_> {
 					), ?1 + 1)
 				ORDER BY sequence
 				LIMIT ?3
-			)",
-			params![
-				sequence_column(covered_through)?,
-				grace_before_unix_ms,
-				i64::try_from(EVENT_COMPACTION_BATCH_LIMIT).unwrap_or(i64::MAX),
-			],
-			|row| row.get(0),
-		)?;
+			)"#,
+			covered_through,
+			grace_before_unix_ms,
+			batch
+		)
+		.fetch_one(self.connection())
+		.await?;
 		let Some(last_removed) = last_removed else {
 			return Ok(0);
 		};
-		let removed = self.transaction.execute(
+		let removed = sqlx::query!(
 			"DELETE FROM events
 			 WHERE class = 'operational' AND sequence <= ?1
 				AND recorded_at_unix_ms < ?2",
-			params![last_removed, grace_before_unix_ms],
-		)?;
-		self.transaction.execute(
+			last_removed,
+			grace_before_unix_ms
+		)
+		.execute(self.connection())
+		.await?
+		.rows_affected();
+		sqlx::query!(
 			"UPDATE event_journal_state
 			 SET minimum_replay_cursor = MAX(minimum_replay_cursor, ?1)
 			 WHERE singleton = 1",
-			[last_removed],
-		)?;
-		Ok(removed)
+			last_removed
+		)
+		.execute(self.connection())
+		.await?;
+		Ok(usize::try_from(removed).unwrap_or(usize::MAX))
 	}
 }
 
-fn read_row(row: &Row<'_>) -> rusqlite::Result<EventRecord> {
-	let event_id: String = row.get(1)?;
-	let actor_kind: String = row.get(2)?;
-	let actor_id: Option<String> = row.get(3)?;
-	let conversation_id: Option<String> = row.get(5)?;
-	let run_id: Option<String> = row.get(6)?;
+fn read_row(row: Row) -> Result<EventRecord, StoreError> {
 	Ok(EventRecord {
-		sequence: parse_sequence(row.get(0)?)?,
-		event_id: parse_uuid(1, &event_id)?,
-		actor: parse_actor(&actor_kind, actor_id.as_deref())?,
-		recorded_at_unix_ms: row.get(4)?,
-		conversation_id: parse_optional_uuid(5, conversation_id.as_deref())?,
-		run_id: parse_optional_uuid(6, run_id.as_deref())?,
-		kind: row.get(7)?,
-		payload_version: row.get(8)?,
-		payload: row.get(9)?,
+		sequence: parse_sequence(row.sequence)?,
+		event_id: parse_uuid("event_id", &row.event_id)?,
+		actor: parse_actor(&row.actor_kind, row.actor_id.as_deref())?,
+		recorded_at_unix_ms: row.recorded_at_unix_ms,
+		conversation_id: parse_optional_uuid(
+			"conversation_id",
+			row.conversation_id.as_deref(),
+		)?,
+		run_id: parse_optional_uuid("run_id", row.run_id.as_deref())?,
+		kind: row.kind,
+		payload_version: parse_payload_version(row.payload_version)?,
+		payload: row.payload,
 	})
 }
 
-fn parse_actor(kind: &str, id: Option<&str>) -> rusqlite::Result<ActorRecord> {
+fn parse_actor(
+	kind: &str,
+	id: Option<&str>,
+) -> Result<ActorRecord, StoreError> {
 	let Some(id) = id else {
-		return Err(column_error(2, format!("actor {kind:?} has no identity")));
+		return Err(column_error(
+			"actor_id",
+			format!("actor {kind:?} has no identity"),
+		));
 	};
-	ActorRecord::parse(kind, id, 3)
+	ActorRecord::parse(kind, id)
 }
 
 fn sequence_column(sequence: u64) -> Result<i64, StoreError> {
@@ -237,8 +277,20 @@ fn sequence_column(sequence: u64) -> Result<i64, StoreError> {
 	})
 }
 
-fn parse_sequence(sequence: i64) -> rusqlite::Result<u64> {
+fn parse_sequence(sequence: i64) -> Result<u64, StoreError> {
 	u64::try_from(sequence).map_err(|_| {
-		column_error(0, format!("event sequence {sequence} is negative"))
+		column_error(
+			"sequence",
+			format!("event sequence {sequence} is negative"),
+		)
+	})
+}
+
+fn parse_payload_version(version: i64) -> Result<u32, StoreError> {
+	u32::try_from(version).map_err(|_| {
+		column_error(
+			"payload_version",
+			format!("payload version {version} is out of range"),
+		)
 	})
 }

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT plane_id, daemon_starts FROM plane WHERE singleton = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "plane_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plane",
+            "name": "plane_id"
+          }
+        }
+      },
+      {
+        "name": "daemon_starts",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "plane",
+            "name": "daemon_starts"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "c2bcd88f11537fbf8152b45c0d77056ddc58d835b538af0cbd27ba4dcc4f3691"
+}

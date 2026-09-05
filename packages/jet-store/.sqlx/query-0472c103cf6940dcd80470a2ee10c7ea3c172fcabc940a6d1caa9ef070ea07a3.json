@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO command_receipts (\n\t\t\t\tactor_kind, actor_id, command_id, request_digest,\n\t\t\t\trecorded_at_unix_ms, outcome_version, outcome\n\t\t\t ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "0472c103cf6940dcd80470a2ee10c7ea3c172fcabc940a6d1caa9ef070ea07a3"
+}

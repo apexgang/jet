@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT conversation_id AS \"conversation_id!\", retention,\n\t\t\t\tcreated_at_unix_ms\n\t\t\t FROM conversations\n\t\t\t ORDER BY rowid",
+  "describe": {
+    "columns": [
+      {
+        "name": "conversation_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "name": "retention",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "retention"
+          }
+        }
+      },
+      {
+        "name": "created_at_unix_ms",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "created_at_unix_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "2f82b0da051ebeff0ac914e082dcf5aedcc1e99e56b5aca68251ba39891ba648"
+}

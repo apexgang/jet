@@ -112,7 +112,7 @@ impl Core {
 	/// Returns a `not_found` [`CoreError`] for unknown identities, a
 	/// `conflict` one when the Command violates a lifecycle invariant, and
 	/// a store category when the transaction cannot commit.
-	pub fn execute(
+	pub async fn execute(
 		&self,
 		actor: &Actor,
 		envelope: CommandEnvelope,
@@ -125,42 +125,51 @@ impl Core {
 		} = envelope;
 		let actor_record = actor.record();
 		let recorded_at_unix_ms = self.now_unix_ms();
-		self.store.write(|tx| {
-			tx.prune_command_receipts_before(
-				recorded_at_unix_ms.saturating_sub(COMMAND_RETENTION_MS),
-			)?;
-			if let Some(receipt) =
-				tx.command_receipt(actor_record, command_id.0)?
-			{
-				return replay(receipt, request_digest, recorded_at_unix_ms);
-			}
+		self.store
+			.write(async |tx| {
+				tx.prune_command_receipts_before(
+					recorded_at_unix_ms.saturating_sub(COMMAND_RETENTION_MS),
+				)
+				.await?;
+				if let Some(receipt) =
+					tx.command_receipt(actor_record, command_id.0).await?
+				{
+					return replay(
+						receipt,
+						request_digest,
+						recorded_at_unix_ms,
+					);
+				}
 
-			let result = execute_new(
-				tx,
-				actor,
-				command_id,
-				command,
-				recorded_at_unix_ms,
-			);
-			if let Err(error) = &result
-				&& !error.is_authoritative_result()
-			{
-				return Err(error.clone());
-			}
-			// An authoritative error is raised before the Command writes any
-			// state, so committing its receipt commits nothing else. A Command
-			// that must fail authoritatively after writing wraps its writes in
-			// a savepoint first.
-			tx.insert_command_receipt(&NewCommandReceipt {
-				actor: actor_record,
-				command_id: command_id.0,
-				request_digest,
-				recorded_at_unix_ms,
-				outcome_version: OUTCOME_VERSION,
-				outcome: encode_result(&result)?,
-			})?;
-			Ok(result)
-		})?
+				let result = execute_new(
+					tx,
+					actor,
+					command_id,
+					command,
+					recorded_at_unix_ms,
+				)
+				.await;
+				if let Err(error) = &result
+					&& !error.is_authoritative_result()
+				{
+					return Err(error.clone());
+				}
+				// An authoritative error is raised before the Command writes
+				// any state, so committing its receipt commits nothing else.
+				// A Command that must fail authoritatively after writing
+				// wraps its writes in a savepoint first.
+				tx.insert_command_receipt(&NewCommandReceipt {
+					actor: actor_record,
+					command_id: command_id.0,
+					request_digest,
+					recorded_at_unix_ms,
+					outcome_version: OUTCOME_VERSION,
+					outcome: encode_result(&result)?,
+				})
+				.await?;
+				Ok(result)
+			})
+			.await?
 	}
 }
 
@@ -210,8 +219,8 @@ fn invalid_receipt(missing: &str) -> CoreError {
 	)
 }
 
-fn execute_new(
-	tx: &WriteTransaction<'_>,
+async fn execute_new(
+	tx: &mut WriteTransaction,
 	actor: &Actor,
 	command_id: CommandId,
 	command: Command,
@@ -219,24 +228,27 @@ fn execute_new(
 ) -> Result<CommandOutcome, CoreError> {
 	match command {
 		Command::CreateConversation { retention } => {
-			create_conversation(tx, actor, retention, now_unix_ms)
+			create_conversation(tx, actor, retention, now_unix_ms).await
 		}
 		Command::CreateRun { conversation_id } => {
-			create_run(tx, actor, conversation_id, now_unix_ms)
+			create_run(tx, actor, conversation_id, now_unix_ms).await
 		}
 		Command::TransitionRun {
 			run_id,
 			expected_revision,
 			lifecycle,
-		} => transition_run(
-			tx,
-			actor,
-			command_id,
-			run_id,
-			expected_revision,
-			lifecycle,
-			now_unix_ms,
-		),
+		} => {
+			transition_run(
+				tx,
+				actor,
+				command_id,
+				run_id,
+				expected_revision,
+				lifecycle,
+				now_unix_ms,
+			)
+			.await
+		}
 	}
 }
 
@@ -248,8 +260,8 @@ fn encode_result(
 	})
 }
 
-fn create_conversation(
-	tx: &WriteTransaction<'_>,
+async fn create_conversation(
+	tx: &mut WriteTransaction,
 	actor: &Actor,
 	retention: RetentionPolicy,
 	now_unix_ms: i64,
@@ -259,31 +271,34 @@ fn create_conversation(
 			conversation_id: Uuid::now_v7(),
 			retention,
 			created_at_unix_ms: now_unix_ms,
-		})?
+		})
+		.await?
 		.into();
 	let event = EventKind::ConversationCreated { retention };
 	tx.append_event(event.to_record(
 		actor,
 		EventSubject::Conversation(conversation.conversation_id),
 		now_unix_ms,
-	)?)?;
+	)?)
+	.await?;
 	Ok(CommandOutcome::ConversationCreated(conversation))
 }
 
-fn create_run(
-	tx: &WriteTransaction<'_>,
+async fn create_run(
+	tx: &mut WriteTransaction,
 	actor: &Actor,
 	conversation_id: ConversationId,
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
-	if tx.conversation(conversation_id.0)?.is_none() {
+	if tx.conversation(conversation_id.0).await?.is_none() {
 		return Err(CoreError::not_found(
 			"conversation.not_found",
 			"the Conversation does not exist",
 		));
 	}
 	let busy = tx
-		.runs(conversation_id.0)?
+		.runs(conversation_id.0)
+		.await?
 		.iter()
 		.any(|run| !run.lifecycle.is_terminal());
 	if busy {
@@ -297,7 +312,8 @@ fn create_run(
 			run_id: Uuid::now_v7(),
 			conversation_id: conversation_id.0,
 			created_at_unix_ms: now_unix_ms,
-		})?
+		})
+		.await?
 		.into();
 	tx.append_event(EventKind::RunCreated {}.to_record(
 		actor,
@@ -306,12 +322,13 @@ fn create_run(
 			run_id: run.run_id,
 		},
 		now_unix_ms,
-	)?)?;
+	)?)
+	.await?;
 	Ok(CommandOutcome::RunCreated(run))
 }
 
-fn transition_run(
-	tx: &WriteTransaction<'_>,
+async fn transition_run(
+	tx: &mut WriteTransaction,
 	actor: &Actor,
 	command_id: CommandId,
 	run_id: RunId,
@@ -319,7 +336,7 @@ fn transition_run(
 	lifecycle: RunLifecycle,
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
-	let Some(current) = tx.run(run_id.0)? else {
+	let Some(current) = tx.run(run_id.0).await? else {
 		return Err(CoreError::not_found(
 			"run.not_found",
 			"the Run does not exist",
@@ -347,7 +364,8 @@ fn transition_run(
 		));
 	}
 	let run: Run = tx
-		.update_run_lifecycle(run_id.0, lifecycle, now_unix_ms)?
+		.update_run_lifecycle(run_id.0, lifecycle, now_unix_ms)
+		.await?
 		.into();
 	let event = EventKind::RunLifecycleChanged {
 		from: current.lifecycle,
@@ -360,7 +378,8 @@ fn transition_run(
 			run_id,
 		},
 		now_unix_ms,
-	)?)?;
+	)?)
+	.await?;
 	if lifecycle == RunLifecycle::Starting {
 		let effect_id = Uuid::now_v7();
 		// ASVS 2.3.3: the Effect is inserted in the same authoritative
@@ -374,7 +393,8 @@ fn transition_run(
 				external_key: effect_id,
 				max_attempts: 3,
 			},
-		})?;
+		})
+		.await?;
 	}
 	Ok(CommandOutcome::RunTransitioned(run))
 }

@@ -15,7 +15,7 @@ use crate::connection::{
 	answer, draining_error, execute, malformed, wire_error,
 };
 
-/// Bounds decoded requests waiting behind synchronous durable core work.
+/// Bounds decoded requests waiting behind durable core work.
 const MAX_PENDING_REQUESTS: usize = 16;
 /// Bounds replies waiting to enter the byte-bounded priority scheduler.
 const MAX_PENDING_REPLIES: usize = 16;
@@ -163,15 +163,9 @@ async fn process_requests(
 		message,
 	}) = requests.recv().await
 	{
-		let core = Arc::clone(&core);
-		let actor = actor.clone();
-		let Ok(reply) = tokio::task::spawn_blocking(move || {
-			reply_to(&core, &actor, minor, payload, message)
-		})
-		.await
-		else {
-			return;
-		};
+		// The store runs SQLite on its own worker thread, so the core is
+		// awaited here rather than moved onto a blocking thread.
+		let reply = reply_to(&core, &actor, minor, payload, message).await;
 		let Ok(payload) = encode_control(&reply) else {
 			return;
 		};
@@ -185,7 +179,7 @@ async fn process_requests(
 	}
 }
 
-fn reply_to(
+async fn reply_to(
 	core: &Core,
 	actor: &Actor,
 	minor: u32,
@@ -194,22 +188,25 @@ fn reply_to(
 ) -> ServerMessage {
 	match message {
 		ClientMessage::Query { id, query } => {
-			answer(core, actor, minor, id, &query)
+			answer(core, actor, minor, id, &query).await
 		}
 		ClientMessage::Command {
 			id,
 			command_id,
 			command,
 		} => match raw_command(&payload) {
-			Ok(raw) => execute(
-				core,
-				actor,
-				minor,
-				id,
-				command_id,
-				&command,
-				raw.get().as_bytes(),
-			),
+			Ok(raw) => {
+				execute(
+					core,
+					actor,
+					minor,
+					id,
+					command_id,
+					&command,
+					raw.get().as_bytes(),
+				)
+				.await
+			}
 			Err(_) => ServerMessage::Error {
 				id: Some(id),
 				error: malformed(),

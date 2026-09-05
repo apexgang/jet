@@ -47,45 +47,59 @@ pub(crate) trait EffectAdapter {
 }
 
 impl Core {
-	pub(crate) fn reconcile_effects(
+	#[expect(
+		clippy::await_holding_invalid_type,
+		reason = "the guard must span the Adapter call between the two store \
+		          transactions; releasing it earlier would let a second \
+		          worker claim the same in-flight Effect (ADR-0067)"
+	)]
+	pub(crate) async fn reconcile_effects(
 		&self,
 		adapter: &mut impl EffectAdapter,
 	) -> Result<Vec<Effect>, CoreError> {
 		// ASVS 15.4.1: one core serializes all Effect decisions, so two
-		// workers cannot execute the same durable request concurrently.
-		let _guard = self
-			.effect_reconciliation
-			.lock()
-			.unwrap_or_else(std::sync::PoisonError::into_inner);
-		let records = self.store.read(|tx| tx.unresolved_effects())?;
-		records
-			.into_iter()
-			.map(|record| self.reconcile_effect(adapter, record))
-			.collect()
+		// workers cannot execute the same durable request concurrently. The
+		// guard spans store awaits, so it is the async mutex.
+		let _guard = self.effect_reconciliation.lock().await;
+		let records = self
+			.store
+			.read(async |tx| tx.unresolved_effects().await)
+			.await?;
+		let mut effects = Vec::with_capacity(records.len());
+		for record in records {
+			effects.push(self.reconcile_effect(adapter, record).await?);
+		}
+		Ok(effects)
 	}
 
-	fn reconcile_effect(
+	async fn reconcile_effect(
 		&self,
 		adapter: &mut impl EffectAdapter,
 		record: EffectRecord,
 	) -> Result<Effect, CoreError> {
 		let effect = Effect::try_from(record)?;
 		match effect.state {
-			EffectState::Pending => self.execute_effect(adapter, effect),
+			EffectState::Pending => self.execute_effect(adapter, effect).await,
 			EffectState::InFlight => match adapter.reconcile(&effect) {
 				EffectResult::Completed => {
 					self.finish_effect(effect, EffectStateRecord::Completed)
+						.await
 				}
 				EffectResult::Failed => {
-					self.finish_effect(effect, EffectStateRecord::Failed)
+					self.finish_effect(effect, EffectStateRecord::Failed).await
 				}
 				EffectResult::Unknown
 					if may_retry(effect.safety, effect.attempt_count) =>
 				{
-					self.execute_effect(adapter, effect)
+					self.execute_effect(adapter, effect).await
 				}
-				EffectResult::Unknown => self
-					.finish_effect(effect, EffectStateRecord::OutcomeUnknown),
+				EffectResult::Unknown => {
+					self.finish_effect(
+						effect,
+						EffectStateRecord::OutcomeUnknown,
+					)
+					.await
+				}
 			},
 			EffectState::Completed
 			| EffectState::Failed
@@ -93,34 +107,38 @@ impl Core {
 		}
 	}
 
-	fn execute_effect(
+	async fn execute_effect(
 		&self,
 		adapter: &mut impl EffectAdapter,
 		effect: Effect,
 	) -> Result<Effect, CoreError> {
 		let record = self
 			.store
-			.write(|tx| tx.begin_effect_attempt(effect.effect_id))?;
+			.write(async |tx| tx.begin_effect_attempt(effect.effect_id).await)
+			.await?;
 		let in_flight = Effect::try_from(record)?;
 		match adapter.execute(&in_flight) {
 			EffectResult::Completed => {
 				self.finish_effect(in_flight, EffectStateRecord::Completed)
+					.await
 			}
 			EffectResult::Failed => {
 				self.finish_effect(in_flight, EffectStateRecord::Failed)
+					.await
 			}
 			EffectResult::Unknown => Ok(in_flight),
 		}
 	}
 
-	fn finish_effect(
+	async fn finish_effect(
 		&self,
 		effect: Effect,
 		state: EffectStateRecord,
 	) -> Result<Effect, CoreError> {
 		let record = self
 			.store
-			.write(|tx| tx.finish_effect(effect.effect_id, state))?;
+			.write(async |tx| tx.finish_effect(effect.effect_id, state).await)
+			.await?;
 		Effect::try_from(record)
 	}
 }

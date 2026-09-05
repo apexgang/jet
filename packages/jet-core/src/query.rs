@@ -58,66 +58,85 @@ impl Core {
 	///
 	/// Returns [`CoreError`] when the Actor is not authorized, the
 	/// addressed entity does not exist, or the store cannot answer.
-	pub fn query(
+	pub async fn query(
 		&self,
 		actor: &Actor,
 		query: Query,
 	) -> Result<QueryResult, CoreError> {
 		actor.authorize()?;
 		match query {
-			Query::Status => self.store.read(|tx| {
-				let plane = tx.plane()?;
-				Ok(QueryResult::Status(PlaneStatus {
-					cursor: EventSequence(tx.event_cursor()?),
-					plane_id: PlaneId(plane.plane_id),
-					daemon_starts: plane.daemon_starts,
-					started_at: self.started_at,
-					core_version: CORE_VERSION,
-				}))
-			}),
-			Query::Conversations => first_conversations(self),
-			Query::LegacyConversations => self.store.read(|tx| {
-				Ok(QueryResult::Conversations(ConversationList {
-					cursor: EventSequence(tx.event_cursor()?),
-					conversations: tx
-						.conversations()?
-						.into_iter()
-						.map(Into::into)
-						.collect(),
-					next_page: None,
-				}))
-			}),
+			Query::Status => {
+				self.store
+					.read(async |tx| {
+						let plane = tx.plane().await?;
+						let cursor = EventSequence(tx.event_cursor().await?);
+						Ok(QueryResult::Status(PlaneStatus {
+							cursor,
+							plane_id: PlaneId(plane.plane_id),
+							daemon_starts: plane.daemon_starts,
+							started_at: self.started_at,
+							core_version: CORE_VERSION,
+						}))
+					})
+					.await
+			}
+			Query::Conversations => first_conversations(self).await,
+			Query::LegacyConversations => {
+				self.store
+					.read(async |tx| {
+						Ok(QueryResult::Conversations(ConversationList {
+							cursor: EventSequence(tx.event_cursor().await?),
+							conversations: tx
+								.conversations()
+								.await?
+								.into_iter()
+								.map(Into::into)
+								.collect(),
+							next_page: None,
+						}))
+					})
+					.await
+			}
 			Query::NextConversations { cursor } => {
-				next_conversations(self, &cursor)
+				next_conversations(self, &cursor).await
 			}
 			Query::Conversation { conversation_id } => {
-				self.store.read(|tx| conversation(tx, conversation_id))
+				self.store
+					.read(async |tx| conversation(tx, conversation_id).await)
+					.await
 			}
-			Query::Events { after } => self.store.read(|tx| {
-				let (cursor, events) =
-					tx.events_after(after.0, EVENT_PAGE_LIMIT)?;
-				Ok(QueryResult::Events(EventPage {
-					cursor: EventSequence(cursor),
-					events: events
-						.into_iter()
-						.map(Event::try_from)
-						.collect::<Result<_, _>>()?,
-				}))
-			}),
+			Query::Events { after } => {
+				self.store
+					.read(async |tx| {
+						let (cursor, events) =
+							tx.events_after(after.0, EVENT_PAGE_LIMIT).await?;
+						Ok(QueryResult::Events(EventPage {
+							cursor: EventSequence(cursor),
+							events: events
+								.into_iter()
+								.map(Event::try_from)
+								.collect::<Result<_, _>>()?,
+						}))
+					})
+					.await
+			}
 		}
 	}
 }
 
-fn first_conversations(core: &Core) -> Result<QueryResult, CoreError> {
+async fn first_conversations(core: &Core) -> Result<QueryResult, CoreError> {
 	let now = core.now_unix_ms();
 	// ASVS 2.3.3 and 15.4.2: the projection page and its Event fence are
 	// read atomically from one SQLite snapshot.
-	let (cursor, (conversations, next)) = core.store.read(|tx| {
-		Ok::<_, CoreError>((
-			EventSequence(tx.event_cursor()?),
-			tx.conversation_page(ConversationPageStart::First)?,
-		))
-	})?;
+	let (cursor, (conversations, next)) = core
+		.store
+		.read(async |tx| {
+			let cursor = EventSequence(tx.event_cursor().await?);
+			let page =
+				tx.conversation_page(ConversationPageStart::First).await?;
+			Ok::<_, CoreError>((cursor, page))
+		})
+		.await?;
 	let deadline = core.conversation_pages.first_deadline(now);
 	let next_page = core.conversation_pages.issue(next, cursor, deadline, now);
 	Ok(QueryResult::Conversations(ConversationList {
@@ -127,7 +146,7 @@ fn first_conversations(core: &Core) -> Result<QueryResult, CoreError> {
 	}))
 }
 
-fn next_conversations(
+async fn next_conversations(
 	core: &Core,
 	cursor: &PageCursor,
 ) -> Result<QueryResult, CoreError> {
@@ -135,15 +154,22 @@ fn next_conversations(
 	let Some(state) = core.conversation_pages.resume(cursor, now) else {
 		let current = core
 			.store
-			.read(|tx| Ok::<_, CoreError>(EventSequence(tx.event_cursor()?)))?;
+			.read(async |tx| {
+				Ok::<_, CoreError>(EventSequence(tx.event_cursor().await?))
+			})
+			.await?;
 		return Err(CoreError::pagination_stale(current));
 	};
-	let (current, (conversations, next)) = core.store.read(|tx| {
-		Ok::<_, CoreError>((
-			EventSequence(tx.event_cursor()?),
-			tx.conversation_page(ConversationPageStart::After(state.after))?,
-		))
-	})?;
+	let (current, (conversations, next)) = core
+		.store
+		.read(async |tx| {
+			let current = EventSequence(tx.event_cursor().await?);
+			let page = tx
+				.conversation_page(ConversationPageStart::After(state.after))
+				.await?;
+			Ok::<_, CoreError>((current, page))
+		})
+		.await?;
 	if current != state.snapshot_revision {
 		return Err(CoreError::pagination_stale(current));
 	}
@@ -160,23 +186,21 @@ fn next_conversations(
 	}))
 }
 
-fn conversation(
-	tx: &ReadTransaction<'_>,
+async fn conversation(
+	tx: &mut ReadTransaction,
 	conversation_id: ConversationId,
 ) -> Result<QueryResult, CoreError> {
-	let Some(record) = tx.conversation(conversation_id.0)? else {
+	let Some(record) = tx.conversation(conversation_id.0).await? else {
 		return Err(CoreError::not_found(
 			"conversation.not_found",
 			"the Conversation does not exist",
 		));
 	};
+	let cursor = EventSequence(tx.event_cursor().await?);
+	let runs = tx.runs(conversation_id.0).await?;
 	Ok(QueryResult::Conversation(ConversationSnapshot {
-		cursor: EventSequence(tx.event_cursor()?),
+		cursor,
 		conversation: record.into(),
-		runs: tx
-			.runs(conversation_id.0)?
-			.into_iter()
-			.map(Into::into)
-			.collect(),
+		runs: runs.into_iter().map(Into::into).collect(),
 	}))
 }

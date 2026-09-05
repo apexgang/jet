@@ -41,6 +41,18 @@ Run `just fmt` (in the `packages` directory) automatically after you have finish
 
 Before initializing a large change to `packages`, run `just fix -p <project>` (in the `packages` directory) to fix any linter issues in the code. Prefer scoping with `-p` to avoid slow workspace-wide Clippy builds; only run `just fix` without `-p` if you changed shared crates. Do not re-run tests after running `fix` or `fmt`.
 
+## Database
+
+`jet-store` is the only crate that touches SQLite, and it does so through `sqlx`.
+
+- Queries use the compile-time checked macros (`sqlx::query!`, `sqlx::query_scalar!`, `sqlx::query_as!`). They take a string literal, so SQL cannot be assembled with `format!`.
+- Those macros build from `jet-store/.sqlx`, which is committed. Regenerate it with `just sqlx-prepare` in the same commit as any SQL or migration edit, and gate on `just sqlx-check`. Nothing else notices a stale cache. `packages/.cargo/config.toml` pins `SQLX_OFFLINE=true` so a `DATABASE_URL` exported for an unrelated project cannot hijack the build.
+- Add migrations with `sqlx migrate add --timestamp <name>` from `packages/jet-store`. Forward-only: no `-r`, no `.down.sql`. Pass `--timestamp` explicitly: the CLI silently switches to sequential numbering when the latest two versions differ by 1, which turns later versions into a counter anchored to a stale date. Versions have one-second resolution, so after a merge check that `ls migrations | cut -d_ -f1 | sort | uniq -d` is empty.
+- Never write `-- no-transaction` in a migration. It cannot roll back, so a failure leaves the store half-migrated with no bookkeeping row and every later start fails on the object it already created.
+- SQLite reports a bare `TEXT PRIMARY KEY` column as nullable. Tell the macro otherwise with `AS "col!"` instead of changing the schema.
+- Keep the `sqlite-bundled` feature and never set `LIBSQLITE3_SYS_USE_PKG_CONFIG`. Either one silently links the distribution's SQLite, which may lack the FTS5 that ADR-0057 requires.
+- `sqlx-cli` is a developer tool, not a dependency: `cargo install sqlx-cli --version 0.9.0 --no-default-features --features sqlite,rustls`.
+
 ## Code review rules
 
 ### Crate API surface

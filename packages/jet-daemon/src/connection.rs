@@ -216,7 +216,7 @@ fn decode<T: serde::de::DeserializeOwned>(
 	decode_control(payload).map_err(|_| ReceiveError::Protocol(malformed()))
 }
 
-pub(super) fn answer(
+pub(super) async fn answer(
 	core: &Core,
 	actor: &Actor,
 	minor: u32,
@@ -237,6 +237,7 @@ pub(super) fn answer(
 	}
 	let result = core
 		.query(actor, translate::query(query, minor))
+		.await
 		.and_then(|result| translate::query_result(result, minor));
 	match result {
 		Ok(result) => ServerMessage::QueryResult { id, result },
@@ -247,7 +248,7 @@ pub(super) fn answer(
 	}
 }
 
-pub(super) fn execute(
+pub(super) async fn execute(
 	core: &Core,
 	actor: &Actor,
 	minor: u32,
@@ -256,12 +257,15 @@ pub(super) fn execute(
 	command: &CommandRequest,
 	request_bytes: &[u8],
 ) -> ServerMessage {
-	let outcome = CommandEnvelope::new(
+	let envelope = CommandEnvelope::new(
 		CommandId(command_id),
 		translate::command(command),
 		request_bytes,
-	)
-	.and_then(|envelope| core.execute(actor, envelope));
+	);
+	let outcome = match envelope {
+		Ok(envelope) => core.execute(actor, envelope).await,
+		Err(error) => Err(error),
+	};
 	match outcome {
 		Ok(outcome) => ServerMessage::CommandResult {
 			id,

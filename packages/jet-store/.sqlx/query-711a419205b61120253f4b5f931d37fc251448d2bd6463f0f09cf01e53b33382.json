@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM events\n\t\t\t WHERE class = 'operational' AND sequence <= ?1\n\t\t\t\tAND recorded_at_unix_ms < ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "711a419205b61120253f4b5f931d37fc251448d2bd6463f0f09cf01e53b33382"
+}
