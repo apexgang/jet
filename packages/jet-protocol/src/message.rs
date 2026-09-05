@@ -5,6 +5,7 @@ use serde_json::value::RawValue;
 use uuid::Uuid;
 
 use crate::account::AccountBindingList;
+use crate::audit::SecurityAudit;
 use crate::capability::{CapabilityObservation, CapabilitySnapshot};
 use crate::control::{ControlError, decode_control};
 use crate::conversation::{
@@ -128,6 +129,13 @@ pub enum QueryRequest {
 		#[serde(with = "crate::decimal")]
 		after: u64,
 	},
+	/// A page of the owner-only Security audit strictly after a position.
+	SecurityAudit {
+		/// The position to resume after, carried as a decimal string
+		/// (ADR-0089); `"0"` for the whole audit.
+		#[serde(with = "crate::decimal")]
+		after: u64,
+	},
 }
 
 /// Query snapshots.
@@ -148,6 +156,8 @@ pub enum QueryResponse {
 	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.
 	Events(EventPage),
+	/// One page of the Security audit, oldest first.
+	SecurityAudit(SecurityAudit),
 }
 
 /// One page of journal Events, fenced by the journal position it was read

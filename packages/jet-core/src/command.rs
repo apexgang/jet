@@ -3,9 +3,9 @@
 //! acknowledged only after that commit (ADR-0020, ADR-0071).
 
 use jet_store::{
-	EffectKindRecord, EffectSafetyRecord, NewCommandReceipt, NewConversation,
-	NewEffect, NewRun, RetentionPolicy, RunLifecycle, SettingRecord,
-	WriteTransaction,
+	AuditOutcome, EffectKindRecord, EffectSafetyRecord, NewCommandReceipt,
+	NewConversation, NewEffect, NewRun, RetentionPolicy, RunLifecycle,
+	SettingRecord, WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -15,6 +15,7 @@ use crate::account::{
 	self, AccountBinding, AccountBindingId, CredentialReference,
 	CredentialSource, ProviderAccount, ProviderId,
 };
+use crate::audit::{self, AuditSubject, Decision};
 use crate::capability::{Capability, ExternalTool};
 use crate::command_receipt::{
 	COMMAND_RETENTION_MS, OUTCOME_VERSION, encode_result, replay,
@@ -435,6 +436,21 @@ async fn set_setting(
 		now_unix_ms,
 	)?)
 	.await?;
+	// ASVS 16.2.1: a policy that decides what Jet may do on its own is
+	// recorded in the Security audit as well as in the journal (ADR-0105).
+	if let Some(decision) = audit::stored_setting(key, &value) {
+		audit::record(
+			tx,
+			actor,
+			Decision {
+				decision,
+				subject: AuditSubject::of_scope(scope),
+				outcome: AuditOutcome::Succeeded,
+			},
+			now_unix_ms,
+		)
+		.await?;
+	}
 	Ok(CommandOutcome::SettingSet { key, scope, value })
 }
 
@@ -455,6 +471,19 @@ async fn clear_setting(
 		now_unix_ms,
 	)?)
 	.await?;
+	if let Some(decision) = audit::cleared_setting(key) {
+		audit::record(
+			tx,
+			actor,
+			Decision {
+				decision,
+				subject: AuditSubject::of_scope(scope),
+				outcome: AuditOutcome::Succeeded,
+			},
+			now_unix_ms,
+		)
+		.await?;
+	}
 	Ok(CommandOutcome::SettingCleared { key, scope })
 }
 

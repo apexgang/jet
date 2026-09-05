@@ -4,6 +4,7 @@
 //! beside it.
 
 mod account;
+mod audit;
 mod capability;
 mod setting;
 
@@ -12,11 +13,12 @@ pub(crate) use capability::snapshot as capabilities;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_core::{
-	AccountBindingId, Actor, Command, CommandOutcome, ConflictState,
-	Conversation, ConversationId, ConversationList, ConversationSnapshot,
-	CoreError, ErrorCategory, Event, EventPage, EventPayload, EventSequence,
-	PlaneStatus, ProviderId, Query, QueryResult, RecoveryAction,
-	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
+	AccountBindingId, Actor, AuditSequence, Command, CommandOutcome,
+	ConflictState, Conversation, ConversationId, ConversationList,
+	ConversationSnapshot, CoreError, ErrorCategory, Event, EventPage,
+	EventPayload, EventSequence, PlaneStatus, ProviderId, Query, QueryResult,
+	RecoveryAction, RetentionPolicy, Revision, RevisionConflict, Run, RunId,
+	RunLifecycle,
 };
 use jet_protocol as wire;
 
@@ -56,6 +58,9 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 		wire::QueryRequest::Events { after } => Query::Events {
 			after: EventSequence(*after),
 		},
+		wire::QueryRequest::SecurityAudit { after } => Query::SecurityAudit {
+			after: AuditSequence(*after),
+		},
 	}
 }
 
@@ -84,6 +89,9 @@ pub(crate) fn query_result(
 		}
 		QueryResult::Events(page) => {
 			wire::QueryResponse::Events(event_page(&page)?)
+		}
+		QueryResult::SecurityAudit(page) => {
+			wire::QueryResponse::SecurityAudit(audit::page(page))
 		}
 	})
 }
@@ -258,7 +266,7 @@ fn event(event: &Event) -> Result<wire::Event, CoreError> {
 	})
 }
 
-fn actor(actor: &Actor) -> wire::Actor {
+pub(super) fn actor(actor: &Actor) -> wire::Actor {
 	match actor {
 		Actor::InteractiveClient { client_id } => {
 			wire::Actor::InteractiveClient {

@@ -16,13 +16,14 @@
 use std::time::SystemTime;
 
 use jet_store::{
-	AccountBindingRecord, CredentialSourceRecord, NewAccountBinding,
-	WriteTransaction,
+	AccountBindingRecord, AuditOutcome, CredentialSourceRecord,
+	NewAccountBinding, WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::Actor;
+use crate::audit::{self, AuditDecision, AuditSubject, Decision};
 use crate::capability::{CredentialStoreKind, CredentialStoreStatus};
 use crate::command::CommandOutcome;
 use crate::error::CoreError;
@@ -394,6 +395,19 @@ pub(crate) async fn bind(
 		now_unix_ms,
 	)?)
 	.await?;
+	// ASVS 16.2.1: widening what may authenticate on this Plane is a
+	// Security audit decision, not only journal history (ADR-0105).
+	audit::record(
+		tx,
+		actor,
+		Decision {
+			decision: AuditDecision::AccountBound,
+			subject: AuditSubject::AccountBinding(binding.binding_id),
+			outcome: AuditOutcome::Succeeded,
+		},
+		now_unix_ms,
+	)
+	.await?;
 	Ok(CommandOutcome::AccountBound(binding))
 }
 
@@ -425,6 +439,17 @@ pub(crate) async fn unbind(
 		EventSubject::Plane,
 		now_unix_ms,
 	)?)
+	.await?;
+	audit::record(
+		tx,
+		actor,
+		Decision {
+			decision: AuditDecision::AccountUnbound,
+			subject: AuditSubject::AccountBinding(binding_id),
+			outcome: AuditOutcome::Succeeded,
+		},
+		now_unix_ms,
+	)
 	.await?;
 	Ok(CommandOutcome::AccountUnbound {
 		binding_id,

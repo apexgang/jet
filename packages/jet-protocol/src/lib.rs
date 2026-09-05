@@ -11,6 +11,7 @@
 
 mod account;
 mod artifact;
+mod audit;
 mod capability;
 mod control;
 mod conversation;
@@ -30,6 +31,9 @@ pub use account::{
 };
 pub use artifact::{
 	ArtifactError, ArtifactVerifier, DigestError, Sha256Digest,
+};
+pub use audit::{
+	AuditEntry, AuditOutcome, AuditRisk, AuditTarget, SecurityAudit,
 };
 pub use capability::{
 	CapabilityObservation, CapabilitySnapshot, CredentialStoreKind,
@@ -53,7 +57,8 @@ pub use frame::{
 pub use handshake::{
 	ACCOUNT_BINDINGS_MINOR, CODEC_JSON_V1, ClientHello, FENCED_READS_MINOR,
 	MULTIPLEXED_STREAMS_MINOR, PREFACE, PROTOCOL_MINOR, PROTOCOL_VERSION,
-	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, VersionRange,
+	SECURITY_AUDIT_MINOR, SETTINGS_AND_CAPABILITIES_MINOR, ServerHello,
+	VersionRange,
 };
 pub use message::{
 	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,

@@ -9,6 +9,7 @@
 //! translates at the transport seam.
 
 mod account;
+mod audit;
 mod capability;
 mod capability_probe;
 mod clock;
@@ -43,6 +44,10 @@ pub use account::{
 	CredentialItem, CredentialReference, CredentialSource, CredentialState,
 	ProviderAccount, ProviderId,
 };
+pub use audit::{
+	AuditDecision, AuditEntry, AuditEpoch, AuditPage, AuditRecordId,
+	AuditSequence, AuditTarget,
+};
 pub use capability::{
 	CapabilityObservation, CapabilitySnapshot, CraftId, CredentialStoreKind,
 	CredentialStoreStatus, DegradedCondition, ExternalTool, ExternalToolStatus,
@@ -60,7 +65,9 @@ pub use error::{
 pub use event::{
 	Event, EventId, EventKind, EventPage, EventPayload, EventSequence,
 };
-pub use jet_store::{RetentionPolicy, RunLifecycle};
+pub use jet_store::{
+	AuditOutcome, AuditRisk, AuditTargetRef, RetentionPolicy, RunLifecycle,
+};
 pub use query::{Query, QueryResult};
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,
@@ -254,3 +261,7 @@ mod capability_tests;
 #[cfg(test)]
 #[path = "account_tests.rs"]
 mod account_tests;
+
+#[cfg(test)]
+#[path = "audit_tests.rs"]
+mod audit_tests;

@@ -300,6 +300,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::ACCOUNT_BINDINGS_MINOR,
 			feature: "the Account binding Query",
 		}),
+		QueryRequest::SecurityAudit { .. } => Some(MinorRequirement {
+			minor: jet_protocol::SECURITY_AUDIT_MINOR,
+			feature: "the Security audit Query",
+		}),
 		QueryRequest::Status
 		| QueryRequest::Conversations
 		| QueryRequest::Conversation { .. }

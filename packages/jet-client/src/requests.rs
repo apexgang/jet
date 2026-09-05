@@ -5,8 +5,8 @@ use jet_protocol::{
 	CapabilitySnapshot, CommandRequest, CommandResponse, Conversation,
 	ConversationList, ConversationSnapshot, CredentialReference,
 	CredentialSource, EventPage, PageCursor, PlaneStatus, QueryRequest,
-	QueryResponse, RetentionPolicy, Run, RunLifecycle, SettingKey,
-	SettingScope, SettingSelection, SettingSnapshot, SettingValue,
+	QueryResponse, RetentionPolicy, Run, RunLifecycle, SecurityAudit,
+	SettingKey, SettingScope, SettingSelection, SettingSnapshot, SettingValue,
 };
 use uuid::Uuid;
 
@@ -36,7 +36,8 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
-			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -55,7 +56,8 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
-			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -81,7 +83,8 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
-			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -107,7 +110,8 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
-			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -128,6 +132,34 @@ impl Client {
 			other @ (QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
+			| QueryResponse::Settings(_)
+			| QueryResponse::Capabilities(_)
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Reads one page of the owner-only Security audit strictly after
+	/// `sequence`; zero starts from the oldest retained record. The page's
+	/// cursor tells whether later pages exist (ADR-0105).
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the daemon reports a stable
+	/// error, or the transport failure otherwise.
+	pub async fn security_audit_after(
+		&self,
+		sequence: u64,
+	) -> Result<SecurityAudit, ClientError> {
+		match self
+			.query(QueryRequest::SecurityAudit { after: sequence })
+			.await?
+		{
+			QueryResponse::SecurityAudit(page) => Ok(page),
+			other @ (QueryResponse::Status(_)
+			| QueryResponse::Conversations(_)
+			| QueryResponse::Conversation(_)
+			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
@@ -254,7 +286,8 @@ impl Client {
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
 			| QueryResponse::Capabilities(_)
-			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -348,7 +381,8 @@ impl Client {
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
-			| QueryResponse::AccountBindings(_)) => Err(unexpected(&other)),
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -381,7 +415,8 @@ impl Client {
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
-			| QueryResponse::Capabilities(_)) => Err(unexpected(&other)),
+			| QueryResponse::Capabilities(_)
+			| QueryResponse::SecurityAudit(_)) => Err(unexpected(&other)),
 		}
 	}
 
