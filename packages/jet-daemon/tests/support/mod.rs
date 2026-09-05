@@ -38,7 +38,18 @@ pub fn jetd(home: &Path) -> Command {
 }
 
 pub async fn start_jetd(home: &Path) -> Daemon {
-	let mut child = jetd(home).spawn().unwrap();
+	start(&mut jetd(home)).await
+}
+
+/// Starts `jetd` where none of the external tools it invokes can be found,
+/// so its Capability snapshot reports them missing (ADR-0056). The search
+/// path is given to the child alone; this process keeps its own.
+pub async fn start_jetd_without_external_tools(home: &Path) -> Daemon {
+	start(jetd(home).env("PATH", "/jet-has-no-tools-here")).await
+}
+
+pub async fn start(command: &mut Command) -> Daemon {
+	let mut child = command.spawn().unwrap();
 	let stdout = child.stdout.take().unwrap();
 	let mut lines = BufReader::new(stdout).lines();
 	let ready = lines.next_line().await.unwrap().expect("jetd exited early");

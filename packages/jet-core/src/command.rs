@@ -3,7 +3,7 @@
 //! acknowledged only after that commit (ADR-0020, ADR-0071).
 
 use jet_store::{
-	CommandReceiptRecord, EffectKindRecord, EffectSafetyRecord,
+	ActorRecord, CommandReceiptRecord, EffectKindRecord, EffectSafetyRecord,
 	NewCommandReceipt, NewConversation, NewEffect, NewRun, RetentionPolicy,
 	RunLifecycle, SettingRecord, WriteTransaction,
 };
@@ -11,11 +11,16 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use crate::capability::{Capability, ExternalTool};
 use crate::conversation::{Conversation, ConversationId, Revision, Run, RunId};
 use crate::error::{ConflictState, CoreError, RevisionConflict};
 use crate::event::{EventKind, EventSubject};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
 use crate::{Actor, Core, lifecycle};
+
+/// Automatic Git delivery is carried out with the Git the core invokes, so
+/// turning it on depends on that tool being installed (ADR-0029, ADR-0056).
+const GIT: &[Capability] = &[Capability::ExternalTool(ExternalTool::Git)];
 
 const OUTCOME_VERSION: u32 = 1;
 const COMMAND_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
@@ -110,6 +115,26 @@ pub enum Command {
 	},
 }
 
+impl Command {
+	/// What the Plane must still be able to do when this Command runs. Each
+	/// one is checked against a new observation before anything commits
+	/// (ADR-0086).
+	fn required_capabilities(&self) -> &'static [Capability] {
+		match self {
+			Self::SetSetting {
+				key: SettingKey::GitAutoCommit,
+				value: SettingValue::Flag(true),
+				..
+			} => GIT,
+			Self::CreateConversation { .. }
+			| Self::CreateRun { .. }
+			| Self::SetSetting { .. }
+			| Self::ClearSetting { .. }
+			| Self::TransitionRun { .. } => &[],
+		}
+	}
+}
+
 /// The durable result of a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
@@ -158,6 +183,8 @@ impl Core {
 			request_digest,
 		} = envelope;
 		let actor_record = actor.record();
+		self.revalidate_capabilities(actor_record, command_id, &command)
+			.await?;
 		let recorded_at_unix_ms = self.now_unix_ms();
 		self.store
 			.write(async |tx| {
@@ -204,6 +231,44 @@ impl Core {
 				Ok(result)
 			})
 			.await?
+	}
+}
+
+impl Core {
+	/// Observes the Plane again for every Capability `command` depends on,
+	/// before it commits anything (ADR-0086).
+	///
+	/// A Command whose outcome is already durable is not revalidated: its
+	/// work is done, and repeating it must return what the Plane decided
+	/// then rather than what this observation would decide now (ADR-0093).
+	async fn revalidate_capabilities(
+		&self,
+		actor: ActorRecord,
+		command_id: CommandId,
+		command: &Command,
+	) -> Result<(), CoreError> {
+		let required = command.required_capabilities();
+		if required.is_empty() {
+			return Ok(());
+		}
+		let recorded = self
+			.store
+			.read(async |tx| {
+				Ok::<_, CoreError>(
+					tx.command_receipt(actor, command_id.0).await?,
+				)
+			})
+			.await?;
+		if recorded.is_some() {
+			return Ok(());
+		}
+		let capabilities = self.observe_capabilities().await;
+		for &capability in required {
+			if !capabilities.supports(capability) {
+				return Err(CoreError::capability_unavailable(capability));
+			}
+		}
+		Ok(())
 	}
 }
 

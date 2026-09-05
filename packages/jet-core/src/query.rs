@@ -3,6 +3,7 @@
 
 use jet_store::{ConversationPageStart, ReadTransaction};
 
+use crate::capability::{CapabilityObservation, CapabilitySnapshot};
 use crate::conversation::{
 	ConversationId, ConversationList, ConversationSnapshot, PageCursor,
 };
@@ -31,6 +32,11 @@ pub enum Query {
 		/// The Conversation to read.
 		conversation_id: ConversationId,
 	},
+	/// What the Plane can do (ADR-0086).
+	Capabilities {
+		/// Whether to report the last observation or take a new one.
+		observation: CapabilityObservation,
+	},
 	/// Settings resolved for one scope (ADR-0085).
 	Settings {
 		/// The scope to resolve for; its own values win over the Plane's.
@@ -55,6 +61,8 @@ pub enum QueryResult {
 	Conversations(ConversationList),
 	/// One Conversation with all of its Runs.
 	Conversation(ConversationSnapshot),
+	/// What the Plane can do.
+	Capabilities(CapabilitySnapshot),
 	/// Settings resolved for one scope.
 	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.
@@ -114,6 +122,16 @@ impl Core {
 				self.store
 					.read(async |tx| conversation(tx, conversation_id).await)
 					.await
+			}
+			Query::Capabilities { observation } => {
+				Ok(QueryResult::Capabilities(match observation {
+					CapabilityObservation::LastObserved => {
+						self.capabilities.read().await.clone()
+					}
+					CapabilityObservation::Fresh => {
+						self.observe_capabilities().await
+					}
+				}))
 			}
 			Query::Settings { scope, selection } => {
 				settings(self, scope, selection).await

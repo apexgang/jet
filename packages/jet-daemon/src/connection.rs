@@ -289,8 +289,12 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			feature: "Conversation pagination",
 		}),
 		QueryRequest::Settings { .. } => Some(MinorRequirement {
-			minor: jet_protocol::SETTINGS_MINOR,
+			minor: jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR,
 			feature: "Setting Queries",
+		}),
+		QueryRequest::Capabilities { .. } => Some(MinorRequirement {
+			minor: jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR,
+			feature: "the Capability Query",
 		}),
 		QueryRequest::Status
 		| QueryRequest::Conversations
@@ -303,7 +307,7 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 	match command {
 		CommandRequest::SetSetting { .. }
 		| CommandRequest::ClearSetting { .. } => Some(MinorRequirement {
-			minor: jet_protocol::SETTINGS_MINOR,
+			minor: jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR,
 			feature: "Setting Commands",
 		}),
 		CommandRequest::CreateConversation { .. }

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use uuid::Uuid;
 
+use crate::capability::{CapabilityObservation, CapabilitySnapshot};
 use crate::control::{ControlError, decode_control};
 use crate::conversation::{
 	CommandRequest, CommandResponse, ConversationList, ConversationSnapshot,
@@ -100,6 +101,11 @@ pub enum QueryRequest {
 		/// The Conversation to read.
 		conversation_id: Uuid,
 	},
+	/// What the Plane can do.
+	Capabilities {
+		/// Whether to report the last observation or take a new one.
+		observation: CapabilityObservation,
+	},
 	/// Settings resolved for one scope.
 	Settings {
 		/// The scope to resolve for; its own values win over the Plane's.
@@ -126,6 +132,8 @@ pub enum QueryResponse {
 	Conversations(ConversationList),
 	/// One Conversation with all of its Runs.
 	Conversation(ConversationSnapshot),
+	/// What the Plane can do.
+	Capabilities(CapabilitySnapshot),
 	/// Settings resolved for one scope.
 	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.

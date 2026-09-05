@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 use crate::clock::Clock;
 use crate::test_support::{
-	actor, command_id, request, request_with_id, start_core,
+	FixedProbe, actor, command_id, equipped, request, request_with_id,
+	start_core, start_core_with,
 };
 use crate::{
 	Command, CommandEnvelope, CommandOutcome, Conversation, ConversationId,
@@ -15,7 +16,6 @@ use crate::{
 	EventPayload, EventSequence, Query, QueryResult, RetentionPolicy, Revision,
 	Run, RunId, RunLifecycle,
 };
-use jet_store::Store;
 
 #[derive(Debug)]
 struct ManualClock(Mutex<SystemTime>);
@@ -337,12 +337,12 @@ async fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 	let dir = tempfile::tempdir().unwrap();
 	let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 	let clock = Arc::new(ManualClock(Mutex::new(start)));
-	let core = Core::start_with_clock(
-		Store::open(&dir.path().join("p.sqlite3")).await.unwrap(),
+	let core = start_core_with(
+		&dir.path().join("p.sqlite3"),
 		clock.clone(),
+		FixedProbe::new(equipped()),
 	)
-	.await
-	.unwrap();
+	.await;
 	let command_id = command_id();
 	let command = Command::CreateConversation {
 		retention: RetentionPolicy::Retain,

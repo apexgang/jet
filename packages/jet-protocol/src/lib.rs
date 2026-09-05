@@ -10,6 +10,7 @@
 //! starts with a fixed preface and a restricted handshake (ADR-0090).
 
 mod artifact;
+mod capability;
 mod control;
 mod conversation;
 mod decimal;
@@ -24,6 +25,11 @@ mod stream_error;
 
 pub use artifact::{
 	ArtifactError, ArtifactVerifier, DigestError, Sha256Digest,
+};
+pub use capability::{
+	CapabilityObservation, CapabilitySnapshot, CredentialStoreKind,
+	CredentialStoreStatus, DegradedCondition, ExternalTool, ExternalToolStatus,
+	InstalledCraft, Platform, ToolAvailability,
 };
 pub use control::{
 	ControlError, MAX_COLLECTION_ITEMS, MAX_CONTROL_ITEMS, MAX_NESTING_DEPTH,
@@ -41,8 +47,8 @@ pub use frame::{
 };
 pub use handshake::{
 	CODEC_JSON_V1, ClientHello, FENCED_READS_MINOR, MULTIPLEXED_STREAMS_MINOR,
-	PREFACE, PROTOCOL_MINOR, PROTOCOL_VERSION, SETTINGS_MINOR, ServerHello,
-	VersionRange,
+	PREFACE, PROTOCOL_MINOR, PROTOCOL_VERSION, SETTINGS_AND_CAPABILITIES_MINOR,
+	ServerHello, VersionRange,
 };
 pub use message::{
 	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,

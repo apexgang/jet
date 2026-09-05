@@ -19,8 +19,9 @@ pub const PROTOCOL_MINOR: u32 = 3;
 pub const FENCED_READS_MINOR: u32 = 1;
 /// Minor that switches post-handshake frames to numbered stream envelopes.
 pub const MULTIPLEXED_STREAMS_MINOR: u32 = 2;
-/// Minor that introduced Setting Queries and Commands.
-pub const SETTINGS_MINOR: u32 = 3;
+/// Minor that introduced Setting Queries and Commands and the Capability
+/// Query.
+pub const SETTINGS_AND_CAPABILITIES_MINOR: u32 = 3;
 /// The only v1 codec; other codecs are reserved for later negotiation.
 pub const CODEC_JSON_V1: &str = "json-v1";
 
