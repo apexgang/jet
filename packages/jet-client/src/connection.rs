@@ -6,16 +6,14 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use jet_protocol::{
-	CODEC_JSON_V1, CONNECTION_STREAM, ClientHello, ClientMessage,
-	CommandRequest, CommandResponse, ControlError, Frame, FrameError,
-	FrameLimits, FrameReader, FrameWriter, MULTIPLEXED_STREAMS_MINOR,
-	PROTOCOL_MINOR, PROTOCOL_VERSION, QueryRequest, QueryResponse, RequestId,
-	ServerHello, ServerMessage, StreamId, VersionRange, WireError,
-	decode_control, encode_control,
+	CODEC_JSON_V1, CONNECTION_STREAM, ClientMessage, CommandRequest,
+	CommandResponse, ControlError, Frame, FrameError, FrameLimits, FrameReader,
+	FrameWriter, MULTIPLEXED_STREAMS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION,
+	QueryRequest, QueryResponse, RequestId, ServerHello, ServerMessage,
+	StreamId, WireError, decode_control, encode_control,
 };
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::UnixStream;
-use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -77,6 +75,7 @@ pub enum ClientError {
 /// A connected, handshaken Jet protocol client.
 #[derive(Debug)]
 pub struct Client {
+	pub(crate) ssh: Option<tokio::process::Child>,
 	outbound: mpsc::Sender<WriteRequest>,
 	pending: PendingReplies,
 	reader_task: JoinHandle<()>,
@@ -115,32 +114,26 @@ impl Client {
 		socket: &Path,
 		client_id: Uuid,
 	) -> Result<Self, ClientError> {
-		let mut stream = UnixStream::connect(socket).await?;
-		stream.write_all(jet_protocol::PREFACE).await?;
-		let (read, write) = stream.into_split();
-		let mut reader = FrameReader::new(read);
-		let mut writer = FrameWriter::new(write);
+		let (read, write) = UnixStream::connect(socket).await?.into_split();
+		let (reader, writer, hello) =
+			crate::handshake::local(read, write, client_id).await?;
+		Self::from_handshake(reader, writer, hello)
+	}
+
+	pub(crate) fn from_handshake<R, W>(
+		mut reader: FrameReader<R>,
+		mut writer: FrameWriter<W>,
+		hello: ServerHello,
+	) -> Result<Self, ClientError>
+	where
+		R: AsyncRead + Unpin + Send + 'static,
+		W: AsyncWrite + Unpin + Send + 'static,
+	{
 		let accepted = FrameLimits::default();
-		let hello = ClientHello {
-			protocol: VersionRange {
-				min: PROTOCOL_VERSION,
-				max: PROTOCOL_VERSION,
-			},
-			minor: PROTOCOL_MINOR,
-			codec: CODEC_JSON_V1.into(),
-			client_id,
-			max_control_frame: limit(accepted.control),
-			max_data_frame: limit(accepted.data),
-			capabilities: vec![],
-		};
-		write_message(&mut writer, CONNECTION_STREAM, &hello).await?;
-		let (stream_id, hello) = receive_handshake(&mut reader).await?;
-		if !stream_id.is_connection() {
-			return Err(ClientError::Unexpected(
-				"handshake reply arrived on an application stream".into(),
-			));
-		}
 		match hello {
+			ServerHello::Challenge { .. } => Err(ClientError::Unexpected(
+				"remote challenge on local connection".into(),
+			)),
 			ServerHello::Welcome {
 				protocol,
 				minor,
@@ -175,6 +168,7 @@ impl Client {
 					tokio::spawn(read_replies(reader, Arc::clone(&pending)));
 				let writer_task = tokio::spawn(write_frames(writer, writes));
 				Ok(Self {
+					ssh: None,
 					outbound,
 					pending,
 					reader_task,
@@ -370,33 +364,8 @@ impl Drop for Client {
 	}
 }
 
-async fn write_message<T: serde::Serialize>(
-	writer: &mut FrameWriter<OwnedWriteHalf>,
-	stream_id: StreamId,
-	message: &T,
-) -> Result<(), ClientError> {
-	let payload = encode_control(message)?;
-	writer
-		.write(&Frame::stream_control(stream_id, payload))
-		.await?;
-	Ok(())
-}
-
-async fn receive_handshake<T: serde::de::DeserializeOwned>(
-	reader: &mut FrameReader<OwnedReadHalf>,
-) -> Result<(StreamId, T), ClientError> {
-	match reader.read().await? {
-		Frame::Control { stream_id, payload } => {
-			Ok((stream_id, decode_control(&payload)?))
-		}
-		Frame::Data { .. } => Err(ClientError::Unexpected(
-			"data frame arrived during the handshake".into(),
-		)),
-	}
-}
-
-async fn read_replies(
-	mut reader: FrameReader<OwnedReadHalf>,
+async fn read_replies<R: AsyncRead + Unpin>(
+	mut reader: FrameReader<R>,
 	pending: PendingReplies,
 ) {
 	loop {
@@ -438,8 +407,8 @@ async fn read_replies(
 		.clear();
 }
 
-async fn write_frames(
-	mut writer: FrameWriter<OwnedWriteHalf>,
+async fn write_frames<W: AsyncWrite + Unpin>(
+	mut writer: FrameWriter<W>,
 	mut writes: mpsc::Receiver<WriteRequest>,
 ) {
 	while let Some(WriteRequest { frame, finished }) = writes.recv().await {
@@ -480,10 +449,6 @@ fn remote_error(
 		)),
 		None => ClientError::Disconnected(error),
 	}
-}
-
-fn limit(limit: usize) -> u32 {
-	u32::try_from(limit).unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]

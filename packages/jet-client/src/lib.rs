@@ -5,7 +5,11 @@
 //! ADR-0057).
 
 mod connection;
+mod handshake;
 mod pairing_requests;
 mod requests;
+mod ssh;
 
 pub use connection::{Client, ClientError};
+pub use handshake::ClientIdentity;
+pub use ssh::SshEndpoint;

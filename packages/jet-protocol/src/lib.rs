@@ -13,6 +13,7 @@ mod account;
 mod artifact;
 mod audit;
 mod capability;
+mod connection_auth;
 mod control;
 mod conversation;
 mod decimal;
@@ -43,6 +44,10 @@ pub use capability::{
 	CredentialStoreStatus, DegradedCondition, ExternalTool, ExternalToolStatus,
 	InstalledCraft, Platform, ToolAvailability,
 };
+pub use connection_auth::{
+	ConnectionProof, RemotePairingRequest, RemotePairingResponse,
+	connection_signing_bytes,
+};
 pub use control::{
 	ControlError, MAX_COLLECTION_ITEMS, MAX_CONTROL_ITEMS, MAX_NESTING_DEPTH,
 	decode_control, encode_control,
@@ -60,8 +65,8 @@ pub use frame::{
 pub use handshake::{
 	ACCOUNT_BINDINGS_MINOR, CODEC_JSON_V1, ClientHello, FENCED_READS_MINOR,
 	MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE, PROTOCOL_MINOR,
-	PROTOCOL_VERSION, SECURITY_AUDIT_MINOR, SETTINGS_AND_CAPABILITIES_MINOR,
-	ServerHello, VersionRange,
+	PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SECURITY_AUDIT_MINOR,
+	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, VersionRange,
 };
 pub use message::{
 	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,

@@ -14,7 +14,9 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 6;
+pub const PROTOCOL_MINOR: u32 = 7;
+/// Minor that introduced fresh signed remote connection challenges.
+pub const REMOTE_AUTH_MINOR: u32 = 7;
 /// Minor that introduced fenced status and Conversation pagination.
 pub const FENCED_READS_MINOR: u32 = 1;
 /// Minor that switches post-handshake frames to numbered stream envelopes.
@@ -73,6 +75,12 @@ pub struct ClientHello {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ServerHello {
+	/// Remote endpoint access is established; Jet authorization is still pending.
+	Challenge {
+		/// A fresh 256-bit nonce, used once on this connection.
+		#[serde(with = "crate::hex")]
+		nonce: [u8; 32],
+	},
 	/// The connection is authenticated and negotiated.
 	Welcome {
 		/// Selected protocol major.
