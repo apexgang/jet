@@ -353,7 +353,14 @@ impl Core {
 		actor: &Actor,
 		envelope: CommandEnvelope,
 	) -> Result<CommandOutcome, CoreError> {
-		actor.authorize()?;
+		// ASVS 8.3.2: no admission can slip between revocation's commit and
+		// invalidating live authority, including a replayed Command receipt.
+		let _access = self
+			.remote_access
+			.acquire_many(crate::remote::AUTHORITY_READERS)
+			.await
+			.expect("authority gate never closes");
+		actor.authorize(&self.remote_sessions)?;
 		let CommandEnvelope {
 			command_id,
 			command,
@@ -377,6 +384,7 @@ impl Core {
 			.await?;
 			return Err(refusal);
 		}
+		let mut invalidated_client = None;
 		let outcome = self
 			.store
 			.write(async |tx| {
@@ -411,6 +419,10 @@ impl Core {
 					recorded_at_unix_ms,
 				)
 				.await;
+				invalidated_client = result
+					.as_ref()
+					.ok()
+					.and_then(crate::remote::invalidated_client);
 				if let Err(error) = &result
 					&& !error.is_authoritative_result()
 				{
@@ -435,7 +447,13 @@ impl Core {
 				.await?;
 				Ok(result)
 			})
-			.await??;
+			.await;
+		// SQLite may have committed before writing the external audit head
+		// failed. Publish the safe direction before propagating either error.
+		if let Some(client_id) = invalidated_client {
+			self.remote_sessions.invalidate(client_id);
+		}
+		let outcome = outcome??;
 		// Carrying on past an integrity failure is not the daemon deciding
 		// it is well again: it validates the chain it now vouches for.
 		if matches!(outcome, CommandOutcome::AuditEpochBegun { .. }) {

@@ -10,6 +10,7 @@ mod pairing;
 mod setting;
 
 pub(crate) use capability::snapshot as capabilities;
+pub(crate) use pairing::{client as paired_client, pending as pairing_pending};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -361,12 +362,8 @@ fn event(event: &Event) -> Result<wire::Event, CoreError> {
 }
 
 pub(super) fn actor(actor: &Actor) -> wire::Actor {
-	match actor {
-		Actor::InteractiveClient { client_id } => {
-			wire::Actor::InteractiveClient {
-				client_id: client_id.0,
-			}
-		}
+	wire::Actor::InteractiveClient {
+		client_id: actor.client_id().0,
 	}
 }
 

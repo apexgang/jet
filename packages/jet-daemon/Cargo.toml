@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+getrandom.workspace = true
 clap.workspace = true
 jet-core.workspace = true
 jet-protocol.workspace = true

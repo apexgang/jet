@@ -57,6 +57,8 @@ pub struct AuditRecordId(pub Uuid);
 /// what happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditDecision {
+	/// A remote connection attempted to prove its Paired Client identity.
+	ConnectionAuthenticated,
 	/// A Provider account was bound to this Plane, widening what may
 	/// authenticate on it (ADR-0016).
 	AccountBound,
@@ -210,6 +212,7 @@ impl AuditDecision {
 	#[must_use]
 	pub fn as_str(self) -> &'static str {
 		match self {
+			Self::ConnectionAuthenticated => "connection.authenticated",
 			Self::AccountBound => "account.bound",
 			Self::AccountUnbound => "account.unbound",
 			Self::GitAutomationEnabled => "policy.git_automation_enabled",
@@ -239,6 +242,7 @@ impl AuditDecision {
 	/// one a later release would assign.
 	fn risk(self) -> AuditRisk {
 		match self {
+			Self::ConnectionAuthenticated => AuditRisk::Routine,
 			Self::AccountBound
 			| Self::AccountUnbound
 			| Self::GitAutomationEnabled
