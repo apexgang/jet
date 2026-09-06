@@ -47,6 +47,7 @@ sqlx = { version = "0.9", default-features = false, features = [
 subtle = "2"
 tempfile = "3"
 thiserror = "2"
+toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
 tokio = { version = "1", features = [
 	"io-std",
 	"io-util",
