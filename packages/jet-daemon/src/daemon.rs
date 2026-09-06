@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use jet_core::Core;
+use jet_core::{Core, WorkspaceHome};
 use jet_runtime::{
 	DaemonMetadata, InstallationChannel, IpcError, JetHome, LifetimeLock,
 	LocalListener, LockError,
@@ -67,13 +67,14 @@ pub(crate) async fn run(
 		}
 	};
 	// The start is recorded only once the daemon can actually serve.
-	let core = match Core::start(store).await {
-		Ok(core) => Arc::new(core),
-		Err(error) => {
-			eprintln!("jetd: cannot start the core: {error}");
-			return ExitCode::from(EXIT_FAILURE);
-		}
-	};
+	let core =
+		match Core::start(store, WorkspaceHome(home.workspaces_dir())).await {
+			Ok(core) => Arc::new(core),
+			Err(error) => {
+				eprintln!("jetd: cannot start the core: {error}");
+				return ExitCode::from(EXIT_FAILURE);
+			}
+		};
 	// ADR-0086: the Plane reports what it can do at startup, on the one
 	// line a launcher reads, and on demand afterwards.
 	let capabilities = crate::translate::capabilities(

@@ -8,6 +8,7 @@ use jet_protocol::{
 	Actor, CommandRequest, CommandResponse, ConflictState,
 	ConversationSnapshot, ErrorCategory, RecoveryAction, RetentionPolicy,
 	RevisionConflict, RunLifecycle, ServerMessage, WireError,
+	WorkingTreeRequest,
 };
 use pretty_assertions::assert_eq;
 use support::{connect, connect_raw, start_jetd};
@@ -39,6 +40,7 @@ async fn an_identical_retry_returns_the_durable_original_result() {
 	let command_id = Uuid::now_v7();
 	let command = CommandRequest::CreateConversation {
 		retention: RetentionPolicy::Retain,
+		working_tree: WorkingTreeRequest::NoProject,
 	};
 
 	let mut first = start_jetd(&home).await;
@@ -77,6 +79,7 @@ async fn changed_content_cannot_reuse_an_actors_command_identity() {
 			command_id,
 			CommandRequest::CreateConversation {
 				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRequest::NoProject,
 			},
 		)
 		.await
@@ -87,6 +90,7 @@ async fn changed_content_cannot_reuse_an_actors_command_identity() {
 			command_id,
 			CommandRequest::CreateConversation {
 				retention: RetentionPolicy::ForgetAfterFinalRun,
+				working_tree: WorkingTreeRequest::NoProject,
 			},
 		)
 		.await
@@ -123,6 +127,7 @@ async fn only_a_byte_equivalent_command_body_is_an_identical_retry() {
 			command_id,
 			CommandRequest::CreateConversation {
 				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRequest::NoProject,
 			},
 		)
 		.await
@@ -164,6 +169,7 @@ async fn command_identities_are_scoped_to_the_authenticated_actor() {
 	let command_id = Uuid::now_v7();
 	let command = CommandRequest::CreateConversation {
 		retention: RetentionPolicy::Retain,
+		working_tree: WorkingTreeRequest::NoProject,
 	};
 	let first = connect(&daemon, first_actor).await;
 	let second = connect(&daemon, second_actor).await;
@@ -284,6 +290,7 @@ async fn concurrent_commands_expose_one_authoritative_revision_order() {
 			ConversationSnapshot {
 				cursor: 3,
 				conversation,
+				workspace: None,
 				runs: vec![current],
 			},
 			vec![1, 2, 3]

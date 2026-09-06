@@ -4,7 +4,12 @@
 //! canceled, or be lost from any live state, but it only completes after
 //! it has been active.
 
-use jet_store::RunLifecycle;
+use jet_store::{RunLifecycle, RunRecord};
+
+/// Whether any of `runs` has not reached a terminal state.
+pub(crate) fn any_live(runs: &[RunRecord]) -> bool {
+	runs.iter().any(|run| !run.lifecycle.is_terminal())
+}
 
 pub(crate) fn may_transition(from: RunLifecycle, to: RunLifecycle) -> bool {
 	match to {

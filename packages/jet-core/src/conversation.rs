@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::event::EventSequence;
 use crate::system_time;
+use crate::workspace::{WorkingTree, Workspace};
 
 /// Durable identity of one Conversation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -45,6 +46,8 @@ pub struct Conversation {
 	pub conversation_id: ConversationId,
 	/// Whether Jet keeps the Conversation after its final Run.
 	pub retention: RetentionPolicy,
+	/// Where it does its work (ADR-0025).
+	pub working_tree: WorkingTree,
 	/// When the Conversation was created.
 	pub created_at: SystemTime,
 }
@@ -86,6 +89,8 @@ pub struct ConversationSnapshot {
 	pub cursor: EventSequence,
 	/// The Conversation itself.
 	pub conversation: Conversation,
+	/// The Workspace it owns, when it works in one.
+	pub workspace: Option<Workspace>,
 	/// Its Runs in creation order, terminal ones included.
 	pub runs: Vec<Run>,
 }
@@ -95,6 +100,7 @@ impl From<ConversationRecord> for Conversation {
 		Self {
 			conversation_id: ConversationId(record.conversation_id),
 			retention: record.retention,
+			working_tree: record.working_tree.into(),
 			created_at: system_time(record.created_at_unix_ms),
 		}
 	}

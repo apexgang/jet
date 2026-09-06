@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT conversation_id AS \"conversation_id!\", retention,\n\t\t\t\tcreated_at_unix_ms\n\t\t\t FROM conversations\n\t\t\t WHERE conversation_id = ?1",
+  "query": "SELECT conversation_id AS \"conversation_id!\", retention,\n\t\t\t\tworking_tree, project_id, created_at_unix_ms\n\t\t\t FROM conversations\n\t\t\t WHERE conversation_id = ?1",
   "describe": {
     "columns": [
       {
@@ -26,8 +26,30 @@
         }
       },
       {
-        "name": "created_at_unix_ms",
+        "name": "working_tree",
         "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "working_tree"
+          }
+        }
+      },
+      {
+        "name": "project_id",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "project_id"
+          }
+        }
+      },
+      {
+        "name": "created_at_unix_ms",
+        "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -43,8 +65,10 @@
     "nullable": [
       true,
       false,
+      false,
+      true,
       false
     ]
   },
-  "hash": "e336d040d3bd6ed619ef2a1d1a4fe44af2bf9a40d1c00efea605ee714a87bc5d"
+  "hash": "90bef05537360468313fafdb1128c98c1ce22fbf314678be0bddf845f971c6c3"
 }

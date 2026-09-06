@@ -18,13 +18,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::path::PathBuf;
 
 use jet_core::{
-	AccountBindingId, Actor, AuditSequence, AuthenticationString, ClientId,
-	Command, CommandOutcome, ConflictState, Conversation, ConversationId,
-	ConversationList, ConversationSnapshot, CoreError, ErrorCategory, Event,
-	EventPage, EventPayload, EventSequence, PairingOfferId, PairingSecret,
-	PairingSignature, PathGrant, PlaneStatus, ProjectId, ProviderId, Query,
-	QueryResult, RecoveryAction, RelativePath, RetentionPolicy, Revision,
-	RevisionConflict, Run, RunId, RunLifecycle,
+	AccountBindingId, Actor, AuditSequence, AuthenticationString,
+	BaseSelection, ClientId, Command, CommandOutcome, ConflictState,
+	Conversation, ConversationId, ConversationList, ConversationSnapshot,
+	CoreError, ErrorCategory, Event, EventPage, EventPayload, EventSequence,
+	PairingOfferId, PairingSecret, PairingSignature, PathGrant, PlaneStatus,
+	ProjectId, ProviderId, Query, QueryResult, RecoveryAction, RelativePath,
+	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
+	WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase,
 };
 use jet_protocol as wire;
 
@@ -103,10 +104,12 @@ pub(crate) fn query_result(
 			wire::QueryResponse::Status(plane_status(&status, minor))
 		}
 		QueryResult::Conversations(list) => {
-			wire::QueryResponse::Conversations(conversation_list(&list))
+			wire::QueryResponse::Conversations(conversation_list(&list, minor))
 		}
 		QueryResult::Conversation(snapshot) => {
-			wire::QueryResponse::Conversation(conversation_snapshot(&snapshot))
+			wire::QueryResponse::Conversation(conversation_snapshot(
+				&snapshot, minor,
+			))
 		}
 		QueryResult::Capabilities(snapshot) => {
 			wire::QueryResponse::Capabilities(capability::snapshot(
@@ -142,11 +145,13 @@ pub(crate) fn query_result(
 
 pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 	match request {
-		wire::CommandRequest::CreateConversation { retention } => {
-			Command::CreateConversation {
-				retention: retention_from_wire(*retention),
-			}
-		}
+		wire::CommandRequest::CreateConversation {
+			retention,
+			working_tree,
+		} => Command::CreateConversation {
+			retention: retention_from_wire(*retention),
+			working_tree: working_tree_request(working_tree),
+		},
 		wire::CommandRequest::CreateRun { conversation_id } => {
 			Command::CreateRun {
 				conversation_id: ConversationId(*conversation_id),
@@ -244,10 +249,13 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 
 pub(crate) fn command_outcome(
 	outcome: CommandOutcome,
+	minor: u32,
 ) -> wire::CommandResponse {
 	match outcome {
 		CommandOutcome::ConversationCreated(created) => {
-			wire::CommandResponse::ConversationCreated(conversation(&created))
+			wire::CommandResponse::ConversationCreated(conversation(
+				&created, minor,
+			))
 		}
 		CommandOutcome::RunCreated(created) => {
 			wire::CommandResponse::RunCreated(run(&created))
@@ -340,10 +348,17 @@ fn plane_status(status: &PlaneStatus, minor: u32) -> wire::PlaneStatus {
 	}
 }
 
-fn conversation_list(list: &ConversationList) -> wire::ConversationList {
+fn conversation_list(
+	list: &ConversationList,
+	minor: u32,
+) -> wire::ConversationList {
 	wire::ConversationList {
 		cursor: list.cursor.0,
-		conversations: list.conversations.iter().map(conversation).collect(),
+		conversations: list
+			.conversations
+			.iter()
+			.map(|conversation| self::conversation(conversation, minor))
+			.collect(),
 		next_page: list
 			.next_page
 			.as_ref()
@@ -353,19 +368,87 @@ fn conversation_list(list: &ConversationList) -> wire::ConversationList {
 
 fn conversation_snapshot(
 	snapshot: &ConversationSnapshot,
+	minor: u32,
 ) -> wire::ConversationSnapshot {
 	wire::ConversationSnapshot {
 		cursor: snapshot.cursor.0,
-		conversation: conversation(&snapshot.conversation),
+		conversation: conversation(&snapshot.conversation, minor),
+		// A client that negotiated an older minor is not told about a
+		// Workspace it cannot decode (ADR-0019).
+		workspace: (minor >= wire::WORKSPACES_MINOR)
+			.then(|| snapshot.workspace.as_ref().map(workspace))
+			.flatten(),
 		runs: snapshot.runs.iter().map(run).collect(),
 	}
 }
 
-fn conversation(conversation: &Conversation) -> wire::Conversation {
+fn conversation(conversation: &Conversation, minor: u32) -> wire::Conversation {
 	wire::Conversation {
 		conversation_id: conversation.conversation_id.0,
 		retention: retention(conversation.retention),
+		working_tree: (minor >= wire::WORKSPACES_MINOR)
+			.then(|| working_tree(conversation.working_tree)),
 		created_at_unix_ms: unix_ms(conversation.created_at),
+	}
+}
+
+fn working_tree(working_tree: WorkingTree) -> wire::WorkingTree {
+	match working_tree {
+		WorkingTree::NoProject => wire::WorkingTree::NoProject,
+		WorkingTree::Workspace { project_id } => wire::WorkingTree::Workspace {
+			project_id: project_id.0,
+		},
+		WorkingTree::LocalCheckout { project_id } => {
+			wire::WorkingTree::LocalCheckout {
+				project_id: project_id.0,
+			}
+		}
+	}
+}
+
+fn working_tree_request(
+	request: &wire::WorkingTreeRequest,
+) -> WorkingTreeRequest {
+	match request {
+		wire::WorkingTreeRequest::NoProject => WorkingTreeRequest::NoProject,
+		wire::WorkingTreeRequest::Workspace { project_id, base } => {
+			WorkingTreeRequest::Workspace {
+				project_id: ProjectId(*project_id),
+				base: match base {
+					wire::BaseSelection::Head => BaseSelection::Head,
+					wire::BaseSelection::Revision { revision } => {
+						BaseSelection::Revision(revision.clone())
+					}
+				},
+			}
+		}
+		wire::WorkingTreeRequest::LocalCheckout { project_id } => {
+			WorkingTreeRequest::LocalCheckout {
+				project_id: ProjectId(*project_id),
+			}
+		}
+	}
+}
+
+fn workspace(workspace: &Workspace) -> wire::Workspace {
+	let WorkspaceBase { selection, commit } = &workspace.base;
+	wire::Workspace {
+		workspace_id: workspace.workspace_id.0,
+		conversation_id: workspace.conversation_id.0,
+		project_id: workspace.project_id.0,
+		root: workspace.root.display().to_string(),
+		base: wire::WorkspaceBase {
+			selection: match selection {
+				BaseSelection::Head => wire::BaseSelection::Head,
+				BaseSelection::Revision(revision) => {
+					wire::BaseSelection::Revision {
+						revision: revision.clone(),
+					}
+				}
+			},
+			commit: commit.clone(),
+		},
+		created_at_unix_ms: unix_ms(workspace.created_at),
 	}
 }
 

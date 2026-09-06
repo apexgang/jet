@@ -10,7 +10,7 @@ use jet_protocol::{
 	ErrorCategory, Frame, FrameError, FrameLimits, FrameReader, FrameWriter,
 	MULTIPLEXED_STREAMS_MINOR, PREFACE, PROTOCOL_MINOR, PROTOCOL_VERSION,
 	QueryRequest, RequestId, ServerHello, ServerMessage, StreamId, WireError,
-	decode_control, encode_control,
+	WorkingTreeRequest, decode_control, encode_control,
 };
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixStream;
@@ -366,7 +366,7 @@ pub(super) async fn execute(
 	match outcome {
 		Ok(outcome) => ServerMessage::CommandResult {
 			id,
-			result: translate::command_outcome(outcome),
+			result: translate::command_outcome(outcome, minor),
 		},
 		Err(error) => ServerMessage::Error {
 			id: Some(id),
@@ -456,7 +456,19 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::PROJECTS_MINOR,
 			feature: "Project registration",
 		}),
-		CommandRequest::CreateConversation { .. }
+		CommandRequest::CreateConversation {
+			working_tree:
+				WorkingTreeRequest::Workspace { .. }
+				| WorkingTreeRequest::LocalCheckout { .. },
+			..
+		} => Some(MinorRequirement {
+			minor: jet_protocol::WORKSPACES_MINOR,
+			feature: "a Conversation with a working tree",
+		}),
+		CommandRequest::CreateConversation {
+			working_tree: WorkingTreeRequest::NoProject,
+			..
+		}
 		| CommandRequest::CreateRun { .. }
 		| CommandRequest::TransitionRun { .. } => None,
 	}

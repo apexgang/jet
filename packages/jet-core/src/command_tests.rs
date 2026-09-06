@@ -12,7 +12,7 @@ use crate::{
 	Command, CommandEnvelope, CommandOutcome, Conversation, ConversationId,
 	ConversationSnapshot, Core, CoreError, ErrorCategory, EventKind, EventPage,
 	EventPayload, EventSequence, Query, QueryResult, RetentionPolicy, Revision,
-	Run, RunId, RunLifecycle,
+	Run, RunId, RunLifecycle, WorkingTree, WorkingTreeRequest,
 };
 
 async fn create_conversation(
@@ -20,7 +20,13 @@ async fn create_conversation(
 	retention: RetentionPolicy,
 ) -> Conversation {
 	let outcome = core
-		.execute(&actor(), request(Command::CreateConversation { retention }))
+		.execute(
+			&actor(),
+			request(Command::CreateConversation {
+				retention,
+				working_tree: WorkingTreeRequest::NoProject,
+			}),
+		)
 		.await
 		.unwrap();
 	let CommandOutcome::ConversationCreated(conversation) = outcome else {
@@ -117,6 +123,7 @@ async fn a_conversation_exists_and_is_queryable_before_any_run() {
 		ConversationSnapshot {
 			cursor: EventSequence(1),
 			conversation,
+			workspace: None,
 			runs: vec![],
 		}
 	);
@@ -125,7 +132,8 @@ async fn a_conversation_exists_and_is_queryable_before_any_run() {
 		vec![(
 			1,
 			EventKind::ConversationCreated {
-				retention: RetentionPolicy::Retain
+				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTree::NoProject,
 			}
 		)]
 	);
@@ -158,6 +166,7 @@ async fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
 		ConversationSnapshot {
 			cursor: EventSequence(7),
 			conversation,
+			workspace: None,
 			runs: vec![completed, canceled],
 		}
 	);
@@ -328,6 +337,7 @@ async fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 	let command_id = command_id();
 	let command = Command::CreateConversation {
 		retention: RetentionPolicy::Retain,
+		working_tree: WorkingTreeRequest::NoProject,
 	};
 	let original = core
 		.execute(&actor(), request_with_id(command_id, command.clone()))
@@ -372,6 +382,7 @@ async fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 			vec![Conversation {
 				conversation_id: original.conversation_id,
 				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTree::NoProject,
 				created_at: start,
 			}]
 		)
@@ -389,6 +400,7 @@ async fn typed_command_content_is_bound_to_the_request_digest() {
 			command_id,
 			Command::CreateConversation {
 				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRequest::NoProject,
 			},
 			b"same adapter bytes",
 		)
@@ -404,6 +416,7 @@ async fn typed_command_content_is_bound_to_the_request_digest() {
 				command_id,
 				Command::CreateConversation {
 					retention: RetentionPolicy::ForgetAfterFinalRun,
+					working_tree: WorkingTreeRequest::NoProject,
 				},
 				b"same adapter bytes",
 			)

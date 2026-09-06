@@ -9,7 +9,7 @@ use crate::effect::{
 use crate::test_support::{actor, start_core};
 use crate::{
 	Command, CommandEnvelope, CommandId, CommandOutcome, ConversationId, Core,
-	Query, QueryResult, RetentionPolicy, Run, RunLifecycle,
+	Query, QueryResult, RetentionPolicy, Run, RunLifecycle, WorkingTreeRequest,
 };
 
 async fn execute(
@@ -32,6 +32,7 @@ async fn create_run(core: &Core) -> (ConversationId, Run) {
 		CommandId(Uuid::now_v7()),
 		Command::CreateConversation {
 			retention: RetentionPolicy::Retain,
+			working_tree: WorkingTreeRequest::NoProject,
 		},
 	)
 	.await

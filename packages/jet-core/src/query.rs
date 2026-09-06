@@ -423,10 +423,12 @@ async fn conversation(
 		));
 	};
 	let cursor = EventSequence(tx.event_cursor().await?);
+	let workspace = tx.workspace_of(conversation_id.0).await?;
 	let runs = tx.runs(conversation_id.0).await?;
 	Ok(QueryResult::Conversation(ConversationSnapshot {
 		cursor,
 		conversation: record.into(),
+		workspace: workspace.map(Into::into),
 		runs: runs.into_iter().map(Into::into).collect(),
 	}))
 }

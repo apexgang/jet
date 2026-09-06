@@ -10,6 +10,7 @@ use crate::pairing::{
 };
 use crate::project::Project;
 use crate::setting::{SettingKey, SettingScope, SettingValue};
+use crate::workspace::{WorkingTree, WorkingTreeRequest, Workspace};
 
 /// Opaque token for continuing one fenced keyset snapshot page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,6 +60,9 @@ pub struct Conversation {
 	pub conversation_id: Uuid,
 	/// Retention choice.
 	pub retention: RetentionPolicy,
+	/// Where it does its work. Absent before protocol minor 9.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub working_tree: Option<WorkingTree>,
 	/// When it was created, in signed Unix milliseconds.
 	pub created_at_unix_ms: i64,
 }
@@ -105,6 +109,10 @@ pub struct ConversationSnapshot {
 	pub cursor: u64,
 	/// The Conversation itself.
 	pub conversation: Conversation,
+	/// The Workspace it owns, when it works in one. Absent before protocol
+	/// minor 9.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub workspace: Option<Workspace>,
 	/// Its Runs in creation order, terminal ones included.
 	pub runs: Vec<Run>,
 }
@@ -113,11 +121,19 @@ pub struct ConversationSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandRequest {
-	/// Create a Conversation with no Runs. Retained unless told otherwise.
+	/// Create a Conversation with no Runs. Retained unless told otherwise,
+	/// and in no Project unless a working tree is asked for.
 	CreateConversation {
 		/// Retention choice.
 		#[serde(default)]
 		retention: RetentionPolicy,
+		/// Where the Conversation does its work. A Workspace request
+		/// creates the Workspace with the Conversation.
+		#[serde(
+			default,
+			skip_serializing_if = "WorkingTreeRequest::is_no_project"
+		)]
+		working_tree: WorkingTreeRequest,
 	},
 	/// Record a new Run of a Conversation that has no live Run.
 	CreateRun {

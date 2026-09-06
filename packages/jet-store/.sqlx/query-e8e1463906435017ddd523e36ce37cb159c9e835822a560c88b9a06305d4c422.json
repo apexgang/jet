@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT runs.run_id AS \"run_id!\", runs.conversation_id,\n\t\t\t\truns.revision, runs.lifecycle, runs.created_at_unix_ms,\n\t\t\t\truns.ended_at_unix_ms\n\t\t\t FROM runs\n\t\t\t JOIN conversations USING (conversation_id)\n\t\t\t WHERE conversations.project_id = ?1\n\t\t\t   AND conversations.working_tree = 'local_checkout'\n\t\t\t ORDER BY runs.rowid",
+  "describe": {
+    "columns": [
+      {
+        "name": "run_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "name": "conversation_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "name": "revision",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "name": "lifecycle",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "lifecycle"
+          }
+        }
+      },
+      {
+        "name": "created_at_unix_ms",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "created_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "ended_at_unix_ms",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "ended_at_unix_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "e8e1463906435017ddd523e36ce37cb159c9e835822a560c88b9a06305d4c422"
+}

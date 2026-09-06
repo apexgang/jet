@@ -64,10 +64,10 @@ pub(crate) struct Inspection {
 const GIT_LINK_MODE: &str = "160000";
 
 /// What one `git` invocation produced.
-struct Output {
-	status: ExitStatus,
-	stdout: String,
-	stderr: String,
+pub(crate) struct Output {
+	pub(crate) status: ExitStatus,
+	pub(crate) stdout: String,
+	pub(crate) stderr: String,
 }
 
 /// Decides whether `root`, a canonical directory, can be a Project.
@@ -254,7 +254,10 @@ async fn registrability(root: &Path) -> Result<Verdict, CoreError> {
 }
 
 /// Runs one `git` command at `root` and collects what it printed.
-async fn git(root: &Path, arguments: &[&str]) -> Result<Output, CoreError> {
+pub(crate) async fn git(
+	root: &Path,
+	arguments: &[&str],
+) -> Result<Output, CoreError> {
 	let output = command(root)
 		.args(arguments)
 		.output()

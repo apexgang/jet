@@ -28,6 +28,7 @@ mod setting;
 mod stream;
 mod stream_control;
 mod stream_error;
+mod workspace;
 
 pub use account::{
 	AccountBinding, AccountBindingList, AccountBindingStatus, CredentialItem,
@@ -68,6 +69,7 @@ pub use handshake::{
 	MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE, PROJECTS_MINOR,
 	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SECURITY_AUDIT_MINOR,
 	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, VersionRange,
+	WORKSPACES_MINOR,
 };
 pub use message::{
 	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,
@@ -93,3 +95,6 @@ pub use stream::{
 	MAX_OPEN_BINARY_STREAMS, OutboundLimits, OutboundQueue, StreamQueueError,
 };
 pub use stream_control::StreamControl;
+pub use workspace::{
+	BaseSelection, WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase,
+};
