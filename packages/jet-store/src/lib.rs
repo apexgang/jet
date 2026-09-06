@@ -29,6 +29,7 @@ mod project;
 mod promotion;
 mod records;
 mod run;
+mod search;
 mod setting;
 mod transaction;
 mod workspace;
@@ -78,6 +79,10 @@ pub use records::{
 	NewCommandReceipt, NewConversation, NewEffect, NewEvent, NewRun,
 	RetentionPolicy, RunLifecycle, RunRecord, SettingRecord,
 	SettingScopeRecord, VerifiedSnapshotCoverage, WorkingTreeRecord,
+};
+pub use search::{
+	NewSearchDocument, SEARCH_DOCUMENT_BODY_LIMIT, SEARCH_HIT_LIMIT,
+	SEARCH_INDEX_BATCH_LIMIT, SearchHitRecord,
 };
 pub use transaction::{ReadTransaction, WriteTransaction};
 pub use workspace::{NewWorkspace, WorkspaceRecord, WorkspaceSeedRecord};

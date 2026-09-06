@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT indexed_through_sequence FROM search_index_state\n\t\t\t WHERE singleton = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "indexed_through_sequence",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "search_index_state",
+            "name": "indexed_through_sequence"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a97d0a060f973fd030620975f30571bf7de9d165e326d130d298b0b89adea14b"
+}

@@ -13,17 +13,17 @@ pub const EVENT_COMPACTION_BATCH_LIMIT: usize = 256;
 
 /// One `events` row as SQLite stores it, before its text columns are parsed
 /// back into domain types.
-struct Row {
-	sequence: i64,
-	event_id: String,
-	actor_kind: String,
-	actor_id: Option<String>,
-	recorded_at_unix_ms: i64,
-	conversation_id: Option<String>,
-	run_id: Option<String>,
-	kind: String,
-	payload_version: i64,
-	payload: String,
+pub(crate) struct Row {
+	pub(crate) sequence: i64,
+	pub(crate) event_id: String,
+	pub(crate) actor_kind: String,
+	pub(crate) actor_id: Option<String>,
+	pub(crate) recorded_at_unix_ms: i64,
+	pub(crate) conversation_id: Option<String>,
+	pub(crate) run_id: Option<String>,
+	pub(crate) kind: String,
+	pub(crate) payload_version: i64,
+	pub(crate) payload: String,
 }
 
 impl ReadTransaction {
@@ -69,8 +69,10 @@ impl ReadTransaction {
 		)
 		.fetch_all(self.connection())
 		.await?;
-		let events =
-			rows.into_iter().map(read_row).collect::<Result<_, _>>()?;
+		let events = rows
+			.into_iter()
+			.map(read_event_row)
+			.collect::<Result<_, _>>()?;
 		Ok((current_snapshot_revision, events))
 	}
 
@@ -85,7 +87,9 @@ impl ReadTransaction {
 		Ok(self.journal_position().await?.0)
 	}
 
-	async fn journal_position(&mut self) -> Result<(u64, u64), StoreError> {
+	pub(crate) async fn journal_position(
+		&mut self,
+	) -> Result<(u64, u64), StoreError> {
 		let row = sqlx::query!(
 			"SELECT high_water_sequence, minimum_replay_cursor
 			 FROM event_journal_state WHERE singleton = 1"
@@ -241,7 +245,7 @@ impl WriteTransaction {
 	}
 }
 
-fn read_row(row: Row) -> Result<EventRecord, StoreError> {
+pub(crate) fn read_event_row(row: Row) -> Result<EventRecord, StoreError> {
 	Ok(EventRecord {
 		sequence: parse_sequence(row.sequence)?,
 		event_id: parse_uuid("event_id", &row.event_id)?,
@@ -271,7 +275,7 @@ fn parse_actor(
 	ActorRecord::parse(kind, id)
 }
 
-fn sequence_column(sequence: u64) -> Result<i64, StoreError> {
+pub(crate) fn sequence_column(sequence: u64) -> Result<i64, StoreError> {
 	i64::try_from(sequence).map_err(|_| {
 		StoreError::Integrity(format!("event sequence {sequence} overflows"))
 	})

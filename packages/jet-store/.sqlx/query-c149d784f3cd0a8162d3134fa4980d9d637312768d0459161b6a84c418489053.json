@@ -1,0 +1,134 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sequence AS \"sequence!\", event_id, actor_kind, actor_id,\n\t\t\t\trecorded_at_unix_ms, conversation_id, run_id, kind,\n\t\t\t\tpayload_version, payload\n\t\t\t FROM events\n\t\t\t WHERE sequence > ?1 AND class = 'semantic'\n\t\t\t ORDER BY sequence\n\t\t\t LIMIT ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "sequence!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "sequence"
+          }
+        }
+      },
+      {
+        "name": "event_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "event_id"
+          }
+        }
+      },
+      {
+        "name": "actor_kind",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "actor_kind"
+          }
+        }
+      },
+      {
+        "name": "actor_id",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "actor_id"
+          }
+        }
+      },
+      {
+        "name": "recorded_at_unix_ms",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "recorded_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "conversation_id",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "name": "run_id",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "name": "kind",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "name": "payload_version",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "payload_version"
+          }
+        }
+      },
+      {
+        "name": "payload",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "payload"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c149d784f3cd0a8162d3134fa4980d9d637312768d0459161b6a84c418489053"
+}

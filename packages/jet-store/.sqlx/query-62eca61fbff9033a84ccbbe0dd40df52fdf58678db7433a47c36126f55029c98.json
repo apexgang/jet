@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE search_index_state SET indexed_through_sequence = ?1\n\t\t\t WHERE singleton = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "62eca61fbff9033a84ccbbe0dd40df52fdf58678db7433a47c36126f55029c98"
+}
