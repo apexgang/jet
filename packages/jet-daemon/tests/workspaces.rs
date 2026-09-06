@@ -8,8 +8,9 @@ mod support;
 use jet_client::ClientError;
 use jet_protocol::{
 	BaseSelection, ClientMessage, CommandRequest, CommandResponse,
-	ErrorCategory, PROJECTS_MINOR, RetentionPolicy, ServerHello, ServerMessage,
-	WorkingTree, WorkingTreeRequest as In, Workspace, WorkspaceBase,
+	ErrorCategory, PROJECTS_MINOR, RetentionPolicy, SeedSelection, ServerHello,
+	ServerMessage, WORKSPACES_MINOR, WorkingTree, WorkingTreeRequest as In,
+	Workspace, WorkspaceBase, WorkspaceSeed,
 };
 use pretty_assertions::assert_eq;
 use support::{connect, handshake_raw, hello, init_repository, start_jetd};
@@ -37,6 +38,7 @@ async fn a_managed_conversation_receives_a_workspace_under_the_jet_home() {
 			In::Workspace {
 				project_id: project.project_id,
 				base: BaseSelection::Head,
+				seed: SeedSelection::None,
 			},
 		)
 		.await
@@ -70,6 +72,7 @@ async fn a_managed_conversation_receives_a_workspace_under_the_jet_home() {
 					selection: BaseSelection::Head,
 					commit: workspace.base.commit.clone(),
 				},
+				seed: None,
 				created_at_unix_ms: conversation.created_at_unix_ms,
 			},
 			true,
@@ -201,6 +204,153 @@ async fn a_client_below_the_workspace_minor_is_refused_a_working_tree() {
 			"protocol.unsupported_minor",
 			"a Conversation with a working tree needs protocol minor 9",
 			None,
+		)
+	);
+}
+
+/// A Workspace seeded with the Local checkout's eligible changes holds
+/// them, its snapshot says what it was seeded with, and the checkout is
+/// left as it was (ADR-0025).
+#[tokio::test]
+async fn a_workspace_is_seeded_with_the_selected_checkout_changes() {
+	let dir = tempfile::tempdir().unwrap();
+	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	let client = connect(&daemon, Uuid::new_v4()).await;
+	let repository = init_repository(&dir.path().join("repo"));
+	std::fs::write(repository.join("notes.txt"), "draft\n").unwrap();
+	let project = client
+		.register_project(Uuid::now_v7(), repository.to_str().unwrap())
+		.await
+		.unwrap();
+
+	let conversation = client
+		.create_conversation_in(
+			Uuid::now_v7(),
+			RetentionPolicy::Retain,
+			In::Workspace {
+				project_id: project.project_id,
+				base: BaseSelection::Head,
+				seed: SeedSelection::AllEligible,
+			},
+		)
+		.await
+		.unwrap();
+	let workspace = client
+		.conversation(conversation.conversation_id)
+		.await
+		.unwrap()
+		.workspace
+		.unwrap();
+
+	let root = std::path::PathBuf::from(&workspace.root);
+	let seed = workspace.seed.clone().unwrap();
+	assert_eq!(
+		(
+			std::fs::read_to_string(root.join("notes.txt")).ok(),
+			&seed,
+			std::fs::read_to_string(repository.join("notes.txt")).ok(),
+		),
+		(
+			Some("draft\n".into()),
+			&WorkspaceSeed {
+				tree: seed.tree.clone(),
+				changed_paths: 1,
+			},
+			Some("draft\n".into()),
+		)
+	);
+}
+
+/// A seed whose checkout is not at the selected base, or whose path is not
+/// one the Plane accepts, is refused with a stable error and creates
+/// nothing; and a client that negotiated a minor without seeds is refused
+/// one (ADR-0019, ADR-0025, ADR-0101).
+#[tokio::test]
+async fn a_seed_the_plane_cannot_take_is_refused_with_a_stable_error() {
+	let dir = tempfile::tempdir().unwrap();
+	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	let client = connect(&daemon, Uuid::new_v4()).await;
+	let repository = init_repository(&dir.path().join("repo"));
+	let project = client
+		.register_project(Uuid::now_v7(), repository.to_str().unwrap())
+		.await
+		.unwrap();
+	let mut refusals = Vec::new();
+	for (base, seed) in [
+		(
+			BaseSelection::Revision {
+				revision: "HEAD~0".into(),
+			},
+			SeedSelection::Paths {
+				paths: vec!["../escape".into()],
+			},
+		),
+		(
+			BaseSelection::Revision {
+				revision: "HEAD".into(),
+			},
+			SeedSelection::Paths {
+				paths: vec!["nothere.txt".into()],
+			},
+		),
+	] {
+		let refused = client
+			.create_conversation_in(
+				Uuid::now_v7(),
+				RetentionPolicy::Retain,
+				In::Workspace {
+					project_id: project.project_id,
+					base,
+					seed,
+				},
+			)
+			.await
+			.unwrap_err();
+		let ClientError::Remote(refusal) = refused else {
+			panic!("expected a stable remote error, got {refused:?}");
+		};
+		refusals.push((refusal.category, refusal.code));
+	}
+	let mut older = hello(Uuid::new_v4());
+	older.minor = WORKSPACES_MINOR;
+	let (mut connection, _) = handshake_raw(&daemon, &older).await;
+	connection
+		.send(&ClientMessage::Command {
+			id: 1,
+			command_id: Uuid::now_v7(),
+			command: CommandRequest::CreateConversation {
+				retention: RetentionPolicy::Retain,
+				working_tree: In::Workspace {
+					project_id: project.project_id,
+					base: BaseSelection::Head,
+					seed: SeedSelection::AllEligible,
+				},
+			},
+		})
+		.await;
+	let ServerMessage::Error { error, .. } = connection.receive().await else {
+		panic!("expected a refusal");
+	};
+	let conversations = client.conversations().await.unwrap();
+
+	assert_eq!(
+		(
+			refusals,
+			error.code.as_str(),
+			error.message.as_str(),
+			conversations.conversations.len(),
+		),
+		(
+			vec![
+				(ErrorCategory::InvalidInput, "path.parent_traversal".into()),
+				(
+					ErrorCategory::NotFound,
+					"workspace.seed_path_not_found".into()
+				),
+			],
+			"protocol.unsupported_minor",
+			"a Workspace seeded from the Local checkout needs protocol minor 10",
+			0,
 		)
 	);
 }

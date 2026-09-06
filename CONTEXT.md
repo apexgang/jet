@@ -48,6 +48,10 @@ _Avoid_: Project, repository, local checkout
 A user-directed application of a Workspace's changes to a permanent Project checkout or branch. Conflicts remain isolated in the Workspace rather than overwriting the destination.
 _Avoid_: Workspace move, automatic merge, Project transfer
 
+**Workspace seed**:
+The Local-checkout changes a Workspace starts with, chosen as none, every eligible change, or named paths, captured as one immutable Git tree and applied over the base as the Workspace is created. A Workspace the seed cannot be applied to is not created.
+_Avoid_: Stash, patch, Change checkpoint, snapshot
+
 **Local checkout**:
 The user's original working directory for a Project, outside Jet's isolated Workspace lifecycle. Jet permits at most one active managed Run there while external processes remain outside its control.
 _Avoid_: Workspace, Project

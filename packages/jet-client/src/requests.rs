@@ -247,22 +247,27 @@ impl Client {
 	}
 
 	/// Creates a Conversation that works in `working_tree`: a managed
-	/// Workspace of a Project, created with it, or the Project's own Local
-	/// checkout (ADR-0025). Asking for either needs protocol minor 9.
+	/// Workspace of a Project, created with it and seeded with the
+	/// Local-checkout changes it selects, or the Project's own Local
+	/// checkout (ADR-0025). Asking for either needs protocol minor 9, and
+	/// seeding the Workspace needs minor 10.
 	///
 	/// # Errors
 	///
 	/// Returns [`ClientError::FeatureUnavailable`] when the negotiated
-	/// minor predates working trees, [`ClientError::Remote`] when the
-	/// daemon reports a stable error such as `project.not_found` or
-	/// `workspace.base_not_found`, or the transport failure otherwise.
+	/// minor predates working trees or seeds, [`ClientError::Remote`] when
+	/// the daemon reports a stable error such as `project.not_found`,
+	/// `workspace.base_not_found`, or `workspace.seed_base_mismatch`, or
+	/// the transport failure otherwise.
 	pub async fn create_conversation_in(
 		&self,
 		command_id: Uuid,
 		retention: RetentionPolicy,
 		working_tree: WorkingTreeRequest,
 	) -> Result<Conversation, ClientError> {
-		if !working_tree.is_no_project() {
+		if working_tree.is_seeded() {
+			self.require_minor(jet_protocol::SEEDED_WORKSPACES_MINOR)?;
+		} else if !working_tree.is_no_project() {
 			self.require_minor(jet_protocol::WORKSPACES_MINOR)?;
 		}
 		match self
