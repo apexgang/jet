@@ -30,6 +30,7 @@ use crate::promotion::{
 	PromotionConflict, PromotionDestination, PromotionPreview, PromotionState,
 	WorkspacePromotion,
 };
+use crate::search::{SearchField, SearchHit, SearchResult};
 use crate::workspace::{
 	BaseSelection, SeedSelection, WorkingTreeRequest, Workspace, WorkspaceBase,
 	WorkspaceSeed,
@@ -762,6 +763,47 @@ fn a_promotion_preview_has_the_agreed_wire_shape() {
 				"3".repeat(40),
 				"4".repeat(40),
 			),
+		)
+	);
+}
+
+/// A search carries its text as typed and answers with ranked hits that
+/// name the Conversation and the Event each one came from, with every
+/// journal position as a decimal string (ADR-0036, ADR-0089).
+#[test]
+fn a_search_has_the_agreed_wire_shape() {
+	let query = ClientMessage::Query {
+		id: 15,
+		query: QueryRequest::Search {
+			text: "src/lib.rs release".into(),
+		},
+	};
+	let result = ServerMessage::QueryResult {
+		id: 15,
+		result: QueryResponse::Search(SearchResult {
+			cursor: 9,
+			indexed_through: 9,
+			hits: vec![
+				SearchHit {
+					conversation_id: Uuid::nil(),
+					sequence: 7,
+					field: SearchField::Path,
+					excerpt: "src/lib.rs".into(),
+				},
+				SearchHit {
+					conversation_id: Uuid::nil(),
+					sequence: 5,
+					field: SearchField::Branch,
+					excerpt: "release".into(),
+				},
+			],
+		}),
+	};
+	assert_eq!(
+		(json(&query), json(&result)),
+		(
+			r#"{"kind":"query","id":15,"query":{"type":"search","text":"src/lib.rs release"}}"#.to_string(),
+			r#"{"kind":"query_result","id":15,"result":{"type":"search","cursor":"9","indexed_through":"9","hits":[{"conversation_id":"00000000-0000-0000-0000-000000000000","sequence":"7","field":"path","excerpt":"src/lib.rs"},{"conversation_id":"00000000-0000-0000-0000-000000000000","sequence":"5","field":"branch","excerpt":"release"}]}}"#.to_string(),
 		)
 	);
 }
