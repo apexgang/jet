@@ -113,8 +113,9 @@ pub enum QueryResult {
 	Status(PlaneStatus),
 	/// One page of Conversations on the Plane.
 	Conversations(ConversationList),
-	/// One Conversation with all of its Runs.
-	Conversation(ConversationSnapshot),
+	/// One Conversation with all of its Runs. Boxed: the Workspace it
+	/// carries, with its promotion, outweighs every other snapshot.
+	Conversation(Box<ConversationSnapshot>),
 	/// What the Plane can do.
 	Capabilities(CapabilitySnapshot),
 	/// Every Account binding on the Plane.
@@ -133,8 +134,9 @@ pub enum QueryResult {
 	ProjectPreview(ProjectPreview),
 	/// What one path inside a Project names.
 	ProjectEntry(ProjectEntry),
-	/// What promoting a Workspace would do.
-	PromotionPreview(PromotionPreview),
+	/// What promoting a Workspace would do. Boxed: the preview carries
+	/// two lists and six object names, far more than any other snapshot.
+	PromotionPreview(Box<PromotionPreview>),
 }
 
 impl Core {
@@ -451,10 +453,10 @@ async fn conversation(
 		None => None,
 	};
 	let runs = tx.runs(conversation_id.0).await?;
-	Ok(QueryResult::Conversation(ConversationSnapshot {
+	Ok(QueryResult::Conversation(Box::new(ConversationSnapshot {
 		cursor,
 		conversation: record.into(),
 		workspace,
 		runs: runs.into_iter().map(Into::into).collect(),
-	}))
+	})))
 }

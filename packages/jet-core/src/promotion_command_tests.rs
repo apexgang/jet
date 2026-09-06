@@ -4,15 +4,15 @@ use jet_store::{EffectKindRecord, EffectStateRecord};
 use pretty_assertions::assert_eq;
 
 use crate::test_support::{
-	actor, conversation_snapshot as snapshot, events, git, register_repository,
-	request, start_core,
+	actor, conversation_snapshot as snapshot, events, git, preview_promotion,
+	register_repository, request, start_core, status,
 };
 use crate::{
 	Actor, BaseSelection, ClientId, Command, CommandOutcome, ConflictKind,
 	Core, CoreError, ErrorCategory, EventKind, PromotionBinding,
 	PromotionConflict, PromotionDestination, PromotionPreview, PromotionState,
-	Query, QueryResult, RetentionPolicy, SeedSelection, WorkingTreeRequest,
-	Workspace, WorkspacePromotion,
+	RetentionPolicy, SeedSelection, WorkingTreeRequest, Workspace,
+	WorkspacePromotion,
 };
 
 /// A Project whose Local checkout has an unstaged edit at the end of
@@ -67,20 +67,9 @@ async fn preview(
 	workspace: &Workspace,
 	destination: PromotionDestination,
 ) -> PromotionPreview {
-	let result = core
-		.query(
-			&actor(),
-			Query::PreviewPromotion {
-				workspace_id: workspace.workspace_id,
-				destination,
-			},
-		)
+	preview_promotion(core, workspace.workspace_id, destination)
 		.await
-		.unwrap();
-	let QueryResult::PromotionPreview(preview) = result else {
-		panic!("unexpected result {result:?}");
-	};
-	preview
+		.unwrap()
 }
 
 async fn promote(
@@ -112,10 +101,6 @@ async fn pending_effects(core: &Core) -> Vec<(uuid::Uuid, EffectStateRecord)> {
 		})
 		.await
 		.unwrap()
-}
-
-fn status(root: &Path) -> String {
-	git(root, &["status", "--porcelain", "--untracked-files=all"])
 }
 
 /// A promotion confirmed from a clean preview is recorded as applying,

@@ -161,6 +161,19 @@ pub enum EventKind {
 		/// The paths that could not be settled; empty unless conflicted.
 		conflicts: Vec<PromotionConflict>,
 	},
+	/// A Workspace promotion's Effect settled: the destination was
+	/// verified to hold the result, the Effect failed before changing
+	/// anything, or its outcome could not be established (ADR-0025,
+	/// ADR-0067).
+	#[serde(rename = "workspace.promotion_settled")]
+	WorkspacePromotionSettled {
+		/// The Workspace that was promoted.
+		workspace_id: WorkspaceId,
+		/// The promotion that settled.
+		promotion_id: PromotionId,
+		/// Where it stands now.
+		state: PromotionState,
+	},
 	/// A Run was recorded in the `created` state.
 	#[serde(rename = "run.created")]
 	RunCreated {},
@@ -330,7 +343,8 @@ impl EventKind {
 			| Self::ProjectRegistered { .. }
 			| Self::WorkspaceCreated { .. }
 			| Self::WorkspaceSeeded { .. }
-			| Self::WorkspacePromotionRecorded { .. } => {
+			| Self::WorkspacePromotionRecorded { .. }
+			| Self::WorkspacePromotionSettled { .. } => {
 				let encoded = serde_json::to_value(self).map_err(|error| {
 					CoreError::internal("event.unencodable", error.to_string())
 				})?;

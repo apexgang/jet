@@ -102,6 +102,13 @@ pub(crate) async fn is_checked_out(
 	Ok(listed.stdout.lines().any(|line| line == reference))
 }
 
+/// Whether Git at `root` has an identity to commit as. A promotion to a
+/// branch writes a commit, and Git refuses one without an author.
+pub(crate) async fn has_identity(root: &Path) -> Result<bool, CoreError> {
+	let ident = git(root, &["var", "GIT_COMMITTER_IDENT"]).await?;
+	Ok(ident.status.success())
+}
+
 /// Merges `theirs`, the Workspace's tree, into `ours`, the destination's,
 /// with `base` as the common ancestor, writing the result as a tree and
 /// naming the conflicts, without touching any working tree.

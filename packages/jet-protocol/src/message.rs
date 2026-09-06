@@ -182,8 +182,9 @@ pub enum QueryResponse {
 	Status(PlaneStatus),
 	/// One page of Conversations on the Plane.
 	Conversations(ConversationList),
-	/// One Conversation with all of its Runs.
-	Conversation(ConversationSnapshot),
+	/// One Conversation with all of its Runs. Boxed: the Workspace it
+	/// carries, with its promotion, outweighs every other snapshot.
+	Conversation(Box<ConversationSnapshot>),
 	/// What the Plane can do.
 	Capabilities(CapabilitySnapshot),
 	/// Every Account binding on the Plane.
@@ -202,8 +203,9 @@ pub enum QueryResponse {
 	ProjectPreview(ProjectPreview),
 	/// What one path inside a Project names.
 	ProjectEntry(ProjectEntry),
-	/// What promoting a Workspace would do.
-	PromotionPreview(PromotionPreview),
+	/// What promoting a Workspace would do. Boxed: the preview carries
+	/// two lists and six object names, far more than any other snapshot.
+	PromotionPreview(Box<PromotionPreview>),
 }
 
 /// One page of journal Events, fenced by the journal position it was read

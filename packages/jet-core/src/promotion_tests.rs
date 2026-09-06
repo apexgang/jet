@@ -1,103 +1,15 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use pretty_assertions::assert_eq;
 
 use crate::test_support::{
-	actor, conversation_snapshot as snapshot, git, register_repository,
-	request, start_core,
+	Diverged, diverged, git, preview_promotion as preview, status,
 };
 use crate::{
-	BaseSelection, ChangeKind, ClientId, Command, CommandOutcome, ConflictKind,
-	Core, CoreError, ErrorCategory, EventSequence, PromotedChange,
-	PromotionBinding, PromotionConflict, PromotionDestination,
-	PromotionPreview, Query, QueryResult, RetentionPolicy, SeedSelection,
-	WorkingTreeRequest, Workspace, WorkspaceId,
+	ChangeKind, ClientId, ConflictKind, ErrorCategory, EventSequence,
+	PromotedChange, PromotionBinding, PromotionConflict, PromotionDestination,
+	PromotionPreview, WorkspaceId,
 };
-
-/// A Project whose Local checkout and one Workspace have both moved on
-/// from the base: the checkout keeps an unstaged edit at the end of
-/// `f.txt`, a staged new `o.txt`, and the untracked `notes.txt` the
-/// Workspace was seeded with; the Workspace edits the top of `f.txt`,
-/// adds `new.txt`, and deletes `k.txt`.
-struct Diverged {
-	core: Core,
-	repository: PathBuf,
-	base: String,
-	workspace: Workspace,
-}
-
-async fn diverged(dir: &Path) -> Diverged {
-	let core = start_core(&dir.join("plane.sqlite3")).await;
-	let project_id = register_repository(&core, &dir.join("repo")).await;
-	let repository = dir.join("repo").canonicalize().unwrap();
-	std::fs::write(repository.join("f.txt"), "a\nb\nc\n").unwrap();
-	std::fs::write(repository.join("k.txt"), "keep\n").unwrap();
-	git(&repository, &["add", "-A"]);
-	git(&repository, &["commit", "-q", "-m", "Base"]);
-	let base = git(&repository, &["rev-parse", "HEAD"]).trim().to_owned();
-	std::fs::write(repository.join("notes.txt"), "draft\n").unwrap();
-
-	let outcome = core
-		.execute(
-			&actor(),
-			request(Command::CreateConversation {
-				retention: RetentionPolicy::Retain,
-				working_tree: WorkingTreeRequest::Workspace {
-					project_id,
-					base: BaseSelection::Head,
-					seed: SeedSelection::AllEligible,
-				},
-			}),
-		)
-		.await
-		.unwrap();
-	let CommandOutcome::ConversationCreated(conversation) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
-	};
-	let workspace = snapshot(&core, conversation.conversation_id)
-		.await
-		.workspace
-		.unwrap();
-	std::fs::write(workspace.root.join("f.txt"), "A\nb\nc\n").unwrap();
-	std::fs::write(workspace.root.join("new.txt"), "new\n").unwrap();
-	std::fs::remove_file(workspace.root.join("k.txt")).unwrap();
-
-	std::fs::write(repository.join("f.txt"), "a\nb\nC\n").unwrap();
-	std::fs::write(repository.join("o.txt"), "other\n").unwrap();
-	git(&repository, &["add", "o.txt"]);
-
-	Diverged {
-		core,
-		repository,
-		base,
-		workspace,
-	}
-}
-
-async fn preview(
-	core: &Core,
-	workspace_id: WorkspaceId,
-	destination: PromotionDestination,
-) -> Result<PromotionPreview, CoreError> {
-	let result = core
-		.query(
-			&actor(),
-			Query::PreviewPromotion {
-				workspace_id,
-				destination,
-			},
-		)
-		.await?;
-	let QueryResult::PromotionPreview(preview) = result else {
-		panic!("unexpected result {result:?}");
-	};
-	Ok(preview)
-}
-
-/// The paths `git status` reports in `root`, staged and unstaged alike.
-fn status(root: &Path) -> String {
-	git(root, &["status", "--porcelain", "--untracked-files=all"])
-}
 
 /// What `tree` holds at `path`, or nothing.
 fn content(root: &Path, tree: &str, path: &str) -> Option<String> {
@@ -245,8 +157,9 @@ async fn a_preview_names_what_it_cannot_settle() {
 }
 
 /// A branch no working tree has checked out is previewed against its
-/// tip; the checked-out branch, a missing one, a malformed name, and an
-/// unknown Workspace are refused with stable errors (ADR-0025).
+/// tip; the checked-out branch, a missing one, a malformed name, a
+/// Plane whose Git has no identity to commit as, and an unknown
+/// Workspace are refused with stable errors (ADR-0025).
 #[tokio::test]
 async fn a_preview_targets_a_branch_no_working_tree_has_checked_out() {
 	let dir = tempfile::tempdir().unwrap();
@@ -257,7 +170,16 @@ async fn a_preview_targets_a_branch_no_working_tree_has_checked_out() {
 		workspace,
 	} = diverged(dir.path()).await;
 	git(&repository, &["branch", "release", &base]);
-	let mut refusals = Vec::new();
+	git(&repository, &["config", "user.name", ""]);
+	let anonymous = preview(
+		&core,
+		workspace.workspace_id,
+		PromotionDestination::Branch("release".into()),
+	)
+	.await
+	.unwrap_err();
+	git(&repository, &["config", "user.name", "Jet"]);
+	let mut refusals = vec![(anonymous.category, anonymous.code)];
 	for (workspace_id, destination) in [
 		(
 			workspace.workspace_id,
@@ -328,6 +250,10 @@ async fn a_preview_targets_a_branch_no_working_tree_has_checked_out() {
 			Some("A\nb\nc\n".into()),
 			Some("draft\n".into()),
 			vec![
+				(
+					ErrorCategory::Unavailable,
+					"workspace.promotion_identity_missing".into()
+				),
 				(
 					ErrorCategory::Conflict,
 					"workspace.promotion_branch_checked_out".into()

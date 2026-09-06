@@ -271,24 +271,25 @@ fn raw_command_keeps_the_exact_command_bytes_of_a_frame() {
 
 #[test]
 fn conversation_snapshots_and_event_pages_have_the_agreed_wire_shape() {
-	let snapshot = QueryResponse::Conversation(ConversationSnapshot {
-		cursor: 3,
-		conversation: Conversation {
-			conversation_id: Uuid::nil(),
-			retention: RetentionPolicy::ForgetAfterFinalRun,
-			working_tree: None,
-			created_at_unix_ms: 1,
-		},
-		workspace: None,
-		runs: vec![Run {
-			run_id: Uuid::nil(),
-			conversation_id: Uuid::nil(),
-			revision: 4,
-			lifecycle: RunLifecycle::Completed,
-			created_at_unix_ms: 2,
-			ended_at_unix_ms: Some(3),
-		}],
-	});
+	let snapshot =
+		QueryResponse::Conversation(Box::new(ConversationSnapshot {
+			cursor: 3,
+			conversation: Conversation {
+				conversation_id: Uuid::nil(),
+				retention: RetentionPolicy::ForgetAfterFinalRun,
+				working_tree: None,
+				created_at_unix_ms: 1,
+			},
+			workspace: None,
+			runs: vec![Run {
+				run_id: Uuid::nil(),
+				conversation_id: Uuid::nil(),
+				revision: 4,
+				lifecycle: RunLifecycle::Completed,
+				created_at_unix_ms: 2,
+				ended_at_unix_ms: Some(3),
+			}],
+		}));
 	let events = QueryResponse::Events(EventPage {
 		cursor: 3,
 		events: vec![Event {
@@ -719,7 +720,7 @@ fn a_promotion_preview_has_the_agreed_wire_shape() {
 	};
 	let result = ServerMessage::QueryResult {
 		id: 13,
-		result: QueryResponse::PromotionPreview(PromotionPreview {
+		result: QueryResponse::PromotionPreview(Box::new(PromotionPreview {
 			cursor: 3,
 			binding: PromotionBinding {
 				workspace_id: Uuid::nil(),
@@ -747,7 +748,7 @@ fn a_promotion_preview_has_the_agreed_wire_shape() {
 				path: "src/lib.rs".into(),
 				kind: ConflictKind::Diverged,
 			}],
-		}),
+		})),
 	};
 	assert_eq!(
 		(json(&query), json(&result)),

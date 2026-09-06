@@ -272,6 +272,39 @@ pub(crate) async fn git_with_index(
 	collect(command(root).env("GIT_INDEX_FILE", index).args(arguments)).await
 }
 
+/// Runs one `git` command at `root` against the index file at `index`,
+/// feeding it `input` on standard input.
+pub(crate) async fn git_with_input(
+	root: &Path,
+	arguments: &[&str],
+	input: Vec<u8>,
+) -> Result<Output, CoreError> {
+	use tokio::io::AsyncWriteExt;
+	let mut child = command(root)
+		.args(arguments)
+		.stdin(Stdio::piped())
+		.stdout(Stdio::piped())
+		.stderr(Stdio::piped())
+		.spawn()
+		.map_err(spawn_failure)?;
+	if let Some(mut stdin) = child.stdin.take() {
+		stdin
+			.write_all(&input)
+			.await
+			.map_err(|error| inspection_failed(error.to_string()))?;
+		drop(stdin);
+	}
+	let output = child
+		.wait_with_output()
+		.await
+		.map_err(|error| inspection_failed(error.to_string()))?;
+	Ok(Output {
+		status: output.status,
+		stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+		stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+	})
+}
+
 async fn collect(command: &mut Command) -> Result<Output, CoreError> {
 	let output = command.output().await.map_err(spawn_failure)?;
 	Ok(Output {

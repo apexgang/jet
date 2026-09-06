@@ -328,3 +328,67 @@ async fn a_promotion_is_recorded_as_previewed_or_refused_as_stale() {
 		)
 	);
 }
+
+/// A promotion confirmed from a clean preview is applied by its Effect
+/// once acknowledged: the Local checkout receives the merged result,
+/// staged, and the Workspace's snapshot settles as promoted (ADR-0025,
+/// ADR-0064).
+#[tokio::test]
+async fn an_acknowledged_promotion_is_applied_to_the_checkout() {
+	let dir = tempfile::tempdir().unwrap();
+	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	let client = connect(&daemon, Uuid::new_v4()).await;
+	let repository = init_repository(&dir.path().join("repo"));
+	let workspace = workspace_with_changes(&client, &repository).await;
+	std::fs::write(repository.join("f.txt"), "a\nb\nC\n").unwrap();
+	let previewed = client
+		.preview_promotion(
+			workspace.workspace_id,
+			PromotionDestination::LocalCheckout,
+		)
+		.await
+		.unwrap();
+
+	let recorded = client
+		.promote_workspace(Uuid::now_v7(), previewed.binding)
+		.await
+		.unwrap();
+	let mut settled = None;
+	for _ in 0..500 {
+		let shown = client
+			.conversation(workspace.conversation_id)
+			.await
+			.unwrap()
+			.workspace
+			.unwrap()
+			.promotion
+			.unwrap();
+		if shown.state != PromotionState::Applying {
+			settled = Some(shown);
+			break;
+		}
+		tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+	}
+	let settled = settled.expect("the promotion settles");
+
+	assert_eq!(
+		(
+			recorded.state,
+			&settled,
+			std::fs::read_to_string(repository.join("f.txt")).unwrap(),
+			std::fs::read_to_string(repository.join("new.txt")).unwrap(),
+			git(&repository, &["status", "--porcelain"]),
+		),
+		(
+			PromotionState::Applying,
+			&WorkspacePromotion {
+				state: PromotionState::Promoted,
+				settled_at_unix_ms: settled.settled_at_unix_ms,
+				..recorded
+			},
+			"A\nb\nC\n".into(),
+			"new\n".into(),
+			"M  f.txt\nA  new.txt\n".into(),
+		)
+	);
+}

@@ -223,9 +223,10 @@ impl PromotionDestination {
 ///
 /// Returns `workspace.not_found` or `project.not_found` when either is
 /// gone, `workspace.promotion_destination_invalid`,
-/// `workspace.promotion_branch_not_found`, or
-/// `workspace.promotion_branch_checked_out` when the destination cannot
-/// be promoted to, and an `unavailable` `workspace.promotion_failed` when
+/// `workspace.promotion_branch_not_found`,
+/// `workspace.promotion_branch_checked_out`, or
+/// `workspace.promotion_identity_missing` when the destination cannot be
+/// promoted to, and an `unavailable` `workspace.promotion_failed` when
 /// Git cannot compare the two.
 pub(crate) async fn preview(
 	core: &Core,
@@ -264,14 +265,14 @@ pub(crate) async fn preview(
 		destination,
 	)
 	.await?;
-	Ok(QueryResult::PromotionPreview(PromotionPreview {
+	Ok(QueryResult::PromotionPreview(Box::new(PromotionPreview {
 		cursor,
 		binding,
 		destination_dirty,
 		changed_paths,
 		changes,
 		conflicts,
-	}))
+	})))
 }
 
 /// Computes the preview from the repository as it is right now, outside
@@ -424,6 +425,15 @@ async fn destination_state(
 					"the selected branch is checked out in a working tree; \
 					 promote to the Local checkout instead, or select a branch \
 					 no working tree has checked out",
+				));
+			}
+			if !merge::has_identity(project_root).await? {
+				return Err(CoreError::unavailable(
+					"workspace.promotion_identity_missing",
+					"Git on this Plane has no identity to commit as; configure \
+					 user.name and user.email for the Project, or promote to \
+					 the Local checkout instead",
+					"git var GIT_COMMITTER_IDENT failed",
 				));
 			}
 			let tree = merge::tree_of(project_root, &commit).await?;

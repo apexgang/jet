@@ -28,6 +28,9 @@ pub(crate) struct Change {
 	pub(crate) path: String,
 	source_mode: String,
 	destination_mode: String,
+	/// The object the destination tree holds at the path, or all zeros
+	/// when it holds nothing.
+	destination_object: String,
 }
 
 impl Change {
@@ -47,6 +50,15 @@ impl Change {
 	/// Whether the destination tree lacks the path.
 	pub(crate) fn is_deletion(&self) -> bool {
 		self.destination_mode == ABSENT_MODE
+	}
+
+	/// The change as `update-index --index-info` reads it: the destination
+	/// mode and object at the path, a mode of zero removing it.
+	pub(crate) fn index_info(&self) -> String {
+		format!(
+			"{} {}\t{}\0",
+			self.destination_mode, self.destination_object, self.path
+		)
 	}
 }
 
@@ -230,8 +242,9 @@ fn parse_changes(
 				"diff-tree answered with an unreadable record {record:?}"
 			)));
 		};
-		let mut modes = modes.split(' ');
-		let (Some(source), Some(destination)) = (modes.next(), modes.next())
+		let mut fields = modes.split(' ');
+		let (Some(source), Some(destination), Some(_), Some(object)) =
+			(fields.next(), fields.next(), fields.next(), fields.next())
 		else {
 			return Err(failure(format!(
 				"diff-tree answered with an unreadable record {record:?}"
@@ -241,6 +254,7 @@ fn parse_changes(
 			path: path.to_owned(),
 			source_mode: source.to_owned(),
 			destination_mode: destination.to_owned(),
+			destination_object: object.to_owned(),
 		});
 	}
 	Ok(changes)

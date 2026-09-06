@@ -120,7 +120,7 @@ impl Client {
 			.query(QueryRequest::Conversation { conversation_id })
 			.await?
 		{
-			QueryResponse::Conversation(snapshot) => Ok(snapshot),
+			QueryResponse::Conversation(snapshot) => Ok(*snapshot),
 			other @ (QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Events(_)

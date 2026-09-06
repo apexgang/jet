@@ -116,9 +116,9 @@ pub(crate) fn query_result(
 			wire::QueryResponse::Conversations(conversation_list(&list, minor))
 		}
 		QueryResult::Conversation(snapshot) => {
-			wire::QueryResponse::Conversation(conversation_snapshot(
+			wire::QueryResponse::Conversation(Box::new(conversation_snapshot(
 				&snapshot, minor,
-			))
+			)))
 		}
 		QueryResult::Capabilities(snapshot) => {
 			wire::QueryResponse::Capabilities(capability::snapshot(
@@ -150,7 +150,9 @@ pub(crate) fn query_result(
 			wire::QueryResponse::ProjectEntry(project::entry(entry))
 		}
 		QueryResult::PromotionPreview(preview) => {
-			wire::QueryResponse::PromotionPreview(promotion::preview(preview))
+			wire::QueryResponse::PromotionPreview(Box::new(promotion::preview(
+				*preview,
+			)))
 		}
 	})
 }

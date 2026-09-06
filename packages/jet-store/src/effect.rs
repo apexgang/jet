@@ -74,6 +74,30 @@ impl ReadTransaction {
 		.await?;
 		rows.into_iter().map(read_row).collect()
 	}
+
+	/// One Effect by identity, whatever its state.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the row cannot be read.
+	pub async fn effect(
+		&mut self,
+		effect_id: Uuid,
+	) -> Result<Option<EffectRecord>, StoreError> {
+		let effect_id = effect_id.to_string();
+		let row = sqlx::query_as!(
+			Row,
+			r#"SELECT effect_id AS "effect_id!", command_id, run_id,
+				promotion_id, kind, safety, external_key, max_attempts, state,
+				attempt_count
+			 FROM effects
+			 WHERE effect_id = ?1"#,
+			effect_id
+		)
+		.fetch_optional(self.connection())
+		.await?;
+		row.map(read_row).transpose()
+	}
 }
 
 impl WriteTransaction {
@@ -186,25 +210,6 @@ impl WriteTransaction {
 		self.effect(effect_id).await?.ok_or_else(|| {
 			StoreError::Integrity(format!("Effect {effect_id} disappeared"))
 		})
-	}
-
-	async fn effect(
-		&mut self,
-		effect_id: Uuid,
-	) -> Result<Option<EffectRecord>, StoreError> {
-		let effect_id = effect_id.to_string();
-		let row = sqlx::query_as!(
-			Row,
-			r#"SELECT effect_id AS "effect_id!", command_id, run_id,
-				promotion_id, kind, safety, external_key, max_attempts, state,
-				attempt_count
-			 FROM effects
-			 WHERE effect_id = ?1"#,
-			effect_id
-		)
-		.fetch_optional(self.connection())
-		.await?;
-		row.map(read_row).transpose()
 	}
 }
 

@@ -16,10 +16,12 @@ use crate::capability::{
 };
 use crate::clock::{Clock, SystemClock};
 use crate::{
-	Actor, ClientId, Command, CommandEnvelope, CommandId, CommandOutcome,
-	ConversationId, ConversationSnapshot, Core, CraftId, EventKind,
-	EventSequence, HarnessId, PathGrant, ProjectId, Query, QueryResult,
-	WorkspaceHome,
+	Actor, BaseSelection, ClientId, Command, CommandEnvelope, CommandId,
+	CommandOutcome, ConversationId, ConversationSnapshot, Core, CraftId,
+	EventKind, EventSequence, HarnessId, PathGrant, ProjectId,
+	PromotionDestination, PromotionPreview, Query, QueryResult,
+	RetentionPolicy, SeedSelection, WorkingTreeRequest, Workspace,
+	WorkspaceHome, WorkspaceId,
 };
 
 /// The one interactive Actor every core test acts as.
@@ -194,7 +196,7 @@ pub(crate) async fn conversation_snapshot(
 	let QueryResult::Conversation(snapshot) = result else {
 		panic!("unexpected result {result:?}");
 	};
-	snapshot
+	*snapshot
 }
 
 /// Reads every journal Event's kind, oldest first, as the test Actor.
@@ -278,4 +280,99 @@ pub(crate) async fn register_repository(core: &Core, dir: &Path) -> ProjectId {
 		panic!("unexpected outcome {outcome:?}");
 	};
 	project.project_id
+}
+
+/// A Project whose Local checkout and one Workspace have both moved on
+/// from the base, for promotion tests: the checkout keeps an unstaged
+/// edit at the end of `f.txt`, a staged new `o.txt`, and the untracked
+/// `notes.txt` the Workspace was seeded with; the Workspace edits the
+/// top of `f.txt`, adds `new.txt`, and deletes `k.txt`.
+pub(crate) struct Diverged {
+	pub(crate) core: Core,
+	/// The canonical root of the Project's Local checkout.
+	pub(crate) repository: std::path::PathBuf,
+	/// The base commit both sides started from.
+	pub(crate) base: String,
+	pub(crate) workspace: Workspace,
+}
+
+pub(crate) async fn diverged(dir: &Path) -> Diverged {
+	let core = start_core(&dir.join("plane.sqlite3")).await;
+	let project_id = register_repository(&core, &dir.join("repo")).await;
+	let repository = dir.join("repo").canonicalize().unwrap();
+	std::fs::write(repository.join("f.txt"), "a\nb\nc\n").unwrap();
+	std::fs::write(repository.join("k.txt"), "keep\n").unwrap();
+	git(&repository, &["add", "-A"]);
+	git(&repository, &["commit", "-q", "-m", "Base"]);
+	// The core's Git commits a branch promotion as whoever the Project's
+	// configuration names; the host's own identity is not assumed.
+	git(&repository, &["config", "user.name", "Jet"]);
+	git(
+		&repository,
+		&["config", "user.email", "jet@example.invalid"],
+	);
+	let base = git(&repository, &["rev-parse", "HEAD"]).trim().to_owned();
+	std::fs::write(repository.join("notes.txt"), "draft\n").unwrap();
+
+	let outcome = core
+		.execute(
+			&actor(),
+			request(Command::CreateConversation {
+				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRequest::Workspace {
+					project_id,
+					base: BaseSelection::Head,
+					seed: SeedSelection::AllEligible,
+				},
+			}),
+		)
+		.await
+		.unwrap();
+	let CommandOutcome::ConversationCreated(conversation) = outcome else {
+		panic!("unexpected outcome {outcome:?}");
+	};
+	let workspace = conversation_snapshot(&core, conversation.conversation_id)
+		.await
+		.workspace
+		.unwrap();
+	std::fs::write(workspace.root.join("f.txt"), "A\nb\nc\n").unwrap();
+	std::fs::write(workspace.root.join("new.txt"), "new\n").unwrap();
+	std::fs::remove_file(workspace.root.join("k.txt")).unwrap();
+
+	std::fs::write(repository.join("f.txt"), "a\nb\nC\n").unwrap();
+	std::fs::write(repository.join("o.txt"), "other\n").unwrap();
+	git(&repository, &["add", "o.txt"]);
+
+	Diverged {
+		core,
+		repository,
+		base,
+		workspace,
+	}
+}
+
+/// Previews promoting one Workspace as the test Actor.
+pub(crate) async fn preview_promotion(
+	core: &Core,
+	workspace_id: WorkspaceId,
+	destination: PromotionDestination,
+) -> Result<PromotionPreview, crate::CoreError> {
+	let result = core
+		.query(
+			&actor(),
+			Query::PreviewPromotion {
+				workspace_id,
+				destination,
+			},
+		)
+		.await?;
+	let QueryResult::PromotionPreview(preview) = result else {
+		panic!("unexpected result {result:?}");
+	};
+	Ok(*preview)
+}
+
+/// The paths `git status` reports in `root`, staged and unstaged alike.
+pub(crate) fn status(root: &Path) -> String {
+	git(root, &["status", "--porcelain", "--untracked-files=all"])
 }

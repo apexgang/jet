@@ -99,12 +99,12 @@ impl RecordingAdapter {
 }
 
 impl EffectAdapter for RecordingAdapter {
-	fn execute(&mut self, effect: &Effect) -> EffectResult {
+	async fn execute(&mut self, effect: &Effect) -> EffectResult {
 		self.executed.push(effect.clone());
 		self.execution
 	}
 
-	fn reconcile(&mut self, effect: &Effect) -> EffectResult {
+	async fn reconcile(&mut self, effect: &Effect) -> EffectResult {
 		self.reconciled.push(effect.clone());
 		EffectResult::Unknown
 	}
@@ -113,7 +113,12 @@ impl EffectAdapter for RecordingAdapter {
 async fn assert_no_work_remains(path: &std::path::Path) {
 	let core = start_core(path).await;
 	let mut adapter = RecordingAdapter::new(EffectResult::Unknown);
-	assert_eq!(core.reconcile_effects(&mut adapter).await.unwrap(), vec![]);
+	assert_eq!(
+		core.reconcile_effects(&mut adapter, EffectKindRecord::StartRun)
+			.await
+			.unwrap(),
+		vec![]
+	);
 	assert_eq!((adapter.executed, adapter.reconciled), (vec![], vec![]));
 }
 
@@ -136,7 +141,10 @@ async fn a_starting_run_and_its_effect_commit_before_external_work_begins() {
 		RunLifecycle::Starting
 	);
 	let mut adapter = RecordingAdapter::new(EffectResult::Completed);
-	let reconciled = restarted.reconcile_effects(&mut adapter).await.unwrap();
+	let reconciled = restarted
+		.reconcile_effects(&mut adapter, EffectKindRecord::StartRun)
+		.await
+		.unwrap();
 	let attempted = adapter.executed[0].clone();
 	let expected_attempt = Effect {
 		effect_id: attempted.effect_id,
@@ -172,7 +180,7 @@ async fn an_idempotent_effect_resumes_under_the_same_identity_after_interruption
 	let command_id = queue_start(&first, run).await;
 	let mut interrupted_adapter = RecordingAdapter::new(EffectResult::Unknown);
 	let first_pass = first
-		.reconcile_effects(&mut interrupted_adapter)
+		.reconcile_effects(&mut interrupted_adapter, EffectKindRecord::StartRun)
 		.await
 		.unwrap();
 	let interrupted = interrupted_adapter.executed[0].clone();
@@ -194,8 +202,10 @@ async fn an_idempotent_effect_resumes_under_the_same_identity_after_interruption
 
 	let second = start_core(&path).await;
 	let mut retry_adapter = RecordingAdapter::new(EffectResult::Failed);
-	let second_pass =
-		second.reconcile_effects(&mut retry_adapter).await.unwrap();
+	let second_pass = second
+		.reconcile_effects(&mut retry_adapter, EffectKindRecord::StartRun)
+		.await
+		.unwrap();
 	let retried = retry_adapter.executed[0].clone();
 	let expected_retried = Effect {
 		attempt_count: 2,
@@ -239,7 +249,7 @@ async fn an_ambiguous_interrupted_effect_becomes_outcome_unknown_without_retry()
 		.unwrap();
 	let mut interrupted_adapter = RecordingAdapter::new(EffectResult::Unknown);
 	first
-		.reconcile_effects(&mut interrupted_adapter)
+		.reconcile_effects(&mut interrupted_adapter, EffectKindRecord::StartRun)
 		.await
 		.unwrap();
 	let interrupted = interrupted_adapter.executed[0].clone();
@@ -248,7 +258,7 @@ async fn an_ambiguous_interrupted_effect_becomes_outcome_unknown_without_retry()
 	let second = start_core(&path).await;
 	let mut unknown_adapter = RecordingAdapter::new(EffectResult::Completed);
 	let second_pass = second
-		.reconcile_effects(&mut unknown_adapter)
+		.reconcile_effects(&mut unknown_adapter, EffectKindRecord::StartRun)
 		.await
 		.unwrap();
 

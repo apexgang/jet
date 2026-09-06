@@ -39,7 +39,7 @@ impl Client {
 			})
 			.await?
 		{
-			QueryResponse::PromotionPreview(preview) => Ok(preview),
+			QueryResponse::PromotionPreview(preview) => Ok(*preview),
 			other @ (QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)

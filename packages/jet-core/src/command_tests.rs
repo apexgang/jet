@@ -75,7 +75,7 @@ async fn snapshot(
 	let QueryResult::Conversation(snapshot) = result else {
 		panic!("unexpected result {result:?}");
 	};
-	snapshot
+	*snapshot
 }
 
 async fn events_after(core: &Core, after: EventSequence) -> EventPage {
