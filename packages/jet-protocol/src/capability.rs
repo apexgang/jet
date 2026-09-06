@@ -49,6 +49,11 @@ pub struct Platform {
 pub enum ExternalTool {
 	/// Git, which every Workspace and Change checkpoint rests on.
 	Git,
+	/// Git LFS, reported so a Project that tracks large files knows whether
+	/// the Plane can handle them. Named from protocol minor 8, spelled as
+	/// the program the Plane looks for.
+	#[serde(rename = "git-lfs")]
+	GitLfs,
 	/// OpenSSH, which No-Visa Runs reach paired Planes through.
 	Ssh,
 	/// Tailscale, which discovers and reaches Planes across networks.

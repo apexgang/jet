@@ -1,12 +1,13 @@
 //! Translation between core domain types and versioned wire types
 //! (ADR-0049). This is the only place the two vocabularies meet; its
-//! Account binding, Capability, and Setting parts sit in the submodules
-//! beside it.
+//! Account binding, Capability, Pairing, Project, and Setting parts sit in
+//! the submodules beside it.
 
 mod account;
 mod audit;
 mod capability;
 mod pairing;
+mod project;
 mod setting;
 
 pub(crate) use capability::snapshot as capabilities;
@@ -14,19 +15,31 @@ pub(crate) use pairing::{client as paired_client, pending as pairing_pending};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use std::path::PathBuf;
+
 use jet_core::{
 	AccountBindingId, Actor, AuditSequence, AuthenticationString, ClientId,
 	Command, CommandOutcome, ConflictState, Conversation, ConversationId,
 	ConversationList, ConversationSnapshot, CoreError, ErrorCategory, Event,
 	EventPage, EventPayload, EventSequence, PairingOfferId, PairingSecret,
-	PairingSignature, PlaneStatus, ProviderId, Query, QueryResult,
-	RecoveryAction, RetentionPolicy, Revision, RevisionConflict, Run, RunId,
-	RunLifecycle,
+	PairingSignature, PathGrant, PlaneStatus, ProjectId, ProviderId, Query,
+	QueryResult, RecoveryAction, RelativePath, RetentionPolicy, Revision,
+	RevisionConflict, Run, RunId, RunLifecycle,
 };
 use jet_protocol as wire;
 
-pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
-	match request {
+/// The core form of a Query.
+///
+/// # Errors
+///
+/// Returns an `invalid_input` [`CoreError`] when a relative path is not
+/// one the core accepts, so the core never receives an unvalidated path
+/// (ADR-0101).
+pub(crate) fn query(
+	request: &wire::QueryRequest,
+	minor: u32,
+) -> Result<Query, CoreError> {
+	Ok(match request {
 		wire::QueryRequest::Status => Query::Status,
 		wire::QueryRequest::Conversations
 			if minor < wire::FENCED_READS_MINOR =>
@@ -65,7 +78,20 @@ pub(crate) fn query(request: &wire::QueryRequest, minor: u32) -> Query {
 		wire::QueryRequest::SecurityAudit { after } => Query::SecurityAudit {
 			after: AuditSequence(*after),
 		},
-	}
+		wire::QueryRequest::Projects => Query::Projects,
+		wire::QueryRequest::PreviewProject { path, observation } => {
+			Query::PreviewProject {
+				grant: PathGrant(PathBuf::from(path)),
+				observation: capability::observation(*observation),
+			}
+		}
+		wire::QueryRequest::ProjectEntry { project_id, path } => {
+			Query::ProjectEntry {
+				project_id: ProjectId(*project_id),
+				path: RelativePath::parse(path)?,
+			}
+		}
+	})
 }
 
 pub(crate) fn query_result(
@@ -83,7 +109,9 @@ pub(crate) fn query_result(
 			wire::QueryResponse::Conversation(conversation_snapshot(&snapshot))
 		}
 		QueryResult::Capabilities(snapshot) => {
-			wire::QueryResponse::Capabilities(capability::snapshot(snapshot))
+			wire::QueryResponse::Capabilities(capability::snapshot(
+				snapshot, minor,
+			))
 		}
 		QueryResult::AccountBindings(bindings) => {
 			wire::QueryResponse::AccountBindings(account::list(bindings))
@@ -99,6 +127,15 @@ pub(crate) fn query_result(
 		}
 		QueryResult::SecurityAudit(page) => {
 			wire::QueryResponse::SecurityAudit(audit::page(page))
+		}
+		QueryResult::Projects(list) => {
+			wire::QueryResponse::Projects(project::list(list))
+		}
+		QueryResult::ProjectPreview(preview) => {
+			wire::QueryResponse::ProjectPreview(project::preview(preview))
+		}
+		QueryResult::ProjectEntry(entry) => {
+			wire::QueryResponse::ProjectEntry(project::entry(entry))
 		}
 	})
 }
@@ -197,6 +234,11 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 			expected_revision: Revision(*expected_revision),
 			lifecycle: lifecycle_from_wire(*lifecycle),
 		},
+		wire::CommandRequest::RegisterProject { path } => {
+			Command::RegisterProject {
+				grant: PathGrant(PathBuf::from(path)),
+			}
+		}
 	}
 }
 
@@ -276,6 +318,9 @@ pub(crate) fn command_outcome(
 			wire::CommandResponse::PairedClientRevoked {
 				client_id: client_id.0,
 			}
+		}
+		CommandOutcome::ProjectRegistered(project) => {
+			wire::CommandResponse::ProjectRegistered(project::project(project))
 		}
 	}
 }
@@ -362,8 +407,15 @@ fn event(event: &Event) -> Result<wire::Event, CoreError> {
 }
 
 pub(super) fn actor(actor: &Actor) -> wire::Actor {
+	actor_of(actor.client_id())
+}
+
+/// The wire attribution of the Client identity an Actor acted through.
+/// Every Actor this core knows is an interactive client, so this is the
+/// one place that collapse is spelled.
+pub(super) fn actor_of(client_id: ClientId) -> wire::Actor {
 	wire::Actor::InteractiveClient {
-		client_id: actor.client_id().0,
+		client_id: client_id.0,
 	}
 }
 

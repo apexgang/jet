@@ -775,6 +775,7 @@ dependencies = [
  "jet-runtime",
  "jet-store",
  "pretty_assertions",
+ "rustix",
  "serde",
  "serde_json",
  "sha2 0.10.9",

@@ -3,19 +3,18 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
-use uuid::Uuid;
 
 use crate::capability::{
 	CredentialStoreKind, DegradedCondition, ExternalTool, HarnessId,
 };
 use crate::test_support::{
-	FixedProbe, ManualClock, actor, equipped, request, start_core_with,
-	stripped,
+	FixedProbe, ManualClock, actor, equipped, register_repository, request,
+	start_core_with, stripped,
 };
 use crate::{
 	CORE_VERSION, CapabilityObservation, CapabilitySnapshot, Command, Core,
-	CoreError, ErrorCategory, ProjectId, Query, QueryResult, ResolvedSetting,
-	SettingKey, SettingScope, SettingSelection, SettingSource, SettingValue,
+	CoreError, ErrorCategory, Query, QueryResult, ResolvedSetting, SettingKey,
+	SettingScope, SettingSelection, SettingSource, SettingValue,
 };
 
 /// The one instant every observation in these tests is taken at.
@@ -167,7 +166,7 @@ async fn a_command_whose_capability_disappeared_commits_nothing() {
 	let probe = FixedProbe::new(equipped());
 	let core = start(&dir, Arc::clone(&probe)).await;
 	let scope = SettingScope::Project {
-		project_id: ProjectId(Uuid::now_v7()),
+		project_id: register_repository(&core, &dir.path().join("repo")).await,
 	};
 	let observed = capabilities(&core, CapabilityObservation::Fresh).await;
 	probe.answer_with(stripped());

@@ -23,6 +23,7 @@ mod handshake;
 mod hex;
 mod message;
 mod pairing;
+mod project;
 mod setting;
 mod stream;
 mod stream_control;
@@ -64,8 +65,8 @@ pub use frame::{
 };
 pub use handshake::{
 	ACCOUNT_BINDINGS_MINOR, CODEC_JSON_V1, ClientHello, FENCED_READS_MINOR,
-	MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE, PROTOCOL_MINOR,
-	PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SECURITY_AUDIT_MINOR,
+	MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE, PROJECTS_MINOR,
+	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SECURITY_AUDIT_MINOR,
 	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, VersionRange,
 };
 pub use message::{
@@ -77,6 +78,10 @@ pub use pairing::{
 	ClientPublicKey, PairedClient, PairedClientAccess, PairingDisclosure,
 	PairingEnd, PairingGate, PairingKeyAlgorithm, PairingMethod,
 	PairingProgress, PairingSnapshot, PendingPairing,
+};
+pub use project::{
+	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
+	ProjectPreview, Registrability, Repository, Worktree,
 };
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,

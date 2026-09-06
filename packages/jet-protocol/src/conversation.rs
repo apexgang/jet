@@ -8,6 +8,7 @@ use crate::pairing::{
 	ClientPublicKey, PairedClient, PairedClientAccess, PairingDisclosure,
 	PairingGate, PairingMethod, PendingPairing,
 };
+use crate::project::Project;
 use crate::setting::{SettingKey, SettingScope, SettingValue};
 
 /// Opaque token for continuing one fenced keyset snapshot page.
@@ -229,6 +230,14 @@ pub enum CommandRequest {
 		/// The state to enter.
 		lifecycle: RunLifecycle,
 	},
+	/// Register the Git working tree at an absolute path as a Project. This
+	/// is a Path grant: the interactive user's explicit authorization for
+	/// the Plane to work inside that directory. The Plane resolves the path
+	/// and refuses anything that is not an ordinary working tree.
+	RegisterProject {
+		/// The absolute path the user granted.
+		path: String,
+	},
 }
 
 /// Durable Command outcomes.
@@ -316,6 +325,8 @@ pub enum CommandResponse {
 		#[serde(with = "crate::decimal")]
 		epoch: u64,
 	},
+	/// The Project as registered.
+	ProjectRegistered(Project),
 }
 
 /// Structured state returned when a Revision precondition is stale.

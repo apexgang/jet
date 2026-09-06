@@ -14,7 +14,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 7;
+pub const PROTOCOL_MINOR: u32 = 8;
 /// Minor that introduced fresh signed remote connection challenges.
 pub const REMOTE_AUTH_MINOR: u32 = 7;
 /// Minor that introduced fenced status and Conversation pagination.
@@ -30,6 +30,9 @@ pub const ACCOUNT_BINDINGS_MINOR: u32 = 4;
 pub const SECURITY_AUDIT_MINOR: u32 = 5;
 /// Minor that introduced the Pairing Query and Commands.
 pub const PAIRING_MINOR: u32 = 6;
+/// Minor that introduced Project registration, the Project Queries, and
+/// the Git LFS external tool in Capability snapshots.
+pub const PROJECTS_MINOR: u32 = 8;
 /// The only v1 codec; other codecs are reserved for later negotiation.
 pub const CODEC_JSON_V1: &str = "json-v1";
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO projects\n\t\t\t\t(project_id, root, actor_kind, actor_id, registered_at_unix_ms)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "c6a36463cbe43da59c98341e89c5c975053bbb2b692da3735624a4b339c4f330"
+}

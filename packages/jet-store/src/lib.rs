@@ -25,6 +25,7 @@ mod paired_client;
 mod pairing;
 mod pairing_offer;
 mod plane;
+mod project;
 mod records;
 mod run;
 mod setting;
@@ -62,6 +63,7 @@ pub use pairing_offer::{
 	PairingMethod, PairingOfferRecord, PairingOfferState,
 };
 pub use plane::PlaneRecord;
+pub use project::{NewProject, ProjectRecord};
 pub use records::{
 	ActorRecord, CommandReceiptRecord, ConversationPageKey,
 	ConversationPageStart, ConversationRecord, EffectKindRecord, EffectRecord,

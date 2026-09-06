@@ -13,9 +13,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::SystemTime;
 
-use jet_store::ActorRecord;
-
-use crate::command::{Command, CommandId};
+use crate::command::Command;
 use crate::error::CoreError;
 use crate::{CORE_VERSION, Core};
 
@@ -90,6 +88,9 @@ pub struct Platform {
 pub enum ExternalTool {
 	/// Git, which every Workspace and Change checkpoint rests on.
 	Git,
+	/// Git LFS, which a Project's large files pass through only when it is
+	/// installed. Jet reports it and never bundles it (ADR-0103).
+	GitLfs,
 	/// OpenSSH, which No-Visa Runs reach paired Planes through.
 	Ssh,
 	/// Tailscale, which discovers and reaches Planes across networks.
@@ -223,13 +224,18 @@ pub(crate) enum Capability {
 
 impl ExternalTool {
 	/// Every tool the core looks for, in the order a snapshot reports them.
-	pub(crate) const ALL: [Self; 3] = [Self::Git, Self::Ssh, Self::Tailscale];
+	pub(crate) const ALL: [Self; 4] =
+		[Self::Git, Self::GitLfs, Self::Ssh, Self::Tailscale];
 
-	/// The stable name of the tool, also its program name.
+	/// The stable name of the tool, also its program name. Git LFS is
+	/// looked for as the `git-lfs` program that `git lfs` dispatches to,
+	/// because `git` answers `git lfs` with an error line of its own when
+	/// the program is missing, and an error line is not a version.
 	#[must_use]
 	pub fn as_str(self) -> &'static str {
 		match self {
 			Self::Git => "git",
+			Self::GitLfs => "git-lfs",
 			Self::Ssh => "ssh",
 			Self::Tailscale => "tailscale",
 		}
@@ -240,8 +246,12 @@ impl ExternalTool {
 		match self {
 			// Workspaces are worktrees and checkpoints are commits.
 			Self::Git => ToolNeed::Always,
-			// Both serve Planes the user has paired, not this one alone.
-			Self::Ssh | Self::Tailscale => ToolNeed::SomeFeatures,
+			// Only a Project that tracks large files through LFS needs it,
+			// and both SSH and Tailscale serve Planes the user has paired,
+			// not this one alone.
+			Self::GitLfs | Self::Ssh | Self::Tailscale => {
+				ToolNeed::SomeFeatures
+			}
 		}
 	}
 }
@@ -313,6 +323,18 @@ impl CapabilitySnapshot {
 		}
 	}
 
+	/// What the Plane found when it looked for `tool`. A snapshot names
+	/// every tool the core looks for, so one that does not name it was
+	/// taken by a core that did not look, and that is a Plane without it.
+	pub(crate) fn availability(&self, tool: ExternalTool) -> ToolAvailability {
+		self.external_tools
+			.iter()
+			.find(|status| status.tool == tool)
+			.map_or(ToolAvailability::Missing, |status| {
+				status.availability.clone()
+			})
+	}
+
 	/// Whether the Plane could do `capability` when it was observed.
 	///
 	/// A locked credential store still counts as one: locking hides the
@@ -338,29 +360,12 @@ impl CapabilitySnapshot {
 impl Core {
 	/// Observes the Plane again for every Capability `command` depends on,
 	/// before it commits anything (ADR-0086).
-	///
-	/// A Command whose outcome is already durable is not revalidated: its
-	/// work is done, and repeating it must return what the Plane decided
-	/// then rather than what this observation would decide now (ADR-0093).
 	pub(crate) async fn revalidate_capabilities(
 		&self,
-		actor: ActorRecord,
-		command_id: CommandId,
 		command: &Command,
 	) -> Result<(), CoreError> {
 		let required = command.required_capabilities();
 		if required.is_empty() {
-			return Ok(());
-		}
-		let recorded = self
-			.store
-			.read(async |tx| {
-				Ok::<_, CoreError>(
-					tx.command_receipt(actor, command_id.0).await?,
-				)
-			})
-			.await?;
-		if recorded.is_some() {
 			return Ok(());
 		}
 		let capabilities = self.observe_capabilities().await;

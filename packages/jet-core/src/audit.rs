@@ -106,6 +106,9 @@ pub enum AuditDecision {
 	/// either back: the installation pairs again or it does not control
 	/// this Plane.
 	PairedClientRevoked,
+	/// An interactive user granted Jet a directory as a Project, widening
+	/// what it may read and change on this Plane (ADR-0101).
+	ProjectRegistered,
 }
 
 /// What a decision is about. The core turns each one into the durable kind
@@ -231,6 +234,7 @@ impl AuditDecision {
 			Self::PairedClientEnabled => "pairing.client_enabled",
 			Self::PairedClientDisabled => "pairing.client_disabled",
 			Self::PairedClientRevoked => "pairing.client_revoked",
+			Self::ProjectRegistered => "project.registered",
 		}
 	}
 
@@ -261,7 +265,10 @@ impl AuditDecision {
 			| Self::PairingOfferInvalidated
 			| Self::PairingConfirmed
 			| Self::PairingCompleted
-			| Self::PairedClientEnabled => AuditRisk::Elevated,
+			| Self::PairedClientEnabled
+			// A Path grant is the one way a directory comes under Jet's
+			// management, and everything a Run does there follows from it.
+			| Self::ProjectRegistered => AuditRisk::Elevated,
 			// Revoking destroys the key the pairing was, and no part of Jet
 			// can put it back: the installation pairs again or it does not
 			// control this Plane.
@@ -340,6 +347,9 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::RevokePairedClient { .. } => {
 			Some(AuditDecision::PairedClientRevoked)
 		}
+		Command::RegisterProject { .. } => {
+			Some(AuditDecision::ProjectRegistered)
+		}
 		Command::BeginAuditEpoch
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
@@ -349,9 +359,10 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 
 /// What a Command that never ran was about.
 ///
-/// A binding that was not made has no identity yet, so a refused one is
-/// recorded against the Plane it was refused on. Everything else already
-/// names something that exists.
+/// A binding that was not made has no identity yet, and neither has a
+/// Project that was not registered, so a refused one is recorded against
+/// the Plane it was refused on. Everything else already names something
+/// that exists.
 fn refused_subject(command: &Command) -> AuditSubject {
 	match command {
 		Command::UnbindAccount { binding_id } => {
@@ -364,6 +375,7 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		Command::SetSetting { scope, .. }
 		| Command::ClearSetting { scope, .. } => AuditSubject::of_scope(*scope),
 		Command::BindAccount { .. }
+		| Command::RegisterProject { .. }
 		| Command::BeginAuditEpoch
 		| Command::SetPairingGate { .. }
 		| Command::OpenPairing { .. }

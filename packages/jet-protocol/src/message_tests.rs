@@ -9,6 +9,7 @@ use crate::audit::{
 	AuditBreach, AuditEntry, AuditHead, AuditOutcome, AuditRisk, AuditTarget,
 	SecurityAudit, SecurityState,
 };
+use crate::capability::{CapabilityObservation, ToolAvailability};
 use crate::conversation::{
 	CommandRequest, CommandResponse, ConflictState, Conversation,
 	ConversationSnapshot, RetentionPolicy, RevisionConflict, Run, RunLifecycle,
@@ -19,6 +20,10 @@ use crate::pairing::{
 	ClientPublicKey, PairedClient, PairedClientAccess, PairingGate,
 	PairingKeyAlgorithm, PairingMethod, PairingProgress, PairingSnapshot,
 	PendingPairing,
+};
+use crate::project::{
+	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
+	ProjectPreview, Registrability, Repository, Worktree,
 };
 use crate::{ControlError, decode_control};
 
@@ -510,5 +515,122 @@ fn only_lowercase_hexadecimal_of_the_fixed_width_is_a_key() {
 			))
 		),
 		(true, true)
+	);
+}
+
+#[test]
+fn project_registration_and_listing_have_the_agreed_wire_shape() {
+	let command = ClientMessage::Command {
+		id: 9,
+		command_id: Uuid::nil(),
+		command: CommandRequest::RegisterProject {
+			path: "/home/jet/repo".into(),
+		},
+	};
+	let project = Project {
+		project_id: Uuid::nil(),
+		root: "/home/jet/repo".into(),
+		registered_by: Actor::InteractiveClient {
+			client_id: Uuid::nil(),
+		},
+		registered_at_unix_ms: 1_700_000_000_000,
+	};
+	let result = ServerMessage::CommandResult {
+		id: 9,
+		result: CommandResponse::ProjectRegistered(project.clone()),
+	};
+	let query = ClientMessage::Query {
+		id: 10,
+		query: QueryRequest::Projects,
+	};
+	let list = ServerMessage::QueryResult {
+		id: 10,
+		result: QueryResponse::Projects(ProjectList {
+			cursor: 3,
+			projects: vec![project],
+		}),
+	};
+	assert_eq!(
+		(json(&command), json(&result), json(&query), json(&list)),
+		(
+			r#"{"kind":"command","id":9,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"register_project","path":"/home/jet/repo"}}"#.to_string(),
+			r#"{"kind":"command_result","id":9,"result":{"type":"project_registered","project_id":"00000000-0000-0000-0000-000000000000","root":"/home/jet/repo","registered_by":{"type":"interactive_client","client_id":"00000000-0000-0000-0000-000000000000"},"registered_at_unix_ms":1700000000000}}"#.to_string(),
+			r#"{"kind":"query","id":10,"query":{"type":"projects"}}"#.to_string(),
+			r#"{"kind":"query_result","id":10,"result":{"type":"projects","cursor":"3","projects":[{"project_id":"00000000-0000-0000-0000-000000000000","root":"/home/jet/repo","registered_by":{"type":"interactive_client","client_id":"00000000-0000-0000-0000-000000000000"},"registered_at_unix_ms":1700000000000}]}}"#.to_string(),
+		)
+	);
+}
+
+#[test]
+fn a_project_preview_has_the_agreed_wire_shape() {
+	let query = ClientMessage::Query {
+		id: 11,
+		query: QueryRequest::PreviewProject {
+			path: "/home/jet/repo".into(),
+			observation: CapabilityObservation::Fresh,
+		},
+	};
+	let result = ServerMessage::QueryResult {
+		id: 11,
+		result: QueryResponse::ProjectPreview(ProjectPreview {
+			root: "/home/jet/repo".into(),
+			registrability: Registrability::Registrable {
+				repository: Repository {
+					worktree: Worktree::Linked {
+						common_dir: "/home/jet/main/.git".into(),
+					},
+					checkout: Checkout::Sparse,
+					submodules: vec![GitLink {
+						path: "vendor/child".into(),
+						commit: "0".repeat(40),
+					}],
+					lfs: ToolAvailability::Missing,
+				},
+			},
+		}),
+	};
+	let refused = QueryResponse::ProjectPreview(ProjectPreview {
+		root: "/home/jet/repo/src".into(),
+		registrability: Registrability::InsideWorkingTree {
+			toplevel: "/home/jet/repo".into(),
+		},
+	});
+	assert_eq!(
+		(json(&query), json(&result), json(&refused)),
+		(
+			r#"{"kind":"query","id":11,"query":{"type":"preview_project","path":"/home/jet/repo","observation":{"type":"fresh"}}}"#.to_string(),
+			format!(
+				r#"{{"kind":"query_result","id":11,"result":{{"type":"project_preview","root":"/home/jet/repo","registrability":{{"verdict":"registrable","repository":{{"worktree":{{"kind":"linked","common_dir":"/home/jet/main/.git"}},"checkout":"sparse","submodules":[{{"path":"vendor/child","commit":"{}"}}],"lfs":{{"status":"missing"}}}}}}}}}}"#,
+				"0".repeat(40)
+			),
+			r#"{"type":"project_preview","root":"/home/jet/repo/src","registrability":{"verdict":"inside_working_tree","toplevel":"/home/jet/repo"}}"#.to_string(),
+		)
+	);
+}
+
+#[test]
+fn a_project_entry_has_the_agreed_wire_shape() {
+	let query = ClientMessage::Query {
+		id: 12,
+		query: QueryRequest::ProjectEntry {
+			project_id: Uuid::nil(),
+			path: "docs/adr/0101.md".into(),
+		},
+	};
+	let result = ServerMessage::QueryResult {
+		id: 12,
+		result: QueryResponse::ProjectEntry(ProjectEntry {
+			cursor: 3,
+			project_id: Uuid::nil(),
+			path: "docs/adr/0101.md".into(),
+			kind: EntryKind::File { bytes: 512 },
+		}),
+	};
+	assert_eq!(
+		(json(&query), json(&result)),
+		(
+			r#"{"kind":"query","id":12,"query":{"type":"project_entry","project_id":"00000000-0000-0000-0000-000000000000","path":"docs/adr/0101.md"}}"#.to_string(),
+			r#"{"kind":"query_result","id":12,"result":{"type":"project_entry","cursor":"3","project_id":"00000000-0000-0000-0000-000000000000","path":"docs/adr/0101.md","kind":{"type":"file","bytes":512}}}"#.to_string(),
+		)
 	);
 }

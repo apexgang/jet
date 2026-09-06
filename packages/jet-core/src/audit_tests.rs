@@ -7,14 +7,14 @@ use uuid::Uuid;
 use crate::audit::{self, AuditSubject};
 use crate::clock::Clock;
 use crate::test_support::{
-	FixedProbe, ManualClock, actor, equipped, request, start_core_with,
-	stripped,
+	FixedProbe, ManualClock, actor, equipped, register_repository, request,
+	start_core_with, stripped,
 };
 use crate::{
 	AuditDecision, AuditEntry, AuditEpoch, AuditOutcome, AuditPage, AuditRisk,
 	AuditSequence, AuditTarget, ClientId, Command, CommandOutcome, Core,
-	CredentialSource, ErrorCategory, PlaneId, ProjectId, Query, QueryResult,
-	SettingKey, SettingScope, SettingValue,
+	CredentialSource, ErrorCategory, PlaneId, Query, QueryResult, SettingKey,
+	SettingScope, SettingValue,
 };
 
 /// The built-in retention window, so a test can step past it.
@@ -169,7 +169,7 @@ async fn git_automation_is_a_policy_decision_and_naming_is_a_preference() {
 	let dir = tempfile::tempdir().unwrap();
 	let core = start(&dir).await;
 	let project = SettingScope::Project {
-		project_id: ProjectId(Uuid::now_v7()),
+		project_id: register_repository(&core, &dir.path().join("repo")).await,
 	};
 
 	for command in [
@@ -198,9 +198,14 @@ async fn git_automation_is_a_policy_decision_and_naming_is_a_preference() {
 
 	let page = audit(&core, AuditSequence(0)).await;
 	assert_eq!(
-		(decisions(&page), page.entries[0].target.kind.as_str()),
+		(decisions(&page), page.entries[1].target.kind.as_str()),
 		(
 			vec![
+				(
+					"project.registered",
+					AuditRisk::Elevated,
+					AuditOutcome::Succeeded
+				),
 				(
 					"policy.git_automation_enabled",
 					AuditRisk::Elevated,

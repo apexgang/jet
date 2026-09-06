@@ -1,7 +1,7 @@
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
-use crate::test_support::{actor, request, start_core};
+use crate::test_support::{actor, register_repository, request, start_core};
 use crate::{
 	Command, CommandOutcome, ConversationId, Core, CoreError, ErrorCategory,
 	EventKind, ProjectId, Query, QueryResult, ResolvedSetting, RetentionPolicy,
@@ -132,10 +132,11 @@ async fn a_project_resolves_its_own_values_over_the_planes() {
 	let core = start(&dir).await;
 	let key = SettingKey::UtilityAutomaticNaming;
 	let scope = SettingScope::Project {
-		project_id: ProjectId(Uuid::now_v7()),
+		project_id: register_repository(&core, &dir.path().join("repo")).await,
 	};
 	let elsewhere = SettingScope::Project {
-		project_id: ProjectId(Uuid::now_v7()),
+		project_id: register_repository(&core, &dir.path().join("elsewhere"))
+			.await,
 	};
 
 	set(&core, key, SettingScope::Plane, SettingValue::Flag(false))
@@ -161,6 +162,37 @@ async fn a_project_resolves_its_own_values_over_the_planes() {
 				SettingValue::Flag(false),
 				SettingSource::Scope(SettingScope::Plane)
 			),
+		]
+	);
+}
+
+/// A Project scope names a registered Project (ADR-0085), so a Setting
+/// cannot be stored for, or resolved through, a Project this Plane does
+/// not have.
+#[tokio::test]
+async fn a_setting_for_an_unregistered_project_is_refused() {
+	let dir = tempfile::tempdir().unwrap();
+	let core = start(&dir).await;
+	let key = SettingKey::UtilityAutomaticNaming;
+	let scope = SettingScope::Project {
+		project_id: ProjectId(Uuid::now_v7()),
+	};
+
+	let stored = set(&core, key, scope, SettingValue::Flag(true))
+		.await
+		.unwrap_err();
+	let resolved = resolve(&core, scope, SettingSelection::Key(key))
+		.await
+		.unwrap_err();
+
+	assert_eq!(
+		[
+			(stored.category, stored.code),
+			(resolved.category, resolved.code)
+		],
+		[
+			(ErrorCategory::NotFound, "project.not_found".into()),
+			(ErrorCategory::NotFound, "project.not_found".into()),
 		]
 	);
 }

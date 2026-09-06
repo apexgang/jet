@@ -499,19 +499,27 @@ pub(crate) async fn resolve_plane(
 
 /// Refuses a scope whose subject this Plane does not have.
 ///
-/// Projects have no registry on this Plane yet, so a Project scope is taken
-/// as named until Project registration exists.
-///
 /// # Errors
 ///
-/// Returns a `not_found` [`CoreError`] when the named Conversation does not
-/// exist, or a store category when the check cannot be answered.
+/// Returns a `not_found` [`CoreError`] when the named Project or
+/// Conversation does not exist, or a store category when the check cannot
+/// be answered.
 pub(crate) async fn require_subject(
 	tx: &mut ReadTransaction,
 	scope: SettingScope,
 ) -> Result<(), CoreError> {
 	match scope {
-		SettingScope::Plane | SettingScope::Project { .. } => Ok(()),
+		SettingScope::Plane => Ok(()),
+		SettingScope::Project { project_id } => {
+			if tx.project(project_id.0).await?.is_some() {
+				Ok(())
+			} else {
+				Err(CoreError::not_found(
+					"project.not_found",
+					"the Project does not exist",
+				))
+			}
+		}
 		SettingScope::Conversation { conversation_id } => {
 			if tx.conversation(conversation_id.0).await?.is_some() {
 				Ok(())

@@ -58,6 +58,7 @@ async fn a_plane_reports_the_machine_it_runs_on() {
 			},
 			vec![
 				ExternalTool::Git,
+				ExternalTool::GitLfs,
 				ExternalTool::Ssh,
 				ExternalTool::Tailscale
 			],
@@ -82,6 +83,10 @@ async fn a_command_that_needs_a_missing_tool_is_refused() {
 	let daemon =
 		start_jetd_without_external_tools(&dir.path().join(".jet")).await;
 	let client = connect(&daemon, Uuid::new_v4()).await;
+	// No Project can be registered without Git, and none needs to be: a
+	// Command is answered by what the Plane can do before it reaches the
+	// scope it names, so the refusal is the Capability's and not the
+	// unknown Project's.
 	let scope = SettingScope::Project {
 		project_id: Uuid::now_v7(),
 	};
@@ -129,7 +134,7 @@ async fn a_command_that_needs_a_missing_tool_is_refused() {
 				restart: None,
 				recovery_actions: vec![],
 			},
-			vec![ToolAvailability::Missing; 3],
+			vec![ToolAvailability::Missing; 4],
 			true,
 		)
 	);

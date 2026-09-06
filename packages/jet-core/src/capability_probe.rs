@@ -78,6 +78,7 @@ async fn run_version(program: &str, arguments: &[&str]) -> ToolAvailability {
 fn version_arguments(tool: ExternalTool) -> &'static [&'static str] {
 	match tool {
 		ExternalTool::Git => &["--version"],
+		ExternalTool::GitLfs => &["version"],
 		ExternalTool::Ssh => &["-V"],
 		ExternalTool::Tailscale => &["version"],
 	}

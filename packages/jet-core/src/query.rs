@@ -14,9 +14,12 @@ use crate::conversation::{
 use crate::error::CoreError;
 use crate::event::{EVENT_PAGE_LIMIT, Event, EventPage, EventSequence};
 use crate::pairing::{self, PairingSnapshot};
+use crate::project::{self, PathGrant, ProjectList, ProjectPreview};
+use crate::project_entry::{self, ProjectEntry};
+use crate::relative_path::RelativePath;
 use crate::setting::{self, SettingScope, SettingSelection, SettingSnapshot};
 use crate::status::PlaneStatus;
-use crate::{Actor, CORE_VERSION, Core, PlaneId};
+use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +74,26 @@ pub enum Query {
 		/// The position to resume after; zero for the whole audit.
 		after: AuditSequence,
 	},
+	/// Every registered Project on the Plane (ADR-0025).
+	Projects,
+	/// What a Path grant would register, before it is made (ADR-0101).
+	PreviewProject {
+		/// The absolute path the user is about to grant.
+		grant: PathGrant,
+		/// Whether Git LFS is reported from the last observation of the
+		/// Plane or a new one, taken now (ADR-0086).
+		observation: CapabilityObservation,
+	},
+	/// What one path inside a Project names: the shape every ordinary file
+	/// operation takes, a Project and a validated relative path
+	/// (ADR-0101). Workspaces address files the same way once they exist
+	/// (ADR-0025).
+	ProjectEntry {
+		/// The Project to resolve the path in.
+		project_id: ProjectId,
+		/// The path, relative to the Project's root.
+		path: RelativePath,
+	},
 }
 
 /// Snapshots returned by [`Core::query`].
@@ -94,6 +117,12 @@ pub enum QueryResult {
 	Pairing(PairingSnapshot),
 	/// One page of the Security audit, oldest first.
 	SecurityAudit(AuditPage),
+	/// Every registered Project on the Plane.
+	Projects(ProjectList),
+	/// What a Path grant would register.
+	ProjectPreview(ProjectPreview),
+	/// What one path inside a Project names.
+	ProjectEntry(ProjectEntry),
 }
 
 impl Core {
@@ -207,6 +236,27 @@ impl Core {
 							clients: clients
 								.into_iter()
 								.map(pairing::paired_client)
+								.collect(),
+						}))
+					})
+					.await
+			}
+			Query::PreviewProject { grant, observation } => {
+				project::preview(self, actor, &grant, observation).await
+			}
+			Query::ProjectEntry { project_id, path } => {
+				project_entry::entry(self, project_id, path).await
+			}
+			Query::Projects => {
+				self.store
+					.read(async |tx| {
+						let cursor = EventSequence(tx.event_cursor().await?);
+						let projects = tx.projects().await?;
+						Ok(QueryResult::Projects(ProjectList {
+							cursor,
+							projects: projects
+								.into_iter()
+								.map(Into::into)
 								.collect(),
 						}))
 					})

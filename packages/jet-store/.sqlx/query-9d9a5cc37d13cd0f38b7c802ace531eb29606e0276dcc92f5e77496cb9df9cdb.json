@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT project_id AS \"project_id!\", root, actor_kind, actor_id,\n\t\t\t\tregistered_at_unix_ms\n\t\t\t FROM projects\n\t\t\t WHERE project_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "project_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "project_id"
+          }
+        }
+      },
+      {
+        "name": "root",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "root"
+          }
+        }
+      },
+      {
+        "name": "actor_kind",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "actor_kind"
+          }
+        }
+      },
+      {
+        "name": "actor_id",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "actor_id"
+          }
+        }
+      },
+      {
+        "name": "registered_at_unix_ms",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "registered_at_unix_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9d9a5cc37d13cd0f38b7c802ace531eb29606e0276dcc92f5e77496cb9df9cdb"
+}

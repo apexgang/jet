@@ -22,14 +22,18 @@ pub(super) fn observation(
 
 pub(crate) fn snapshot(
 	snapshot: CapabilitySnapshot,
+	minor: u32,
 ) -> wire::CapabilitySnapshot {
 	wire::CapabilitySnapshot {
 		observed_at_unix_ms: unix_ms(snapshot.observed_at),
 		core_version: snapshot.core_version.into(),
 		platform: platform(snapshot.platform),
+		// A tool introduced after the negotiated minor is left out rather
+		// than sent in a shape the peer cannot read (ADR-0019).
 		external_tools: snapshot
 			.external_tools
 			.into_iter()
+			.filter(|status| introduced_in(status.tool) <= minor)
 			.map(external_tool_status)
 			.collect(),
 		credential_store: credential_store(snapshot.credential_store),
@@ -38,8 +42,26 @@ pub(crate) fn snapshot(
 		degraded: snapshot
 			.degraded
 			.into_iter()
+			.filter(|condition| match condition {
+				DegradedCondition::MissingExternalTool { tool } => {
+					introduced_in(*tool) <= minor
+				}
+				DegradedCondition::NoHarnessAvailable
+				| DegradedCondition::CredentialStoreUnavailable { .. }
+				| DegradedCondition::CredentialStoreLocked { .. } => true,
+			})
 			.map(degraded_condition)
 			.collect(),
+	}
+}
+
+/// The protocol minor that first named each external tool.
+fn introduced_in(tool: ExternalTool) -> u32 {
+	match tool {
+		ExternalTool::Git | ExternalTool::Ssh | ExternalTool::Tailscale => {
+			wire::SETTINGS_AND_CAPABILITIES_MINOR
+		}
+		ExternalTool::GitLfs => wire::PROJECTS_MINOR,
 	}
 }
 
@@ -67,6 +89,7 @@ fn external_tool_status(
 fn external_tool(tool: ExternalTool) -> wire::ExternalTool {
 	match tool {
 		ExternalTool::Git => wire::ExternalTool::Git,
+		ExternalTool::GitLfs => wire::ExternalTool::GitLfs,
 		ExternalTool::Ssh => wire::ExternalTool::Ssh,
 		ExternalTool::Tailscale => wire::ExternalTool::Tailscale,
 	}
