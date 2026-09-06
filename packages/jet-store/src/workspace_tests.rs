@@ -3,8 +3,9 @@ use uuid::Uuid;
 
 use super::{NewWorkspace, WorkspaceRecord, WorkspaceSeedRecord};
 use crate::{
-	ActorRecord, NewConversation, NewProject, NewRun, RetentionPolicy,
-	RunLifecycle, RunRecord, Store, StoreError, WorkingTreeRecord,
+	ActorRecord, ConversationOriginRecord, NewConversation, NewProject, NewRun,
+	RetentionPolicy, RunLifecycle, RunRecord, Store, StoreError,
+	WorkingTreeRecord,
 };
 
 const NOW_UNIX_MS: i64 = 1_700_000_000_000;
@@ -25,6 +26,7 @@ fn conversation(working_tree: WorkingTreeRecord) -> NewConversation {
 		conversation_id: Uuid::now_v7(),
 		retention: RetentionPolicy::Retain,
 		working_tree,
+		origin: ConversationOriginRecord::New,
 		created_at_unix_ms: NOW_UNIX_MS,
 	}
 }

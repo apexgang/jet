@@ -7,9 +7,9 @@ use super::{
 	WorkspacePromotionRecord,
 };
 use crate::{
-	ActorRecord, EffectKindRecord, EffectSafetyRecord, NewConversation,
-	NewEffect, NewProject, NewWorkspace, RetentionPolicy, Store, StoreError,
-	WorkingTreeRecord,
+	ActorRecord, ConversationOriginRecord, EffectKindRecord,
+	EffectSafetyRecord, NewConversation, NewEffect, NewProject, NewWorkspace,
+	RetentionPolicy, Store, StoreError, WorkingTreeRecord,
 };
 
 const NOW_UNIX_MS: i64 = 1_700_000_000_000;
@@ -39,6 +39,7 @@ async fn workspace(store: &Store) -> Uuid {
 				conversation_id,
 				retention: RetentionPolicy::Retain,
 				working_tree: WorkingTreeRecord::Workspace { project_id },
+				origin: ConversationOriginRecord::New,
 				created_at_unix_ms: NOW_UNIX_MS,
 			})
 			.await?;

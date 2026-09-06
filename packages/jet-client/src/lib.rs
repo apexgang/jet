@@ -6,6 +6,7 @@
 
 mod connection;
 mod handshake;
+mod import_requests;
 mod pairing_requests;
 mod project_requests;
 mod promotion_requests;

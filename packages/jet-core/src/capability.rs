@@ -13,6 +13,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::SystemTime;
 
+use serde::{Deserialize, Serialize};
+
 use crate::command::Command;
 use crate::error::CoreError;
 use crate::{CORE_VERSION, Core};
@@ -165,7 +167,7 @@ pub enum CredentialStoreStatus {
 pub struct CraftId(pub String);
 
 /// Identity of one Harness a Craft adapts, such as `codex`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct HarnessId(pub String);
 
 /// One Craft installed on the Plane and the Harnesses it adapts.

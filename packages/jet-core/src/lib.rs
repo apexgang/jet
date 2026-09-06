@@ -16,10 +16,12 @@ mod clock;
 mod command;
 mod command_receipt;
 mod conversation;
+mod discovery;
 mod effect;
 mod error;
 mod event;
 mod filesystem;
+mod import;
 mod lifecycle;
 mod orphan;
 mod pagination;
@@ -88,6 +90,7 @@ use uuid::Uuid;
 use capability::CapabilityProbe;
 use capability_probe::SystemCapabilityProbe;
 use clock::{Clock, SystemClock};
+use discovery::{ConversationDiscovery, SystemConversationDiscovery};
 
 pub use account::{
 	AccountBinding, AccountBindingId, AccountBindingList, AccountBindingStatus,
@@ -105,8 +108,8 @@ pub use capability::{
 };
 pub use command::{Command, CommandEnvelope, CommandId, CommandOutcome};
 pub use conversation::{
-	Conversation, ConversationId, ConversationList, ConversationSnapshot,
-	PageCursor, Revision, Run, RunId,
+	Conversation, ConversationId, ConversationList, ConversationOrigin,
+	ConversationSnapshot, PageCursor, Revision, Run, RunId,
 };
 pub use error::{
 	ConflictState, CoreError, ErrorCategory, RecoveryAction, RestartMetadata,
@@ -115,6 +118,11 @@ pub use error::{
 pub use event::{
 	Event, EventActor, EventId, EventKind, EventPage, EventPayload,
 	EventSequence,
+};
+pub use import::{
+	DiscoveredConversation, ExternalConversation, ExternalConversationList,
+	ExternalOrigin, ExternalProcess, ImportId, ImportedConversation,
+	NativeConversationId,
 };
 pub use jet_store::{AuditBreach, AuditHead};
 pub use jet_store::{
@@ -248,6 +256,9 @@ pub struct Core {
 	conversation_pages: pagination::ConversationPages,
 	/// Where this core creates Workspaces (ADR-0025).
 	workspace_home: workspace::WorkspaceHome,
+	/// How this core sees the Harness-native Conversations outside its
+	/// management (ADR-0010).
+	discovery: Arc<dyn ConversationDiscovery>,
 }
 
 impl Core {
@@ -272,12 +283,14 @@ impl Core {
 			workspace_home,
 			Arc::new(SystemClock),
 			Arc::new(SystemCapabilityProbe),
+			Arc::new(SystemConversationDiscovery),
 		)
 		.await
 	}
 
-	/// Starts the core with an injected wall clock and Capability probe,
-	/// observing the Plane once so its first report needs no waiting.
+	/// Starts the core with an injected wall clock, Capability probe, and
+	/// Conversation discovery, observing the Plane once so its first report
+	/// needs no waiting.
 	///
 	/// # Errors
 	///
@@ -288,6 +301,7 @@ impl Core {
 		workspace_home: WorkspaceHome,
 		clock: Arc<dyn Clock>,
 		probe: Arc<dyn CapabilityProbe>,
+		discovery: Arc<dyn ConversationDiscovery>,
 	) -> Result<Self, CoreError> {
 		store.record_daemon_start().await?;
 		let started_at = clock.now();
@@ -318,6 +332,7 @@ impl Core {
 			effect_reconciliation: tokio::sync::Mutex::new(()),
 			conversation_pages: pagination::ConversationPages::default(),
 			workspace_home,
+			discovery,
 		};
 		// The index follows the journal; a daemon that stopped between a
 		// Command and its indexing catches up here (ADR-0036).
