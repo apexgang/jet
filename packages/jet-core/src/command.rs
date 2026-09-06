@@ -490,6 +490,10 @@ impl Core {
 			*self.security.write().await =
 				SecurityState::of(self.store.validate_audit().await?);
 		}
+		// The Command is durable and acknowledged by its receipt; the
+		// index follows in its own transaction, and a start or a later
+		// Command finishes what an interruption here leaves (ADR-0036).
+		self.index_search().await?;
 		Ok(outcome)
 	}
 }
