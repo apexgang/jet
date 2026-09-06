@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO run_executions (run_id, plan, state) VALUES (?1, ?2, ?3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "c91759d911d2e66c7c8b7df815f1d0b417c0c66662912f9d68c9e732249dd531"
+}

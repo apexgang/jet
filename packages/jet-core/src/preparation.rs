@@ -17,6 +17,8 @@ use crate::{Actor, Core};
 
 /// What the preparation of one Command produced for its transaction.
 pub(crate) enum Prepared {
+	/// A Run pinned to an accepted Craft and validated working tree.
+	Run(crate::run_command::LaunchPlan),
 	/// The Command needs nothing from outside the store.
 	Nothing,
 	/// The root a Path grant resolved to and `git` accepted.
@@ -91,6 +93,20 @@ impl Core {
 		command: &Command,
 	) -> Result<Prepared, CoreError> {
 		match command {
+			Command::StartRun {
+				conversation_id,
+				craft,
+				prompt,
+			} => Ok(Prepared::Run(
+				crate::run_command::prepare(
+					self,
+					actor,
+					*conversation_id,
+					craft,
+					prompt,
+				)
+				.await?,
+			)),
 			Command::RegisterProject { grant } => Ok(Prepared::Registration(
 				project::prepare_registration(actor, grant).await?,
 			)),

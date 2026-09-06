@@ -93,6 +93,11 @@ pub enum ServerMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryRequest {
+	/// Read the durable execution state of a managed Run.
+	RunExecution {
+		/// Run identity.
+		run_id: Uuid,
+	},
 	/// Snapshot of the Plane's daemon status.
 	Status,
 	/// First bounded page of Conversations on the Plane.
@@ -187,6 +192,8 @@ pub enum QueryRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryResponse {
+	/// Durable lifecycle, activity, and Managed processes of a Run.
+	RunExecution(crate::RunExecution),
 	/// Snapshot of the Plane's daemon status.
 	Status(PlaneStatus),
 	/// One page of Conversations on the Plane.

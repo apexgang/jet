@@ -42,6 +42,20 @@ pub enum CraftAction {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CraftCommand {
+	/// Start a Run through its host-provisioned helper (Craft 1.1, runs).
+	Start {
+		/// Initial Command identity.
+		id: String,
+		/// Initial input for the Harness.
+		text: String,
+		/// Owner-only endpoint of this Run's helper.
+		helper_socket: String,
+	},
+	/// Confirm that preceding semantic output is durable (Craft 1.1, runs).
+	Acknowledge {
+		/// Source record the Craft may now release through the helper.
+		source_offset: u64,
+	},
 	/// Submit one admitted turn.
 	Turn {
 		/// Correlation identity; delivery alone is not a durable receipt.
@@ -66,6 +80,30 @@ pub enum CraftCommand {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CraftEvent {
+	/// The helper definitively failed to launch a native Harness.
+	RunLaunchFailed,
+	/// Native process identities supplied by the Run-role helper.
+	RunStarted {
+		/// Helper OS process identity.
+		helper_pid: u32,
+		/// Harness OS process identity.
+		harness_pid: u32,
+	},
+	/// Current reason an active Run is working or waiting.
+	Activity {
+		/// Orthogonal to the Run lifecycle.
+		activity: crate::RunActivity,
+	},
+	/// End of a native source record; earlier Events must commit first.
+	Progress {
+		/// End offset acknowledged through the Craft only after durable commit.
+		source_offset: u64,
+	},
+	/// The Harness ended, independently from a single turn's completion.
+	RunEnded {
+		/// Native exit code, absent for a signal termination.
+		exit_code: Option<i32>,
+	},
 	/// Complete native event accompanied by optional portable views.
 	Output {
 		/// Original JSON bytes, including unknown data and numeric precision.
@@ -97,6 +135,37 @@ impl<'de> Deserialize<'de> for CraftEvent {
 		let kind: Kind = crate::decode_control(raw.get().as_bytes())
 			.map_err(serde::de::Error::custom)?;
 		match kind.kind.as_str() {
+			"run_launch_failed" | "run_started" | "activity" | "progress"
+			| "run_ended" => {
+				#[derive(Deserialize)]
+				#[serde(tag = "kind", rename_all = "snake_case")]
+				enum State {
+					RunLaunchFailed,
+					RunStarted { helper_pid: u32, harness_pid: u32 },
+					Activity { activity: crate::RunActivity },
+					Progress { source_offset: u64 },
+					RunEnded { exit_code: Option<i32> },
+				}
+				let state: State = crate::decode_control(raw.get().as_bytes())
+					.map_err(serde::de::Error::custom)?;
+				Ok(match state {
+					State::RunLaunchFailed => Self::RunLaunchFailed,
+					State::RunStarted {
+						helper_pid,
+						harness_pid,
+					} => Self::RunStarted {
+						helper_pid,
+						harness_pid,
+					},
+					State::Activity { activity } => Self::Activity { activity },
+					State::Progress { source_offset } => {
+						Self::Progress { source_offset }
+					}
+					State::RunEnded { exit_code } => {
+						Self::RunEnded { exit_code }
+					}
+				})
+			}
 			"output" => {
 				#[derive(Deserialize)]
 				struct Output {

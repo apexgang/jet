@@ -27,6 +27,11 @@ use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
+	/// Read the durable execution projection of a managed Run.
+	RunExecution {
+		/// The Run to inspect.
+		run_id: crate::RunId,
+	},
 	/// Snapshot of the daemon's Plane status.
 	Status,
 	/// First bounded page of Conversations on the Plane.
@@ -117,6 +122,8 @@ pub enum Query {
 /// Snapshots returned by [`Core::query`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult {
+	/// Lifecycle, activity, and Managed processes at one journal cursor.
+	RunExecution(crate::RunExecution),
 	/// Snapshot of the daemon's Plane status.
 	Status(PlaneStatus),
 	/// One page of Conversations on the Plane.
@@ -168,6 +175,11 @@ impl Core {
 			.expect("authority gate never closes");
 		actor.authorize(&self.remote_sessions)?;
 		match query {
+			Query::RunExecution { run_id } => self
+				.store
+				.read(async |tx| crate::run_state::snapshot(tx, run_id).await)
+				.await
+				.map(QueryResult::RunExecution),
 			Query::Status => {
 				let security = *self.security.read().await;
 				self.store
@@ -231,10 +243,19 @@ impl Core {
 					.read(async |tx| {
 						let (cursor, events) =
 							tx.events_after(after.0, EVENT_PAGE_LIMIT).await?;
+						let mut bytes = 0;
+						let events = events.into_iter().take_while(|event| {
+							// Room for envelope/identities after jetd translates the page.
+							let size = event.payload.len() + 1024;
+							if bytes != 0 && bytes + size > 512 * 1024 {
+								return false;
+							}
+							bytes += size;
+							true
+						});
 						Ok(QueryResult::Events(EventPage {
 							cursor: EventSequence(cursor),
 							events: events
-								.into_iter()
 								.map(Event::try_from)
 								.collect::<Result<_, _>>()?,
 						}))

@@ -94,6 +94,12 @@ pub(crate) fn documents_of(event: &Event) -> Vec<NewSearchDocument> {
 		| EventKind::WorkspacePromotionSettled { .. }
 		| EventKind::RunCreated {}
 		| EventKind::RunLifecycleChanged { .. }
+        | EventKind::RunActivityChanged { .. }
+        | EventKind::RunProcessesChanged { .. }
+        | EventKind::RunNativeConversation { .. }
+        // Craft payloads stay opaque here; preserve the explicit search
+        // allowlist rather than indexing native JSON or unknown views.
+        | EventKind::RunOutput { .. }
 		// Settings and Account bindings are Plane configuration, and a
 		// binding sits next to a Credential; neither is Conversation
 		// content (ADR-0076).

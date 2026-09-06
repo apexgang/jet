@@ -16,7 +16,7 @@ fn event(conversation_id: Option<ConversationId>, kind: EventKind) -> Event {
 	Event {
 		sequence: EventSequence(7),
 		event_id: EventId(Uuid::nil()),
-		actor: actor(),
+		actor: actor().into(),
 		recorded_at: SystemTime::UNIX_EPOCH,
 		conversation_id,
 		run_id: None,

@@ -381,6 +381,10 @@ struct MinorRequirement {
 
 fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 	match query {
+		QueryRequest::RunExecution { .. } => Some(MinorRequirement {
+			minor: jet_protocol::MANAGED_RUNS_MINOR,
+			feature: "managed Run Queries",
+		}),
 		QueryRequest::NextConversations { .. } => Some(MinorRequirement {
 			minor: jet_protocol::FENCED_READS_MINOR,
 			feature: "Conversation pagination",
@@ -434,6 +438,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 
 fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 	match command {
+		CommandRequest::StartRun { .. } => Some(MinorRequirement {
+			minor: jet_protocol::MANAGED_RUNS_MINOR,
+			feature: "managed Runs",
+		}),
 		CommandRequest::SetSetting { .. }
 		| CommandRequest::ClearSetting { .. } => Some(MinorRequirement {
 			minor: jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR,

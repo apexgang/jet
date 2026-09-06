@@ -52,6 +52,7 @@ impl Client {
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)) => Err(unexpected(&other)),
 		}
 	}

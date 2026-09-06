@@ -294,6 +294,7 @@ fn conversation_snapshots_and_event_pages_have_the_agreed_wire_shape() {
 	let events = QueryResponse::Events(EventPage {
 		cursor: 3,
 		events: vec![Event {
+			origin: None,
 			sequence: 3,
 			event_id: Uuid::nil(),
 			actor: Actor::InteractiveClient {

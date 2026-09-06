@@ -14,7 +14,9 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 12;
+pub const PROTOCOL_MINOR: u32 = 13;
+/// Minor that introduced managed Run admission and execution snapshots.
+pub const MANAGED_RUNS_MINOR: u32 = 13;
 /// Minor that introduced fresh signed remote connection challenges.
 pub const REMOTE_AUTH_MINOR: u32 = 7;
 /// Minor that introduced fenced status and Conversation pagination.

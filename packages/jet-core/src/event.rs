@@ -65,6 +65,108 @@ pub(crate) enum EventSubject {
 	},
 }
 
+/// Responsible origin of a journal Event. This grants no Command authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventActor {
+	/// An interactive client caused a committed change.
+	InteractiveClient {
+		/// Durable installation identity.
+		client_id: ClientId,
+	},
+	/// Semantic output or attention from the pinned Harness.
+	Harness {
+		/// Execution that retains the accepted Craft identity and digest.
+		run_id: RunId,
+		/// Client that authorized the execution; not the origin of this Event.
+		authorized_by: ClientId,
+	},
+	/// An internal process supervision observation.
+	RunSupervisor {
+		/// Execution being supervised.
+		run_id: RunId,
+		/// Client that authorized the execution.
+		authorized_by: ClientId,
+	},
+}
+impl EventActor {
+	fn from_record(record: &EventRecord) -> Result<Self, CoreError> {
+		let jet_store::ActorRecord::InteractiveClient { client_id } =
+			record.actor;
+		let authorized_by = ClientId(client_id);
+		let payload: serde_json::Value = serde_json::from_str(&record.payload)
+			.map_err(|e| {
+				CoreError::internal("event.malformed", e.to_string())
+			})?;
+		let Some(origin) = payload.get("_jet_origin") else {
+			return Ok(Self::InteractiveClient {
+				client_id: authorized_by,
+			});
+		};
+		let invalid = || {
+			CoreError::internal(
+				"event.invalid_origin",
+				"invalid Run attribution",
+			)
+		};
+		let run_id: Uuid = origin
+			.get("run_id")
+			.and_then(serde_json::Value::as_str)
+			.ok_or_else(invalid)?
+			.parse()
+			.map_err(|_| invalid())?;
+		if Some(run_id) != record.run_id {
+			return Err(invalid());
+		}
+		match origin.get("type").and_then(serde_json::Value::as_str) {
+			Some("harness") => Ok(Self::Harness {
+				run_id: RunId(run_id),
+				authorized_by,
+			}),
+			Some("run_supervisor") => Ok(Self::RunSupervisor {
+				run_id: RunId(run_id),
+				authorized_by,
+			}),
+			_ => Err(invalid()),
+		}
+	}
+	fn provenance(
+		&self,
+	) -> (jet_store::ActorRecord, Option<serde_json::Value>) {
+		let (client_id, origin) = match self {
+			Self::InteractiveClient { client_id } => (*client_id, None),
+			Self::Harness {
+				run_id,
+				authorized_by,
+			} => (
+				*authorized_by,
+				Some(serde_json::json!({"type":"harness","run_id":run_id.0})),
+			),
+			Self::RunSupervisor {
+				run_id,
+				authorized_by,
+			} => (
+				*authorized_by,
+				Some(
+					serde_json::json!({"type":"run_supervisor","run_id":run_id.0}),
+				),
+			),
+		};
+		(
+			jet_store::ActorRecord::InteractiveClient {
+				client_id: client_id.0,
+			},
+			origin,
+		)
+	}
+}
+impl From<Actor> for EventActor {
+	fn from(actor: Actor) -> Self {
+		Self::InteractiveClient {
+			client_id: actor.client_id(),
+		}
+	}
+}
+
 /// One journal entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
@@ -73,7 +175,7 @@ pub struct Event {
 	/// Durable identity.
 	pub event_id: EventId,
 	/// Who caused the Event.
-	pub actor: Actor,
+	pub actor: EventActor,
 	/// When it was recorded; display metadata only.
 	pub recorded_at: SystemTime,
 	/// The Conversation it concerns, if any.
@@ -112,6 +214,32 @@ pub struct EventPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum EventKind {
+	/// An active Run began working or waiting for a specific reason.
+	#[serde(rename = "run.activity_changed")]
+	RunActivityChanged {
+		/// Absent outside the active lifecycle.
+		activity: Option<crate::RunActivity>,
+	},
+	/// Native processes began or ended their participation in the Run.
+	#[serde(rename = "run.processes_changed")]
+	RunProcessesChanged {
+		/// The current process projection.
+		processes: Vec<crate::ManagedProcess>,
+	},
+	/// Lossless native JSON and portable views; strings preserve original bytes.
+	#[serde(rename = "run.output")]
+	RunOutput {
+		/// Original JSON event, never reparsed through a lossy value tree.
+		native_json: String,
+		/// Original JSON Presentation blocks, including unknown kinds.
+		presentation_json: Vec<String>,
+	},
+	/// The Craft reported the Harness-native Conversation identity.
+	#[serde(rename = "run.native_conversation")]
+	RunNativeConversation {
+		/// Identity for a later explicit resume.
+		native_conversation: String,
+	},
 	/// A Conversation came into existence.
 	#[serde(rename = "conversation.created")]
 	ConversationCreated {
@@ -322,6 +450,10 @@ impl EventKind {
 		match self {
 			Self::Unrecognized(payload) => Ok(payload.clone()),
 			Self::ConversationCreated { .. }
+			| Self::RunActivityChanged { .. }
+			| Self::RunProcessesChanged { .. }
+			| Self::RunOutput { .. }
+			| Self::RunNativeConversation { .. }
 			| Self::RunCreated {}
 			| Self::RunLifecycleChanged { .. }
 			| Self::SettingChanged { .. }
@@ -399,11 +531,35 @@ impl EventKind {
 		subject: EventSubject,
 		recorded_at_unix_ms: i64,
 	) -> Result<NewEvent, CoreError> {
+		self.to_record_as(actor.clone().into(), subject, recorded_at_unix_ms)
+	}
+
+	pub(crate) fn to_record_as(
+		&self,
+		actor: EventActor,
+		subject: EventSubject,
+		recorded_at_unix_ms: i64,
+	) -> Result<NewEvent, CoreError> {
 		let EventPayload {
 			kind,
 			payload_version,
 			payload,
 		} = self.encode()?;
+		let (actor, origin) = actor.provenance();
+		let mut payload = payload;
+		if let Some(origin) = origin {
+			// Additive metadata leaves legacy actor columns and payload decoders
+			// readable during rollback. Origin is always derived by Core.
+			payload
+				.as_object_mut()
+				.ok_or_else(|| {
+					CoreError::internal(
+						"event.unencodable",
+						"payload is not an object",
+					)
+				})?
+				.insert("_jet_origin".into(), origin);
+		}
 		let (conversation_id, run_id) = match subject {
 			EventSubject::Plane => (None, None),
 			EventSubject::Conversation(conversation_id) => {
@@ -416,7 +572,7 @@ impl EventKind {
 		};
 		Ok(NewEvent {
 			event_id: Uuid::now_v7(),
-			actor: actor.record(),
+			actor,
 			recorded_at_unix_ms,
 			conversation_id: conversation_id.map(|id| id.0),
 			run_id: run_id.map(|id| id.0),
@@ -436,7 +592,7 @@ impl TryFrom<EventRecord> for Event {
 		Ok(Self {
 			sequence: EventSequence(record.sequence),
 			event_id: EventId(record.event_id),
-			actor: Actor::from_record(record.actor),
+			actor: EventActor::from_record(&record)?,
 			recorded_at: system_time(record.recorded_at_unix_ms),
 			conversation_id: record.conversation_id.map(ConversationId),
 			run_id: record.run_id.map(RunId),

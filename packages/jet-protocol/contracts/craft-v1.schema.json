@@ -120,6 +120,54 @@
       "description": "Host-to-Craft Commands, admitted by Jet before crossing this boundary.",
       "oneOf": [
         {
+          "description": "Start a Run through its host-provisioned helper (Craft 1.1, runs).",
+          "type": "object",
+          "properties": {
+            "helper_socket": {
+              "description": "Owner-only endpoint of this Run's helper.",
+              "type": "string"
+            },
+            "id": {
+              "description": "Initial Command identity.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "start"
+            },
+            "text": {
+              "description": "Initial input for the Harness.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "text",
+            "helper_socket"
+          ]
+        },
+        {
+          "description": "Confirm that preceding semantic output is durable (Craft 1.1, runs).",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "acknowledge"
+            },
+            "source_offset": {
+              "description": "Source record the Craft may now release through the helper.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "source_offset"
+          ]
+        },
+        {
           "description": "Submit one admitted turn.",
           "type": "object",
           "properties": {
@@ -183,6 +231,105 @@
     "CraftEvent": {
       "description": "Craft-to-host events. Native content remains the authoritative payload.",
       "oneOf": [
+        {
+          "description": "The helper definitively failed to launch a native Harness.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "run_launch_failed"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "Native process identities supplied by the Run-role helper.",
+          "type": "object",
+          "properties": {
+            "harness_pid": {
+              "description": "Harness OS process identity.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "helper_pid": {
+              "description": "Helper OS process identity.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "run_started"
+            }
+          },
+          "required": [
+            "kind",
+            "helper_pid",
+            "harness_pid"
+          ]
+        },
+        {
+          "description": "Current reason an active Run is working or waiting.",
+          "type": "object",
+          "properties": {
+            "activity": {
+              "description": "Orthogonal to the Run lifecycle.",
+              "$ref": "#/$defs/RunActivity"
+            },
+            "kind": {
+              "type": "string",
+              "const": "activity"
+            }
+          },
+          "required": [
+            "kind",
+            "activity"
+          ]
+        },
+        {
+          "description": "End of a native source record; earlier Events must commit first.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "progress"
+            },
+            "source_offset": {
+              "description": "End offset acknowledged through the Craft only after durable commit.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "source_offset"
+          ]
+        },
+        {
+          "description": "The Harness ended, independently from a single turn's completion.",
+          "type": "object",
+          "properties": {
+            "exit_code": {
+              "description": "Native exit code, absent for a signal termination.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "run_ended"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
         {
           "description": "Complete native event accompanied by optional portable views.",
           "type": "object",
@@ -672,6 +819,41 @@
       "required": [
         "major",
         "minor"
+      ]
+    },
+    "RunActivity": {
+      "description": "Why an active Run is working or waiting.",
+      "oneOf": [
+        {
+          "description": "Performing work.",
+          "type": "string",
+          "const": "working"
+        },
+        {
+          "description": "Needs user input.",
+          "type": "string",
+          "const": "waiting_for_user"
+        },
+        {
+          "description": "Needs an approval decision.",
+          "type": "string",
+          "const": "waiting_for_approval"
+        },
+        {
+          "description": "Needs authentication.",
+          "type": "string",
+          "const": "waiting_for_auth"
+        },
+        {
+          "description": "Needs available quota.",
+          "type": "string",
+          "const": "waiting_for_quota"
+        },
+        {
+          "description": "Reconnecting to its execution.",
+          "type": "string",
+          "const": "reconnecting"
+        }
       ]
     }
   }

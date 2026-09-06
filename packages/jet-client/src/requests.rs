@@ -44,6 +44,7 @@ impl Client {
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)) => Err(unexpected(&other)),
 		}
 	}
@@ -70,6 +71,7 @@ impl Client {
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)) => Err(unexpected(&other)),
 		}
 	}
@@ -103,6 +105,7 @@ impl Client {
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)) => Err(unexpected(&other)),
 		}
 	}
@@ -136,6 +139,7 @@ impl Client {
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)) => Err(unexpected(&other)),
 		}
 	}
@@ -166,6 +170,7 @@ impl Client {
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)) => Err(unexpected(&other)),
 		}
 	}
@@ -235,6 +240,7 @@ impl Client {
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)) => Err(unexpected(&other)),
 		}
 	}
@@ -431,6 +437,7 @@ impl Client {
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)) => Err(unexpected(&other)),
 		}
 	}
@@ -552,6 +559,7 @@ impl Client {
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)) => Err(unexpected(&other)),
 		}
 	}
@@ -592,6 +600,7 @@ impl Client {
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)) => Err(unexpected(&other)),
 		}
 	}

@@ -9,6 +9,7 @@ mod capability;
 mod pairing;
 mod project;
 mod promotion;
+mod run;
 mod search;
 mod setting;
 
@@ -44,6 +45,9 @@ pub(crate) fn query(
 	minor: u32,
 ) -> Result<Query, CoreError> {
 	Ok(match request {
+		wire::QueryRequest::RunExecution { run_id } => Query::RunExecution {
+			run_id: RunId(*run_id),
+		},
 		wire::QueryRequest::Status => Query::Status,
 		wire::QueryRequest::Conversations
 			if minor < wire::FENCED_READS_MINOR =>
@@ -113,6 +117,9 @@ pub(crate) fn query_result(
 	minor: u32,
 ) -> Result<wire::QueryResponse, CoreError> {
 	Ok(match result {
+		QueryResult::RunExecution(execution) => {
+			wire::QueryResponse::RunExecution(run::execution(execution))
+		}
 		QueryResult::Status(status) => {
 			wire::QueryResponse::Status(plane_status(&status, minor))
 		}
@@ -175,6 +182,15 @@ pub(crate) fn command(
 	request: &wire::CommandRequest,
 ) -> Result<Command, CoreError> {
 	Ok(match request {
+		wire::CommandRequest::StartRun {
+			conversation_id,
+			craft,
+			prompt,
+		} => Command::StartRun {
+			conversation_id: ConversationId(*conversation_id),
+			craft: craft.clone(),
+			prompt: prompt.clone(),
+		},
 		wire::CommandRequest::CreateConversation {
 			retention,
 			working_tree,
@@ -556,7 +572,20 @@ fn event(event: &Event) -> Result<wire::Event, CoreError> {
 	Ok(wire::Event {
 		sequence: event.sequence.0,
 		event_id: event.event_id.0,
-		actor: actor(&event.actor),
+		actor: actor_of(match event.actor {
+			jet_core::EventActor::InteractiveClient { client_id } => client_id,
+			jet_core::EventActor::Harness { authorized_by, .. }
+			| jet_core::EventActor::RunSupervisor { authorized_by, .. } => authorized_by,
+		}),
+		origin: match event.actor {
+			jet_core::EventActor::InteractiveClient { .. } => None,
+			jet_core::EventActor::Harness { run_id, .. } => {
+				Some(wire::EventOrigin::Harness { run_id: run_id.0 })
+			}
+			jet_core::EventActor::RunSupervisor { run_id, .. } => {
+				Some(wire::EventOrigin::RunSupervisor { run_id: run_id.0 })
+			}
+		},
 		recorded_at_unix_ms: unix_ms(event.recorded_at),
 		conversation_id: event.conversation_id.map(|id| id.0),
 		run_id: event.run_id.map(|id| id.0),

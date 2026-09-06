@@ -16,6 +16,22 @@ pub enum Actor {
 	},
 }
 
+/// Responsible execution origin, when legacy client authorization is insufficient.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EventOrigin {
+	/// Semantic observations from the pinned Harness.
+	Harness {
+		/// Owning Run identity.
+		run_id: Uuid,
+	},
+	/// Internal process supervision.
+	RunSupervisor {
+		/// Owning Run identity.
+		run_id: Uuid,
+	},
+}
+
 /// One journal entry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Event {
@@ -25,8 +41,12 @@ pub struct Event {
 	pub sequence: u64,
 	/// Durable identity.
 	pub event_id: Uuid,
-	/// Who caused the Event.
+	/// Legacy client authorization attribution. Use `origin` when present
+	/// to identify who supplied an execution observation.
 	pub actor: Actor,
+	/// Actual origin of an execution observation; additive for older readers.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub origin: Option<EventOrigin>,
 	/// When it was recorded, in signed Unix milliseconds. Display metadata
 	/// only; never an ordering authority.
 	pub recorded_at_unix_ms: i64,

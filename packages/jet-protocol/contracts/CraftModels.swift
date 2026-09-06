@@ -23,12 +23,19 @@ public enum CraftApprovalDecision: String {
 }
 
 public enum CraftCommand {
+    case `start`(CraftCommandStart)
+    case `acknowledge`(CraftCommandAcknowledge)
     case `turn`(CraftCommandTurn)
     case `action`(CraftCommandAction)
     case `shutdown`(CraftCommandShutdown)
 }
 
 public enum CraftEvent {
+    case `run_launch_failed`(CraftEventRunLaunchFailed)
+    case `run_started`(CraftEventRunStarted)
+    case `activity`(CraftEventActivity)
+    case `progress`(CraftEventProgress)
+    case `run_ended`(CraftEventRunEnded)
     case `output`(CraftEventOutput)
     case `completed`(CraftEventCompleted)
 }
@@ -109,6 +116,15 @@ public struct ProtocolVersion {
     public let `minor`: UInt32
 }
 
+public enum RunActivity: String {
+    case `working` = "working"
+    case `waiting_for_user` = "waiting_for_user"
+    case `waiting_for_approval` = "waiting_for_approval"
+    case `waiting_for_auth` = "waiting_for_auth"
+    case `waiting_for_quota` = "waiting_for_quota"
+    case `reconnecting` = "reconnecting"
+}
+
 public struct CraftActionInvoke {
     public let `action_id`: String
     public let `input`: Any
@@ -117,6 +133,16 @@ public struct CraftActionInvoke {
 public struct CraftActionApproval {
     public let `decision`: CraftApprovalDecision
     public let `request_id`: String
+}
+
+public struct CraftCommandStart {
+    public let `helper_socket`: String
+    public let `id`: String
+    public let `text`: String
+}
+
+public struct CraftCommandAcknowledge {
+    public let `source_offset`: UInt32
 }
 
 public struct CraftCommandTurn {
@@ -131,6 +157,27 @@ public struct CraftCommandAction {
 
 public struct CraftCommandShutdown {
 
+}
+
+public struct CraftEventRunLaunchFailed {
+
+}
+
+public struct CraftEventRunStarted {
+    public let `harness_pid`: UInt32
+    public let `helper_pid`: UInt32
+}
+
+public struct CraftEventActivity {
+    public let `activity`: RunActivity
+}
+
+public struct CraftEventProgress {
+    public let `source_offset`: UInt32
+}
+
+public struct CraftEventRunEnded {
+    public let `exit_code`: UInt32?
 }
 
 public struct CraftEventOutput {
