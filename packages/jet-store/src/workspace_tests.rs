@@ -1,7 +1,7 @@
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
-use super::{NewWorkspace, WorkspaceRecord};
+use super::{NewWorkspace, WorkspaceRecord, WorkspaceSeedRecord};
 use crate::{
 	ActorRecord, NewConversation, NewProject, NewRun, RetentionPolicy,
 	RunLifecycle, RunRecord, Store, StoreError, WorkingTreeRecord,
@@ -41,7 +41,18 @@ fn workspace(
 		root: root.into(),
 		base_selection: "main".into(),
 		base_commit: "0123456789abcdef0123456789abcdef01234567".into(),
+		seed: None,
 		created_at_unix_ms: NOW_UNIX_MS,
+	}
+}
+
+fn seeded(workspace: NewWorkspace) -> NewWorkspace {
+	NewWorkspace {
+		seed: Some(WorkspaceSeedRecord {
+			tree: "89abcdef0123456789abcdef0123456789abcdef".into(),
+			changed_paths: 3,
+		}),
+		..workspace
 	}
 }
 
@@ -53,6 +64,7 @@ fn recorded(workspace: &NewWorkspace) -> WorkspaceRecord {
 		root: workspace.root.clone(),
 		base_selection: workspace.base_selection.clone(),
 		base_commit: workspace.base_commit.clone(),
+		seed: workspace.seed.clone(),
 		created_at_unix_ms: workspace.created_at_unix_ms,
 	}
 }
@@ -65,8 +77,9 @@ fn run(conversation: &NewConversation) -> NewRun {
 	}
 }
 
-/// A Workspace belongs to one Conversation and one root, and both the
-/// Conversation and its Workspace remember the Project (ADR-0025).
+/// A Workspace belongs to one Conversation and one root, both the
+/// Conversation and its Workspace remember the Project, and a Workspace
+/// keeps the seed it was given or the absence of one (ADR-0025).
 #[tokio::test]
 async fn a_workspace_is_owned_by_one_conversation_at_one_root() {
 	let dir = tempfile::tempdir().unwrap();
@@ -82,46 +95,66 @@ async fn a_workspace_is_owned_by_one_conversation_at_one_root() {
 	});
 	let unplaced = conversation(WorkingTreeRecord::NoProject);
 	let owned = workspace(&owner, project.project_id, "/home/jet/.jet/ws/a");
+	let grown =
+		seeded(workspace(&other, project.project_id, "/home/jet/.jet/ws/b"));
 
-	let (inserted, second_for_owner, same_root, read_back, none) = store
-		.write(async |tx| {
-			tx.insert_project(project.clone()).await?;
-			for conversation in [owner, other, unplaced] {
-				tx.insert_conversation(conversation).await?;
-			}
-			let inserted = tx.insert_workspace(owned.clone()).await?;
-			let second_for_owner = tx
-				.insert_workspace(workspace(
-					&owner,
-					project.project_id,
-					"/home/jet/.jet/ws/b",
+	let (inserted, second_for_owner, same_root, read_back, seeded, none) =
+		store
+			.write(async |tx| {
+				tx.insert_project(project.clone()).await?;
+				for conversation in [owner, other, unplaced] {
+					tx.insert_conversation(conversation).await?;
+				}
+				let inserted = tx.insert_workspace(owned.clone()).await?;
+				let second_for_owner = tx
+					.insert_workspace(workspace(
+						&owner,
+						project.project_id,
+						"/home/jet/.jet/ws/b",
+					))
+					.await
+					.is_err();
+				let same_root = tx
+					.insert_workspace(workspace(
+						&other,
+						project.project_id,
+						"/home/jet/.jet/ws/a",
+					))
+					.await
+					.is_err();
+				let read_back = tx.workspace_of(owner.conversation_id).await?;
+				tx.insert_workspace(grown.clone()).await?;
+				let seeded = tx.workspace_of(other.conversation_id).await?;
+				let none = tx.workspace_of(unplaced.conversation_id).await?;
+				Ok::<_, StoreError>((
+					inserted,
+					second_for_owner,
+					same_root,
+					read_back,
+					seeded,
+					none,
 				))
-				.await
-				.is_err();
-			let same_root = tx
-				.insert_workspace(workspace(
-					&other,
-					project.project_id,
-					"/home/jet/.jet/ws/a",
-				))
-				.await
-				.is_err();
-			let read_back = tx.workspace_of(owner.conversation_id).await?;
-			let none = tx.workspace_of(unplaced.conversation_id).await?;
-			Ok::<_, StoreError>((
-				inserted,
-				second_for_owner,
-				same_root,
-				read_back,
-				none,
-			))
-		})
-		.await
-		.unwrap();
+			})
+			.await
+			.unwrap();
 
 	assert_eq!(
-		(inserted, second_for_owner, same_root, read_back, none),
-		(recorded(&owned), true, true, Some(recorded(&owned)), None)
+		(
+			inserted,
+			second_for_owner,
+			same_root,
+			read_back,
+			seeded,
+			none
+		),
+		(
+			recorded(&owned),
+			true,
+			true,
+			Some(recorded(&owned)),
+			Some(recorded(&grown)),
+			None
+		)
 	);
 }
 
