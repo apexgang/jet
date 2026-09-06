@@ -18,6 +18,8 @@ mod connection_auth;
 mod control;
 mod conversation;
 mod craft;
+mod craft_handshake;
+mod craft_spec;
 mod decimal;
 mod event;
 mod frame;
@@ -68,6 +70,10 @@ pub use conversation::{
 	RevisionConflict, Run, RunLifecycle,
 };
 pub use craft::{CraftAction, CraftApprovalDecision, CraftCommand, CraftEvent};
+pub use craft_handshake::{CraftHello, CraftReady, CraftResume};
+pub use craft_spec::{
+	BrokerPermission, CraftFeature, CraftHostAccess, CraftSpecification,
+};
 pub use event::{Actor, Event};
 pub use frame::{
 	CONNECTION_STREAM, Frame, FrameError, FrameKind, FrameLimits, FrameReader,
