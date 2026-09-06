@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 /// Host-owned recovery context; never evidence that an unacknowledged action failed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CraftResume {
 	/// Version pinned when this execution first negotiated.
 	pub version: ProtocolVersion,
@@ -16,6 +17,7 @@ pub struct CraftResume {
 
 /// First host control payload after the `jet-craft\n` preface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CraftHello {
 	/// Host Craft-protocol support, independent of its GUI/helper protocols.
 	pub protocol: ProtocolOffer,
@@ -30,6 +32,7 @@ pub struct CraftHello {
 
 /// Successful negotiation; the host persists the version with the execution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CraftReady {
 	/// Selected Craft protocol and capabilities.
 	pub protocol: NegotiatedProtocol,

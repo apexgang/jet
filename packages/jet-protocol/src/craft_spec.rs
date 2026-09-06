@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// A supported Harness feature. Unknown optional features are disabled.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CraftFeature {
 	/// Feature name; v1 understands turns, actions, and resume.
 	pub name: String,
@@ -18,6 +19,7 @@ pub struct CraftFeature {
 
 /// Jet-enforced broker permissions, all required declarations in v1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum BrokerPermission {
 	/// Read authorized Artifacts through the broker.
@@ -30,6 +32,7 @@ pub enum BrokerPermission {
 
 /// Disclosed same-user host access; not a portable sandbox guarantee.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CraftHostAccess {
 	/// An executable the Craft expects to launch.
@@ -56,6 +59,7 @@ pub enum CraftHostAccess {
 
 /// Contents of `.jet/craft-spec.toml`, also sent as JSON during handshake.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CraftSpecification {
 	/// This document's schema version, independent of Craft wire versions.
 	pub schema: ProtocolVersion,

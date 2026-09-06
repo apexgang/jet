@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+schemars = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -20,3 +21,10 @@ pretty_assertions.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+schema = ["dep:schemars"]
+
+[[example]]
+name = "craft-schema"
+required-features = ["schema"]

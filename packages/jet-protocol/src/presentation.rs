@@ -7,6 +7,7 @@ use crate::{ControlError, decode_control};
 
 /// Presentation understood by every GUI; never executable UI code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Presentation {
 	/// Plain text rendered without markup interpretation.
@@ -28,6 +29,7 @@ pub enum Presentation {
 
 /// An action description grants no broker permission or approval authority.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PresentationAction {
 	/// Harness-defined identity scoped to this execution.
 	pub id: String,
@@ -82,5 +84,18 @@ impl<'de> Deserialize<'de> for PresentationBlock {
 		// ASVS 1.5.2: only display blocks are extensible, never Commands.
 		block.known().map_err(serde::de::Error::custom)?;
 		Ok(block)
+	}
+}
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for PresentationBlock {
+	fn schema_name() -> std::borrow::Cow<'static, str> {
+		"PresentationBlock".into()
+	}
+	fn json_schema(
+		generator: &mut schemars::SchemaGenerator,
+	) -> schemars::Schema {
+		let known = generator.subschema_for::<Presentation>();
+		schemars::json_schema!({"anyOf": [known, {"type":"object", "required":["kind"], "properties":{"kind":{"type":"string", "not":{"enum":["text","markdown","actions"]}}}}]})
 	}
 }

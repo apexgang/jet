@@ -36,6 +36,7 @@ libfuzzer-sys = "0.4"
 pretty_assertions = "1"
 rustix = { version = "1", features = ["fs", "process"] }
 serde = { version = "1", features = ["derive"] }
+schemars = { version = "1.2", features = ["raw_value", "uuid1"] }
 serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"
 sqlx = { version = "0.9", default-features = false, features = [

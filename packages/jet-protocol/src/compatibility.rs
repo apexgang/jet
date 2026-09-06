@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Separately versioned contracts; sharing a codec never couples versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ProtocolFamily {
 	/// GUI to daemon protocol.
@@ -20,15 +21,19 @@ pub enum ProtocolFamily {
 #[derive(
 	Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ProtocolVersion {
 	/// Incompatible schema generation, starting at one.
+	#[cfg_attr(feature = "schema", schemars(range(max = 4_294_967_295u64)))]
 	pub major: u32,
 	/// Additive schema generation, starting at zero.
+	#[cfg_attr(feature = "schema", schemars(range(max = 4_294_967_295u64)))]
 	pub minor: u32,
 }
 
 /// A peer's highest minor for each supported major, plus capability names.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ProtocolOffer {
 	/// Contract to which this offer applies.
 	pub family: ProtocolFamily,
@@ -50,6 +55,7 @@ pub enum Negotiation {
 
 /// The immutable selection callers persist with the execution identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct NegotiatedProtocol {
 	/// Independently negotiated contract.
 	pub family: ProtocolFamily,

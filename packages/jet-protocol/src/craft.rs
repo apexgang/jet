@@ -7,6 +7,7 @@ use crate::PresentationBlock;
 
 /// Explicit decision on exactly one native approval request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CraftApprovalDecision {
 	/// Allow only the identified request under existing policy.
@@ -17,6 +18,7 @@ pub enum CraftApprovalDecision {
 
 /// Structured action input; unknown security-sensitive variants fail closed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CraftAction {
 	/// Invoke an action offered by the Harness in this execution.
@@ -37,6 +39,7 @@ pub enum CraftAction {
 
 /// Host-to-Craft Commands, admitted by Jet before crossing this boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CraftCommand {
 	/// Submit one admitted turn.
@@ -60,6 +63,7 @@ pub enum CraftCommand {
 
 /// Craft-to-host events. Native content remains the authoritative payload.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CraftEvent {
 	/// Complete native event accompanied by optional portable views.
