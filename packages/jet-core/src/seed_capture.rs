@@ -8,13 +8,15 @@
 //! changes included; a capture of named paths first reads HEAD back over
 //! the copy, keeping its sparse bits, so a change staged elsewhere does not
 //! come along uninvited. Writing the copy as a tree gives an immutable,
-//! content-addressed snapshot in the Project's own object store, which the
+//! content-addressed capture in the Project's own object store, which the
 //! Workspace shares.
+//!
 //! Git records a symbolic link as the link itself and a submodule as the
 //! commit it has checked out, so neither is followed or entered. A
 //! repository nested inside the working tree would become a Git link too,
 //! and is not: it is dropped from a capture of everything and refused
-//! when named (ADR-0103).
+//! when named. One nested where the base already tracks files is staged as
+//! those files, as Git does, and its own `.git` is never read (ADR-0103).
 //!
 //! Applying reads the tree over the Workspace's own HEAD after checking
 //! that HEAD is the commit the changes were made against. The changes
@@ -47,7 +49,7 @@ const ABSENT_MODE: &str = "000000";
 /// Local-checkout changes captured as one tree, with the commit they were
 /// made against.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CheckoutSnapshot {
+pub(crate) struct CapturedSeed {
 	/// The commit the Local checkout had checked out when the changes were
 	/// captured; the Workspace must be at it for the tree to mean the same.
 	pub(crate) head: String,
@@ -83,7 +85,7 @@ pub(crate) async fn capture(
 	scratch: &Path,
 	selection: &SeedSelection,
 	base_commit: &str,
-) -> Result<CheckoutSnapshot, CoreError> {
+) -> Result<CapturedSeed, CoreError> {
 	tokio::time::timeout(
 		SEED_BUDGET,
 		capture_unbounded(root, scratch, selection, base_commit),
@@ -97,7 +99,13 @@ async fn capture_unbounded(
 	scratch: &Path,
 	selection: &SeedSelection,
 	base_commit: &str,
-) -> Result<CheckoutSnapshot, CoreError> {
+) -> Result<CapturedSeed, CoreError> {
+	if selection.is_none() {
+		return Err(CoreError::internal(
+			"workspace.seed_unselected",
+			"a capture was asked for with nothing selected",
+		));
+	}
 	let head = worktree::resolve_commit(root, "HEAD").await?;
 	if head != base_commit {
 		return Err(base_mismatch());
@@ -105,18 +113,13 @@ async fn capture_unbounded(
 	let index = scratch.join("index");
 	copy_index(root, &index).await?;
 	match selection {
-		SeedSelection::None => {
-			return Err(CoreError::internal(
-				"workspace.seed_unselected",
-				"a capture was asked for with nothing selected",
-			));
-		}
+		SeedSelection::None => {}
 		SeedSelection::AllEligible => stage_everything(root, &index).await?,
 		SeedSelection::Paths(paths) => stage_paths(root, &index, paths).await?,
 	}
 	let mut tree = write_tree(root, &index).await?;
-	let mut changes = changes(root, &head, &tree).await?;
-	let nested: Vec<&str> = changes
+	let mut changed = changes(root, &head, &tree).await?;
+	let nested: Vec<&str> = changed
 		.iter()
 		.filter(|change| change.nested_repository)
 		.map(|change| change.path.as_str())
@@ -132,17 +135,17 @@ async fn capture_unbounded(
 			return Err(seed_failed(removed.stderr));
 		}
 		tree = write_tree(root, &index).await?;
-		changes = self::changes(root, &head, &tree).await?;
+		changed = changes(root, &head, &tree).await?;
 	}
-	Ok(CheckoutSnapshot {
+	Ok(CapturedSeed {
 		head,
 		tree,
-		changed_paths: u32::try_from(changes.len()).unwrap_or(u32::MAX),
+		changed_paths: u32::try_from(changed.len()).unwrap_or(u32::MAX),
 	})
 }
 
-/// Applies `snapshot` to the Workspace at `root`, which must be clean and
-/// at the commit the snapshot was captured against.
+/// Applies `captured` to the Workspace at `root`, which must be clean and
+/// at the commit the captured was captured against.
 ///
 /// # Errors
 ///
@@ -151,9 +154,9 @@ async fn capture_unbounded(
 /// then not one the caller keeps.
 pub(crate) async fn apply(
 	root: &Path,
-	snapshot: &CheckoutSnapshot,
+	captured: &CapturedSeed,
 ) -> Result<(), CoreError> {
-	tokio::time::timeout(SEED_BUDGET, apply_unbounded(root, snapshot))
+	tokio::time::timeout(SEED_BUDGET, apply_unbounded(root, captured))
 		.await
 		.map_err(|_| {
 			seed_failed("the application did not finish in time".into())
@@ -162,17 +165,17 @@ pub(crate) async fn apply(
 
 async fn apply_unbounded(
 	root: &Path,
-	snapshot: &CheckoutSnapshot,
+	captured: &CapturedSeed,
 ) -> Result<(), CoreError> {
 	let head = worktree::resolve_commit(root, "HEAD").await?;
-	if head != snapshot.head {
+	if head != captured.head {
 		return Err(seed_failed(format!(
 			"the Workspace is at {head}, not at {} as captured",
-			snapshot.head
+			captured.head
 		)));
 	}
 	let read =
-		git(root, &["read-tree", "-m", "-u", "HEAD", &snapshot.tree]).await?;
+		git(root, &["read-tree", "-m", "-u", "HEAD", &captured.tree]).await?;
 	if !read.status.success() {
 		return Err(seed_failed(read.stderr));
 	}

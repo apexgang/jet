@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::CoreError;
 use crate::relative_path::RelativePath;
+use crate::seed_capture::CapturedSeed;
 
 /// Most paths one selection may name. A control frame holds no larger
 /// collection either, so a selection that reaches the core through the
@@ -91,6 +92,15 @@ pub struct WorkspaceSeed {
 	pub tree: String,
 	/// How many paths the tree changes against the base.
 	pub changed_paths: u32,
+}
+
+impl From<&CapturedSeed> for WorkspaceSeed {
+	fn from(captured: &CapturedSeed) -> Self {
+		Self {
+			tree: captured.tree.clone(),
+			changed_paths: captured.changed_paths,
+		}
+	}
 }
 
 impl From<WorkspaceSeedRecord> for WorkspaceSeed {

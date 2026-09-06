@@ -3,21 +3,22 @@ use std::path::{Path, PathBuf};
 use pretty_assertions::assert_eq;
 
 use crate::test_support::{
-	actor, git, init_repository, register_repository, request, start_core,
+	actor, conversation_snapshot as snapshot, events, git, init_repository,
+	register_repository, request, start_core,
 };
 use crate::{
-	BaseSelection, Command, CommandOutcome, Conversation, ConversationId,
-	ConversationSnapshot, Core, CoreError, ErrorCategory, EventKind,
-	EventSequence, ProjectId, Query, QueryResult, RelativePath,
-	RetentionPolicy, SeedSelection, WorkingTreeRequest, WorkspaceSeed,
+	BaseSelection, Command, CommandOutcome, Conversation, Core, CoreError,
+	ErrorCategory, EventKind, ProjectId, RelativePath, RetentionPolicy,
+	SeedSelection, WorkingTreeRequest, WorkspaceSeed,
 };
 
 /// A Project whose Local checkout holds every kind of change a seed meets:
 /// a modified, a deleted, a staged-only, and a new file; an ignored file, a
 /// directory mixing unignored and ignored files, an ignored directory, and
 /// an unignored directory of ignored files only; a dangling symbolic link;
-/// a submodule moved to a later commit and dirtied; and a repository
-/// nested inside the working tree.
+/// a submodule moved to a later commit and dirtied; a repository nested
+/// inside the working tree; and another nested over a directory the base
+/// tracks.
 struct BusyCheckout {
 	core: Core,
 	project_id: ProjectId,
@@ -52,6 +53,8 @@ async fn busy_checkout(dir: &Path) -> BusyCheckout {
 	std::fs::write(repository.join("gone.txt"), "gone\n").unwrap();
 	std::fs::create_dir(repository.join("d")).unwrap();
 	std::fs::write(repository.join("d/keep.txt"), "keep\n").unwrap();
+	std::fs::create_dir(repository.join("vendor")).unwrap();
+	std::fs::write(repository.join("vendor/lib.txt"), "lib\n").unwrap();
 	git(&repository, &["add", "-A"]);
 	git(&repository, &["commit", "-q", "-m", "Base"]);
 
@@ -72,6 +75,8 @@ async fn busy_checkout(dir: &Path) -> BusyCheckout {
 	git(&repository.join("sub"), &["checkout", "-q", &submodule_now]);
 	std::fs::write(repository.join("sub/dirty.txt"), "dirty\n").unwrap();
 	init_repository(&repository.join("nested"));
+	std::fs::write(repository.join("vendor/lib.txt"), "rewritten\n").unwrap();
+	init_repository(&repository.join("vendor"));
 
 	BusyCheckout {
 		core,
@@ -107,36 +112,6 @@ async fn create(
 	Ok(conversation)
 }
 
-async fn snapshot(
-	core: &Core,
-	conversation_id: ConversationId,
-) -> ConversationSnapshot {
-	let result = core
-		.query(&actor(), Query::Conversation { conversation_id })
-		.await
-		.unwrap();
-	let QueryResult::Conversation(snapshot) = result else {
-		panic!("unexpected result {result:?}");
-	};
-	snapshot
-}
-
-async fn events(core: &Core) -> Vec<EventKind> {
-	let result = core
-		.query(
-			&actor(),
-			Query::Events {
-				after: EventSequence(0),
-			},
-		)
-		.await
-		.unwrap();
-	let QueryResult::Events(page) = result else {
-		panic!("unexpected result {result:?}");
-	};
-	page.events.into_iter().map(|event| event.kind).collect()
-}
-
 fn paths(paths: &[&str]) -> SeedSelection {
 	SeedSelection::Paths(
 		paths
@@ -165,8 +140,9 @@ fn submodule_commit(root: &Path) -> String {
 /// deletions, staged and unstaged alike, and unignored new files, staged
 /// into the Workspace; leaves ignored files out; keeps a symbolic link as
 /// a link; moves the submodule's Git link without entering it; drops the
-/// nested repository; records and journals what was applied; and leaves
-/// the Local checkout exactly as it was (ADR-0025, ADR-0103).
+/// nested repository while taking one nested over tracked files as those
+/// files; records and journals what was applied; and leaves the Local
+/// checkout exactly as it was (ADR-0025, ADR-0103).
 #[tokio::test]
 async fn all_eligible_changes_seed_the_workspace_and_leave_the_checkout_alone()
 {
@@ -209,6 +185,9 @@ async fn all_eligible_changes_seed_the_workspace_and_leave_the_checkout_alone()
 				root.join("sub/dirty.txt").exists(),
 				git(&root, &["ls-files", "--", "nested"]),
 				root.join("nested").exists(),
+				git(&root, &["ls-files", "--", "vendor"]),
+				read(root.join("vendor/lib.txt")),
+				root.join("vendor/.git").exists(),
 				git(&root, &["status", "--porcelain"]),
 			),
 			(
@@ -237,14 +216,18 @@ async fn all_eligible_changes_seed_the_workspace_and_leave_the_checkout_alone()
 				false,
 				String::new(),
 				false,
+				"vendor/README.md\nvendor/lib.txt\n".to_owned(),
+				Some("rewritten\n".into()),
+				false,
 				"A  d/scratch.txt\nD  gone.txt\nA  link\nA  new.txt\nA  \
-				 staged.txt\nM  sub\nM  tracked.txt\n"
+				 staged.txt\nM  sub\nM  tracked.txt\nA  vendor/README.md\nM  \
+				 vendor/lib.txt\n"
 					.to_owned(),
 			),
 			(
 				&WorkspaceSeed {
 					tree: seed.tree.clone(),
-					changed_paths: 7,
+					changed_paths: 9,
 				},
 				Some(EventKind::WorkspaceSeeded {
 					workspace_id: workspace.workspace_id,
@@ -374,6 +357,66 @@ async fn a_seed_that_cannot_be_taken_is_refused_without_a_trace() {
 			],
 			1,
 			0,
+		)
+	);
+}
+
+/// A seed that cannot be applied fails the whole creation: the refusal is
+/// stable, nothing is recorded, and the worktree Git had already made is
+/// removed rather than kept half seeded (ADR-0025).
+#[tokio::test]
+async fn a_seed_that_cannot_be_applied_leaves_no_workspace_behind() {
+	let dir = tempfile::tempdir().unwrap();
+	let core = start_core(&dir.path().join("plane.sqlite3")).await;
+	let project_id = register_repository(&core, &dir.path().join("repo")).await;
+	let repository = dir.path().join("repo").canonicalize().unwrap();
+	// A filter the capture passes and the checkout cannot: the seed adds
+	// the attribute and the file together, so the base checks out fine and
+	// only reading the seed in fails, after part of it is on disk.
+	for (key, value) in [
+		("filter.boom.clean", "cat"),
+		("filter.boom.smudge", "false"),
+		("filter.boom.required", "true"),
+	] {
+		git(&repository, &["config", key, value]);
+	}
+	std::fs::write(
+		repository.join(".gitattributes"),
+		"secret.txt filter=boom\n",
+	)
+	.unwrap();
+	std::fs::write(repository.join("secret.txt"), "secret\n").unwrap();
+
+	let refusal = create(
+		&core,
+		project_id,
+		BaseSelection::Head,
+		SeedSelection::AllEligible,
+	)
+	.await
+	.unwrap_err();
+	let journal = events(&core).await;
+	let left_behind = std::fs::read_dir(dir.path().join("workspaces"))
+		.map(|entries| entries.count())
+		.unwrap_or(0);
+	let worktrees = git(&repository, &["worktree", "list", "--porcelain"])
+		.matches("worktree ")
+		.count();
+
+	assert_eq!(
+		(
+			refusal.category,
+			refusal.code,
+			journal.len(),
+			left_behind,
+			worktrees
+		),
+		(
+			ErrorCategory::Unavailable,
+			"workspace.seed_failed".into(),
+			1,
+			0,
+			1
 		)
 	);
 }

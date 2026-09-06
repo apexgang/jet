@@ -3,12 +3,12 @@ use std::path::Path;
 use pretty_assertions::assert_eq;
 
 use crate::test_support::{
-	actor, git, register_repository, request, start_core,
+	actor, conversation_snapshot as snapshot, events, git, register_repository,
+	request, start_core,
 };
 use crate::{
-	BaseSelection, Command, CommandOutcome, Conversation, ConversationId,
-	ConversationSnapshot, Core, CoreError, ErrorCategory, EventKind,
-	EventSequence, ProjectId, Query, QueryResult, RetentionPolicy, Run,
+	BaseSelection, Command, CommandOutcome, Conversation, ConversationId, Core,
+	CoreError, ErrorCategory, EventKind, ProjectId, RetentionPolicy, Run,
 	RunLifecycle, SeedSelection, WorkingTree, WorkingTreeRequest, Workspace,
 	WorkspaceBase,
 };
@@ -47,36 +47,6 @@ async fn create_run(
 		panic!("unexpected outcome {outcome:?}");
 	};
 	Ok(run)
-}
-
-async fn snapshot(
-	core: &Core,
-	conversation_id: ConversationId,
-) -> ConversationSnapshot {
-	let result = core
-		.query(&actor(), Query::Conversation { conversation_id })
-		.await
-		.unwrap();
-	let QueryResult::Conversation(snapshot) = result else {
-		panic!("unexpected result {result:?}");
-	};
-	snapshot
-}
-
-async fn events(core: &Core) -> Vec<EventKind> {
-	let result = core
-		.query(
-			&actor(),
-			Query::Events {
-				after: EventSequence(0),
-			},
-		)
-		.await
-		.unwrap();
-	let QueryResult::Events(page) = result else {
-		panic!("unexpected result {result:?}");
-	};
-	page.events.into_iter().map(|event| event.kind).collect()
 }
 
 fn in_workspace(

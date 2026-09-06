@@ -29,7 +29,7 @@ use crate::error::CoreError;
 use crate::event::{EventKind, EventSubject};
 use crate::filesystem::{blocking, canonicalize};
 use crate::seed::{SeedSelection, WorkspaceSeed};
-use crate::seed_capture::{self, CheckoutSnapshot};
+use crate::seed_capture::{self, CapturedSeed};
 use crate::{Actor, Core, ProjectId, lifecycle, system_time, worktree};
 
 /// Longest base selection the core accepts, as text. A branch name is
@@ -138,7 +138,7 @@ pub(crate) struct PreparedWorkspace {
 	project_id: ProjectId,
 	project_root: PathBuf,
 	base: WorkspaceBase,
-	snapshot: Option<CheckoutSnapshot>,
+	captured: Option<CapturedSeed>,
 }
 
 impl BaseSelection {
@@ -204,10 +204,18 @@ pub(crate) async fn prepare(
 	let project_root = PathBuf::from(project.root);
 	let commit =
 		worktree::resolve_commit(&project_root, base.as_revision()).await?;
-	let snapshot = if seed.is_none() {
+	let captured = if seed.is_none() {
 		None
 	} else {
-		Some(capture(&core.workspace_home, &project_root, seed, &commit).await?)
+		Some(
+			capture_in_scratch(
+				&core.workspace_home,
+				&project_root,
+				seed,
+				&commit,
+			)
+			.await?,
+		)
 	};
 	Ok(PreparedWorkspace {
 		project_id,
@@ -216,18 +224,18 @@ pub(crate) async fn prepare(
 			selection: base.clone(),
 			commit,
 		},
-		snapshot,
+		captured,
 	})
 }
 
 /// Captures `seed` through a scratch directory of the Workspace home, which
 /// is the owner's alone and is gone again before this returns.
-async fn capture(
+async fn capture_in_scratch(
 	home: &WorkspaceHome,
 	project_root: &Path,
 	seed: &SeedSelection,
 	commit: &str,
-) -> Result<CheckoutSnapshot, CoreError> {
+) -> Result<CapturedSeed, CoreError> {
 	use std::os::unix::fs::DirBuilderExt;
 	let scratch = prepare_home(&home.0)
 		.await?
@@ -276,12 +284,9 @@ pub(crate) async fn create(
 		project_id,
 		project_root,
 		base,
-		snapshot,
+		captured,
 	} = prepared;
-	let seed = snapshot.as_ref().map(|snapshot| WorkspaceSeed {
-		tree: snapshot.tree.clone(),
-		changed_paths: snapshot.changed_paths,
-	});
+	let seed = captured.as_ref().map(WorkspaceSeed::from);
 	if tx.project(project_id.0).await?.is_none() {
 		return Err(project_not_found());
 	}
@@ -343,8 +348,8 @@ pub(crate) async fn create(
 			.await?;
 	}
 	worktree::add_detached(&project_root, &root_text, &base.commit).await?;
-	if let Some(snapshot) = snapshot
-		&& let Err(refusal) = seed_capture::apply(&root, &snapshot).await
+	if let Some(captured) = captured
+		&& let Err(refusal) = seed_capture::apply(&root, &captured).await
 	{
 		worktree::remove_forced(&project_root, &root_text).await;
 		return Err(refusal);
