@@ -17,7 +17,7 @@ use crate::capability::{
 use crate::clock::{Clock, SystemClock};
 use crate::{
 	Actor, ClientId, Command, CommandEnvelope, CommandId, CommandOutcome, Core,
-	CraftId, HarnessId, PathGrant, ProjectId,
+	CraftId, HarnessId, PathGrant, ProjectId, WorkspaceHome,
 };
 
 /// The one interactive Actor every core test acts as.
@@ -29,7 +29,8 @@ pub(crate) fn actor() -> Actor {
 
 /// Starts a core over a fresh or existing store at `path`, on a Plane that
 /// has everything. Tests observe a fixed Plane rather than the machine they
-/// run on, so no test depends on which tools the host installed.
+/// run on, so no test depends on which tools the host installed. Workspaces
+/// go beside the store, the way they sit beside it under a Jet home.
 pub(crate) async fn start_core(path: &Path) -> Core {
 	start_core_with(path, Arc::new(SystemClock), FixedProbe::new(equipped()))
 		.await
@@ -42,7 +43,8 @@ pub(crate) async fn start_core_with(
 	probe: Arc<FixedProbe>,
 ) -> Core {
 	let store = Store::open(path).await.unwrap();
-	Core::start_with(store, clock, probe).await.unwrap()
+	let home = WorkspaceHome(path.with_file_name("workspaces"));
+	Core::start_with(store, home, clock, probe).await.unwrap()
 }
 
 /// A clock a test moves by hand, so a retention window or an observation

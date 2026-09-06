@@ -6,6 +6,7 @@ use crate::{
 	Command, CommandOutcome, ConversationId, Core, CoreError, ErrorCategory,
 	EventKind, ProjectId, Query, QueryResult, ResolvedSetting, RetentionPolicy,
 	SettingKey, SettingScope, SettingSelection, SettingSource, SettingValue,
+	WorkingTreeRequest,
 };
 
 async fn start(path: &tempfile::TempDir) -> Core {
@@ -18,6 +19,7 @@ async fn conversation(core: &Core) -> SettingScope {
 			&actor(),
 			request(Command::CreateConversation {
 				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRequest::NoProject,
 			}),
 		)
 		.await

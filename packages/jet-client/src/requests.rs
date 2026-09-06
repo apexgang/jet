@@ -7,6 +7,7 @@ use jet_protocol::{
 	CredentialSource, EventPage, PageCursor, PlaneStatus, QueryRequest,
 	QueryResponse, RetentionPolicy, Run, RunLifecycle, SecurityAudit,
 	SettingKey, SettingScope, SettingSelection, SettingSnapshot, SettingValue,
+	WorkingTreeRequest,
 };
 use uuid::Uuid;
 
@@ -237,10 +238,40 @@ impl Client {
 		command_id: Uuid,
 		retention: RetentionPolicy,
 	) -> Result<Conversation, ClientError> {
+		self.create_conversation_in(
+			command_id,
+			retention,
+			WorkingTreeRequest::NoProject,
+		)
+		.await
+	}
+
+	/// Creates a Conversation that works in `working_tree`: a managed
+	/// Workspace of a Project, created with it, or the Project's own Local
+	/// checkout (ADR-0025). Asking for either needs protocol minor 9.
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::FeatureUnavailable`] when the negotiated
+	/// minor predates working trees, [`ClientError::Remote`] when the
+	/// daemon reports a stable error such as `project.not_found` or
+	/// `workspace.base_not_found`, or the transport failure otherwise.
+	pub async fn create_conversation_in(
+		&self,
+		command_id: Uuid,
+		retention: RetentionPolicy,
+		working_tree: WorkingTreeRequest,
+	) -> Result<Conversation, ClientError> {
+		if !working_tree.is_no_project() {
+			self.require_minor(jet_protocol::WORKSPACES_MINOR)?;
+		}
 		match self
 			.execute_command(
 				command_id,
-				CommandRequest::CreateConversation { retention },
+				CommandRequest::CreateConversation {
+					retention,
+					working_tree,
+				},
 			)
 			.await?
 		{

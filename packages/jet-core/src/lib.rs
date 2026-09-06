@@ -42,6 +42,8 @@ mod setting;
 mod status;
 #[cfg(test)]
 mod test_support;
+mod workspace;
+mod worktree;
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -105,6 +107,10 @@ pub use setting::{
 	SettingSnapshot, SettingSource, SettingValue,
 };
 pub use status::PlaneStatus;
+pub use workspace::{
+	BaseSelection, WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase,
+	WorkspaceHome, WorkspaceId,
+};
 
 /// Version of the running core, reported in status snapshots.
 pub(crate) const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -196,6 +202,8 @@ pub struct Core {
 	#[allow(dead_code, reason = "used by Effect reconciliation in issue #20")]
 	effect_reconciliation: tokio::sync::Mutex<()>,
 	conversation_pages: pagination::ConversationPages,
+	/// Where this core creates Workspaces (ADR-0025).
+	workspace_home: workspace::WorkspaceHome,
 }
 
 impl Core {
@@ -205,9 +213,13 @@ impl Core {
 	///
 	/// Returns [`CoreError`] with an `unavailable` or `internal` category
 	/// when the start cannot be committed.
-	pub async fn start(store: Store) -> Result<Self, CoreError> {
+	pub async fn start(
+		store: Store,
+		workspace_home: WorkspaceHome,
+	) -> Result<Self, CoreError> {
 		Self::start_with(
 			store,
+			workspace_home,
 			Arc::new(SystemClock),
 			Arc::new(SystemCapabilityProbe),
 		)
@@ -223,6 +235,7 @@ impl Core {
 	/// when the start cannot be committed.
 	pub(crate) async fn start_with(
 		store: Store,
+		workspace_home: WorkspaceHome,
 		clock: Arc<dyn Clock>,
 		probe: Arc<dyn CapabilityProbe>,
 	) -> Result<Self, CoreError> {
@@ -252,6 +265,7 @@ impl Core {
 			started_at,
 			effect_reconciliation: tokio::sync::Mutex::new(()),
 			conversation_pages: pagination::ConversationPages::default(),
+			workspace_home,
 		})
 	}
 

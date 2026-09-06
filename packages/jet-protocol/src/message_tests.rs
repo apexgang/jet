@@ -25,6 +25,7 @@ use crate::project::{
 	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
 	ProjectPreview, Registrability, Repository, Worktree,
 };
+use crate::workspace::WorkingTreeRequest;
 use crate::{ControlError, decode_control};
 
 fn json(value: &impl serde::Serialize) -> String {
@@ -148,6 +149,7 @@ fn conversation_commands_and_results_have_the_agreed_wire_shape() {
 		command_id: Uuid::nil(),
 		command: CommandRequest::CreateConversation {
 			retention: RetentionPolicy::Retain,
+			working_tree: WorkingTreeRequest::NoProject,
 		},
 	};
 	let result = ServerMessage::CommandResult {
@@ -155,6 +157,7 @@ fn conversation_commands_and_results_have_the_agreed_wire_shape() {
 		result: CommandResponse::ConversationCreated(Conversation {
 			conversation_id: Uuid::nil(),
 			retention: RetentionPolicy::Retain,
+			working_tree: None,
 			created_at_unix_ms: 1_700_000_000_000,
 		}),
 	};
@@ -227,6 +230,7 @@ fn a_create_conversation_command_retains_by_default() {
 			command_id: Uuid::nil(),
 			command: CommandRequest::CreateConversation {
 				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRequest::NoProject,
 			},
 		}
 	);
@@ -248,6 +252,7 @@ fn raw_command_keeps_the_exact_command_bytes_of_a_frame() {
 				command_id: Uuid::nil(),
 				command: CommandRequest::CreateConversation {
 					retention: RetentionPolicy::Retain,
+					working_tree: WorkingTreeRequest::NoProject,
 				},
 			},
 			r#"{ "type" : "create_conversation" }"#
@@ -263,8 +268,10 @@ fn conversation_snapshots_and_event_pages_have_the_agreed_wire_shape() {
 		conversation: Conversation {
 			conversation_id: Uuid::nil(),
 			retention: RetentionPolicy::ForgetAfterFinalRun,
+			working_tree: None,
 			created_at_unix_ms: 1,
 		},
+		workspace: None,
 		runs: vec![Run {
 			run_id: Uuid::nil(),
 			conversation_id: Uuid::nil(),

@@ -175,3 +175,38 @@ pub async fn connect_raw(daemon: &Daemon, client_id: Uuid) -> RawConnection {
 	);
 	connection
 }
+
+/// Creates an ordinary repository at `dir` with one commit and returns its
+/// canonical path. The test host needs `git`, as CI provisions it
+/// (ADR-0056).
+pub fn init_repository(dir: &Path) -> PathBuf {
+	std::fs::create_dir_all(dir).unwrap();
+	for args in [
+		vec!["init", "-q"],
+		vec!["add", "-A"],
+		vec!["commit", "-q", "--allow-empty", "-m", "Initial"],
+	] {
+		let output = std::process::Command::new("git")
+			.env("GIT_CONFIG_NOSYSTEM", "1")
+			.env("GIT_CONFIG_GLOBAL", "/dev/null")
+			.arg("-C")
+			.arg(dir)
+			.args([
+				"-c",
+				"user.name=Jet",
+				"-c",
+				"user.email=jet@example.invalid",
+				"-c",
+				"commit.gpgsign=false",
+			])
+			.args(&args)
+			.output()
+			.unwrap();
+		assert!(
+			output.status.success(),
+			"git {args:?} failed: {}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+	}
+	dir.canonicalize().unwrap()
+}

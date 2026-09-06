@@ -16,6 +16,7 @@ use crate::conversation::{ConversationId, RunId};
 use crate::error::CoreError;
 use crate::pairing::{PairingEnd, PairingOfferId};
 use crate::setting::{SettingKey, SettingScope, SettingValue};
+use crate::workspace::{WorkingTree, WorkspaceBase, WorkspaceId};
 use crate::{Actor, ClientId, ProjectId, system_time};
 
 /// Most Events one `Query::Events` page returns.
@@ -114,6 +115,22 @@ pub enum EventKind {
 	ConversationCreated {
 		/// Its retention choice.
 		retention: RetentionPolicy,
+		/// Where it does its work. A journal written before Conversations
+		/// had one reads as no Project.
+		#[serde(default)]
+		working_tree: WorkingTree,
+	},
+	/// A managed Workspace was created for a Conversation (ADR-0025).
+	#[serde(rename = "workspace.created")]
+	WorkspaceCreated {
+		/// The Workspace that was created.
+		workspace_id: WorkspaceId,
+		/// The Project it was created from.
+		project_id: ProjectId,
+		/// The Jet-owned root of its worktree.
+		root: PathBuf,
+		/// What it started from.
+		base: WorkspaceBase,
 	},
 	/// A Run was recorded in the `created` state.
 	#[serde(rename = "run.created")]
@@ -281,7 +298,8 @@ impl EventKind {
 			| Self::PairingOfferEnded { .. }
 			| Self::PairedClientAccessChanged { .. }
 			| Self::PairedClientRevoked { .. }
-			| Self::ProjectRegistered { .. } => {
+			| Self::ProjectRegistered { .. }
+			| Self::WorkspaceCreated { .. } => {
 				let encoded = serde_json::to_value(self).map_err(|error| {
 					CoreError::internal("event.unencodable", error.to_string())
 				})?;

@@ -11,7 +11,7 @@ use jet_protocol::{
 	ClientMessage, CommandResponse, Conversation, ConversationList,
 	ConversationSnapshot, ErrorCategory, EventPage, QueryRequest,
 	QueryResponse, RestartMetadata, RetentionPolicy, RunLifecycle, ServerHello,
-	ServerMessage, WireError,
+	ServerMessage, WireError, WorkingTree,
 };
 use jet_store::{
 	ActorRecord, CONVERSATION_PAGE_LIMIT, EventClass, NewEvent, Store,
@@ -67,8 +67,10 @@ async fn a_conversation_is_queryable_before_any_run_and_retained_by_default() {
 			conversation: Conversation {
 				conversation_id: conversation.conversation_id,
 				retention: RetentionPolicy::Retain,
+				working_tree: Some(WorkingTree::NoProject),
 				created_at_unix_ms: conversation.created_at_unix_ms,
 			},
+			workspace: None,
 			runs: vec![],
 		}
 	);
@@ -144,6 +146,7 @@ async fn a_conversation_is_retained_with_its_terminal_runs_across_a_jetd_restart
 		ConversationSnapshot {
 			cursor: 7,
 			conversation: conversation.clone(),
+			workspace: None,
 			runs: vec![completed.clone(), canceled],
 		}
 	);

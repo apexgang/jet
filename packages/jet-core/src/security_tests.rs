@@ -8,7 +8,7 @@ use crate::{
 	AuditEpoch, AuditSequence, Command, CommandOutcome, Core, CoreError,
 	CredentialSource, ErrorCategory, ProviderId, Query, QueryResult,
 	RetentionPolicy, SecurityDegradation, SecurityState, SettingKey,
-	SettingScope, SettingValue,
+	SettingScope, SettingValue, WorkingTreeRequest,
 };
 
 async fn bind(core: &Core) -> Result<CommandOutcome, CoreError> {
@@ -90,6 +90,7 @@ async fn a_degraded_plane_refuses_to_change_trust_and_keeps_working() {
 			&actor(),
 			request(Command::CreateConversation {
 				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRequest::NoProject,
 			}),
 		)
 		.await;

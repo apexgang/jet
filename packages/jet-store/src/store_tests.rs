@@ -6,7 +6,7 @@ use super::{
 	EVENT_COMPACTION_BATCH_LIMIT, EventClass, EventRecord, NewCommandReceipt,
 	NewConversation, NewEvent, NewRun, PlaneRecord, RetentionPolicy,
 	RunLifecycle, RunRecord, SettingRecord, SettingScopeRecord, Store,
-	StoreError, is_unavailable_code,
+	StoreError, WorkingTreeRecord, is_unavailable_code,
 };
 
 const NOW_UNIX_MS: i64 = 1_700_000_000_000;
@@ -137,6 +137,7 @@ async fn closing_the_store_checkpoints_the_write_ahead_log() {
 			tx.insert_conversation(NewConversation {
 				conversation_id: Uuid::now_v7(),
 				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRecord::NoProject,
 				created_at_unix_ms: NOW_UNIX_MS,
 			})
 			.await
@@ -177,6 +178,7 @@ async fn a_connection_left_mid_transaction_is_replaced_rather_than_reused() {
 			tx.insert_conversation(NewConversation {
 				conversation_id,
 				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRecord::NoProject,
 				created_at_unix_ms: NOW_UNIX_MS,
 			})
 			.await
@@ -190,6 +192,7 @@ async fn a_connection_left_mid_transaction_is_replaced_rather_than_reused() {
 		ConversationRecord {
 			conversation_id,
 			retention: RetentionPolicy::Retain,
+			working_tree: WorkingTreeRecord::NoProject,
 			created_at_unix_ms: NOW_UNIX_MS,
 		}
 	);
@@ -293,6 +296,7 @@ async fn operational_event_compaction_is_bounded_and_preserves_cursor_truth() {
 			tx.insert_conversation(NewConversation {
 				conversation_id,
 				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRecord::NoProject,
 				created_at_unix_ms: NOW_UNIX_MS,
 			})
 			.await?;
@@ -496,6 +500,7 @@ async fn conversations_runs_and_events_survive_reopening_the_store() {
 				.insert_conversation(NewConversation {
 					conversation_id,
 					retention: RetentionPolicy::Retain,
+					working_tree: WorkingTreeRecord::NoProject,
 					created_at_unix_ms: NOW_UNIX_MS,
 				})
 				.await?;
@@ -557,6 +562,7 @@ async fn conversations_runs_and_events_survive_reopening_the_store() {
 		ConversationRecord {
 			conversation_id,
 			retention: RetentionPolicy::Retain,
+			working_tree: WorkingTreeRecord::NoProject,
 			created_at_unix_ms: NOW_UNIX_MS,
 		}
 	);
@@ -605,6 +611,7 @@ async fn a_failed_write_leaves_no_trace_of_its_changes() {
 			tx.insert_conversation(NewConversation {
 				conversation_id,
 				retention: RetentionPolicy::ForgetAfterFinalRun,
+				working_tree: WorkingTreeRecord::NoProject,
 				created_at_unix_ms: NOW_UNIX_MS,
 			})
 			.await?;

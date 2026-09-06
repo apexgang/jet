@@ -5,7 +5,8 @@
 use jet_store::{
 	EffectKindRecord, EffectSafetyRecord, NewCommandReceipt, NewConversation,
 	NewEffect, NewRun, PairedClientAccess, PairingGate, PairingMethod,
-	RetentionPolicy, RunLifecycle, SettingRecord, WriteTransaction,
+	RetentionPolicy, RunLifecycle, SettingRecord, WorkingTreeRecord,
+	WriteTransaction,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -32,6 +33,7 @@ use crate::preparation::Prepared;
 use crate::project::{self, PathGrant, Project};
 use crate::security::{self, SecurityClass, SecurityState};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
+use crate::workspace::{self, WorkingTree, WorkingTreeRequest, WorkspaceHome};
 use crate::{Actor, ClientId, Core, lifecycle};
 use crate::{paired_client, pairing_completion, pairing_offer};
 
@@ -99,10 +101,13 @@ impl CommandEnvelope {
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
-	/// Create a Conversation with no Runs.
+	/// Create a Conversation with no Runs, and the Workspace it works in
+	/// when it asks for one (ADR-0025).
 	CreateConversation {
 		/// Whether Jet keeps the Conversation after its final Run.
 		retention: RetentionPolicy,
+		/// Where it does its work.
+		working_tree: WorkingTreeRequest,
 	},
 	/// Record a new Run of a Conversation that has no live Run.
 	CreateRun {
@@ -234,7 +239,11 @@ impl Command {
 				value: SettingValue::Flag(true),
 				..
 			}
-			| Self::RegisterProject { .. } => GIT,
+			| Self::RegisterProject { .. }
+			| Self::CreateConversation {
+				working_tree: WorkingTreeRequest::Workspace { .. },
+				..
+			} => GIT,
 			Self::BindAccount {
 				credential_source: CredentialSource::PlatformStore,
 				..
@@ -419,7 +428,10 @@ impl Core {
 					command_id,
 					command,
 					prepared,
-					security,
+					Plane {
+						security,
+						workspace_home: &self.workspace_home,
+					},
 					recorded_at_unix_ms,
 				)
 				.await;
@@ -505,15 +517,29 @@ fn redacted_for_receipt(
 	}
 }
 
+/// What the Plane brings to a Command's transaction that neither the
+/// Command nor its preparation carries.
+struct Plane<'a> {
+	/// Whether the Plane vouched for its Security audit when the Command
+	/// was admitted.
+	security: SecurityState,
+	/// Where the Plane creates Workspaces.
+	workspace_home: &'a WorkspaceHome,
+}
+
 async fn execute_new(
 	tx: &mut WriteTransaction,
 	actor: &Actor,
 	command_id: CommandId,
 	command: Command,
 	prepared: Prepared,
-	security: SecurityState,
+	plane: Plane<'_>,
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
+	let Plane {
+		security,
+		workspace_home,
+	} = plane;
 	match command {
 		Command::RegisterProject { .. } => {
 			let Prepared::Registration(registrable) = prepared else {
@@ -525,9 +551,42 @@ async fn execute_new(
 			};
 			project::register(tx, actor, registrable, now_unix_ms).await
 		}
-		Command::CreateConversation { retention } => {
-			create_conversation(tx, actor, retention, now_unix_ms).await
-		}
+		Command::CreateConversation {
+			retention,
+			working_tree,
+		} => match working_tree {
+			WorkingTreeRequest::NoProject => {
+				create_conversation(tx, actor, retention, now_unix_ms).await
+			}
+			WorkingTreeRequest::Workspace { .. } => {
+				let Prepared::Workspace(seed) = prepared else {
+					return Err(CoreError::internal(
+						"workspace.unprepared",
+						"a Workspace creation reached its transaction without \
+						 its resolved base",
+					));
+				};
+				workspace::create(
+					tx,
+					actor,
+					retention,
+					seed,
+					workspace_home,
+					now_unix_ms,
+				)
+				.await
+			}
+			WorkingTreeRequest::LocalCheckout { project_id } => {
+				workspace::create_in_local_checkout(
+					tx,
+					actor,
+					retention,
+					project_id,
+					now_unix_ms,
+				)
+				.await
+			}
+		},
 		Command::CreateRun { conversation_id } => {
 			create_run(tx, actor, conversation_id, now_unix_ms).await
 		}
@@ -633,11 +692,15 @@ async fn create_conversation(
 		.insert_conversation(NewConversation {
 			conversation_id: Uuid::now_v7(),
 			retention,
+			working_tree: WorkingTreeRecord::NoProject,
 			created_at_unix_ms: now_unix_ms,
 		})
 		.await?
 		.into();
-	let event = EventKind::ConversationCreated { retention };
+	let event = EventKind::ConversationCreated {
+		retention,
+		working_tree: WorkingTree::NoProject,
+	};
 	tx.append_event(event.to_record(
 		actor,
 		EventSubject::Conversation(conversation.conversation_id),

@@ -30,6 +30,7 @@ mod records;
 mod run;
 mod setting;
 mod transaction;
+mod workspace;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -70,9 +71,10 @@ pub use records::{
 	EffectSafetyRecord, EffectStateRecord, EventClass, EventRecord,
 	NewCommandReceipt, NewConversation, NewEffect, NewEvent, NewRun,
 	RetentionPolicy, RunLifecycle, RunRecord, SettingRecord,
-	SettingScopeRecord, VerifiedSnapshotCoverage,
+	SettingScopeRecord, VerifiedSnapshotCoverage, WorkingTreeRecord,
 };
 pub use transaction::{ReadTransaction, WriteTransaction};
+pub use workspace::{NewWorkspace, WorkspaceRecord};
 
 /// Failure inside the store, without native SQLite strings in the category.
 #[derive(Debug, thiserror::Error)]

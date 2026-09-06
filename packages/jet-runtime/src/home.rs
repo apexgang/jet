@@ -8,6 +8,7 @@ const RUNTIME_DIR: &str = "runtime";
 const LOCK_FILE: &str = "jetd.lock";
 const SOCKET_FILE: &str = "jetd.sock";
 const STORE_FILE: &str = "plane.sqlite3";
+const WORKSPACES_DIR: &str = "workspaces";
 
 /// The directory holding everything the Jet core owns for one user.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,5 +72,12 @@ impl JetHome {
 	#[must_use]
 	pub fn store_path(&self) -> PathBuf {
 		self.root.join(STORE_FILE)
+	}
+
+	/// Directory under which managed Workspaces are created, one per
+	/// Conversation (ADR-0025).
+	#[must_use]
+	pub fn workspaces_dir(&self) -> PathBuf {
+		self.root.join(WORKSPACES_DIR)
 	}
 }
