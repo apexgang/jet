@@ -10,6 +10,7 @@ mod pairing;
 mod project;
 mod promotion;
 mod run;
+mod search;
 mod setting;
 
 pub(crate) use capability::snapshot as capabilities;
@@ -27,8 +28,8 @@ use jet_core::{
 	PairingOfferId, PairingSecret, PairingSignature, PathGrant, PlaneStatus,
 	ProjectId, ProviderId, Query, QueryResult, RecoveryAction, RelativePath,
 	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
-	SeedSelection, WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase,
-	WorkspaceId,
+	SearchTerms, SeedSelection, WorkingTree, WorkingTreeRequest, Workspace,
+	WorkspaceBase, WorkspaceId,
 };
 use jet_protocol as wire;
 
@@ -38,7 +39,7 @@ use jet_protocol as wire;
 ///
 /// Returns an `invalid_input` [`CoreError`] when a relative path is not
 /// one the core accepts, so the core never receives an unvalidated path
-/// (ADR-0101).
+/// (ADR-0101), or when a search text is empty or over its bounds.
 pub(crate) fn query(
 	request: &wire::QueryRequest,
 	minor: u32,
@@ -105,6 +106,9 @@ pub(crate) fn query(
 			workspace_id: WorkspaceId(*workspace_id),
 			destination: promotion::destination_from_wire(destination),
 		},
+		wire::QueryRequest::Search { text } => Query::Search {
+			terms: SearchTerms::parse(text)?,
+		},
 	})
 }
 
@@ -160,6 +164,9 @@ pub(crate) fn query_result(
 			wire::QueryResponse::PromotionPreview(Box::new(promotion::preview(
 				*preview,
 			)))
+		}
+		QueryResult::Search(result) => {
+			wire::QueryResponse::Search(search::result(result))
 		}
 	})
 }

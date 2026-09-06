@@ -16,6 +16,7 @@ use crate::event::Event;
 use crate::pairing::PairingSnapshot;
 use crate::project::{ProjectEntry, ProjectList, ProjectPreview};
 use crate::promotion::{PromotionDestination, PromotionPreview};
+use crate::search::SearchResult;
 use crate::setting::{SettingScope, SettingSelection, SettingSnapshot};
 
 /// Correlates a client request with its server reply.
@@ -177,6 +178,14 @@ pub enum QueryRequest {
 		/// Where its changes would go.
 		destination: PromotionDestination,
 	},
+	/// Bounded ranked hits over this Plane's human-visible Conversation
+	/// content. A GUI merges the answers of every Plane it is connected
+	/// to.
+	Search {
+		/// At most 256 characters, whose whitespace-separated terms every
+		/// hit must contain, sixteen at most.
+		text: String,
+	},
 }
 
 /// Query snapshots.
@@ -213,6 +222,8 @@ pub enum QueryResponse {
 	/// What promoting a Workspace would do. Boxed: the preview carries
 	/// two lists and six object names, far more than any other snapshot.
 	PromotionPreview(Box<PromotionPreview>),
+	/// Bounded ranked hits, best match first.
+	Search(SearchResult),
 }
 
 /// One page of journal Events, fenced by the journal position it was read

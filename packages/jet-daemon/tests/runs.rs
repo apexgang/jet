@@ -45,7 +45,7 @@ async fn managed_run_reports_attention_output_and_durable_completion() {
         assert_eq!(activities, vec![json!("working"), json!("waiting_for_user"), json!("waiting_for_auth"), json!("waiting_for_quota"), json!("reconnecting"), json!("waiting_for_approval"), Value::Null]);
         // The prior minor's closed Actor and typed lifecycle payload remain readable.
         let mut hello = support::hello(client_id);
-        hello.minor = 11;
+        hello.minor = 12;
         let (mut old, _) = support::handshake_raw(&daemon, &hello).await;
         old.send(&json!({"kind":"query","id":3,"query":{"type":"events","after":"0"}})).await;
         let old_page: Value = old.receive().await;
@@ -59,6 +59,26 @@ async fn managed_run_reports_attention_output_and_durable_completion() {
             }
         }
 
+        // Search at minor 12 still traverses managed Run Events, while Run
+        // requests require minor 13 and cannot execute through an older peer.
+        old.send(&json!({"kind":"query","id":4,"query":{"type":"search","text":"workspaces"}})).await;
+        let searched: Value = old.receive().await;
+        assert_eq!(searched["kind"], "query_result");
+        assert_eq!(searched["result"]["indexed_through"], journal.cursor.to_string());
+        assert!(searched["result"]["hits"].as_array().unwrap().iter().any(|hit| hit["conversation_id"] == conversation.conversation_id.to_string()));
+        let mut unsupported_start = start.clone();
+        unsupported_start["command_id"] = json!(Uuid::now_v7());
+        for request in [
+            json!({"kind":"query","id":5,"query":{"type":"run_execution","run_id":run_id}}),
+            unsupported_start,
+        ] {
+            old.send(&request).await;
+            let refused: Value = old.receive().await;
+            assert_eq!((refused["kind"].clone(), refused["error"]["code"].clone()), (json!("error"), json!("protocol.unsupported_minor")));
+        }
+        let raw_search = client.search("native_integer").await.unwrap();
+        assert_eq!((raw_search.indexed_through, raw_search.hits), (journal.cursor, vec![]));
+
 		assert_eq!(std::fs::read_to_string(std::path::Path::new(&workspace.root).join("result.txt")).unwrap(), "Harness work\n");
 		assert!(!root.join("result.txt").exists());
 		daemon.child.kill().await.unwrap();
@@ -69,6 +89,9 @@ async fn managed_run_reports_attention_output_and_durable_completion() {
 		assert_eq!(wire.receive::<Value>().await, admitted);
 		assert_eq!(wait_for(&mut wire, run_id, "completed").await, completed);
 		assert_eq!(all_events(&client).await, journal);
+        let restarted_search = client.search("workspaces").await.unwrap();
+        let expected_search: jet_protocol::SearchResult = serde_json::from_value(searched["result"].clone()).unwrap();
+        assert_eq!(restarted_search, expected_search);
 	}).await.unwrap();
 }
 

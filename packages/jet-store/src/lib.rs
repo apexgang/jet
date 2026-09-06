@@ -30,6 +30,7 @@ mod promotion;
 mod records;
 mod run;
 mod run_execution;
+mod search;
 mod setting;
 mod transaction;
 mod workspace;
@@ -81,6 +82,10 @@ pub use records::{
 	SettingScopeRecord, VerifiedSnapshotCoverage, WorkingTreeRecord,
 };
 pub use run_execution::RunExecutionRecord;
+pub use search::{
+	NewSearchDocument, SEARCH_DOCUMENT_BODY_LIMIT, SEARCH_HIT_LIMIT,
+	SEARCH_INDEX_BATCH_LIMIT, SearchHitRecord,
+};
 pub use transaction::{ReadTransaction, WriteTransaction};
 pub use workspace::{NewWorkspace, WorkspaceRecord, WorkspaceSeedRecord};
 

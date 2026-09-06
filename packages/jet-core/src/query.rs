@@ -18,6 +18,7 @@ use crate::project::{self, PathGrant, ProjectList, ProjectPreview};
 use crate::project_entry::{self, ProjectEntry};
 use crate::promotion::{self, PromotionDestination, PromotionPreview};
 use crate::relative_path::RelativePath;
+use crate::search::{self, SearchResult, SearchTerms};
 use crate::setting::{self, SettingScope, SettingSelection, SettingSnapshot};
 use crate::status::PlaneStatus;
 use crate::workspace::{Workspace, WorkspaceId};
@@ -109,6 +110,13 @@ pub enum Query {
 		/// Where its changes would go.
 		destination: PromotionDestination,
 	},
+	/// Bounded ranked hits over this Plane's human-visible Conversation
+	/// content (ADR-0036). A GUI merges the answers of every Plane it is
+	/// connected to.
+	Search {
+		/// The terms every hit must contain.
+		terms: SearchTerms,
+	},
 }
 
 /// Snapshots returned by [`Core::query`].
@@ -144,6 +152,8 @@ pub enum QueryResult {
 	/// What promoting a Workspace would do. Boxed: the preview carries
 	/// two lists and six object names, far more than any other snapshot.
 	PromotionPreview(Box<PromotionPreview>),
+	/// Bounded ranked hits, best match first.
+	Search(SearchResult),
 }
 
 impl Core {
@@ -288,6 +298,7 @@ impl Core {
 			} => {
 				promotion::preview(self, actor, workspace_id, destination).await
 			}
+			Query::Search { terms } => search::query(self, &terms).await,
 			Query::Projects => {
 				self.store
 					.read(async |tx| {
