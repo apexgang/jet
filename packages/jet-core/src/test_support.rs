@@ -15,11 +15,12 @@ use crate::capability::{
 	ToolAvailability,
 };
 use crate::clock::{Clock, SystemClock};
+use crate::discovery::ConversationDiscovery;
 use crate::{
 	Actor, BaseSelection, ClientId, Command, CommandEnvelope, CommandId,
 	CommandOutcome, ConversationId, ConversationSnapshot, Core, CraftId,
-	EventKind, EventSequence, HarnessId, PathGrant, ProjectId,
-	PromotionDestination, PromotionPreview, Query, QueryResult,
+	DiscoveredConversation, EventKind, EventSequence, HarnessId, PathGrant,
+	ProjectId, PromotionDestination, PromotionPreview, Query, QueryResult,
 	RetentionPolicy, SeedSelection, WorkingTreeRequest, Workspace,
 	WorkspaceHome, WorkspaceId,
 };
@@ -46,9 +47,60 @@ pub(crate) async fn start_core_with(
 	clock: Arc<dyn Clock>,
 	probe: Arc<FixedProbe>,
 ) -> Core {
+	start_core_at(path, clock, probe, FixedDiscovery::new(Vec::new())).await
+}
+
+/// The equipped core on a Plane whose external Conversations are whatever
+/// `discovery` answers with.
+pub(crate) async fn start_core_discovering(
+	path: &Path,
+	discovery: Arc<FixedDiscovery>,
+) -> Core {
+	start_core_at(
+		path,
+		Arc::new(SystemClock),
+		FixedProbe::new(equipped()),
+		discovery,
+	)
+	.await
+}
+
+async fn start_core_at(
+	path: &Path,
+	clock: Arc<dyn Clock>,
+	probe: Arc<FixedProbe>,
+	discovery: Arc<FixedDiscovery>,
+) -> Core {
 	let store = Store::open(path).await.unwrap();
 	let home = WorkspaceHome(path.with_file_name("workspaces"));
-	Core::start_with(store, home, clock, probe).await.unwrap()
+	Core::start_with(store, home, clock, probe, discovery)
+		.await
+		.unwrap()
+}
+
+/// A Conversation discovery whose answer a test changes between
+/// observations, the way a Harness starts and ends while `jetd` runs.
+#[derive(Debug)]
+pub(crate) struct FixedDiscovery(Mutex<Vec<DiscoveredConversation>>);
+
+impl FixedDiscovery {
+	pub(crate) fn new(found: Vec<DiscoveredConversation>) -> Arc<Self> {
+		Arc::new(Self(Mutex::new(found)))
+	}
+
+	pub(crate) fn answer_with(&self, found: Vec<DiscoveredConversation>) {
+		*self.0.lock().unwrap() = found;
+	}
+}
+
+impl ConversationDiscovery for FixedDiscovery {
+	fn discover(
+		&self,
+	) -> Pin<Box<dyn Future<Output = Vec<DiscoveredConversation>> + Send + '_>>
+	{
+		let found = self.0.lock().unwrap().clone();
+		Box::pin(async move { found })
+	}
 }
 
 /// A clock a test moves by hand, so a retention window or an observation

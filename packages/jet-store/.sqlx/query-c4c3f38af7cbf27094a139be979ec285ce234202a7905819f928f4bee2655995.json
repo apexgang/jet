@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT i.import_id AS \"import_id!\", i.harness,\n\t\t\t\ti.native_conversation, i.working_directory, i.actor_kind,\n\t\t\t\ti.actor_id, i.imported_at_unix_ms,\n\t\t\t\tc.conversation_id AS \"resumed_as?\"\n\t\t\t FROM imported_conversations AS i\n\t\t\t LEFT JOIN conversations AS c ON c.import_id = i.import_id\n\t\t\t WHERE i.harness = ?1 AND i.native_conversation = ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "import_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "imported_conversations",
+            "name": "import_id"
+          }
+        }
+      },
+      {
+        "name": "harness",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "imported_conversations",
+            "name": "harness"
+          }
+        }
+      },
+      {
+        "name": "native_conversation",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "imported_conversations",
+            "name": "native_conversation"
+          }
+        }
+      },
+      {
+        "name": "working_directory",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "imported_conversations",
+            "name": "working_directory"
+          }
+        }
+      },
+      {
+        "name": "actor_kind",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "imported_conversations",
+            "name": "actor_kind"
+          }
+        }
+      },
+      {
+        "name": "actor_id",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "imported_conversations",
+            "name": "actor_id"
+          }
+        }
+      },
+      {
+        "name": "imported_at_unix_ms",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "imported_conversations",
+            "name": "imported_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "resumed_as?",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "conversation_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "c4c3f38af7cbf27094a139be979ec285ce234202a7905819f928f4bee2655995"
+}

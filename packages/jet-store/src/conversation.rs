@@ -4,9 +4,9 @@ use uuid::Uuid;
 
 use crate::StoreError;
 use crate::records::{
-	ConversationPageKey, ConversationPageStart, ConversationRecord,
-	NewConversation, RetentionPolicy, WorkingTreeRecord, column_error,
-	parse_optional_uuid, parse_uuid,
+	ConversationOriginRecord, ConversationPageKey, ConversationPageStart,
+	ConversationRecord, NewConversation, RetentionPolicy, WorkingTreeRecord,
+	column_error, parse_optional_uuid, parse_uuid,
 };
 use crate::transaction::{ReadTransaction, WriteTransaction};
 
@@ -20,6 +20,7 @@ struct Row {
 	retention: String,
 	working_tree: String,
 	project_id: Option<String>,
+	import_id: Option<String>,
 	created_at_unix_ms: i64,
 }
 
@@ -37,7 +38,7 @@ impl ReadTransaction {
 		let row = sqlx::query_as!(
 			Row,
 			r#"SELECT conversation_id AS "conversation_id!", retention,
-				working_tree, project_id, created_at_unix_ms
+				working_tree, project_id, import_id, created_at_unix_ms
 			 FROM conversations
 			 WHERE conversation_id = ?1"#,
 			conversation_id
@@ -58,7 +59,7 @@ impl ReadTransaction {
 		let rows = sqlx::query_as!(
 			Row,
 			r#"SELECT conversation_id AS "conversation_id!", retention,
-				working_tree, project_id, created_at_unix_ms
+				working_tree, project_id, import_id, created_at_unix_ms
 			 FROM conversations
 			 ORDER BY rowid"#
 		)
@@ -91,7 +92,7 @@ impl ReadTransaction {
 		let rows = sqlx::query!(
 			r#"SELECT rowid AS "rowid!",
 				conversation_id AS "conversation_id!", retention,
-				working_tree, project_id, created_at_unix_ms
+				working_tree, project_id, import_id, created_at_unix_ms
 			 FROM conversations
 			 WHERE rowid > ?1 ORDER BY rowid LIMIT ?2"#,
 			after,
@@ -109,6 +110,7 @@ impl ReadTransaction {
 						retention: row.retention,
 						working_tree: row.working_tree,
 						project_id: row.project_id,
+						import_id: row.import_id,
 						created_at_unix_ms: row.created_at_unix_ms,
 					})?,
 				))
@@ -136,21 +138,27 @@ impl WriteTransaction {
 			conversation_id: conversation.conversation_id,
 			retention: conversation.retention,
 			working_tree: conversation.working_tree,
+			origin: conversation.origin,
 			created_at_unix_ms: conversation.created_at_unix_ms,
 		};
 		let conversation_id = record.conversation_id.to_string();
 		let retention = record.retention.as_str();
 		let (working_tree, project_id) = record.working_tree.columns();
 		let project_id = project_id.map(|project_id| project_id.to_string());
+		let import_id = record
+			.origin
+			.column()
+			.map(|import_id| import_id.to_string());
 		sqlx::query!(
 			"INSERT INTO conversations
 				(conversation_id, retention, working_tree, project_id,
-				created_at_unix_ms)
-			 VALUES (?1, ?2, ?3, ?4, ?5)",
+				import_id, created_at_unix_ms)
+			 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
 			conversation_id,
 			retention,
 			working_tree,
 			project_id,
+			import_id,
 			record.created_at_unix_ms
 		)
 		.execute(self.connection())
@@ -167,6 +175,10 @@ fn read_row(row: Row) -> Result<ConversationRecord, StoreError> {
 			&row.working_tree,
 			parse_optional_uuid("project_id", row.project_id.as_deref())?,
 		)?,
+		origin: ConversationOriginRecord::parse(parse_optional_uuid(
+			"import_id",
+			row.import_id.as_deref(),
+		)?),
 		created_at_unix_ms: row.created_at_unix_ms,
 	})
 }

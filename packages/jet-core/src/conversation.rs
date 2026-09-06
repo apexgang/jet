@@ -7,7 +7,10 @@ use jet_store::{ConversationRecord, RetentionPolicy, RunLifecycle, RunRecord};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use jet_store::ConversationOriginRecord;
+
 use crate::event::EventSequence;
+use crate::import::ImportId;
 use crate::system_time;
 use crate::workspace::{WorkingTree, Workspace};
 
@@ -38,6 +41,49 @@ pub struct RunId(pub Uuid);
 )]
 pub struct Revision(pub u64);
 
+/// Where a Conversation came from (ADR-0010).
+#[derive(
+	Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ConversationOrigin {
+	/// Created in Jet.
+	#[default]
+	New,
+	/// Created by a managed Resume to continue an Imported conversation,
+	/// whose Harness-native identity a later Run reopens.
+	Imported {
+		/// The import it continues.
+		import_id: ImportId,
+	},
+}
+
+impl ConversationOrigin {
+	pub(crate) fn record(self) -> ConversationOriginRecord {
+		match self {
+			Self::New => ConversationOriginRecord::New,
+			Self::Imported { import_id } => {
+				ConversationOriginRecord::Imported {
+					import_id: import_id.0,
+				}
+			}
+		}
+	}
+}
+
+impl From<ConversationOriginRecord> for ConversationOrigin {
+	fn from(record: ConversationOriginRecord) -> Self {
+		match record {
+			ConversationOriginRecord::New => Self::New,
+			ConversationOriginRecord::Imported { import_id } => {
+				Self::Imported {
+					import_id: ImportId(import_id),
+				}
+			}
+		}
+	}
+}
+
 /// A logical interaction between a user and a Harness. It exists before
 /// its first Run and outlives every Run it has had.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,6 +94,8 @@ pub struct Conversation {
 	pub retention: RetentionPolicy,
 	/// Where it does its work (ADR-0025).
 	pub working_tree: WorkingTree,
+	/// Where it came from (ADR-0010).
+	pub origin: ConversationOrigin,
 	/// When the Conversation was created.
 	pub created_at: SystemTime,
 }
@@ -101,6 +149,7 @@ impl From<ConversationRecord> for Conversation {
 			conversation_id: ConversationId(record.conversation_id),
 			retention: record.retention,
 			working_tree: record.working_tree.into(),
+			origin: record.origin.into(),
 			created_at: system_time(record.created_at_unix_ms),
 		}
 	}

@@ -14,7 +14,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 13;
+pub const PROTOCOL_MINOR: u32 = 14;
 /// Minor that introduced managed Run admission and execution snapshots.
 pub const MANAGED_RUNS_MINOR: u32 = 13;
 /// Minor that introduced fresh signed remote connection challenges.
@@ -48,6 +48,9 @@ pub const WORKSPACE_PROMOTION_MINOR: u32 = 11;
 /// Minor that introduced the Search Query over Plane-local Conversation
 /// content.
 pub const SEARCH_MINOR: u32 = 12;
+/// Minor that introduced external Conversation discovery, imports, managed
+/// Resume, and the origin on every Conversation.
+pub const IMPORTED_CONVERSATIONS_MINOR: u32 = 14;
 /// The only v1 codec; other codecs are reserved for later negotiation.
 pub const CODEC_JSON_V1: &str = "json-v1";
 

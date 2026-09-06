@@ -9,9 +9,9 @@ mod support;
 use jet_client::ClientError;
 use jet_protocol::{
 	ClientMessage, CommandResponse, Conversation, ConversationList,
-	ConversationSnapshot, ErrorCategory, EventPage, QueryRequest,
-	QueryResponse, RestartMetadata, RetentionPolicy, RunLifecycle, ServerHello,
-	ServerMessage, WireError, WorkingTree,
+	ConversationOrigin, ConversationSnapshot, ErrorCategory, EventPage,
+	QueryRequest, QueryResponse, RestartMetadata, RetentionPolicy,
+	RunLifecycle, ServerHello, ServerMessage, WireError, WorkingTree,
 };
 use jet_store::{
 	ActorRecord, CONVERSATION_PAGE_LIMIT, EventClass, NewEvent, Store,
@@ -68,6 +68,7 @@ async fn a_conversation_is_queryable_before_any_run_and_retained_by_default() {
 				conversation_id: conversation.conversation_id,
 				retention: RetentionPolicy::Retain,
 				working_tree: Some(WorkingTree::NoProject),
+				origin: Some(ConversationOrigin::New),
 				created_at_unix_ms: conversation.created_at_unix_ms,
 			},
 			workspace: None,

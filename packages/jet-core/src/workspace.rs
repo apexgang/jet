@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::command::CommandOutcome;
-use crate::conversation::{Conversation, ConversationId};
+use crate::conversation::{Conversation, ConversationId, ConversationOrigin};
 use crate::error::CoreError;
 use crate::event::{EventKind, EventSubject};
 use crate::filesystem::{blocking, canonicalize};
@@ -292,6 +292,7 @@ pub(crate) async fn create(
 	tx: &mut WriteTransaction,
 	actor: &Actor,
 	retention: RetentionPolicy,
+	origin: ConversationOrigin,
 	prepared: PreparedWorkspace,
 	home: &WorkspaceHome,
 	now_unix_ms: i64,
@@ -323,6 +324,7 @@ pub(crate) async fn create(
 			working_tree: WorkingTreeRecord::Workspace {
 				project_id: project_id.0,
 			},
+			origin: origin.record(),
 			created_at_unix_ms: now_unix_ms,
 		})
 		.await?
@@ -344,6 +346,7 @@ pub(crate) async fn create(
 	let created = EventKind::ConversationCreated {
 		retention,
 		working_tree: conversation.working_tree,
+		origin,
 	};
 	tx.append_event(created.to_record(actor, subject, now_unix_ms)?)
 		.await?;
@@ -382,6 +385,7 @@ pub(crate) async fn create_in_local_checkout(
 	tx: &mut WriteTransaction,
 	actor: &Actor,
 	retention: RetentionPolicy,
+	origin: ConversationOrigin,
 	project_id: ProjectId,
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
@@ -395,6 +399,7 @@ pub(crate) async fn create_in_local_checkout(
 			working_tree: WorkingTreeRecord::LocalCheckout {
 				project_id: project_id.0,
 			},
+			origin: origin.record(),
 			created_at_unix_ms: now_unix_ms,
 		})
 		.await?
@@ -402,6 +407,7 @@ pub(crate) async fn create_in_local_checkout(
 	let event = EventKind::ConversationCreated {
 		retention,
 		working_tree: conversation.working_tree,
+		origin,
 	};
 	tx.append_event(event.to_record(
 		actor,

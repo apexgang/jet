@@ -40,7 +40,8 @@ impl Client {
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
 			| QueryResponse::RunExecution(_)
-			| QueryResponse::Search(_)) => Err(unexpected(&other)),
+			| QueryResponse::Search(_)
+			| QueryResponse::ExternalConversations(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -84,7 +85,8 @@ impl Client {
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
 			| CommandResponse::ProjectRegistered(_)
-			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
+			| CommandResponse::WorkspacePromotionRecorded(_)
+			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -130,7 +132,8 @@ impl Client {
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
 			| CommandResponse::ProjectRegistered(_)
-			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
+			| CommandResponse::WorkspacePromotionRecorded(_)
+			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -182,7 +185,8 @@ impl Client {
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
 			| CommandResponse::ProjectRegistered(_)
-			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
+			| CommandResponse::WorkspacePromotionRecorded(_)
+			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -232,7 +236,8 @@ impl Client {
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
 			| CommandResponse::ProjectRegistered(_)
-			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
+			| CommandResponse::WorkspacePromotionRecorded(_)
+			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -278,7 +283,8 @@ impl Client {
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
 			| CommandResponse::ProjectRegistered(_)
-			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
+			| CommandResponse::WorkspacePromotionRecorded(_)
+			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -323,7 +329,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientRevoked { .. }
 			| CommandResponse::ProjectRegistered(_)
-			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
+			| CommandResponse::WorkspacePromotionRecorded(_)
+			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -366,7 +373,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::ProjectRegistered(_)
-			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
+			| CommandResponse::WorkspacePromotionRecorded(_)
+			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}
 	}
 }

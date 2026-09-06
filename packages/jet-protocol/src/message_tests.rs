@@ -16,6 +16,10 @@ use crate::conversation::{
 };
 use crate::event::{Actor, Event};
 use crate::handshake::{ClientHello, ServerHello, VersionRange};
+use crate::import::{
+	ExternalConversation, ExternalConversationList, ExternalOrigin,
+	ExternalProcess, ImportedConversation,
+};
 use crate::pairing::{
 	ClientPublicKey, PairedClient, PairedClientAccess, PairingGate,
 	PairingKeyAlgorithm, PairingMethod, PairingProgress, PairingSnapshot,
@@ -167,6 +171,7 @@ fn conversation_commands_and_results_have_the_agreed_wire_shape() {
 			conversation_id: Uuid::nil(),
 			retention: RetentionPolicy::Retain,
 			working_tree: None,
+			origin: None,
 			created_at_unix_ms: 1_700_000_000_000,
 		}),
 	};
@@ -279,6 +284,7 @@ fn conversation_snapshots_and_event_pages_have_the_agreed_wire_shape() {
 				conversation_id: Uuid::nil(),
 				retention: RetentionPolicy::ForgetAfterFinalRun,
 				working_tree: None,
+				origin: None,
 				created_at_unix_ms: 1,
 			},
 			workspace: None,
@@ -865,6 +871,78 @@ fn a_workspace_promotion_has_the_agreed_wire_shape() {
 			format!(
 				r#"{{"kind":"command_result","id":14,"result":{{"type":"workspace_promotion_recorded","promotion_id":"00000000-0000-0000-0000-000000000000","binding":{binding_json},"changed_paths":1,"state":"conflicted","recorded_at_unix_ms":1,"settled_at_unix_ms":1}}}}"#
 			),
+		)
+	);
+}
+
+/// An external Conversation says where it worked, whether a live process
+/// holds it and whether that process cooperates, and an import is
+/// continued through the same working-tree request as any managed
+/// Conversation (ADR-0010).
+#[test]
+fn external_conversations_and_imports_have_the_agreed_wire_shape() {
+	let query = ClientMessage::Query {
+		id: 16,
+		query: QueryRequest::ExternalConversations,
+	};
+	let result = ServerMessage::QueryResult {
+		id: 16,
+		result: QueryResponse::ExternalConversations(
+			ExternalConversationList {
+				cursor: 3,
+				discovered: vec![
+					ExternalConversation {
+						harness: "codex".into(),
+						native_conversation: "thread-1".into(),
+						origin: ExternalOrigin::Project {
+							project_id: Uuid::nil(),
+							working_directory: "/home/jet/repo/src".into(),
+						},
+						process: ExternalProcess::Cooperating {
+							pid: 41,
+							endpoint: "/run/user/1000/codex/41.sock".into(),
+						},
+						import_id: None,
+					},
+					ExternalConversation {
+						harness: "codex".into(),
+						native_conversation: "thread-2".into(),
+						origin: ExternalOrigin::Unknown,
+						process: ExternalProcess::External { pid: 42 },
+						import_id: Some(Uuid::nil()),
+					},
+				],
+				imported: vec![ImportedConversation {
+					import_id: Uuid::nil(),
+					harness: "codex".into(),
+					native_conversation: "thread-2".into(),
+					working_directory: None,
+					imported_by: Actor::InteractiveClient {
+						client_id: Uuid::nil(),
+					},
+					imported_at_unix_ms: 1,
+					resumed_as: None,
+				}],
+			},
+		),
+	};
+	let resume = ClientMessage::Command {
+		id: 17,
+		command_id: Uuid::nil(),
+		command: CommandRequest::ResumeImportedConversation {
+			import_id: Uuid::nil(),
+			retention: RetentionPolicy::Retain,
+			working_tree: WorkingTreeRequest::LocalCheckout {
+				project_id: Uuid::nil(),
+			},
+		},
+	};
+	assert_eq!(
+		(json(&query), json(&result), json(&resume)),
+		(
+			r#"{"kind":"query","id":16,"query":{"type":"external_conversations"}}"#.to_string(),
+			r#"{"kind":"query_result","id":16,"result":{"type":"external_conversations","cursor":"3","discovered":[{"harness":"codex","native_conversation":"thread-1","origin":{"kind":"project","project_id":"00000000-0000-0000-0000-000000000000","working_directory":"/home/jet/repo/src"},"process":{"kind":"cooperating","pid":41,"endpoint":"/run/user/1000/codex/41.sock"}},{"harness":"codex","native_conversation":"thread-2","origin":{"kind":"unknown"},"process":{"kind":"external","pid":42},"import_id":"00000000-0000-0000-0000-000000000000"}],"imported":[{"import_id":"00000000-0000-0000-0000-000000000000","harness":"codex","native_conversation":"thread-2","imported_by":{"type":"interactive_client","client_id":"00000000-0000-0000-0000-000000000000"},"imported_at_unix_ms":1}]}}"#.to_string(),
+			r#"{"kind":"command","id":17,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"resume_imported_conversation","import_id":"00000000-0000-0000-0000-000000000000","retention":"retain","working_tree":{"kind":"local_checkout","project_id":"00000000-0000-0000-0000-000000000000"}}}"#.to_string(),
 		)
 	);
 }

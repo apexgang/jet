@@ -10,6 +10,7 @@
 use crate::audit;
 use crate::command::{Command, CommandId};
 use crate::error::CoreError;
+use crate::import::{self, DiscoveredConversation};
 use crate::project::{self, Registrable};
 use crate::promotion_command::{self, PreparedPromotion};
 use crate::workspace::{self, PreparedWorkspace, WorkingTreeRequest};
@@ -28,6 +29,8 @@ pub(crate) enum Prepared {
 	Workspace(PreparedWorkspace),
 	/// A promotion whose binding still matches the repository.
 	Promotion(PreparedPromotion),
+	/// The identity an import names, as discovery reports it right now.
+	Import(DiscoveredConversation),
 }
 
 impl Core {
@@ -124,6 +127,28 @@ impl Core {
 			Command::PromoteWorkspace { binding } => Ok(Prepared::Promotion(
 				promotion_command::prepare(self, actor, binding).await?,
 			)),
+			Command::ImportConversation {
+				harness,
+				native_conversation,
+			} => Ok(Prepared::Import(
+				import::prepare_import(self, harness, native_conversation)
+					.await?,
+			)),
+			Command::ResumeImportedConversation { working_tree, .. } => {
+				import::require_working_tree(working_tree)?;
+				match working_tree {
+					WorkingTreeRequest::Workspace {
+						project_id,
+						base,
+						seed,
+					} => Ok(Prepared::Workspace(
+						workspace::prepare(self, *project_id, base, seed)
+							.await?,
+					)),
+					WorkingTreeRequest::NoProject
+					| WorkingTreeRequest::LocalCheckout { .. } => Ok(Prepared::Nothing),
+				}
+			}
 			Command::CreateConversation { .. }
 			| Command::CreateRun { .. }
 			| Command::SetSetting { .. }

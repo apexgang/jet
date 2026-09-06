@@ -37,7 +37,8 @@ pub(crate) fn invalidated_client(
 		| CommandOutcome::PairingConfirmed { .. }
 		| CommandOutcome::AuditEpochBegun { .. }
 		| CommandOutcome::ProjectRegistered(_)
-		| CommandOutcome::WorkspacePromotionRecorded(_) => None,
+		| CommandOutcome::WorkspacePromotionRecorded(_)
+		| CommandOutcome::ConversationImported(_) => None,
 	}
 }
 

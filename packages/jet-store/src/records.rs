@@ -391,6 +391,33 @@ impl WorkingTreeRecord {
 	}
 }
 
+/// Where a Conversation came from (ADR-0010).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationOriginRecord {
+	/// Created in Jet.
+	New,
+	/// Created to continue an Imported conversation, recorded in
+	/// `imported_conversations`.
+	Imported {
+		/// The import it continues.
+		import_id: Uuid,
+	},
+}
+
+impl ConversationOriginRecord {
+	/// The import column, absent for a Conversation created in Jet.
+	pub(crate) fn column(self) -> Option<Uuid> {
+		match self {
+			Self::New => None,
+			Self::Imported { import_id } => Some(import_id),
+		}
+	}
+
+	pub(crate) fn parse(import_id: Option<Uuid>) -> Self {
+		import_id.map_or(Self::New, |import_id| Self::Imported { import_id })
+	}
+}
+
 /// A Conversation to insert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NewConversation {
@@ -400,6 +427,8 @@ pub struct NewConversation {
 	pub retention: RetentionPolicy,
 	/// Where the Conversation does its work.
 	pub working_tree: WorkingTreeRecord,
+	/// Where the Conversation came from.
+	pub origin: ConversationOriginRecord,
 	/// When the caller recorded the Conversation.
 	pub created_at_unix_ms: i64,
 }
@@ -413,6 +442,8 @@ pub struct ConversationRecord {
 	pub retention: RetentionPolicy,
 	/// Where the Conversation does its work.
 	pub working_tree: WorkingTreeRecord,
+	/// Where the Conversation came from.
+	pub origin: ConversationOriginRecord,
 	/// When the Conversation was recorded.
 	pub created_at_unix_ms: i64,
 }

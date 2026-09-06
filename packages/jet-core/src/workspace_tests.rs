@@ -7,10 +7,10 @@ use crate::test_support::{
 	request, start_core,
 };
 use crate::{
-	BaseSelection, Command, CommandOutcome, Conversation, ConversationId, Core,
-	CoreError, ErrorCategory, EventKind, ProjectId, RetentionPolicy, Run,
-	RunLifecycle, SeedSelection, WorkingTree, WorkingTreeRequest, Workspace,
-	WorkspaceBase,
+	BaseSelection, Command, CommandOutcome, Conversation, ConversationId,
+	ConversationOrigin, Core, CoreError, ErrorCategory, EventKind, ProjectId,
+	RetentionPolicy, Run, RunLifecycle, SeedSelection, WorkingTree,
+	WorkingTreeRequest, Workspace, WorkspaceBase,
 };
 
 async fn start(dir: &tempfile::TempDir) -> Core {
@@ -160,6 +160,7 @@ async fn a_managed_conversation_receives_a_detached_workspace_of_its_own() {
 				EventKind::ConversationCreated {
 					retention: RetentionPolicy::Retain,
 					working_tree: WorkingTree::Workspace { project_id },
+					origin: ConversationOrigin::New,
 				},
 				EventKind::WorkspaceCreated {
 					workspace_id: first_workspace.workspace_id,
@@ -170,6 +171,7 @@ async fn a_managed_conversation_receives_a_detached_workspace_of_its_own() {
 				EventKind::ConversationCreated {
 					retention: RetentionPolicy::Retain,
 					working_tree: WorkingTree::Workspace { project_id },
+					origin: ConversationOrigin::New,
 				},
 				EventKind::WorkspaceCreated {
 					workspace_id: second_workspace.workspace_id,
