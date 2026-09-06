@@ -73,6 +73,7 @@ async fn a_managed_conversation_receives_a_workspace_under_the_jet_home() {
 					commit: workspace.base.commit.clone(),
 				},
 				seed: None,
+				promotion: None,
 				created_at_unix_ms: conversation.created_at_unix_ms,
 			},
 			true,

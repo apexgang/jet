@@ -40,7 +40,8 @@ pub const WORKSPACES_MINOR: u32 = 9;
 /// Minor that introduced seeding a Workspace from selected Local-checkout
 /// changes, and the seed on a Workspace.
 pub const SEEDED_WORKSPACES_MINOR: u32 = 10;
-/// Minor that introduced previewing a Workspace promotion.
+/// Minor that introduced previewing and confirming a Workspace promotion,
+/// and the promotion on a Workspace.
 pub const WORKSPACE_PROMOTION_MINOR: u32 = 11;
 /// The only v1 codec; other codecs are reserved for later negotiation.
 pub const CODEC_JSON_V1: &str = "json-v1";

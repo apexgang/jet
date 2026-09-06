@@ -5,11 +5,18 @@ use jet_store::{
 };
 use uuid::Uuid;
 
-use crate::{CommandId, Core, CoreError, RunId};
+use crate::{CommandId, Core, CoreError, PromotionId, RunId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum EffectKind {
-	StartRun { run_id: RunId },
+	StartRun {
+		run_id: RunId,
+	},
+	/// Apply one recorded Workspace promotion to its destination
+	/// (ADR-0025).
+	PromoteWorkspace {
+		promotion_id: PromotionId,
+	},
 }
 
 pub(crate) type EffectSafety = EffectSafetyRecord;
@@ -156,6 +163,18 @@ impl TryFrom<EffectRecord> for Effect {
 					)
 				})?),
 			},
+			EffectKindRecord::PromoteWorkspace => {
+				EffectKind::PromoteWorkspace {
+					promotion_id: PromotionId(record.promotion_id.ok_or_else(
+						|| {
+							CoreError::internal(
+								"effect.invalid",
+								"a workspace.promote Effect has no promotion identity",
+							)
+						},
+					)?),
+				}
+			}
 		};
 		Ok(Self {
 			effect_id: record.effect_id,

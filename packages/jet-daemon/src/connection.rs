@@ -458,6 +458,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::PROJECTS_MINOR,
 			feature: "Project registration",
 		}),
+		CommandRequest::PromoteWorkspace { .. } => Some(MinorRequirement {
+			minor: jet_protocol::WORKSPACE_PROMOTION_MINOR,
+			feature: "Workspace promotion",
+		}),
 		CommandRequest::CreateConversation { working_tree, .. }
 			if working_tree.is_seeded() =>
 		{

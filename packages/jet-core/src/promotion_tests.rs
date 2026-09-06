@@ -345,3 +345,52 @@ async fn a_preview_targets_a_branch_no_working_tree_has_checked_out() {
 		)
 	);
 }
+
+/// A file changed to content of the same size in the same second as the
+/// checkout's index was last written is captured as it is: the scratch
+/// copy of the index keeps the index file's own time, so Git still
+/// distrusts the entry's recorded stat data and reads the file
+/// (ADR-0025). The second is staged by hand: the index and the file are
+/// given one past time, and the repository is told not to trust change
+/// times, which a write moves and a test cannot set.
+#[tokio::test]
+async fn a_change_made_as_the_index_was_written_is_still_seen() {
+	let dir = tempfile::tempdir().unwrap();
+	let Diverged {
+		core,
+		repository,
+		workspace,
+		..
+	} = diverged(dir.path()).await;
+	git(&repository, &["config", "core.trustctime", "false"]);
+	let file = repository.join("f.txt");
+	let index = repository.join(".git").join("index");
+	let past =
+		std::time::SystemTime::now() - std::time::Duration::from_secs(600);
+	let stamp = |path: &Path| {
+		std::fs::File::options()
+			.write(true)
+			.open(path)
+			.unwrap()
+			.set_times(std::fs::FileTimes::new().set_modified(past))
+			.unwrap();
+	};
+	stamp(&file);
+	git(&repository, &["add", "f.txt"]);
+	std::fs::write(&file, "a\nb\nX\n").unwrap();
+	stamp(&file);
+	stamp(&index);
+
+	let previewed = preview(
+		&core,
+		workspace.workspace_id,
+		PromotionDestination::LocalCheckout,
+	)
+	.await
+	.unwrap();
+
+	assert_eq!(
+		content(&repository, &previewed.binding.destination_tree, "f.txt"),
+		Some("a\nb\nX\n".into())
+	);
+}

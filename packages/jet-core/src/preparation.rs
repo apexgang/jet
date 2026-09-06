@@ -11,6 +11,7 @@ use crate::audit;
 use crate::command::{Command, CommandId};
 use crate::error::CoreError;
 use crate::project::{self, Registrable};
+use crate::promotion_command::{self, PreparedPromotion};
 use crate::workspace::{self, PreparedWorkspace, WorkingTreeRequest};
 use crate::{Actor, Core};
 
@@ -23,6 +24,8 @@ pub(crate) enum Prepared {
 	/// The Project, resolved base, and captured seed a new Workspace
 	/// starts from.
 	Workspace(PreparedWorkspace),
+	/// A promotion whose binding still matches the repository.
+	Promotion(PreparedPromotion),
 }
 
 impl Core {
@@ -101,6 +104,9 @@ impl Core {
 				..
 			} => Ok(Prepared::Workspace(
 				workspace::prepare(self, *project_id, base, seed).await?,
+			)),
+			Command::PromoteWorkspace { binding } => Ok(Prepared::Promotion(
+				promotion_command::prepare(self, actor, binding).await?,
 			)),
 			Command::CreateConversation { .. }
 			| Command::CreateRun { .. }

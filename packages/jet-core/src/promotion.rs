@@ -12,16 +12,26 @@
 //! is written over the destination's work.
 
 use std::path::Path;
+use std::time::SystemTime;
 
-use jet_store::WorkspaceRecord;
+use jet_store::{
+	PromotionConflictKindRecord, PromotionConflictRecord,
+	PromotionDestinationRecord, PromotionStateRecord, WorkspacePromotionRecord,
+	WorkspaceRecord,
+};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::error::CoreError;
 use crate::event::EventSequence;
 use crate::query::QueryResult;
 use crate::tree_capture::Change;
 use crate::workspace::{self, WorkspaceHome, WorkspaceId};
-use crate::{Actor, ClientId, Core, promotion_merge as merge};
+use crate::{Actor, ClientId, Core, promotion_merge as merge, system_time};
+
+/// Durable identity of one promotion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PromotionId(pub Uuid);
 
 /// Longest branch name the core accepts, as text.
 const MAX_BRANCH_CHARS: usize = 1024;
@@ -133,6 +143,45 @@ pub enum ConflictKind {
 	/// untracked file Git does not ignore is part of what is merged, and
 	/// collides as a divergence instead.
 	Untracked,
+}
+
+/// Where a promotion stands (ADR-0025, ADR-0067).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PromotionState {
+	/// Recorded, with the Effect that applies it not yet settled.
+	Applying,
+	/// Applied, and the destination verified to hold the result.
+	Promoted,
+	/// Never applied: the preview could not settle every path, and the
+	/// paths are kept with the promotion for the user to resolve in the
+	/// Workspace.
+	Conflicted,
+	/// Its Effect reported a definite failure before changing anything;
+	/// the destination is as it was.
+	Failed,
+	/// Its Effect's outcome could not be established. Jet neither repeats
+	/// it nor calls it failed; the destination is the user's to inspect.
+	OutcomeUnknown,
+}
+
+/// One recorded promotion of a Workspace: what the user confirmed and
+/// where it stands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspacePromotion {
+	/// Durable identity.
+	pub promotion_id: PromotionId,
+	/// Exactly what the preview bound and the user confirmed.
+	pub binding: PromotionBinding,
+	/// How many paths the result changes in the destination.
+	pub changed_paths: u32,
+	/// Where the promotion stands.
+	pub state: PromotionState,
+	/// The paths that could not be settled; empty unless conflicted.
+	pub conflicts: Vec<PromotionConflict>,
+	/// When it was recorded.
+	pub recorded_at: SystemTime,
+	/// When it reached a settled state, if it has.
+	pub settled_at: Option<SystemTime>,
 }
 
 /// A preview as computed, before the journal fence is added.
@@ -411,6 +460,81 @@ fn destination_invalid() -> CoreError {
 
 pub(crate) fn workspace_not_found() -> CoreError {
 	CoreError::not_found("workspace.not_found", "the Workspace does not exist")
+}
+
+impl From<WorkspacePromotionRecord> for WorkspacePromotion {
+	fn from(record: WorkspacePromotionRecord) -> Self {
+		Self {
+			promotion_id: PromotionId(record.promotion_id),
+			binding: PromotionBinding {
+				workspace_id: WorkspaceId(record.workspace_id),
+				destination: match record.destination {
+					PromotionDestinationRecord::LocalCheckout => {
+						PromotionDestination::LocalCheckout
+					}
+					PromotionDestinationRecord::Branch(name) => {
+						PromotionDestination::Branch(name)
+					}
+				},
+				base_commit: record.base_commit,
+				workspace_tree: record.workspace_tree,
+				destination_commit: record.destination_commit,
+				destination_tree: record.destination_tree,
+				result_tree: record.result_tree,
+				actor: Actor::from_record(record.promoted_by).client_id(),
+			},
+			changed_paths: record.changed_paths,
+			state: match record.state {
+				PromotionStateRecord::Applying => PromotionState::Applying,
+				PromotionStateRecord::Promoted => PromotionState::Promoted,
+				PromotionStateRecord::Conflicted => PromotionState::Conflicted,
+				PromotionStateRecord::Failed => PromotionState::Failed,
+				PromotionStateRecord::OutcomeUnknown => {
+					PromotionState::OutcomeUnknown
+				}
+			},
+			conflicts: record.conflicts.into_iter().map(Into::into).collect(),
+			recorded_at: system_time(record.recorded_at_unix_ms),
+			settled_at: record.settled_at_unix_ms.map(system_time),
+		}
+	}
+}
+
+impl From<PromotionConflictRecord> for PromotionConflict {
+	fn from(record: PromotionConflictRecord) -> Self {
+		Self {
+			path: record.path,
+			kind: match record.kind {
+				PromotionConflictKindRecord::Diverged => ConflictKind::Diverged,
+				PromotionConflictKindRecord::Untracked => {
+					ConflictKind::Untracked
+				}
+			},
+		}
+	}
+}
+
+impl From<&PromotionConflict> for PromotionConflictRecord {
+	fn from(conflict: &PromotionConflict) -> Self {
+		Self {
+			path: conflict.path.clone(),
+			kind: match conflict.kind {
+				ConflictKind::Diverged => PromotionConflictKindRecord::Diverged,
+				ConflictKind::Untracked => {
+					PromotionConflictKindRecord::Untracked
+				}
+			},
+		}
+	}
+}
+
+impl From<&PromotionDestination> for PromotionDestinationRecord {
+	fn from(destination: &PromotionDestination) -> Self {
+		match destination {
+			PromotionDestination::LocalCheckout => Self::LocalCheckout,
+			PromotionDestination::Branch(name) => Self::Branch(name.clone()),
+		}
+	}
 }
 
 #[cfg(test)]

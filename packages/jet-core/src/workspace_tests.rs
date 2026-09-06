@@ -135,6 +135,7 @@ async fn a_managed_conversation_receives_a_detached_workspace_of_its_own() {
 					commit: main.clone(),
 				},
 				seed: None,
+				promotion: None,
 				created_at: first.created_at,
 			},
 			&Workspace {
@@ -147,6 +148,7 @@ async fn a_managed_conversation_receives_a_detached_workspace_of_its_own() {
 					commit: topic.clone(),
 				},
 				seed: None,
+				promotion: None,
 				created_at: second.created_at,
 			},
 			(main.clone(), true),

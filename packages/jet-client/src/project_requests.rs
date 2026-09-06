@@ -95,7 +95,8 @@ impl Client {
 			| CommandResponse::PairingConfirmed { .. }
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
-			| CommandResponse::PairedClientRevoked { .. }) => Err(unexpected(&other)),
+			| CommandResponse::PairedClientRevoked { .. }
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 

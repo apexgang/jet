@@ -88,7 +88,8 @@ pub use project::{
 };
 pub use promotion::{
 	ChangeKind, ConflictKind, PromotedChange, PromotionBinding,
-	PromotionConflict, PromotionDestination, PromotionPreview,
+	PromotionConflict, PromotionDestination, PromotionPreview, PromotionState,
+	WorkspacePromotion,
 };
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,

@@ -71,8 +71,14 @@ impl<'a> ScratchIndex<'a> {
 		}
 	}
 
-	/// Copies the checkout's own index here. A working tree that was never
-	/// checked out has no index yet, and the copy then starts from HEAD.
+	/// Copies the checkout's own index here, keeping the index file's own
+	/// modification time. Git decides whether an entry's recorded stat
+	/// data can be trusted by comparing the entry's time with the index
+	/// file's; a copy stamped with the time of copying would vouch for
+	/// every entry, and a file changed in the same second as the last
+	/// index write, to content of the same size, would be captured as it
+	/// was rather than as it is. A working tree that was never checked
+	/// out has no index yet, and the copy then starts from HEAD.
 	pub(crate) async fn copy_from_checkout(&self) -> Result<(), CoreError> {
 		let located = git(
 			self.root,
@@ -84,8 +90,8 @@ impl<'a> ScratchIndex<'a> {
 		}
 		let source = PathBuf::from(located.stdout.trim_end());
 		let target = self.index.to_path_buf();
-		match blocking(move || std::fs::copy(&source, &target)).await? {
-			Ok(_) => Ok(()),
+		match blocking(move || copy_with_times(&source, &target)).await? {
+			Ok(()) => Ok(()),
 			Err(error) if error.kind() == io::ErrorKind::NotFound => {
 				self.run(&["read-tree", "HEAD"]).await
 			}
@@ -166,6 +172,17 @@ impl<'a> ScratchIndex<'a> {
 	) -> Result<Output, CoreError> {
 		git_with_index(self.root, self.index, arguments).await
 	}
+}
+
+/// Copies `source` to `target` and gives the copy the source's
+/// modification time.
+fn copy_with_times(source: &Path, target: &Path) -> io::Result<()> {
+	let modified = std::fs::metadata(source)?.modified()?;
+	std::fs::copy(source, target)?;
+	std::fs::File::options()
+		.write(true)
+		.open(target)?
+		.set_times(std::fs::FileTimes::new().set_modified(modified))
 }
 
 /// What `destination` changes against `source`, one record per path.

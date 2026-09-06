@@ -2,10 +2,13 @@
 //! ADR-0049).
 
 use jet_core::{
-	ChangeKind, ConflictKind, PromotedChange, PromotionBinding,
-	PromotionConflict, PromotionDestination, PromotionPreview,
+	ChangeKind, ClientId, ConflictKind, PromotedChange, PromotionBinding,
+	PromotionConflict, PromotionDestination, PromotionPreview, PromotionState,
+	WorkspaceId, WorkspacePromotion,
 };
 use jet_protocol as wire;
+
+use super::unix_ms;
 
 pub(super) fn destination_from_wire(
 	destination: &wire::PromotionDestination,
@@ -75,5 +78,42 @@ fn conflict(conflict: PromotionConflict) -> wire::PromotionConflict {
 			ConflictKind::Diverged => wire::ConflictKind::Diverged,
 			ConflictKind::Untracked => wire::ConflictKind::Untracked,
 		},
+	}
+}
+
+pub(super) fn binding_from_wire(
+	binding: &wire::PromotionBinding,
+) -> PromotionBinding {
+	PromotionBinding {
+		workspace_id: WorkspaceId(binding.workspace_id),
+		destination: destination_from_wire(&binding.destination),
+		base_commit: binding.base_commit.clone(),
+		workspace_tree: binding.workspace_tree.clone(),
+		destination_commit: binding.destination_commit.clone(),
+		destination_tree: binding.destination_tree.clone(),
+		result_tree: binding.result_tree.clone(),
+		actor: ClientId(binding.actor),
+	}
+}
+
+pub(super) fn promotion(
+	promotion: WorkspacePromotion,
+) -> wire::WorkspacePromotion {
+	wire::WorkspacePromotion {
+		promotion_id: promotion.promotion_id.0,
+		binding: binding(promotion.binding),
+		changed_paths: promotion.changed_paths,
+		state: match promotion.state {
+			PromotionState::Applying => wire::PromotionState::Applying,
+			PromotionState::Promoted => wire::PromotionState::Promoted,
+			PromotionState::Conflicted => wire::PromotionState::Conflicted,
+			PromotionState::Failed => wire::PromotionState::Failed,
+			PromotionState::OutcomeUnknown => {
+				wire::PromotionState::OutcomeUnknown
+			}
+		},
+		conflicts: promotion.conflicts.into_iter().map(conflict).collect(),
+		recorded_at_unix_ms: unix_ms(promotion.recorded_at),
+		settled_at_unix_ms: promotion.settled_at.map(unix_ms),
 	}
 }

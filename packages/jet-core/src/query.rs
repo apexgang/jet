@@ -20,7 +20,7 @@ use crate::promotion::{self, PromotionDestination, PromotionPreview};
 use crate::relative_path::RelativePath;
 use crate::setting::{self, SettingScope, SettingSelection, SettingSnapshot};
 use crate::status::PlaneStatus;
-use crate::workspace::WorkspaceId;
+use crate::workspace::{Workspace, WorkspaceId};
 use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 
 /// Read-only requests answered with a snapshot.
@@ -441,12 +441,20 @@ async fn conversation(
 		));
 	};
 	let cursor = EventSequence(tx.event_cursor().await?);
-	let workspace = tx.workspace_of(conversation_id.0).await?;
+	let workspace = match tx.workspace_of(conversation_id.0).await? {
+		Some(record) => {
+			let promotion = tx.latest_promotion(record.workspace_id).await?;
+			let mut workspace = Workspace::from(record);
+			workspace.promotion = promotion.map(Into::into);
+			Some(workspace)
+		}
+		None => None,
+	};
 	let runs = tx.runs(conversation_id.0).await?;
 	Ok(QueryResult::Conversation(ConversationSnapshot {
 		cursor,
 		conversation: record.into(),
-		workspace: workspace.map(Into::into),
+		workspace,
 		runs: runs.into_iter().map(Into::into).collect(),
 	}))
 }

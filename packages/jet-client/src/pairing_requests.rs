@@ -81,7 +81,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -126,7 +127,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -177,7 +179,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -226,7 +229,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -271,7 +275,8 @@ impl Client {
 			| CommandResponse::PairingConfirmed { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -315,7 +320,8 @@ impl Client {
 			| CommandResponse::PairingConfirmed { .. }
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -357,7 +363,8 @@ impl Client {
 			| CommandResponse::PairingConfirmed { .. }
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 }

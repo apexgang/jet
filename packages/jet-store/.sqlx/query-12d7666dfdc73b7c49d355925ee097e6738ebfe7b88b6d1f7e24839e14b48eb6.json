@@ -1,0 +1,194 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT promotion_id AS \"promotion_id!\", workspace_id, actor_kind,\n\t\t\t\tactor_id, destination_kind, destination_branch, base_commit,\n\t\t\t\tworkspace_tree, destination_commit, destination_tree,\n\t\t\t\tresult_tree, changed_paths, state, recorded_at_unix_ms,\n\t\t\t\tsettled_at_unix_ms\n\t\t\t FROM workspace_promotions\n\t\t\t WHERE workspace_id = ?1\n\t\t\t ORDER BY rowid DESC\n\t\t\t LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "promotion_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "promotion_id"
+          }
+        }
+      },
+      {
+        "name": "workspace_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "workspace_id"
+          }
+        }
+      },
+      {
+        "name": "actor_kind",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "actor_kind"
+          }
+        }
+      },
+      {
+        "name": "actor_id",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "actor_id"
+          }
+        }
+      },
+      {
+        "name": "destination_kind",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "destination_kind"
+          }
+        }
+      },
+      {
+        "name": "destination_branch",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "destination_branch"
+          }
+        }
+      },
+      {
+        "name": "base_commit",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "base_commit"
+          }
+        }
+      },
+      {
+        "name": "workspace_tree",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "workspace_tree"
+          }
+        }
+      },
+      {
+        "name": "destination_commit",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "destination_commit"
+          }
+        }
+      },
+      {
+        "name": "destination_tree",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "destination_tree"
+          }
+        }
+      },
+      {
+        "name": "result_tree",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "result_tree"
+          }
+        }
+      },
+      {
+        "name": "changed_paths",
+        "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "changed_paths"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 12,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "name": "recorded_at_unix_ms",
+        "ordinal": 13,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "recorded_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "settled_at_unix_ms",
+        "ordinal": 14,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "settled_at_unix_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "12d7666dfdc73b7c49d355925ee097e6738ebfe7b88b6d1f7e24839e14b48eb6"
+}

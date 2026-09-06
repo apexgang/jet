@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO effects (\n\t\t\t\teffect_id, command_id, run_id, promotion_id, kind, safety,\n\t\t\t\texternal_key, max_attempts, state, attempt_count\n\t\t\t ) VALUES (\n\t\t\t\t?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 0\n\t\t\t )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "681c9a4de58146fd800bf6abc4c39197393b1112929685aa687ecc80cc761b3c"
+}

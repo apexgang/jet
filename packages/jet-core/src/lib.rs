@@ -33,6 +33,7 @@ mod preparation;
 mod project;
 mod project_entry;
 mod promotion;
+mod promotion_command;
 mod promotion_merge;
 mod query;
 mod relative_path;
@@ -105,7 +106,8 @@ pub use project::{
 pub use project_entry::{EntryKind, ProjectEntry};
 pub use promotion::{
 	ChangeKind, ConflictKind, PromotedChange, PromotionBinding,
-	PromotionConflict, PromotionDestination, PromotionPreview,
+	PromotionConflict, PromotionDestination, PromotionId, PromotionPreview,
+	PromotionState, WorkspacePromotion,
 };
 pub use query::{Query, QueryResult};
 pub use relative_path::RelativePath;

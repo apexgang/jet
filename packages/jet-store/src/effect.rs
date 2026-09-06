@@ -15,6 +15,7 @@ struct Row {
 	effect_id: String,
 	command_id: String,
 	run_id: Option<String>,
+	promotion_id: Option<String>,
 	kind: String,
 	safety: String,
 	external_key: Option<String>,
@@ -36,11 +37,38 @@ impl ReadTransaction {
 		// module is passed through SQLite parameters.
 		let rows = sqlx::query_as!(
 			Row,
-			r#"SELECT effect_id AS "effect_id!", command_id, run_id, kind,
-				safety, external_key, max_attempts, state, attempt_count
+			r#"SELECT effect_id AS "effect_id!", command_id, run_id,
+				promotion_id, kind, safety, external_key, max_attempts, state,
+				attempt_count
 			 FROM effects
 			 WHERE state IN ('pending', 'in_flight')
 			 ORDER BY rowid"#
+		)
+		.fetch_all(self.connection())
+		.await?;
+		rows.into_iter().map(read_row).collect()
+	}
+
+	/// The unresolved Effects of one kind, so a worker that performs one
+	/// kind of work leaves the others to theirs.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the outbox cannot be read.
+	pub async fn unresolved_effects_of(
+		&mut self,
+		kind: EffectKindRecord,
+	) -> Result<Vec<EffectRecord>, StoreError> {
+		let kind = kind.as_str();
+		let rows = sqlx::query_as!(
+			Row,
+			r#"SELECT effect_id AS "effect_id!", command_id, run_id,
+				promotion_id, kind, safety, external_key, max_attempts, state,
+				attempt_count
+			 FROM effects
+			 WHERE state IN ('pending', 'in_flight') AND kind = ?1
+			 ORDER BY rowid"#,
+			kind
 		)
 		.fetch_all(self.connection())
 		.await?;
@@ -62,19 +90,22 @@ impl WriteTransaction {
 		let effect_id = effect.effect_id.to_string();
 		let command_id = effect.command_id.to_string();
 		let run_id = effect.run_id.as_ref().map(ToString::to_string);
+		let promotion_id =
+			effect.promotion_id.as_ref().map(ToString::to_string);
 		let kind = effect.kind.as_str();
 		let external_key = external_key.as_ref().map(ToString::to_string);
 		let max_attempts = i64::from(max_attempts);
 		sqlx::query!(
 			"INSERT INTO effects (
-				effect_id, command_id, run_id, kind, safety, external_key,
-				max_attempts, state, attempt_count
+				effect_id, command_id, run_id, promotion_id, kind, safety,
+				external_key, max_attempts, state, attempt_count
 			 ) VALUES (
-				?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', 0
+				?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 0
 			 )",
 			effect_id,
 			command_id,
 			run_id,
+			promotion_id,
 			kind,
 			safety,
 			external_key,
@@ -164,8 +195,9 @@ impl WriteTransaction {
 		let effect_id = effect_id.to_string();
 		let row = sqlx::query_as!(
 			Row,
-			r#"SELECT effect_id AS "effect_id!", command_id, run_id, kind,
-				safety, external_key, max_attempts, state, attempt_count
+			r#"SELECT effect_id AS "effect_id!", command_id, run_id,
+				promotion_id, kind, safety, external_key, max_attempts, state,
+				attempt_count
 			 FROM effects
 			 WHERE effect_id = ?1"#,
 			effect_id
@@ -182,6 +214,10 @@ fn read_row(row: Row) -> Result<EffectRecord, StoreError> {
 		effect_id: parse_uuid("effect_id", &row.effect_id)?,
 		command_id: parse_uuid("command_id", &row.command_id)?,
 		run_id: parse_optional_uuid("run_id", row.run_id.as_deref())?,
+		promotion_id: parse_optional_uuid(
+			"promotion_id",
+			row.promotion_id.as_deref(),
+		)?,
 		// ASVS 1.5.2: durable kind input is decoded through a closed
 		// allowlist.
 		kind: EffectKindRecord::parse(&row.kind).ok_or_else(|| {

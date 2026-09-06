@@ -265,6 +265,11 @@ pub(crate) fn command(
 				grant: PathGrant(PathBuf::from(path)),
 			}
 		}
+		wire::CommandRequest::PromoteWorkspace { binding } => {
+			Command::PromoteWorkspace {
+				binding: promotion::binding_from_wire(binding),
+			}
+		}
 	})
 }
 
@@ -350,6 +355,11 @@ pub(crate) fn command_outcome(
 		}
 		CommandOutcome::ProjectRegistered(project) => {
 			wire::CommandResponse::ProjectRegistered(project::project(project))
+		}
+		CommandOutcome::WorkspacePromotionRecorded(recorded) => {
+			wire::CommandResponse::WorkspacePromotionRecorded(
+				promotion::promotion(recorded),
+			)
 		}
 	}
 }
@@ -501,6 +511,10 @@ fn workspace(workspace: &Workspace, minor: u32) -> wire::Workspace {
 					changed_paths: seed.changed_paths,
 				})
 			})
+			.flatten(),
+		// Nor about a promotion it cannot decode.
+		promotion: (minor >= wire::WORKSPACE_PROMOTION_MINOR)
+			.then(|| workspace.promotion.clone().map(promotion::promotion))
 			.flatten(),
 		created_at_unix_ms: unix_ms(workspace.created_at),
 	}

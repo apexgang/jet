@@ -28,6 +28,7 @@ use crate::conversation::{Conversation, ConversationId};
 use crate::error::CoreError;
 use crate::event::{EventKind, EventSubject};
 use crate::filesystem::{blocking, canonicalize};
+use crate::promotion::WorkspacePromotion;
 use crate::seed::{SeedSelection, WorkspaceSeed};
 use crate::seed_capture::{self, CapturedSeed};
 use crate::{Actor, Core, ProjectId, lifecycle, system_time, worktree};
@@ -127,6 +128,10 @@ pub struct Workspace {
 	pub base: WorkspaceBase,
 	/// The Local-checkout changes it started with, if any.
 	pub seed: Option<WorkspaceSeed>,
+	/// Its most recent promotion, if it has been promoted: where that
+	/// stands, and the paths it could not settle when it is conflicted
+	/// (ADR-0025).
+	pub promotion: Option<WorkspacePromotion>,
 	/// When it was created.
 	pub created_at: SystemTime,
 }
@@ -490,6 +495,7 @@ impl From<WorkspaceRecord> for Workspace {
 				commit: record.base_commit,
 			},
 			seed: record.seed.map(Into::into),
+			promotion: None,
 			created_at: system_time(record.created_at_unix_ms),
 		}
 	}

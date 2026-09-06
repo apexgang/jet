@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT path, kind FROM workspace_promotion_conflicts\n\t\t\t WHERE promotion_id = ?1\n\t\t\t ORDER BY position",
+  "describe": {
+    "columns": [
+      {
+        "name": "path",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotion_conflicts",
+            "name": "path"
+          }
+        }
+      },
+      {
+        "name": "kind",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotion_conflicts",
+            "name": "kind"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "5eecfc0f8f82017915c2a9019b27a6565349f4cac590ff4f14d3cb83c7745fe0"
+}

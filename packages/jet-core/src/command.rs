@@ -31,6 +31,8 @@ use crate::pairing::{
 };
 use crate::preparation::Prepared;
 use crate::project::{self, PathGrant, Project};
+use crate::promotion::{PromotionBinding, WorkspacePromotion};
+use crate::promotion_command;
 use crate::security::{self, SecurityClass, SecurityState};
 use crate::setting::{self, SettingKey, SettingScope, SettingValue};
 use crate::workspace::{self, WorkingTree, WorkingTreeRequest, WorkspaceHome};
@@ -226,6 +228,14 @@ pub enum Command {
 		/// The user's explicit authorization for one absolute path.
 		grant: PathGrant,
 	},
+	/// Promote a Workspace to the permanent checkout or branch its preview
+	/// was made for, exactly as previewed (ADR-0025). The preview is
+	/// computed again before the transaction opens, and a Workspace or
+	/// destination that moved on makes it stale and refused.
+	PromoteWorkspace {
+		/// What the preview bound and the user confirmed.
+		binding: PromotionBinding,
+	},
 }
 
 impl Command {
@@ -243,7 +253,8 @@ impl Command {
 			| Self::CreateConversation {
 				working_tree: WorkingTreeRequest::Workspace { .. },
 				..
-			} => GIT,
+			}
+			| Self::PromoteWorkspace { .. } => GIT,
 			Self::BindAccount {
 				credential_source: CredentialSource::PlatformStore,
 				..
@@ -361,6 +372,9 @@ pub enum CommandOutcome {
 	},
 	/// The Project as registered.
 	ProjectRegistered(Project),
+	/// The promotion as recorded: applying, with its Effect committed, or
+	/// conflicted, with the paths that keep it from being applied.
+	WorkspacePromotionRecorded(WorkspacePromotion),
 }
 
 impl Core {
@@ -511,7 +525,8 @@ fn redacted_for_receipt(
 			| CommandOutcome::PairingCompleted { .. }
 			| CommandOutcome::PairedClientAccessSet { .. }
 			| CommandOutcome::PairedClientRevoked { .. }
-			| CommandOutcome::ProjectRegistered(_)),
+			| CommandOutcome::ProjectRegistered(_)
+			| CommandOutcome::WorkspacePromotionRecorded(_)),
 		) => Ok(outcome.clone()),
 		Err(error) => Err(error.clone()),
 	}
@@ -541,6 +556,23 @@ async fn execute_new(
 		workspace_home,
 	} = context;
 	match command {
+		Command::PromoteWorkspace { .. } => {
+			let Prepared::Promotion(prepared) = prepared else {
+				return Err(CoreError::internal(
+					"workspace.promotion_unprepared",
+					"a Workspace promotion reached its transaction without \
+					 its revalidated binding",
+				));
+			};
+			promotion_command::record(
+				tx,
+				actor,
+				command_id,
+				prepared,
+				now_unix_ms,
+			)
+			.await
+		}
 		Command::RegisterProject { .. } => {
 			let Prepared::Registration(registrable) = prepared else {
 				return Err(CoreError::internal(
@@ -886,6 +918,7 @@ async fn transition_run(
 			effect_id,
 			command_id: command_id.0,
 			run_id: Some(run_id.0),
+			promotion_id: None,
 			kind: EffectKindRecord::StartRun,
 			safety: EffectSafetyRecord::Idempotent {
 				external_key: effect_id,

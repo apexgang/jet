@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT effect_id AS \"effect_id!\", command_id, run_id, kind,\n\t\t\t\tsafety, external_key, max_attempts, state, attempt_count\n\t\t\t FROM effects\n\t\t\t WHERE state IN ('pending', 'in_flight')\n\t\t\t ORDER BY rowid",
+  "query": "SELECT effect_id AS \"effect_id!\", command_id, run_id,\n\t\t\t\tpromotion_id, kind, safety, external_key, max_attempts, state,\n\t\t\t\tattempt_count\n\t\t\t FROM effects\n\t\t\t WHERE state IN ('pending', 'in_flight')\n\t\t\t ORDER BY rowid",
   "describe": {
     "columns": [
       {
@@ -37,8 +37,19 @@
         }
       },
       {
-        "name": "kind",
+        "name": "promotion_id",
         "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "effects",
+            "name": "promotion_id"
+          }
+        }
+      },
+      {
+        "name": "kind",
+        "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +60,7 @@
       },
       {
         "name": "safety",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "external_key",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "max_attempts",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -82,7 +93,7 @@
       },
       {
         "name": "state",
-        "ordinal": 7,
+        "ordinal": 8,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -93,7 +104,7 @@
       },
       {
         "name": "attempt_count",
-        "ordinal": 8,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -110,6 +121,7 @@
       true,
       false,
       true,
+      true,
       false,
       false,
       true,
@@ -118,5 +130,5 @@
       false
     ]
   },
-  "hash": "f7eca0053b735c2e3fec2b6d6cdfcb74766a9c39be45db73ca1d5233f146213d"
+  "hash": "55d8409d094bdead7107a1c87f21588a1b89a93052212f4de41ce7ee1bad1b51"
 }

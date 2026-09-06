@@ -1,6 +1,7 @@
 //! Wire form of Workspace promotion: previewing what applying a
 //! Workspace's changes to a permanent checkout or branch of its Project
-//! would do, before it is done (ADR-0025).
+//! would do, confirming exactly that, and where a promotion stands
+//! (ADR-0025).
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -106,4 +107,46 @@ pub enum ConflictKind {
 	/// The Workspace adds the path and the destination already holds an
 	/// ignored file there, which the merge never saw.
 	Untracked,
+}
+
+/// Where a promotion stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromotionState {
+	/// Recorded, with the Effect that applies it not yet settled.
+	Applying,
+	/// Applied, and the destination verified to hold the result.
+	Promoted,
+	/// Never applied: the preview could not settle every path, and the
+	/// paths are kept with the promotion for the user to resolve in the
+	/// Workspace.
+	Conflicted,
+	/// Its Effect reported a definite failure before changing anything;
+	/// the destination is as it was.
+	Failed,
+	/// Its Effect's outcome could not be established. The Plane neither
+	/// repeats it nor calls it failed; the destination is the user's to
+	/// inspect.
+	OutcomeUnknown,
+}
+
+/// One recorded promotion of a Workspace: what the user confirmed and
+/// where it stands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspacePromotion {
+	/// Durable identity.
+	pub promotion_id: Uuid,
+	/// Exactly what the preview bound and the user confirmed.
+	pub binding: PromotionBinding,
+	/// How many paths the result changes in the destination.
+	pub changed_paths: u32,
+	/// Where the promotion stands.
+	pub state: PromotionState,
+	/// The paths that could not be settled; empty unless conflicted.
+	pub conflicts: Vec<PromotionConflict>,
+	/// When it was recorded, in signed Unix milliseconds.
+	pub recorded_at_unix_ms: i64,
+	/// When it reached a settled state, if it has.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub settled_at_unix_ms: Option<i64>,
 }
