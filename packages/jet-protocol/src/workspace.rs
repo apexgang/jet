@@ -4,6 +4,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::promotion::WorkspacePromotion;
+
 /// Where a Conversation does its work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -149,6 +151,11 @@ pub struct Workspace {
 	/// protocol minor 10, and when it was seeded with nothing.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub seed: Option<WorkspaceSeed>,
+	/// Its most recent promotion, if it has been promoted: where that
+	/// stands, and the paths it could not settle when it is conflicted.
+	/// Absent before protocol minor 11, and when it was never promoted.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub promotion: Option<WorkspacePromotion>,
 	/// When it was created, in signed Unix milliseconds.
 	pub created_at_unix_ms: i64,
 }

@@ -15,6 +15,7 @@ use crate::conversation::{
 use crate::event::Event;
 use crate::pairing::PairingSnapshot;
 use crate::project::{ProjectEntry, ProjectList, ProjectPreview};
+use crate::promotion::{PromotionDestination, PromotionPreview};
 use crate::setting::{SettingScope, SettingSelection, SettingSnapshot};
 
 /// Correlates a client request with its server reply.
@@ -162,6 +163,15 @@ pub enum QueryRequest {
 		/// components.
 		path: String,
 	},
+	/// What promoting a Workspace to a permanent checkout or branch of its
+	/// Project would do, before it is done. The answer binds what it
+	/// compared, and a promotion carries that binding back.
+	PreviewPromotion {
+		/// The Workspace to promote.
+		workspace_id: Uuid,
+		/// Where its changes would go.
+		destination: PromotionDestination,
+	},
 }
 
 /// Query snapshots.
@@ -172,8 +182,9 @@ pub enum QueryResponse {
 	Status(PlaneStatus),
 	/// One page of Conversations on the Plane.
 	Conversations(ConversationList),
-	/// One Conversation with all of its Runs.
-	Conversation(ConversationSnapshot),
+	/// One Conversation with all of its Runs. Boxed: the Workspace it
+	/// carries, with its promotion, outweighs every other snapshot.
+	Conversation(Box<ConversationSnapshot>),
 	/// What the Plane can do.
 	Capabilities(CapabilitySnapshot),
 	/// Every Account binding on the Plane.
@@ -192,6 +203,9 @@ pub enum QueryResponse {
 	ProjectPreview(ProjectPreview),
 	/// What one path inside a Project names.
 	ProjectEntry(ProjectEntry),
+	/// What promoting a Workspace would do. Boxed: the preview carries
+	/// two lists and six object names, far more than any other snapshot.
+	PromotionPreview(Box<PromotionPreview>),
 }
 
 /// One page of journal Events, fenced by the journal position it was read

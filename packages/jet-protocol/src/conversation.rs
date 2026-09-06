@@ -9,6 +9,7 @@ use crate::pairing::{
 	PairingGate, PairingMethod, PendingPairing,
 };
 use crate::project::Project;
+use crate::promotion::{PromotionBinding, WorkspacePromotion};
 use crate::setting::{SettingKey, SettingScope, SettingValue};
 use crate::workspace::{WorkingTree, WorkingTreeRequest, Workspace};
 
@@ -254,6 +255,13 @@ pub enum CommandRequest {
 		/// The absolute path the user granted.
 		path: String,
 	},
+	/// Promote a Workspace exactly as a preview showed. The Plane computes
+	/// the preview again and refuses a binding the Workspace or the
+	/// destination has moved past.
+	PromoteWorkspace {
+		/// What the preview bound and the user confirmed.
+		binding: PromotionBinding,
+	},
 }
 
 /// Durable Command outcomes.
@@ -343,6 +351,9 @@ pub enum CommandResponse {
 	},
 	/// The Project as registered.
 	ProjectRegistered(Project),
+	/// The promotion as recorded: applying, with its Effect committed, or
+	/// conflicted, with the paths that keep it from being applied.
+	WorkspacePromotionRecorded(WorkspacePromotion),
 }
 
 /// Structured state returned when a Revision precondition is stale.

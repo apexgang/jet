@@ -207,18 +207,22 @@ pub struct NewCommandReceipt {
 pub enum EffectKindRecord {
 	/// Start one Run's managed processes.
 	StartRun,
+	/// Apply one Workspace promotion to its destination (ADR-0025).
+	PromoteWorkspace,
 }
 
 impl EffectKindRecord {
 	pub(crate) fn as_str(self) -> &'static str {
 		match self {
 			Self::StartRun => "run.start",
+			Self::PromoteWorkspace => "workspace.promote",
 		}
 	}
 
 	pub(crate) fn parse(text: &str) -> Option<Self> {
 		match text {
 			"run.start" => Some(Self::StartRun),
+			"workspace.promote" => Some(Self::PromoteWorkspace),
 			_ => None,
 		}
 	}
@@ -306,6 +310,8 @@ pub struct NewEffect {
 	pub command_id: Uuid,
 	/// Run affected by the work.
 	pub run_id: Option<Uuid>,
+	/// Workspace promotion the work applies.
+	pub promotion_id: Option<Uuid>,
 	/// Closed Effect kind understood by the core.
 	pub kind: EffectKindRecord,
 	/// Evidence and retry bound governing interrupted attempts.
@@ -321,6 +327,8 @@ pub struct EffectRecord {
 	pub command_id: Uuid,
 	/// Run affected by the work.
 	pub run_id: Option<Uuid>,
+	/// Workspace promotion the work applies.
+	pub promotion_id: Option<Uuid>,
 	/// Closed Effect kind understood by the core.
 	pub kind: EffectKindRecord,
 	/// Evidence and retry bound governing interrupted attempts.

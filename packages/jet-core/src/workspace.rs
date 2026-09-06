@@ -28,6 +28,7 @@ use crate::conversation::{Conversation, ConversationId};
 use crate::error::CoreError;
 use crate::event::{EventKind, EventSubject};
 use crate::filesystem::{blocking, canonicalize};
+use crate::promotion::WorkspacePromotion;
 use crate::seed::{SeedSelection, WorkspaceSeed};
 use crate::seed_capture::{self, CapturedSeed};
 use crate::{Actor, Core, ProjectId, lifecycle, system_time, worktree};
@@ -127,6 +128,10 @@ pub struct Workspace {
 	pub base: WorkspaceBase,
 	/// The Local-checkout changes it started with, if any.
 	pub seed: Option<WorkspaceSeed>,
+	/// Its most recent promotion, if it has been promoted: where that
+	/// stands, and the paths it could not settle when it is conflicted
+	/// (ADR-0025).
+	pub promotion: Option<WorkspacePromotion>,
 	/// When it was created.
 	pub created_at: SystemTime,
 }
@@ -228,26 +233,37 @@ pub(crate) async fn prepare(
 	})
 }
 
-/// Captures `seed` through a scratch directory of the Workspace home, which
-/// is the owner's alone and is gone again before this returns.
+/// Captures `seed` through a scratch directory of the Workspace home.
 async fn capture_in_scratch(
 	home: &WorkspaceHome,
 	project_root: &Path,
 	seed: &SeedSelection,
 	commit: &str,
 ) -> Result<CapturedSeed, CoreError> {
+	with_scratch(home, "seed", async |scratch| {
+		seed_capture::capture(project_root, scratch, seed, commit).await
+	})
+	.await
+}
+
+/// Runs `work` with a scratch directory of the Workspace home, which is
+/// the owner's alone and is gone again before this returns.
+pub(crate) async fn with_scratch<T>(
+	home: &WorkspaceHome,
+	purpose: &str,
+	work: impl AsyncFnOnce(&Path) -> Result<T, CoreError>,
+) -> Result<T, CoreError> {
 	use std::os::unix::fs::DirBuilderExt;
 	let scratch = prepare_home(&home.0)
 		.await?
-		.join(format!(".seed-{}", Uuid::now_v7()));
+		.join(format!(".{purpose}-{}", Uuid::now_v7()));
 	let created = scratch.clone();
 	blocking(move || std::fs::DirBuilder::new().mode(0o700).create(&created))
 		.await?
 		.map_err(home_unavailable)?;
-	let captured =
-		seed_capture::capture(project_root, &scratch, seed, commit).await;
+	let result = work(&scratch).await;
 	let _ = blocking(move || std::fs::remove_dir_all(&scratch)).await;
-	captured
+	result
 }
 
 /// Records a Conversation that works in a new Workspace and creates the
@@ -479,6 +495,7 @@ impl From<WorkspaceRecord> for Workspace {
 				commit: record.base_commit,
 			},
 			seed: record.seed.map(Into::into),
+			promotion: None,
 			created_at: system_time(record.created_at_unix_ms),
 		}
 	}

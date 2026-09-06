@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO workspace_promotion_conflicts\n\t\t\t\t\t(promotion_id, position, path, kind)\n\t\t\t\t VALUES (?1, ?2, ?3, ?4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "a0cd80c81d15d23919f5d5a0a03b4d5d0c672ce58e1ceab8eb0019fc5c135d23"
+}

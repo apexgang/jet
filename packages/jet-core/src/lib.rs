@@ -16,7 +16,6 @@ mod clock;
 mod command;
 mod command_receipt;
 mod conversation;
-#[allow(dead_code, reason = "wired to the Harness by follow-up issue #20")]
 mod effect;
 mod error;
 mod event;
@@ -32,6 +31,11 @@ mod pairing_secret;
 mod preparation;
 mod project;
 mod project_entry;
+mod promotion;
+mod promotion_apply;
+mod promotion_command;
+mod promotion_effect;
+mod promotion_merge;
 mod query;
 mod relative_path;
 mod remote;
@@ -44,6 +48,7 @@ mod setting;
 mod status;
 #[cfg(test)]
 mod test_support;
+mod tree_capture;
 mod workspace;
 mod worktree;
 
@@ -100,6 +105,11 @@ pub use project::{
 	Registrability, Repository, Worktree,
 };
 pub use project_entry::{EntryKind, ProjectEntry};
+pub use promotion::{
+	ChangeKind, ConflictKind, PromotedChange, PromotionBinding,
+	PromotionConflict, PromotionDestination, PromotionId, PromotionPreview,
+	PromotionState, WorkspacePromotion,
+};
 pub use query::{Query, QueryResult};
 pub use relative_path::RelativePath;
 pub use remote::RemoteSession;
@@ -202,7 +212,8 @@ pub struct Core {
 	/// begins a new audit epoch (ADR-0105).
 	security: tokio::sync::RwLock<SecurityState>,
 	started_at: SystemTime,
-	#[allow(dead_code, reason = "used by Effect reconciliation in issue #20")]
+	/// Serializes every Effect decision, so two workers never perform the
+	/// same durable request at once (ADR-0067).
 	effect_reconciliation: tokio::sync::Mutex<()>,
 	conversation_pages: pagination::ConversationPages,
 	/// Where this core creates Workspaces (ADR-0025).

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE workspace_promotions\n\t\t\t SET state = ?2, settled_at_unix_ms = ?3\n\t\t\t WHERE promotion_id = ?1 AND state = 'applying'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "c00d62350956e3a49d3cfcd13c9026a77b551d5901f86273875a39d9b1d0afbb"
+}

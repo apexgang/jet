@@ -15,6 +15,7 @@ use crate::audit::AuditEpoch;
 use crate::conversation::{ConversationId, RunId};
 use crate::error::CoreError;
 use crate::pairing::{PairingEnd, PairingOfferId};
+use crate::promotion::{PromotionBinding, PromotionId, PromotionState};
 use crate::seed::WorkspaceSeed;
 use crate::setting::{SettingKey, SettingScope, SettingValue};
 use crate::workspace::{WorkingTree, WorkspaceBase, WorkspaceId};
@@ -141,6 +142,34 @@ pub enum EventKind {
 		workspace_id: WorkspaceId,
 		/// What it was seeded with.
 		seed: WorkspaceSeed,
+	},
+	/// A Workspace promotion was recorded: applying, with the Effect that
+	/// applies it committed beside it, or conflicted, with the paths that
+	/// keep it from being applied (ADR-0025).
+	#[serde(rename = "workspace.promotion_recorded")]
+	WorkspacePromotionRecorded {
+		/// The Workspace being promoted.
+		workspace_id: WorkspaceId,
+		/// The promotion that was recorded.
+		promotion_id: PromotionId,
+		/// What the user confirmed, the paths that could not be settled
+		/// included.
+		binding: PromotionBinding,
+		/// Where the promotion starts: applying or conflicted.
+		state: PromotionState,
+	},
+	/// A Workspace promotion's Effect settled: the destination was
+	/// verified to hold the result, the Effect failed before changing
+	/// anything, or its outcome could not be established (ADR-0025,
+	/// ADR-0067).
+	#[serde(rename = "workspace.promotion_settled")]
+	WorkspacePromotionSettled {
+		/// The Workspace that was promoted.
+		workspace_id: WorkspaceId,
+		/// The promotion that settled.
+		promotion_id: PromotionId,
+		/// Where it stands now.
+		state: PromotionState,
 	},
 	/// A Run was recorded in the `created` state.
 	#[serde(rename = "run.created")]
@@ -310,7 +339,9 @@ impl EventKind {
 			| Self::PairedClientRevoked { .. }
 			| Self::ProjectRegistered { .. }
 			| Self::WorkspaceCreated { .. }
-			| Self::WorkspaceSeeded { .. } => {
+			| Self::WorkspaceSeeded { .. }
+			| Self::WorkspacePromotionRecorded { .. }
+			| Self::WorkspacePromotionSettled { .. } => {
 				let encoded = serde_json::to_value(self).map_err(|error| {
 					CoreError::internal("event.unencodable", error.to_string())
 				})?;

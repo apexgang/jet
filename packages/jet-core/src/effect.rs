@@ -2,14 +2,22 @@
 
 use jet_store::{
 	EffectKindRecord, EffectRecord, EffectSafetyRecord, EffectStateRecord,
+	WriteTransaction,
 };
 use uuid::Uuid;
 
-use crate::{CommandId, Core, CoreError, RunId};
+use crate::{CommandId, Core, CoreError, PromotionId, RunId, promotion_effect};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum EffectKind {
-	StartRun { run_id: RunId },
+	StartRun {
+		run_id: RunId,
+	},
+	/// Apply one recorded Workspace promotion to its destination
+	/// (ADR-0025).
+	PromoteWorkspace {
+		promotion_id: PromotionId,
+	},
 }
 
 pub(crate) type EffectSafety = EffectSafetyRecord;
@@ -40,10 +48,16 @@ pub(crate) enum EffectResult {
 /// lost.
 pub(crate) trait EffectAdapter {
 	/// Performs a new or provably safe repeated attempt.
-	fn execute(&mut self, effect: &Effect) -> EffectResult;
+	fn execute(
+		&mut self,
+		effect: &Effect,
+	) -> impl std::future::Future<Output = EffectResult> + Send;
 
 	/// Observes an interrupted attempt without changing external state.
-	fn reconcile(&mut self, effect: &Effect) -> EffectResult;
+	fn reconcile(
+		&mut self,
+		effect: &Effect,
+	) -> impl std::future::Future<Output = EffectResult> + Send;
 }
 
 impl Core {
@@ -53,9 +67,13 @@ impl Core {
 		          transactions; releasing it earlier would let a second \
 		          worker claim the same in-flight Effect (ADR-0067)"
 	)]
+	/// Performs every pending Effect of one `kind` and reconciles every
+	/// interrupted one through `adapter`, so a worker that performs one
+	/// kind of work leaves the others to theirs.
 	pub(crate) async fn reconcile_effects(
 		&self,
 		adapter: &mut impl EffectAdapter,
+		kind: EffectKindRecord,
 	) -> Result<Vec<Effect>, CoreError> {
 		// ASVS 15.4.1: one core serializes all Effect decisions, so two
 		// workers cannot execute the same durable request concurrently. The
@@ -63,7 +81,7 @@ impl Core {
 		let _guard = self.effect_reconciliation.lock().await;
 		let records = self
 			.store
-			.read(async |tx| tx.unresolved_effects().await)
+			.read(async |tx| tx.unresolved_effects_of(kind).await)
 			.await?;
 		let mut effects = Vec::with_capacity(records.len());
 		for record in records {
@@ -80,7 +98,7 @@ impl Core {
 		let effect = Effect::try_from(record)?;
 		match effect.state {
 			EffectState::Pending => self.execute_effect(adapter, effect).await,
-			EffectState::InFlight => match adapter.reconcile(&effect) {
+			EffectState::InFlight => match adapter.reconcile(&effect).await {
 				EffectResult::Completed => {
 					self.finish_effect(effect, EffectStateRecord::Completed)
 						.await
@@ -117,7 +135,7 @@ impl Core {
 			.write(async |tx| tx.begin_effect_attempt(effect.effect_id).await)
 			.await?;
 		let in_flight = Effect::try_from(record)?;
-		match adapter.execute(&in_flight) {
+		match adapter.execute(&in_flight).await {
 			EffectResult::Completed => {
 				self.finish_effect(in_flight, EffectStateRecord::Completed)
 					.await
@@ -130,16 +148,39 @@ impl Core {
 		}
 	}
 
+	/// Records an Effect's terminal state together with what it settles:
+	/// the outcome of the work is durable in the same transaction as the
+	/// Effect that did it (ADR-0064).
 	async fn finish_effect(
 		&self,
 		effect: Effect,
 		state: EffectStateRecord,
 	) -> Result<Effect, CoreError> {
+		let now_unix_ms = self.now_unix_ms();
 		let record = self
 			.store
-			.write(async |tx| tx.finish_effect(effect.effect_id, state).await)
+			.write(async |tx| {
+				let record = tx.finish_effect(effect.effect_id, state).await?;
+				settle(tx, &effect, state, now_unix_ms).await?;
+				Ok::<_, CoreError>(record)
+			})
 			.await?;
 		Effect::try_from(record)
+	}
+}
+
+/// Settles what the Effect was for, in the transaction that finishes it.
+async fn settle(
+	tx: &mut WriteTransaction,
+	effect: &Effect,
+	state: EffectStateRecord,
+	now_unix_ms: i64,
+) -> Result<(), CoreError> {
+	match effect.kind {
+		EffectKind::StartRun { .. } => Ok(()),
+		EffectKind::PromoteWorkspace { promotion_id } => {
+			promotion_effect::settle(tx, promotion_id, state, now_unix_ms).await
+		}
 	}
 }
 
@@ -156,6 +197,18 @@ impl TryFrom<EffectRecord> for Effect {
 					)
 				})?),
 			},
+			EffectKindRecord::PromoteWorkspace => {
+				EffectKind::PromoteWorkspace {
+					promotion_id: PromotionId(record.promotion_id.ok_or_else(
+						|| {
+							CoreError::internal(
+								"effect.invalid",
+								"a workspace.promote Effect has no promotion identity",
+							)
+						},
+					)?),
+				}
+			}
 		};
 		Ok(Self {
 			effect_id: record.effect_id,

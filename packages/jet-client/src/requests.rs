@@ -42,7 +42,8 @@ impl Client {
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
-			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -66,7 +67,8 @@ impl Client {
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
-			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -97,7 +99,8 @@ impl Client {
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
-			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -117,7 +120,7 @@ impl Client {
 			.query(QueryRequest::Conversation { conversation_id })
 			.await?
 		{
-			QueryResponse::Conversation(snapshot) => Ok(snapshot),
+			QueryResponse::Conversation(snapshot) => Ok(*snapshot),
 			other @ (QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Events(_)
@@ -128,7 +131,8 @@ impl Client {
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
-			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -156,7 +160,8 @@ impl Client {
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
-			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -191,7 +196,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -222,7 +228,8 @@ impl Client {
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
-			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -297,7 +304,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -335,7 +343,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -380,7 +389,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -413,7 +423,8 @@ impl Client {
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
-			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -455,7 +466,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -495,7 +507,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -530,7 +543,8 @@ impl Client {
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
-			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -568,7 +582,8 @@ impl Client {
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
-			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -621,7 +636,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -665,7 +681,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 }

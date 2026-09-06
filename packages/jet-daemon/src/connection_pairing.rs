@@ -85,7 +85,8 @@ async fn apply(
 		| CommandOutcome::PairingConfirmed { .. }
 		| CommandOutcome::AuditEpochBegun { .. }
 		| CommandOutcome::PairedClientRevoked { .. }
-		| CommandOutcome::ProjectRegistered(_) => Err(malformed()),
+		| CommandOutcome::ProjectRegistered(_)
+		| CommandOutcome::WorkspacePromotionRecorded(_) => Err(malformed()),
 	}
 }
 

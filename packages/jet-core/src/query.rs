@@ -16,9 +16,11 @@ use crate::event::{EVENT_PAGE_LIMIT, Event, EventPage, EventSequence};
 use crate::pairing::{self, PairingSnapshot};
 use crate::project::{self, PathGrant, ProjectList, ProjectPreview};
 use crate::project_entry::{self, ProjectEntry};
+use crate::promotion::{self, PromotionDestination, PromotionPreview};
 use crate::relative_path::RelativePath;
 use crate::setting::{self, SettingScope, SettingSelection, SettingSnapshot};
 use crate::status::PlaneStatus;
+use crate::workspace::{Workspace, WorkspaceId};
 use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 
 /// Read-only requests answered with a snapshot.
@@ -94,6 +96,14 @@ pub enum Query {
 		/// The path, relative to the Project's root.
 		path: RelativePath,
 	},
+	/// What promoting a Workspace to a permanent checkout or branch of its
+	/// Project would do, before it is done (ADR-0025).
+	PreviewPromotion {
+		/// The Workspace to promote.
+		workspace_id: WorkspaceId,
+		/// Where its changes would go.
+		destination: PromotionDestination,
+	},
 }
 
 /// Snapshots returned by [`Core::query`].
@@ -103,8 +113,9 @@ pub enum QueryResult {
 	Status(PlaneStatus),
 	/// One page of Conversations on the Plane.
 	Conversations(ConversationList),
-	/// One Conversation with all of its Runs.
-	Conversation(ConversationSnapshot),
+	/// One Conversation with all of its Runs. Boxed: the Workspace it
+	/// carries, with its promotion, outweighs every other snapshot.
+	Conversation(Box<ConversationSnapshot>),
 	/// What the Plane can do.
 	Capabilities(CapabilitySnapshot),
 	/// Every Account binding on the Plane.
@@ -123,6 +134,9 @@ pub enum QueryResult {
 	ProjectPreview(ProjectPreview),
 	/// What one path inside a Project names.
 	ProjectEntry(ProjectEntry),
+	/// What promoting a Workspace would do. Boxed: the preview carries
+	/// two lists and six object names, far more than any other snapshot.
+	PromotionPreview(Box<PromotionPreview>),
 }
 
 impl Core {
@@ -246,6 +260,12 @@ impl Core {
 			}
 			Query::ProjectEntry { project_id, path } => {
 				project_entry::entry(self, project_id, path).await
+			}
+			Query::PreviewPromotion {
+				workspace_id,
+				destination,
+			} => {
+				promotion::preview(self, actor, workspace_id, destination).await
 			}
 			Query::Projects => {
 				self.store
@@ -423,12 +443,20 @@ async fn conversation(
 		));
 	};
 	let cursor = EventSequence(tx.event_cursor().await?);
-	let workspace = tx.workspace_of(conversation_id.0).await?;
+	let workspace = match tx.workspace_of(conversation_id.0).await? {
+		Some(record) => {
+			let promotion = tx.latest_promotion(record.workspace_id).await?;
+			let mut workspace = Workspace::from(record);
+			workspace.promotion = promotion.map(Into::into);
+			Some(workspace)
+		}
+		None => None,
+	};
 	let runs = tx.runs(conversation_id.0).await?;
-	Ok(QueryResult::Conversation(ConversationSnapshot {
+	Ok(QueryResult::Conversation(Box::new(ConversationSnapshot {
 		cursor,
 		conversation: record.into(),
-		workspace: workspace.map(Into::into),
+		workspace,
 		runs: runs.into_iter().map(Into::into).collect(),
-	}))
+	})))
 }

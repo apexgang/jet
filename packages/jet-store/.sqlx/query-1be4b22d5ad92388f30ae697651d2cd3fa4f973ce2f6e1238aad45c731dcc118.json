@@ -1,104 +1,104 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT effect_id AS \"effect_id!\", command_id, run_id, kind,\n\t\t\t\tsafety, external_key, max_attempts, state, attempt_count\n\t\t\t FROM effects\n\t\t\t WHERE effect_id = ?1",
+  "query": "SELECT workspace_id AS \"workspace_id!\", conversation_id,\n\t\t\t\tproject_id, root, base_selection, base_commit, seed_tree,\n\t\t\t\tseed_changed_paths, created_at_unix_ms\n\t\t\t FROM workspaces\n\t\t\t WHERE workspace_id = ?1",
   "describe": {
     "columns": [
       {
-        "name": "effect_id!",
+        "name": "workspace_id!",
         "ordinal": 0,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "effects",
-            "name": "effect_id"
+            "table": "workspaces",
+            "name": "workspace_id"
           }
         }
       },
       {
-        "name": "command_id",
+        "name": "conversation_id",
         "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "effects",
-            "name": "command_id"
+            "table": "workspaces",
+            "name": "conversation_id"
           }
         }
       },
       {
-        "name": "run_id",
+        "name": "project_id",
         "ordinal": 2,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "effects",
-            "name": "run_id"
+            "table": "workspaces",
+            "name": "project_id"
           }
         }
       },
       {
-        "name": "kind",
+        "name": "root",
         "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "effects",
-            "name": "kind"
+            "table": "workspaces",
+            "name": "root"
           }
         }
       },
       {
-        "name": "safety",
+        "name": "base_selection",
         "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "effects",
-            "name": "safety"
+            "table": "workspaces",
+            "name": "base_selection"
           }
         }
       },
       {
-        "name": "external_key",
+        "name": "base_commit",
         "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "effects",
-            "name": "external_key"
+            "table": "workspaces",
+            "name": "base_commit"
           }
         }
       },
       {
-        "name": "max_attempts",
+        "name": "seed_tree",
         "ordinal": 6,
-        "type_info": "Integer",
-        "origin": {
-          "Table": {
-            "table": "effects",
-            "name": "max_attempts"
-          }
-        }
-      },
-      {
-        "name": "state",
-        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "effects",
-            "name": "state"
+            "table": "workspaces",
+            "name": "seed_tree"
           }
         }
       },
       {
-        "name": "attempt_count",
+        "name": "seed_changed_paths",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "seed_changed_paths"
+          }
+        }
+      },
+      {
+        "name": "created_at_unix_ms",
         "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "effects",
-            "name": "attempt_count"
+            "table": "workspaces",
+            "name": "created_at_unix_ms"
           }
         }
       }
@@ -109,14 +109,14 @@
     "nullable": [
       true,
       false,
-      true,
+      false,
+      false,
       false,
       false,
       true,
-      false,
-      false,
+      true,
       false
     ]
   },
-  "hash": "1b5edc9f73bf4dd5f7a56e2b43b3ced164300f92bd63363907c6c8e9a8ae118e"
+  "hash": "1be4b22d5ad92388f30ae697651d2cd3fa4f973ce2f6e1238aad45c731dcc118"
 }

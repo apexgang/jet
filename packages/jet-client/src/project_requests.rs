@@ -46,7 +46,8 @@ impl Client {
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
-			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -94,7 +95,8 @@ impl Client {
 			| CommandResponse::PairingConfirmed { .. }
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
-			| CommandResponse::PairedClientRevoked { .. }) => Err(unexpected(&other)),
+			| CommandResponse::PairedClientRevoked { .. }
+			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -134,7 +136,8 @@ impl Client {
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
-			| QueryResponse::ProjectPreview(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectPreview(_)
+			| QueryResponse::PromotionPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -159,7 +162,8 @@ impl Client {
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
 			| QueryResponse::ProjectPreview(_)
-			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 }

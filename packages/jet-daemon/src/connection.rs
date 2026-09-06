@@ -417,6 +417,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::PROJECTS_MINOR,
 			feature: "the Project entry Query",
 		}),
+		QueryRequest::PreviewPromotion { .. } => Some(MinorRequirement {
+			minor: jet_protocol::WORKSPACE_PROMOTION_MINOR,
+			feature: "the Workspace promotion preview Query",
+		}),
 		QueryRequest::Status
 		| QueryRequest::Conversations
 		| QueryRequest::Conversation { .. }
@@ -453,6 +457,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		CommandRequest::RegisterProject { .. } => Some(MinorRequirement {
 			minor: jet_protocol::PROJECTS_MINOR,
 			feature: "Project registration",
+		}),
+		CommandRequest::PromoteWorkspace { .. } => Some(MinorRequirement {
+			minor: jet_protocol::WORKSPACE_PROMOTION_MINOR,
+			feature: "Workspace promotion",
 		}),
 		CommandRequest::CreateConversation { working_tree, .. }
 			if working_tree.is_seeded() =>

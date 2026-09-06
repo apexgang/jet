@@ -353,6 +353,7 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::BeginAuditEpoch
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
+		| Command::PromoteWorkspace { .. }
 		| Command::TransitionRun { .. } => None,
 	}
 }
@@ -376,6 +377,7 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::ClearSetting { scope, .. } => AuditSubject::of_scope(*scope),
 		Command::BindAccount { .. }
 		| Command::RegisterProject { .. }
+		| Command::PromoteWorkspace { .. }
 		| Command::BeginAuditEpoch
 		| Command::SetPairingGate { .. }
 		| Command::OpenPairing { .. }

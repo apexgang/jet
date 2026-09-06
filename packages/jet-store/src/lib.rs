@@ -26,6 +26,7 @@ mod pairing;
 mod pairing_offer;
 mod plane;
 mod project;
+mod promotion;
 mod records;
 mod run;
 mod setting;
@@ -65,6 +66,11 @@ pub use pairing_offer::{
 };
 pub use plane::PlaneRecord;
 pub use project::{NewProject, ProjectRecord};
+pub use promotion::{
+	NewWorkspacePromotion, PromotionConflictKindRecord,
+	PromotionConflictRecord, PromotionDestinationRecord, PromotionStateRecord,
+	WorkspacePromotionRecord,
+};
 pub use records::{
 	ActorRecord, CommandReceiptRecord, ConversationPageKey,
 	ConversationPageStart, ConversationRecord, EffectKindRecord, EffectRecord,

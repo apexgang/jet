@@ -8,6 +8,7 @@ mod audit;
 mod capability;
 mod pairing;
 mod project;
+mod promotion;
 mod setting;
 
 pub(crate) use capability::snapshot as capabilities;
@@ -26,6 +27,7 @@ use jet_core::{
 	ProjectId, ProviderId, Query, QueryResult, RecoveryAction, RelativePath,
 	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
 	SeedSelection, WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase,
+	WorkspaceId,
 };
 use jet_protocol as wire;
 
@@ -92,6 +94,13 @@ pub(crate) fn query(
 				path: RelativePath::parse(path)?,
 			}
 		}
+		wire::QueryRequest::PreviewPromotion {
+			workspace_id,
+			destination,
+		} => Query::PreviewPromotion {
+			workspace_id: WorkspaceId(*workspace_id),
+			destination: promotion::destination_from_wire(destination),
+		},
 	})
 }
 
@@ -107,9 +116,9 @@ pub(crate) fn query_result(
 			wire::QueryResponse::Conversations(conversation_list(&list, minor))
 		}
 		QueryResult::Conversation(snapshot) => {
-			wire::QueryResponse::Conversation(conversation_snapshot(
+			wire::QueryResponse::Conversation(Box::new(conversation_snapshot(
 				&snapshot, minor,
-			))
+			)))
 		}
 		QueryResult::Capabilities(snapshot) => {
 			wire::QueryResponse::Capabilities(capability::snapshot(
@@ -139,6 +148,11 @@ pub(crate) fn query_result(
 		}
 		QueryResult::ProjectEntry(entry) => {
 			wire::QueryResponse::ProjectEntry(project::entry(entry))
+		}
+		QueryResult::PromotionPreview(preview) => {
+			wire::QueryResponse::PromotionPreview(Box::new(promotion::preview(
+				*preview,
+			)))
 		}
 	})
 }
@@ -253,6 +267,11 @@ pub(crate) fn command(
 				grant: PathGrant(PathBuf::from(path)),
 			}
 		}
+		wire::CommandRequest::PromoteWorkspace { binding } => {
+			Command::PromoteWorkspace {
+				binding: promotion::binding_from_wire(binding),
+			}
+		}
 	})
 }
 
@@ -338,6 +357,11 @@ pub(crate) fn command_outcome(
 		}
 		CommandOutcome::ProjectRegistered(project) => {
 			wire::CommandResponse::ProjectRegistered(project::project(project))
+		}
+		CommandOutcome::WorkspacePromotionRecorded(recorded) => {
+			wire::CommandResponse::WorkspacePromotionRecorded(
+				promotion::promotion(recorded),
+			)
 		}
 	}
 }
@@ -489,6 +513,10 @@ fn workspace(workspace: &Workspace, minor: u32) -> wire::Workspace {
 					changed_paths: seed.changed_paths,
 				})
 			})
+			.flatten(),
+		// Nor about a promotion it cannot decode.
+		promotion: (minor >= wire::WORKSPACE_PROMOTION_MINOR)
+			.then(|| workspace.promotion.clone().map(promotion::promotion))
 			.flatten(),
 		created_at_unix_ms: unix_ms(workspace.created_at),
 	}

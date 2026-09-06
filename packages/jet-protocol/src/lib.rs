@@ -24,6 +24,7 @@ mod hex;
 mod message;
 mod pairing;
 mod project;
+mod promotion;
 mod setting;
 mod stream;
 mod stream_control;
@@ -69,7 +70,7 @@ pub use handshake::{
 	MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE, PROJECTS_MINOR,
 	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SECURITY_AUDIT_MINOR,
 	SEEDED_WORKSPACES_MINOR, SETTINGS_AND_CAPABILITIES_MINOR, ServerHello,
-	VersionRange, WORKSPACES_MINOR,
+	VersionRange, WORKSPACE_PROMOTION_MINOR, WORKSPACES_MINOR,
 };
 pub use message::{
 	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,
@@ -84,6 +85,11 @@ pub use pairing::{
 pub use project::{
 	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
 	ProjectPreview, Registrability, Repository, Worktree,
+};
+pub use promotion::{
+	ChangeKind, ConflictKind, PromotedChange, PromotionBinding,
+	PromotionConflict, PromotionDestination, PromotionPreview, PromotionState,
+	WorkspacePromotion,
 };
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,

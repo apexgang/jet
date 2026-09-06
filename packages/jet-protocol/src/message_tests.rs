@@ -25,6 +25,11 @@ use crate::project::{
 	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
 	ProjectPreview, Registrability, Repository, Worktree,
 };
+use crate::promotion::{
+	ChangeKind, ConflictKind, PromotedChange, PromotionBinding,
+	PromotionConflict, PromotionDestination, PromotionPreview, PromotionState,
+	WorkspacePromotion,
+};
 use crate::workspace::{
 	BaseSelection, SeedSelection, WorkingTreeRequest, Workspace, WorkspaceBase,
 	WorkspaceSeed,
@@ -266,24 +271,25 @@ fn raw_command_keeps_the_exact_command_bytes_of_a_frame() {
 
 #[test]
 fn conversation_snapshots_and_event_pages_have_the_agreed_wire_shape() {
-	let snapshot = QueryResponse::Conversation(ConversationSnapshot {
-		cursor: 3,
-		conversation: Conversation {
-			conversation_id: Uuid::nil(),
-			retention: RetentionPolicy::ForgetAfterFinalRun,
-			working_tree: None,
-			created_at_unix_ms: 1,
-		},
-		workspace: None,
-		runs: vec![Run {
-			run_id: Uuid::nil(),
-			conversation_id: Uuid::nil(),
-			revision: 4,
-			lifecycle: RunLifecycle::Completed,
-			created_at_unix_ms: 2,
-			ended_at_unix_ms: Some(3),
-		}],
-	});
+	let snapshot =
+		QueryResponse::Conversation(Box::new(ConversationSnapshot {
+			cursor: 3,
+			conversation: Conversation {
+				conversation_id: Uuid::nil(),
+				retention: RetentionPolicy::ForgetAfterFinalRun,
+				working_tree: None,
+				created_at_unix_ms: 1,
+			},
+			workspace: None,
+			runs: vec![Run {
+				run_id: Uuid::nil(),
+				conversation_id: Uuid::nil(),
+				revision: 4,
+				lifecycle: RunLifecycle::Completed,
+				created_at_unix_ms: 2,
+				ended_at_unix_ms: Some(3),
+			}],
+		}));
 	let events = QueryResponse::Events(EventPage {
 		cursor: 3,
 		events: vec![Event {
@@ -681,6 +687,7 @@ fn workspace_seeds_have_the_agreed_wire_shape() {
 			tree: "89abcdef0123456789abcdef0123456789abcdef".into(),
 			changed_paths: 2,
 		}),
+		promotion: None,
 		created_at_unix_ms: 1,
 	};
 	let decoded: CommandRequest =
@@ -693,6 +700,128 @@ fn workspace_seeds_have_the_agreed_wire_shape() {
 			r#"{"type":"create_conversation","retention":"retain","working_tree":{"kind":"workspace","project_id":"00000000-0000-0000-0000-000000000000","base":{"kind":"head"}}}"#.to_string(),
 			r#"{"workspace_id":"00000000-0000-0000-0000-000000000000","conversation_id":"00000000-0000-0000-0000-000000000000","project_id":"00000000-0000-0000-0000-000000000000","root":"/home/jet/.jet/workspaces/x","base":{"selection":{"kind":"head"},"commit":"0123456789abcdef0123456789abcdef01234567"},"seed":{"tree":"89abcdef0123456789abcdef0123456789abcdef","changed_paths":2},"created_at_unix_ms":1}"#.to_string(),
 			unseeded,
+		)
+	);
+}
+
+/// A promotion preview names its destination, binds what it compared and
+/// whom it was shown to, and lists every change and conflict as data
+/// (ADR-0025).
+#[test]
+fn a_promotion_preview_has_the_agreed_wire_shape() {
+	let query = ClientMessage::Query {
+		id: 13,
+		query: QueryRequest::PreviewPromotion {
+			workspace_id: Uuid::nil(),
+			destination: PromotionDestination::Branch {
+				name: "release".into(),
+			},
+		},
+	};
+	let result = ServerMessage::QueryResult {
+		id: 13,
+		result: QueryResponse::PromotionPreview(Box::new(PromotionPreview {
+			cursor: 3,
+			binding: PromotionBinding {
+				workspace_id: Uuid::nil(),
+				destination: PromotionDestination::LocalCheckout,
+				base_commit: "0".repeat(40),
+				workspace_tree: "1".repeat(40),
+				destination_commit: "2".repeat(40),
+				destination_tree: "3".repeat(40),
+				result_tree: "4".repeat(40),
+				destination_dirty: true,
+				conflicts: vec![PromotionConflict {
+					path: "src/lib.rs".into(),
+					kind: ConflictKind::Diverged,
+				}],
+				actor: Uuid::nil(),
+			},
+			changed_paths: 2,
+			changes: vec![
+				PromotedChange {
+					path: "src/lib.rs".into(),
+					kind: ChangeKind::Modified,
+				},
+				PromotedChange {
+					path: "docs/new.md".into(),
+					kind: ChangeKind::Added,
+				},
+			],
+		})),
+	};
+	assert_eq!(
+		(json(&query), json(&result)),
+		(
+			r#"{"kind":"query","id":13,"query":{"type":"preview_promotion","workspace_id":"00000000-0000-0000-0000-000000000000","destination":{"kind":"branch","name":"release"}}}"#.to_string(),
+			format!(
+				r#"{{"kind":"query_result","id":13,"result":{{"type":"promotion_preview","cursor":"3","binding":{{"workspace_id":"00000000-0000-0000-0000-000000000000","destination":{{"kind":"local_checkout"}},"base_commit":"{}","workspace_tree":"{}","destination_commit":"{}","destination_tree":"{}","result_tree":"{}","destination_dirty":true,"conflicts":[{{"path":"src/lib.rs","kind":"diverged"}}],"actor":"00000000-0000-0000-0000-000000000000"}},"changed_paths":2,"changes":[{{"path":"src/lib.rs","kind":"modified"}},{{"path":"docs/new.md","kind":"added"}}]}}}}"#,
+				"0".repeat(40),
+				"1".repeat(40),
+				"2".repeat(40),
+				"3".repeat(40),
+				"4".repeat(40),
+			),
+		)
+	);
+}
+
+/// A promotion carries its binding back, and the recorded promotion
+/// says where it stands and what it could not settle (ADR-0025).
+#[test]
+fn a_workspace_promotion_has_the_agreed_wire_shape() {
+	let binding = PromotionBinding {
+		workspace_id: Uuid::nil(),
+		destination: PromotionDestination::LocalCheckout,
+		base_commit: "0".repeat(40),
+		workspace_tree: "1".repeat(40),
+		destination_commit: "2".repeat(40),
+		destination_tree: "3".repeat(40),
+		result_tree: "4".repeat(40),
+		destination_dirty: false,
+		conflicts: vec![PromotionConflict {
+			path: "local.txt".into(),
+			kind: ConflictKind::Untracked,
+		}],
+		actor: Uuid::nil(),
+	};
+	let command = ClientMessage::Command {
+		id: 14,
+		command_id: Uuid::nil(),
+		command: CommandRequest::PromoteWorkspace {
+			binding: binding.clone(),
+		},
+	};
+	let result = ServerMessage::CommandResult {
+		id: 14,
+		result: CommandResponse::WorkspacePromotionRecorded(
+			WorkspacePromotion {
+				promotion_id: Uuid::nil(),
+				binding,
+				changed_paths: 1,
+				state: PromotionState::Conflicted,
+				recorded_at_unix_ms: 1,
+				settled_at_unix_ms: Some(1),
+			},
+		),
+	};
+	let binding_json = format!(
+		r#"{{"workspace_id":"00000000-0000-0000-0000-000000000000","destination":{{"kind":"local_checkout"}},"base_commit":"{}","workspace_tree":"{}","destination_commit":"{}","destination_tree":"{}","result_tree":"{}","destination_dirty":false,"conflicts":[{{"path":"local.txt","kind":"untracked"}}],"actor":"00000000-0000-0000-0000-000000000000"}}"#,
+		"0".repeat(40),
+		"1".repeat(40),
+		"2".repeat(40),
+		"3".repeat(40),
+		"4".repeat(40),
+	);
+	assert_eq!(
+		(json(&command), json(&result)),
+		(
+			format!(
+				r#"{{"kind":"command","id":14,"command_id":"00000000-0000-0000-0000-000000000000","command":{{"type":"promote_workspace","binding":{binding_json}}}}}"#
+			),
+			format!(
+				r#"{{"kind":"command_result","id":14,"result":{{"type":"workspace_promotion_recorded","promotion_id":"00000000-0000-0000-0000-000000000000","binding":{binding_json},"changed_paths":1,"state":"conflicted","recorded_at_unix_ms":1,"settled_at_unix_ms":1}}}}"#
+			),
 		)
 	);
 }

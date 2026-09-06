@@ -75,6 +75,12 @@ pub(crate) async fn run(
 				return ExitCode::from(EXIT_FAILURE);
 			}
 		};
+	// A promotion a previous daemon did not finish is settled from what its
+	// destination holds before any client can ask for another (ADR-0064,
+	// ADR-0067).
+	if let Err(error) = core.perform_promotions().await {
+		eprintln!("jetd: cannot reconcile Workspace promotions: {error}");
+	}
 	// ADR-0086: the Plane reports what it can do at startup, on the one
 	// line a launcher reads, and on demand afterwards.
 	let capabilities = crate::translate::capabilities(
