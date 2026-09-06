@@ -167,6 +167,7 @@ async fn a_root_that_is_not_an_ordinary_working_tree_is_refused() {
 		refusal(&core, &repository.join("src")).await,
 		refusal(&core, &orphan).await,
 		refusal(&core, &repository.join("README.md")).await,
+		refusal(&core, &repository.join("README.md/repo")).await,
 		refusal(&core, &dir.path().join("missing")).await,
 		refusal(&core, Path::new("repo")).await,
 		refusal(&core, Path::new("/tmp/jet\0repo")).await,
@@ -197,6 +198,7 @@ async fn a_root_that_is_not_an_ordinary_working_tree_is_refused() {
 					ErrorCategory::InvalidInput,
 					"path_grant.not_directory".into()
 				),
+				(ErrorCategory::NotFound, "path_grant.unreachable".into()),
 				(ErrorCategory::NotFound, "path_grant.unreachable".into()),
 				(
 					ErrorCategory::InvalidInput,

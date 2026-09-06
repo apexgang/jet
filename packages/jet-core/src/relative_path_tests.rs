@@ -14,18 +14,19 @@ fn a_relative_path_keeps_the_components_it_was_given() {
 }
 
 /// ADR-0101 lists what a relative path may not be: absolute, a parent
-/// traversal, a NUL, or a form one of the supported platforms would read
-/// differently. Each is refused by its own stable code, before anything
-/// touches a filesystem.
+/// traversal, a NUL, or a form another platform reads differently. Each is
+/// refused by its own stable code, before anything touches a filesystem. A
+/// name that merely looks like a drive letter is an ordinary name on both
+/// supported platforms.
 #[test]
 fn a_path_that_does_not_stay_inside_a_root_is_refused() {
 	let long_component = "x".repeat(256);
+	assert_eq!(RelativePath::parse("c:notes").unwrap().as_str(), "c:notes");
 	let refused = [
 		"",
 		"/etc/passwd",
 		"\\\\server\\share",
 		"C:\\Users",
-		"c:",
 		"../secrets",
 		"src/../../secrets",
 		"src/..",
@@ -50,8 +51,7 @@ fn a_path_that_does_not_stay_inside_a_root_is_refused() {
 			(ErrorCategory::InvalidInput, "path.empty".into()),
 			(ErrorCategory::InvalidInput, "path.absolute".into()),
 			(ErrorCategory::InvalidInput, "path.absolute".into()),
-			(ErrorCategory::InvalidInput, "path.absolute".into()),
-			(ErrorCategory::InvalidInput, "path.absolute".into()),
+			(ErrorCategory::InvalidInput, "path.platform_form".into()),
 			(ErrorCategory::InvalidInput, "path.parent_traversal".into()),
 			(ErrorCategory::InvalidInput, "path.parent_traversal".into()),
 			(ErrorCategory::InvalidInput, "path.parent_traversal".into()),
@@ -169,10 +169,16 @@ fn a_path_resolves_under_the_canonical_root() {
 
 /// ADR-0101: symbolic-link resolution that escapes the registered root is
 /// refused, whether the link is the whole path or a component of it, and a
-/// link that cannot be resolved is refused rather than followed blindly.
+/// link that leads nowhere or loops is refused rather than followed
+/// blindly. A path the platform finds too long once joined to its root is
+/// the path's fault, not a Plane failure to retry.
 #[test]
 fn a_link_that_leaves_the_root_is_refused() {
 	let root = root();
+	symlink("loop", root.canonical.join("loop")).unwrap();
+	let deep = std::iter::repeat_n("x".repeat(255), 16)
+		.collect::<Vec<_>>()
+		.join("/");
 
 	assert_eq!(
 		[
@@ -181,6 +187,8 @@ fn a_link_that_leaves_the_root_is_refused() {
 			resolve(&root, "outside/new"),
 			resolve(&root, "gone"),
 			resolve(&root, "gone/deeper"),
+			resolve(&root, "loop/x"),
+			resolve(&root, &deep).map(|_| PathBuf::new()),
 		],
 		[
 			Err("path.escapes_root".into()),
@@ -188,6 +196,8 @@ fn a_link_that_leaves_the_root_is_refused() {
 			Err("path.escapes_root".into()),
 			Err("path.link_unresolvable".into()),
 			Err("path.link_unresolvable".into()),
+			Err("path.link_unresolvable".into()),
+			Err("path.too_long".into()),
 		]
 	);
 }

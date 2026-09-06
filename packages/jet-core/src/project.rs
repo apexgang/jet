@@ -173,7 +173,13 @@ impl PathGrant {
 			));
 		}
 		let root = canonicalize(path).await.map_err(|error| {
-			if error.kind() == std::io::ErrorKind::NotFound {
+			// A path that leads through a file does not exist any more than
+			// one that leads nowhere, and neither is worth retrying.
+			if matches!(
+				error.kind(),
+				std::io::ErrorKind::NotFound
+					| std::io::ErrorKind::NotADirectory
+			) {
 				CoreError::not_found(
 					"path_grant.unreachable",
 					"the granted path does not exist on this Plane",

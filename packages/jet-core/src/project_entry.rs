@@ -110,6 +110,13 @@ fn entry_kind(resolved: &Path) -> Result<EntryKind, CoreError> {
 		{
 			Ok(EntryKind::Missing)
 		}
+		Err(error) if error.kind() == std::io::ErrorKind::InvalidFilename => {
+			Err(CoreError::invalid_input(
+				"path.too_long",
+				"the path is longer than this Plane accepts once joined to \
+				 its root",
+			))
+		}
 		Err(error) => Err(CoreError::unavailable(
 			"path.unreadable",
 			"the entry cannot be examined",
