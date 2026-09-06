@@ -7,6 +7,11 @@
 //! Conversation may instead work in the Project's own Local checkout,
 //! explicitly and without isolation: Jet admits one live managed Run there
 //! at a time and cannot lock the processes outside its management.
+//!
+//! A Workspace may start with changes from the Local checkout. They are
+//! captured before the transaction opens and applied after the worktree
+//! exists, and a Workspace they cannot be applied to is not kept (see
+//! [`crate::seed`]).
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -23,6 +28,8 @@ use crate::conversation::{Conversation, ConversationId};
 use crate::error::CoreError;
 use crate::event::{EventKind, EventSubject};
 use crate::filesystem::{blocking, canonicalize};
+use crate::seed::{SeedSelection, WorkspaceSeed};
+use crate::seed_capture::{self, CapturedSeed};
 use crate::{Actor, Core, ProjectId, lifecycle, system_time, worktree};
 
 /// Longest base selection the core accepts, as text. A branch name is
@@ -74,6 +81,8 @@ pub enum WorkingTreeRequest {
 		project_id: ProjectId,
 		/// The base to start from.
 		base: BaseSelection,
+		/// Which Local-checkout changes to start with.
+		seed: SeedSelection,
 	},
 	/// The Project's own Local checkout, chosen explicitly.
 	LocalCheckout {
@@ -116,17 +125,20 @@ pub struct Workspace {
 	pub root: PathBuf,
 	/// What it started from.
 	pub base: WorkspaceBase,
+	/// The Local-checkout changes it started with, if any.
+	pub seed: Option<WorkspaceSeed>,
 	/// When it was created.
 	pub created_at: SystemTime,
 }
 
-/// A Workspace request whose Project and base were looked up before the
-/// transaction opened, ready to create.
+/// A Workspace request whose Project and base were looked up, and whose
+/// seed was captured, before the transaction opened; ready to create.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct WorkspaceSeed {
+pub(crate) struct PreparedWorkspace {
 	project_id: ProjectId,
 	project_root: PathBuf,
 	base: WorkspaceBase,
+	captured: Option<CapturedSeed>,
 }
 
 impl BaseSelection {
@@ -164,21 +176,24 @@ impl BaseSelection {
 	}
 }
 
-/// Looks up the Project and resolves the base before the transaction
-/// opens, so the read of the repository happens outside the store's lock
-/// and a refusal that describes the repository leaves no receipt behind
-/// (ADR-0093).
+/// Looks up the Project, resolves the base, and captures the selected
+/// Local-checkout changes before the transaction opens, so the reads of
+/// the repository happen outside the store's lock and a refusal that
+/// describes the repository leaves no receipt behind (ADR-0093).
 ///
 /// # Errors
 ///
 /// Returns `workspace.base_invalid`, `project.not_found`,
-/// `workspace.base_not_found`, or what Git reports when it cannot answer.
+/// `workspace.base_not_found`, what [`seed_capture::capture`] refuses, or
+/// what Git reports when it cannot answer.
 pub(crate) async fn prepare(
 	core: &Core,
 	project_id: ProjectId,
 	base: &BaseSelection,
-) -> Result<WorkspaceSeed, CoreError> {
+	seed: &SeedSelection,
+) -> Result<PreparedWorkspace, CoreError> {
 	base.validate()?;
+	seed.validate()?;
 	let project = core
 		.store
 		.read(async |tx| Ok::<_, CoreError>(tx.project(project_id.0).await?))
@@ -189,25 +204,64 @@ pub(crate) async fn prepare(
 	let project_root = PathBuf::from(project.root);
 	let commit =
 		worktree::resolve_commit(&project_root, base.as_revision()).await?;
-	Ok(WorkspaceSeed {
+	let captured = if seed.is_none() {
+		None
+	} else {
+		Some(
+			capture_in_scratch(
+				&core.workspace_home,
+				&project_root,
+				seed,
+				&commit,
+			)
+			.await?,
+		)
+	};
+	Ok(PreparedWorkspace {
 		project_id,
 		project_root,
 		base: WorkspaceBase {
 			selection: base.clone(),
 			commit,
 		},
+		captured,
 	})
 }
 
+/// Captures `seed` through a scratch directory of the Workspace home, which
+/// is the owner's alone and is gone again before this returns.
+async fn capture_in_scratch(
+	home: &WorkspaceHome,
+	project_root: &Path,
+	seed: &SeedSelection,
+	commit: &str,
+) -> Result<CapturedSeed, CoreError> {
+	use std::os::unix::fs::DirBuilderExt;
+	let scratch = prepare_home(&home.0)
+		.await?
+		.join(format!(".seed-{}", Uuid::now_v7()));
+	let created = scratch.clone();
+	blocking(move || std::fs::DirBuilder::new().mode(0o700).create(&created))
+		.await?
+		.map_err(home_unavailable)?;
+	let captured =
+		seed_capture::capture(project_root, &scratch, seed, commit).await;
+	let _ = blocking(move || std::fs::remove_dir_all(&scratch)).await;
+	captured
+}
+
 /// Records a Conversation that works in a new Workspace and creates the
-/// worktree, in the transaction that commits the rows.
+/// worktree, seeded when a seed was captured, in the transaction that
+/// commits the rows.
 ///
 /// The worktree is added last, after every row, so a refused row costs no
 /// disk; and inside the transaction rather than before it, so a retried
 /// Command that already committed creates nothing twice (ADR-0093). A
 /// commit that fails after the worktree exists leaves a directory no row
 /// names, which no later Conversation can collide with: the root is the
-/// Conversation's own identity.
+/// Conversation's own identity. A seed that cannot be applied fails the
+/// whole creation and removes the worktree, so no Workspace is left
+/// holding part of what was selected (ADR-0025).
 ///
 /// The Project is read again here: what was prepared describes the
 /// repository, and whether the Project is still registered is the
@@ -216,20 +270,23 @@ pub(crate) async fn prepare(
 /// # Errors
 ///
 /// Returns `project.not_found` when the Project is no longer registered,
-/// and what the store or Git reports when the Workspace cannot be made.
+/// `workspace.seed_failed` when the seed cannot be applied, and what the
+/// store or Git reports when the Workspace cannot be made.
 pub(crate) async fn create(
 	tx: &mut WriteTransaction,
 	actor: &Actor,
 	retention: RetentionPolicy,
-	seed: WorkspaceSeed,
+	prepared: PreparedWorkspace,
 	home: &WorkspaceHome,
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
-	let WorkspaceSeed {
+	let PreparedWorkspace {
 		project_id,
 		project_root,
 		base,
-	} = seed;
+		captured,
+	} = prepared;
+	let seed = captured.as_ref().map(WorkspaceSeed::from);
 	if tx.project(project_id.0).await?.is_none() {
 		return Err(project_not_found());
 	}
@@ -262,6 +319,7 @@ pub(crate) async fn create(
 			root: root_text.clone(),
 			base_selection: base.selection.as_revision().to_owned(),
 			base_commit: base.commit.clone(),
+			seed: seed.as_ref().map(Into::into),
 			created_at_unix_ms: now_unix_ms,
 		})
 		.await?
@@ -281,7 +339,21 @@ pub(crate) async fn create(
 	};
 	tx.append_event(placed.to_record(actor, subject, now_unix_ms)?)
 		.await?;
+	if let Some(seed) = seed {
+		let seeded = EventKind::WorkspaceSeeded {
+			workspace_id: workspace.workspace_id,
+			seed,
+		};
+		tx.append_event(seeded.to_record(actor, subject, now_unix_ms)?)
+			.await?;
+	}
 	worktree::add_detached(&project_root, &root_text, &base.commit).await?;
+	if let Some(captured) = captured
+		&& let Err(refusal) = seed_capture::apply(&root, &captured).await
+	{
+		worktree::remove_forced(&project_root, &root_text).await;
+		return Err(refusal);
+	}
 	Ok(CommandOutcome::ConversationCreated(conversation))
 }
 
@@ -406,6 +478,7 @@ impl From<WorkspaceRecord> for Workspace {
 				selection: BaseSelection::from_stored(record.base_selection),
 				commit: record.base_commit,
 			},
+			seed: record.seed.map(Into::into),
 			created_at: system_time(record.created_at_unix_ms),
 		}
 	}

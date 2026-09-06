@@ -16,8 +16,10 @@ use crate::capability::{
 };
 use crate::clock::{Clock, SystemClock};
 use crate::{
-	Actor, ClientId, Command, CommandEnvelope, CommandId, CommandOutcome, Core,
-	CraftId, HarnessId, PathGrant, ProjectId, WorkspaceHome,
+	Actor, ClientId, Command, CommandEnvelope, CommandId, CommandOutcome,
+	ConversationId, ConversationSnapshot, Core, CraftId, EventKind,
+	EventSequence, HarnessId, PathGrant, ProjectId, Query, QueryResult,
+	WorkspaceHome,
 };
 
 /// The one interactive Actor every core test acts as.
@@ -178,6 +180,38 @@ pub(crate) fn request_with_id(
 ) -> CommandEnvelope {
 	let bytes = serde_json::to_vec(&command).unwrap();
 	CommandEnvelope::new(command_id, command, &bytes).unwrap()
+}
+
+/// Reads one Conversation with its Workspace and Runs as the test Actor.
+pub(crate) async fn conversation_snapshot(
+	core: &Core,
+	conversation_id: ConversationId,
+) -> ConversationSnapshot {
+	let result = core
+		.query(&actor(), Query::Conversation { conversation_id })
+		.await
+		.unwrap();
+	let QueryResult::Conversation(snapshot) = result else {
+		panic!("unexpected result {result:?}");
+	};
+	snapshot
+}
+
+/// Reads every journal Event's kind, oldest first, as the test Actor.
+pub(crate) async fn events(core: &Core) -> Vec<EventKind> {
+	let result = core
+		.query(
+			&actor(),
+			Query::Events {
+				after: EventSequence(0),
+			},
+		)
+		.await
+		.unwrap();
+	let QueryResult::Events(page) = result else {
+		panic!("unexpected result {result:?}");
+	};
+	page.events.into_iter().map(|event| event.kind).collect()
 }
 
 /// Runs one `git` command in `dir` with the configuration a test needs and

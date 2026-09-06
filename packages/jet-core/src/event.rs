@@ -15,6 +15,7 @@ use crate::audit::AuditEpoch;
 use crate::conversation::{ConversationId, RunId};
 use crate::error::CoreError;
 use crate::pairing::{PairingEnd, PairingOfferId};
+use crate::seed::WorkspaceSeed;
 use crate::setting::{SettingKey, SettingScope, SettingValue};
 use crate::workspace::{WorkingTree, WorkspaceBase, WorkspaceId};
 use crate::{Actor, ClientId, ProjectId, system_time};
@@ -131,6 +132,15 @@ pub enum EventKind {
 		root: PathBuf,
 		/// What it started from.
 		base: WorkspaceBase,
+	},
+	/// A Workspace was seeded with changes from its Project's Local
+	/// checkout as it was created (ADR-0025).
+	#[serde(rename = "workspace.seeded")]
+	WorkspaceSeeded {
+		/// The Workspace that was seeded.
+		workspace_id: WorkspaceId,
+		/// What it was seeded with.
+		seed: WorkspaceSeed,
 	},
 	/// A Run was recorded in the `created` state.
 	#[serde(rename = "run.created")]
@@ -299,7 +309,8 @@ impl EventKind {
 			| Self::PairedClientAccessChanged { .. }
 			| Self::PairedClientRevoked { .. }
 			| Self::ProjectRegistered { .. }
-			| Self::WorkspaceCreated { .. } => {
+			| Self::WorkspaceCreated { .. }
+			| Self::WorkspaceSeeded { .. } => {
 				let encoded = serde_json::to_value(self).map_err(|error| {
 					CoreError::internal("event.unencodable", error.to_string())
 				})?;

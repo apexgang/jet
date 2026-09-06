@@ -49,7 +49,7 @@ async fn apply(
 		jet_protocol::encode_control(&command).map_err(|_| malformed())?;
 	let envelope = CommandEnvelope::new(
 		CommandId(command_id),
-		crate::translate::command(&command),
+		crate::translate::command(&command)?,
 		&bytes,
 	)?;
 	// This temporary actor can reach only the two enumerated enrollment

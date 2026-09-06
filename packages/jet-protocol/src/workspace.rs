@@ -42,6 +42,10 @@ pub enum WorkingTreeRequest {
 		/// The base to start from; the Project's HEAD when left out.
 		#[serde(default)]
 		base: BaseSelection,
+		/// Which Local-checkout changes to start with; none when left out,
+		/// which is what every request before protocol minor 10 asked for.
+		#[serde(default, skip_serializing_if = "SeedSelection::is_none")]
+		seed: SeedSelection,
 	},
 	/// The Project's own Local checkout, chosen explicitly.
 	LocalCheckout {
@@ -57,6 +61,49 @@ impl WorkingTreeRequest {
 	pub fn is_no_project(&self) -> bool {
 		matches!(self, Self::NoProject)
 	}
+
+	/// Whether the request asks for Local-checkout changes, which needs
+	/// protocol minor 10.
+	#[must_use]
+	pub fn is_seeded(&self) -> bool {
+		matches!(self, Self::Workspace { seed, .. } if !seed.is_none())
+	}
+}
+
+/// Which Local-checkout changes a new Workspace starts with.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SeedSelection {
+	/// No changes: the Workspace starts at its base alone.
+	#[default]
+	None,
+	/// Every eligible change: modifications and deletions of tracked paths,
+	/// untracked paths that are not ignored, and the commit each submodule
+	/// has checked out. Ignored paths and nested repositories are left out.
+	AllEligible,
+	/// The named paths and whatever they hold. An ignored path is included
+	/// because it was named; a named directory brings its unignored content.
+	Paths {
+		/// Paths relative to the Project root, with `/` between components.
+		paths: Vec<String>,
+	},
+}
+
+impl SeedSelection {
+	/// Whether the selection asks for nothing, so the field is left out.
+	#[must_use]
+	pub fn is_none(&self) -> bool {
+		matches!(self, Self::None)
+	}
+}
+
+/// What a Workspace was seeded with from its Project's Local checkout.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceSeed {
+	/// The Git tree object the changes were captured as, as Git spells it.
+	pub tree: String,
+	/// How many paths that tree changes against the base commit.
+	pub changed_paths: u32,
 }
 
 /// The base a Workspace starts from, as the user selects it. The Plane
@@ -98,6 +145,10 @@ pub struct Workspace {
 	pub root: String,
 	/// What it started from.
 	pub base: WorkspaceBase,
+	/// The Local-checkout changes it started with, if any. Absent before
+	/// protocol minor 10, and when it was seeded with nothing.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub seed: Option<WorkspaceSeed>,
 	/// When it was created, in signed Unix milliseconds.
 	pub created_at_unix_ms: i64,
 }

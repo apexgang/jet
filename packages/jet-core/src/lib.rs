@@ -38,6 +38,8 @@ mod remote;
 mod remote_pairing;
 mod repository;
 mod security;
+mod seed;
+mod seed_capture;
 mod setting;
 mod status;
 #[cfg(test)]
@@ -102,6 +104,7 @@ pub use query::{Query, QueryResult};
 pub use relative_path::RelativePath;
 pub use remote::RemoteSession;
 pub use security::{SecurityDegradation, SecurityState};
+pub use seed::{SeedSelection, WorkspaceSeed};
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,
 	SettingSnapshot, SettingSource, SettingValue,

@@ -25,7 +25,7 @@ use jet_core::{
 	PairingOfferId, PairingSecret, PairingSignature, PathGrant, PlaneStatus,
 	ProjectId, ProviderId, Query, QueryResult, RecoveryAction, RelativePath,
 	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
-	WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase,
+	SeedSelection, WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase,
 };
 use jet_protocol as wire;
 
@@ -143,14 +143,23 @@ pub(crate) fn query_result(
 	})
 }
 
-pub(crate) fn command(request: &wire::CommandRequest) -> Command {
-	match request {
+/// The core form of a Command.
+///
+/// # Errors
+///
+/// Returns an `invalid_input` [`CoreError`] when a relative path is not
+/// one the core accepts, so the core never receives an unvalidated path
+/// (ADR-0101).
+pub(crate) fn command(
+	request: &wire::CommandRequest,
+) -> Result<Command, CoreError> {
+	Ok(match request {
 		wire::CommandRequest::CreateConversation {
 			retention,
 			working_tree,
 		} => Command::CreateConversation {
 			retention: retention_from_wire(*retention),
-			working_tree: working_tree_request(working_tree),
+			working_tree: working_tree_request(working_tree)?,
 		},
 		wire::CommandRequest::CreateRun { conversation_id } => {
 			Command::CreateRun {
@@ -244,7 +253,7 @@ pub(crate) fn command(request: &wire::CommandRequest) -> Command {
 				grant: PathGrant(PathBuf::from(path)),
 			}
 		}
-	}
+	})
 }
 
 pub(crate) fn command_outcome(
@@ -376,7 +385,12 @@ fn conversation_snapshot(
 		// A client that negotiated an older minor is not told about a
 		// Workspace it cannot decode (ADR-0019).
 		workspace: (minor >= wire::WORKSPACES_MINOR)
-			.then(|| snapshot.workspace.as_ref().map(workspace))
+			.then(|| {
+				snapshot
+					.workspace
+					.as_ref()
+					.map(|workspace| self::workspace(workspace, minor))
+			})
 			.flatten(),
 		runs: snapshot.runs.iter().map(run).collect(),
 	}
@@ -408,29 +422,47 @@ fn working_tree(working_tree: WorkingTree) -> wire::WorkingTree {
 
 fn working_tree_request(
 	request: &wire::WorkingTreeRequest,
-) -> WorkingTreeRequest {
-	match request {
+) -> Result<WorkingTreeRequest, CoreError> {
+	Ok(match request {
 		wire::WorkingTreeRequest::NoProject => WorkingTreeRequest::NoProject,
-		wire::WorkingTreeRequest::Workspace { project_id, base } => {
-			WorkingTreeRequest::Workspace {
-				project_id: ProjectId(*project_id),
-				base: match base {
-					wire::BaseSelection::Head => BaseSelection::Head,
-					wire::BaseSelection::Revision { revision } => {
-						BaseSelection::Revision(revision.clone())
-					}
-				},
-			}
-		}
+		wire::WorkingTreeRequest::Workspace {
+			project_id,
+			base,
+			seed,
+		} => WorkingTreeRequest::Workspace {
+			project_id: ProjectId(*project_id),
+			base: match base {
+				wire::BaseSelection::Head => BaseSelection::Head,
+				wire::BaseSelection::Revision { revision } => {
+					BaseSelection::Revision(revision.clone())
+				}
+			},
+			seed: seed_selection(seed)?,
+		},
 		wire::WorkingTreeRequest::LocalCheckout { project_id } => {
 			WorkingTreeRequest::LocalCheckout {
 				project_id: ProjectId(*project_id),
 			}
 		}
-	}
+	})
 }
 
-fn workspace(workspace: &Workspace) -> wire::Workspace {
+fn seed_selection(
+	selection: &wire::SeedSelection,
+) -> Result<SeedSelection, CoreError> {
+	Ok(match selection {
+		wire::SeedSelection::None => SeedSelection::None,
+		wire::SeedSelection::AllEligible => SeedSelection::AllEligible,
+		wire::SeedSelection::Paths { paths } => SeedSelection::Paths(
+			paths
+				.iter()
+				.map(|path| RelativePath::parse(path))
+				.collect::<Result<_, _>>()?,
+		),
+	})
+}
+
+fn workspace(workspace: &Workspace, minor: u32) -> wire::Workspace {
 	let WorkspaceBase { selection, commit } = &workspace.base;
 	wire::Workspace {
 		workspace_id: workspace.workspace_id.0,
@@ -448,6 +480,16 @@ fn workspace(workspace: &Workspace) -> wire::Workspace {
 			},
 			commit: commit.clone(),
 		},
+		// A client that negotiated an older minor is not told about a seed
+		// it cannot decode (ADR-0019).
+		seed: (minor >= wire::SEEDED_WORKSPACES_MINOR)
+			.then(|| {
+				workspace.seed.as_ref().map(|seed| wire::WorkspaceSeed {
+					tree: seed.tree.clone(),
+					changed_paths: seed.changed_paths,
+				})
+			})
+			.flatten(),
 		created_at_unix_ms: unix_ms(workspace.created_at),
 	}
 }

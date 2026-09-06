@@ -31,6 +31,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use rustix::io::Errno;
+use serde::Serialize;
 
 use crate::error::CoreError;
 
@@ -47,7 +48,8 @@ const MAX_PATH_BYTES: usize = 4096;
 /// components. It can be built only by [`RelativePath::parse`], so a value
 /// of this type has already been refused if it was absolute, traversed to a
 /// parent, held a NUL, or held a backslash or a control character.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
 pub struct RelativePath {
 	text: String,
 }

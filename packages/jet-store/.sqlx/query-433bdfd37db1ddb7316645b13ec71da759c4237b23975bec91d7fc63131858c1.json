@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT workspace_id AS \"workspace_id!\", conversation_id,\n\t\t\t\tproject_id, root, base_selection, base_commit,\n\t\t\t\tcreated_at_unix_ms\n\t\t\t FROM workspaces\n\t\t\t WHERE conversation_id = ?1",
+  "query": "SELECT workspace_id AS \"workspace_id!\", conversation_id,\n\t\t\t\tproject_id, root, base_selection, base_commit, seed_tree,\n\t\t\t\tseed_changed_paths, created_at_unix_ms\n\t\t\t FROM workspaces\n\t\t\t WHERE conversation_id = ?1",
   "describe": {
     "columns": [
       {
@@ -70,8 +70,30 @@
         }
       },
       {
-        "name": "created_at_unix_ms",
+        "name": "seed_tree",
         "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "seed_tree"
+          }
+        }
+      },
+      {
+        "name": "seed_changed_paths",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "seed_changed_paths"
+          }
+        }
+      },
+      {
+        "name": "created_at_unix_ms",
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -91,8 +113,10 @@
       false,
       false,
       false,
+      true,
+      true,
       false
     ]
   },
-  "hash": "f639cf932f1f0499393f125aa394211bb3adef061195c4e3a912fb346383ff67"
+  "hash": "433bdfd37db1ddb7316645b13ec71da759c4237b23975bec91d7fc63131858c1"
 }

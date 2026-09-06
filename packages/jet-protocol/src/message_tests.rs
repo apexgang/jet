@@ -25,7 +25,10 @@ use crate::project::{
 	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
 	ProjectPreview, Registrability, Repository, Worktree,
 };
-use crate::workspace::WorkingTreeRequest;
+use crate::workspace::{
+	BaseSelection, SeedSelection, WorkingTreeRequest, Workspace, WorkspaceBase,
+	WorkspaceSeed,
+};
 use crate::{ControlError, decode_control};
 
 fn json(value: &impl serde::Serialize) -> String {
@@ -638,6 +641,58 @@ fn a_project_entry_has_the_agreed_wire_shape() {
 		(
 			r#"{"kind":"query","id":12,"query":{"type":"project_entry","project_id":"00000000-0000-0000-0000-000000000000","path":"docs/adr/0101.md"}}"#.to_string(),
 			r#"{"kind":"query_result","id":12,"result":{"type":"project_entry","cursor":"3","project_id":"00000000-0000-0000-0000-000000000000","path":"docs/adr/0101.md","kind":{"type":"file","bytes":512}}}"#.to_string(),
+		)
+	);
+}
+
+/// A seeded Workspace request names its seed, an unseeded one leaves the
+/// field out as every request before minor 10 did, and a Workspace names
+/// what it was seeded with (ADR-0019, ADR-0025).
+#[test]
+fn workspace_seeds_have_the_agreed_wire_shape() {
+	let seeded = CommandRequest::CreateConversation {
+		retention: RetentionPolicy::Retain,
+		working_tree: WorkingTreeRequest::Workspace {
+			project_id: Uuid::nil(),
+			base: BaseSelection::Head,
+			seed: SeedSelection::Paths {
+				paths: vec!["src/lib.rs".into()],
+			},
+		},
+	};
+	let unseeded = CommandRequest::CreateConversation {
+		retention: RetentionPolicy::Retain,
+		working_tree: WorkingTreeRequest::Workspace {
+			project_id: Uuid::nil(),
+			base: BaseSelection::Head,
+			seed: SeedSelection::None,
+		},
+	};
+	let workspace = Workspace {
+		workspace_id: Uuid::nil(),
+		conversation_id: Uuid::nil(),
+		project_id: Uuid::nil(),
+		root: "/home/jet/.jet/workspaces/x".into(),
+		base: WorkspaceBase {
+			selection: BaseSelection::Head,
+			commit: "0123456789abcdef0123456789abcdef01234567".into(),
+		},
+		seed: Some(WorkspaceSeed {
+			tree: "89abcdef0123456789abcdef0123456789abcdef".into(),
+			changed_paths: 2,
+		}),
+		created_at_unix_ms: 1,
+	};
+	let decoded: CommandRequest =
+		serde_json::from_str(&json(&unseeded)).unwrap();
+
+	assert_eq!(
+		(json(&seeded), json(&unseeded), json(&workspace), decoded),
+		(
+			r#"{"type":"create_conversation","retention":"retain","working_tree":{"kind":"workspace","project_id":"00000000-0000-0000-0000-000000000000","base":{"kind":"head"},"seed":{"kind":"paths","paths":["src/lib.rs"]}}}"#.to_string(),
+			r#"{"type":"create_conversation","retention":"retain","working_tree":{"kind":"workspace","project_id":"00000000-0000-0000-0000-000000000000","base":{"kind":"head"}}}"#.to_string(),
+			r#"{"workspace_id":"00000000-0000-0000-0000-000000000000","conversation_id":"00000000-0000-0000-0000-000000000000","project_id":"00000000-0000-0000-0000-000000000000","root":"/home/jet/.jet/workspaces/x","base":{"selection":{"kind":"head"},"commit":"0123456789abcdef0123456789abcdef01234567"},"seed":{"tree":"89abcdef0123456789abcdef0123456789abcdef","changed_paths":2},"created_at_unix_ms":1}"#.to_string(),
+			unseeded,
 		)
 	);
 }

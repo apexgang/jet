@@ -258,11 +258,22 @@ pub(crate) async fn git(
 	root: &Path,
 	arguments: &[&str],
 ) -> Result<Output, CoreError> {
-	let output = command(root)
-		.args(arguments)
-		.output()
-		.await
-		.map_err(spawn_failure)?;
+	collect(command(root).args(arguments)).await
+}
+
+/// Runs one `git` command at `root` against the index file at `index`
+/// instead of the repository's own, so a capture can stage into a scratch
+/// index without touching what the user has staged (ADR-0025).
+pub(crate) async fn git_with_index(
+	root: &Path,
+	index: &Path,
+	arguments: &[&str],
+) -> Result<Output, CoreError> {
+	collect(command(root).env("GIT_INDEX_FILE", index).args(arguments)).await
+}
+
+async fn collect(command: &mut Command) -> Result<Output, CoreError> {
+	let output = command.output().await.map_err(spawn_failure)?;
 	Ok(Output {
 		status: output.status,
 		stdout: String::from_utf8_lossy(&output.stdout).into_owned(),

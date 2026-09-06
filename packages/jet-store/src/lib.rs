@@ -74,7 +74,7 @@ pub use records::{
 	SettingScopeRecord, VerifiedSnapshotCoverage, WorkingTreeRecord,
 };
 pub use transaction::{ReadTransaction, WriteTransaction};
-pub use workspace::{NewWorkspace, WorkspaceRecord};
+pub use workspace::{NewWorkspace, WorkspaceRecord, WorkspaceSeedRecord};
 
 /// Failure inside the store, without native SQLite strings in the category.
 #[derive(Debug, thiserror::Error)]

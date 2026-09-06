@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO workspaces\n\t\t\t\t(workspace_id, conversation_id, project_id, root,\n\t\t\t\tbase_selection, base_commit, seed_tree, seed_changed_paths,\n\t\t\t\tcreated_at_unix_ms)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "87fd2383d849536827b4c0a28f2d62005757ccd58146d104263a97f6b9449cb5"
+}

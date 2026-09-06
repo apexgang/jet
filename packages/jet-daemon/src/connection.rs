@@ -354,11 +354,9 @@ pub(super) async fn execute(
 	{
 		return unsupported_minor(id, requirement);
 	}
-	let envelope = CommandEnvelope::new(
-		CommandId(command_id),
-		translate::command(command),
-		request_bytes,
-	);
+	let envelope = translate::command(command).and_then(|command| {
+		CommandEnvelope::new(CommandId(command_id), command, request_bytes)
+	});
 	let outcome = match envelope {
 		Ok(envelope) => core.execute(actor, envelope).await,
 		Err(error) => Err(error),
@@ -456,6 +454,14 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::PROJECTS_MINOR,
 			feature: "Project registration",
 		}),
+		CommandRequest::CreateConversation { working_tree, .. }
+			if working_tree.is_seeded() =>
+		{
+			Some(MinorRequirement {
+				minor: jet_protocol::SEEDED_WORKSPACES_MINOR,
+				feature: "a Workspace seeded from the Local checkout",
+			})
+		}
 		CommandRequest::CreateConversation {
 			working_tree:
 				WorkingTreeRequest::Workspace { .. }
