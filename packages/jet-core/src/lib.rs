@@ -41,6 +41,8 @@ mod relative_path;
 mod remote;
 mod remote_pairing;
 mod repository;
+mod search;
+mod search_index;
 mod security;
 mod seed;
 mod seed_capture;
@@ -113,6 +115,7 @@ pub use promotion::{
 pub use query::{Query, QueryResult};
 pub use relative_path::RelativePath;
 pub use remote::RemoteSession;
+pub use search::{SearchField, SearchHit, SearchResult, SearchTerms};
 pub use security::{SecurityDegradation, SecurityState};
 pub use seed::{SeedSelection, WorkspaceSeed};
 pub use setting::{
@@ -266,7 +269,7 @@ impl Core {
 			probe.observe().await,
 			started_at,
 		);
-		Ok(Self {
+		let core = Self {
 			remote_access: tokio::sync::Semaphore::new(
 				remote::AUTHORITY_READERS as usize,
 			),
@@ -280,7 +283,11 @@ impl Core {
 			effect_reconciliation: tokio::sync::Mutex::new(()),
 			conversation_pages: pagination::ConversationPages::default(),
 			workspace_home,
-		})
+		};
+		// The index follows the journal; a daemon that stopped between a
+		// Command and its indexing catches up here (ADR-0036).
+		core.index_search().await?;
+		Ok(core)
 	}
 
 	/// What the Plane could do when it was last observed. `jetd` reports
@@ -376,3 +383,7 @@ mod pairing_completion_tests;
 #[cfg(test)]
 #[path = "paired_client_tests.rs"]
 mod paired_client_tests;
+
+#[cfg(test)]
+#[path = "search_tests.rs"]
+mod search_tests;
