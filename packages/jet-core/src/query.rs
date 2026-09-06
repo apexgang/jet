@@ -13,6 +13,7 @@ use crate::conversation::{
 };
 use crate::error::CoreError;
 use crate::event::{EVENT_PAGE_LIMIT, Event, EventPage, EventSequence};
+use crate::import::{self, ExternalConversationList};
 use crate::pairing::{self, PairingSnapshot};
 use crate::project::{self, PathGrant, ProjectList, ProjectPreview};
 use crate::project_entry::{self, ProjectEntry};
@@ -117,6 +118,9 @@ pub enum Query {
 		/// The terms every hit must contain.
 		terms: SearchTerms,
 	},
+	/// The Harness-native Conversations the Plane can see outside its
+	/// management, and the imports it holds (ADR-0010).
+	ExternalConversations,
 }
 
 /// Snapshots returned by [`Core::query`].
@@ -154,6 +158,8 @@ pub enum QueryResult {
 	PromotionPreview(Box<PromotionPreview>),
 	/// Bounded ranked hits, best match first.
 	Search(SearchResult),
+	/// What the Plane can see outside its management, and what it holds.
+	ExternalConversations(ExternalConversationList),
 }
 
 impl Core {
@@ -299,6 +305,9 @@ impl Core {
 				promotion::preview(self, actor, workspace_id, destination).await
 			}
 			Query::Search { terms } => search::query(self, &terms).await,
+			Query::ExternalConversations => {
+				import::external_conversations(self).await
+			}
 			Query::Projects => {
 				self.store
 					.read(async |tx| {

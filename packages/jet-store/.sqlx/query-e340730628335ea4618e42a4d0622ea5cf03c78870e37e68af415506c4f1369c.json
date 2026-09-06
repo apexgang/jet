@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO imported_conversations\n\t\t\t\t(import_id, harness, native_conversation, working_directory,\n\t\t\t\tactor_kind, actor_id, imported_at_unix_ms)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "e340730628335ea4618e42a4d0622ea5cf03c78870e37e68af415506c4f1369c"
+}

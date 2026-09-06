@@ -26,6 +26,7 @@ mod frame;
 mod handshake;
 mod helper;
 mod hex;
+mod import;
 mod message;
 mod pairing;
 mod presentation;
@@ -90,11 +91,16 @@ pub use frame::{
 };
 pub use handshake::{
 	ACCOUNT_BINDINGS_MINOR, CODEC_JSON_V1, ClientHello, FENCED_READS_MINOR,
-	MANAGED_RUNS_MINOR, MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE,
-	PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR,
-	SEARCH_MINOR, SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
+	IMPORTED_CONVERSATIONS_MINOR, MANAGED_RUNS_MINOR,
+	MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE, PROJECTS_MINOR,
+	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SEARCH_MINOR,
+	SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
 	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, VersionRange,
 	WORKSPACE_PROMOTION_MINOR, WORKSPACES_MINOR,
+};
+pub use import::{
+	ConversationOrigin, ExternalConversation, ExternalConversationList,
+	ExternalOrigin, ExternalProcess, ImportedConversation,
 };
 pub use message::{
 	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,

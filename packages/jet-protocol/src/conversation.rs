@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::account::{AccountBinding, CredentialReference, CredentialSource};
+use crate::import::{ConversationOrigin, ImportedConversation};
 use crate::pairing::{
 	ClientPublicKey, PairedClient, PairedClientAccess, PairingDisclosure,
 	PairingGate, PairingMethod, PendingPairing,
@@ -64,6 +65,9 @@ pub struct Conversation {
 	/// Where it does its work. Absent before protocol minor 9.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub working_tree: Option<WorkingTree>,
+	/// Where it came from. Absent before protocol minor 13.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub origin: Option<ConversationOrigin>,
 	/// When it was created, in signed Unix milliseconds.
 	pub created_at_unix_ms: i64,
 }
@@ -271,6 +275,27 @@ pub enum CommandRequest {
 		/// What the preview bound and the user confirmed.
 		binding: PromotionBinding,
 	},
+	/// Register a Harness-native Conversation the Plane can see outside its
+	/// management, so a managed Run may later continue it. The Plane looks
+	/// for the identity again and refuses one no supported Harness reports.
+	ImportConversation {
+		/// The Harness whose identity it is, such as `codex`.
+		harness: String,
+		/// The identity as the Harness spells it.
+		native_conversation: String,
+	},
+	/// Continue an Imported conversation as a new Conversation in a
+	/// Workspace or the Local checkout of a registered Project. A request
+	/// with no Project is refused: the user registers or maps one first.
+	ResumeImportedConversation {
+		/// The import to continue.
+		import_id: Uuid,
+		/// Retention choice.
+		#[serde(default)]
+		retention: RetentionPolicy,
+		/// Where the Conversation does its work.
+		working_tree: WorkingTreeRequest,
+	},
 }
 
 /// Durable Command outcomes.
@@ -363,6 +388,9 @@ pub enum CommandResponse {
 	/// The promotion as recorded: applying, with its Effect committed, or
 	/// conflicted, with the paths that keep it from being applied.
 	WorkspacePromotionRecorded(WorkspacePromotion),
+	/// The Imported conversation as registered, with no Conversation
+	/// continuing it yet.
+	ConversationImported(ImportedConversation),
 }
 
 /// Structured state returned when a Revision precondition is stale.

@@ -17,13 +17,18 @@ use crate::account::{
 	CredentialSource, ProviderAccount, ProviderId,
 };
 use crate::audit::{self, AuditEpoch, AuditSubject, Decision};
-use crate::capability::{Capability, ExternalTool};
+use crate::capability::{Capability, ExternalTool, HarnessId};
 use crate::command_receipt::{
 	COMMAND_RETENTION_MS, OUTCOME_VERSION, encode_result, replay,
 };
-use crate::conversation::{Conversation, ConversationId, Revision, Run, RunId};
+use crate::conversation::{
+	Conversation, ConversationId, ConversationOrigin, Revision, Run, RunId,
+};
 use crate::error::{ConflictState, CoreError, RevisionConflict};
 use crate::event::{EventKind, EventSubject};
+use crate::import::{
+	self, ImportId, ImportedConversation, NativeConversationId,
+};
 use crate::pairing::{
 	self, AuthenticationString, ClientPublicKey, PairedClient,
 	PairingChallenge, PairingDisclosure, PairingOfferId, PairingSecret,
@@ -245,6 +250,27 @@ pub enum Command {
 		/// What the preview bound and the user confirmed.
 		binding: PromotionBinding,
 	},
+	/// Register a Harness-native Conversation the Plane can see outside
+	/// its management, so a managed Run may later continue it (ADR-0010).
+	/// The identity is looked for again before the transaction opens; one
+	/// no supported Harness reports is refused.
+	ImportConversation {
+		/// The Harness whose identity it is.
+		harness: HarnessId,
+		/// The identity as the Harness spells it.
+		native_conversation: NativeConversationId,
+	},
+	/// Continue an Imported conversation as a new Conversation in a
+	/// Workspace or the Local checkout of a registered Project, chosen by
+	/// the user (ADR-0010, ADR-0025). Nowhere to work is refused.
+	ResumeImportedConversation {
+		/// The import to continue.
+		import_id: ImportId,
+		/// Whether Jet keeps the Conversation after its final Run.
+		retention: RetentionPolicy,
+		/// Where it does its work.
+		working_tree: WorkingTreeRequest,
+	},
 }
 
 impl Command {
@@ -261,6 +287,10 @@ impl Command {
 			}
 			| Self::RegisterProject { .. }
 			| Self::CreateConversation {
+				working_tree: WorkingTreeRequest::Workspace { .. },
+				..
+			}
+			| Self::ResumeImportedConversation {
 				working_tree: WorkingTreeRequest::Workspace { .. },
 				..
 			}
@@ -281,6 +311,8 @@ impl Command {
 			| Self::RevokePairedClient { .. }
 			| Self::CreateConversation { .. }
 			| Self::CreateRun { .. }
+			| Self::ImportConversation { .. }
+			| Self::ResumeImportedConversation { .. }
 			| Self::SetSetting { .. }
 			| Self::ClearSetting { .. }
 			| Self::TransitionRun { .. } => &[],
@@ -385,6 +417,9 @@ pub enum CommandOutcome {
 	/// The promotion as recorded: applying, with its Effect committed, or
 	/// conflicted, with the paths that keep it from being applied.
 	WorkspacePromotionRecorded(WorkspacePromotion),
+	/// The Imported conversation as registered, with no Conversation
+	/// continuing it yet.
+	ConversationImported(ImportedConversation),
 }
 
 impl Core {
@@ -540,7 +575,8 @@ fn redacted_for_receipt(
 			| CommandOutcome::PairedClientAccessSet { .. }
 			| CommandOutcome::PairedClientRevoked { .. }
 			| CommandOutcome::ProjectRegistered(_)
-			| CommandOutcome::WorkspacePromotionRecorded(_)),
+			| CommandOutcome::WorkspacePromotionRecorded(_)
+			| CommandOutcome::ConversationImported(_)),
 		) => Ok(outcome.clone()),
 		Err(error) => Err(error.clone()),
 	}
@@ -635,6 +671,7 @@ async fn execute_new(
 					tx,
 					actor,
 					retention,
+					ConversationOrigin::New,
 					prepared,
 					workspace_home,
 					now_unix_ms,
@@ -646,12 +683,35 @@ async fn execute_new(
 					tx,
 					actor,
 					retention,
+					ConversationOrigin::New,
 					project_id,
 					now_unix_ms,
 				)
 				.await
 			}
 		},
+		Command::ImportConversation { .. } => {
+			import::import(tx, actor, prepared, now_unix_ms).await
+		}
+		Command::ResumeImportedConversation {
+			import_id,
+			retention,
+			working_tree,
+		} => {
+			import::resume(
+				tx,
+				actor,
+				import::Resume {
+					import_id,
+					retention,
+					working_tree,
+					prepared,
+				},
+				workspace_home,
+				now_unix_ms,
+			)
+			.await
+		}
 		Command::CreateRun { conversation_id } => {
 			create_run(tx, actor, conversation_id, now_unix_ms).await
 		}
@@ -758,6 +818,7 @@ async fn create_conversation(
 			conversation_id: Uuid::now_v7(),
 			retention,
 			working_tree: WorkingTreeRecord::NoProject,
+			origin: ConversationOrigin::New.record(),
 			created_at_unix_ms: now_unix_ms,
 		})
 		.await?
@@ -765,6 +826,7 @@ async fn create_conversation(
 	let event = EventKind::ConversationCreated {
 		retention,
 		working_tree: WorkingTree::NoProject,
+		origin: ConversationOrigin::New,
 	};
 	tx.append_event(event.to_record(
 		actor,

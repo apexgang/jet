@@ -1,11 +1,12 @@
 //! Translation between core domain types and versioned wire types
 //! (ADR-0049). This is the only place the two vocabularies meet; its
-//! Account binding, Capability, Pairing, Project, and Setting parts sit in
-//! the submodules beside it.
+//! Account binding, Capability, import, Pairing, Project, and Setting
+//! parts sit in the submodules beside it.
 
 mod account;
 mod audit;
 mod capability;
+mod import;
 mod pairing;
 mod project;
 mod promotion;
@@ -25,11 +26,11 @@ use jet_core::{
 	BaseSelection, ClientId, Command, CommandOutcome, ConflictState,
 	Conversation, ConversationId, ConversationList, ConversationSnapshot,
 	CoreError, ErrorCategory, Event, EventPage, EventPayload, EventSequence,
-	PairingOfferId, PairingSecret, PairingSignature, PathGrant, PlaneStatus,
-	ProjectId, ProviderId, Query, QueryResult, RecoveryAction, RelativePath,
-	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
-	SearchTerms, SeedSelection, WorkingTree, WorkingTreeRequest, Workspace,
-	WorkspaceBase, WorkspaceId,
+	HarnessId, ImportId, NativeConversationId, PairingOfferId, PairingSecret,
+	PairingSignature, PathGrant, PlaneStatus, ProjectId, ProviderId, Query,
+	QueryResult, RecoveryAction, RelativePath, RetentionPolicy, Revision,
+	RevisionConflict, Run, RunId, RunLifecycle, SearchTerms, SeedSelection,
+	WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase, WorkspaceId,
 };
 use jet_protocol as wire;
 
@@ -109,6 +110,9 @@ pub(crate) fn query(
 		wire::QueryRequest::Search { text } => Query::Search {
 			terms: SearchTerms::parse(text)?,
 		},
+		wire::QueryRequest::ExternalConversations => {
+			Query::ExternalConversations
+		}
 	})
 }
 
@@ -167,6 +171,9 @@ pub(crate) fn query_result(
 		}
 		QueryResult::Search(result) => {
 			wire::QueryResponse::Search(search::result(result))
+		}
+		QueryResult::ExternalConversations(list) => {
+			wire::QueryResponse::ExternalConversations(import::list(list))
 		}
 	})
 }
@@ -295,6 +302,24 @@ pub(crate) fn command(
 				binding: promotion::binding_from_wire(binding),
 			}
 		}
+		wire::CommandRequest::ImportConversation {
+			harness,
+			native_conversation,
+		} => Command::ImportConversation {
+			harness: HarnessId(harness.clone()),
+			native_conversation: NativeConversationId(
+				native_conversation.clone(),
+			),
+		},
+		wire::CommandRequest::ResumeImportedConversation {
+			import_id,
+			retention,
+			working_tree,
+		} => Command::ResumeImportedConversation {
+			import_id: ImportId(*import_id),
+			retention: retention_from_wire(*retention),
+			working_tree: working_tree_request(working_tree)?,
+		},
 	})
 }
 
@@ -386,6 +411,11 @@ pub(crate) fn command_outcome(
 				promotion::promotion(recorded),
 			)
 		}
+		CommandOutcome::ConversationImported(imported) => {
+			wire::CommandResponse::ConversationImported(import::imported(
+				imported,
+			))
+		}
 	}
 }
 
@@ -449,6 +479,10 @@ fn conversation(conversation: &Conversation, minor: u32) -> wire::Conversation {
 		retention: retention(conversation.retention),
 		working_tree: (minor >= wire::WORKSPACES_MINOR)
 			.then(|| working_tree(conversation.working_tree)),
+		// A client that negotiated an older minor does not know where a
+		// Conversation can come from, so it is not told (ADR-0019).
+		origin: (minor >= wire::IMPORTED_CONVERSATIONS_MINOR)
+			.then(|| import::origin(conversation.origin)),
 		created_at_unix_ms: unix_ms(conversation.created_at),
 	}
 }

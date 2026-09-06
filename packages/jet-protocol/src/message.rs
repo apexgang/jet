@@ -13,6 +13,7 @@ use crate::conversation::{
 	PageCursor, RevisionConflict,
 };
 use crate::event::Event;
+use crate::import::ExternalConversationList;
 use crate::pairing::PairingSnapshot;
 use crate::project::{ProjectEntry, ProjectList, ProjectPreview};
 use crate::promotion::{PromotionDestination, PromotionPreview};
@@ -186,6 +187,9 @@ pub enum QueryRequest {
 		/// hit must contain, sixteen at most.
 		text: String,
 	},
+	/// The Harness-native Conversations the Plane can see outside its
+	/// management, placed against its Projects, and the imports it holds.
+	ExternalConversations,
 }
 
 /// Query snapshots.
@@ -224,6 +228,8 @@ pub enum QueryResponse {
 	PromotionPreview(Box<PromotionPreview>),
 	/// Bounded ranked hits, best match first.
 	Search(SearchResult),
+	/// What the Plane can see outside its management, and what it holds.
+	ExternalConversations(ExternalConversationList),
 }
 
 /// One page of journal Events, fenced by the journal position it was read

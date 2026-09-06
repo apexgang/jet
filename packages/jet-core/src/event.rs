@@ -12,8 +12,10 @@ use uuid::Uuid;
 
 use crate::account::{AccountBindingId, CredentialSource, ProviderId};
 use crate::audit::AuditEpoch;
-use crate::conversation::{ConversationId, RunId};
+use crate::capability::HarnessId;
+use crate::conversation::{ConversationId, ConversationOrigin, RunId};
 use crate::error::CoreError;
+use crate::import::{ImportId, NativeConversationId};
 use crate::pairing::{PairingEnd, PairingOfferId};
 use crate::promotion::{PromotionBinding, PromotionId, PromotionState};
 use crate::seed::WorkspaceSeed;
@@ -249,6 +251,24 @@ pub enum EventKind {
 		/// had one reads as no Project.
 		#[serde(default)]
 		working_tree: WorkingTree,
+		/// Where it came from. A journal written before Conversations could
+		/// be imported reads as created in Jet.
+		#[serde(default)]
+		origin: ConversationOrigin,
+	},
+	/// A Harness-native Conversation discovered outside Jet was registered
+	/// for managed continuation (ADR-0010).
+	#[serde(rename = "conversation.imported")]
+	ConversationImported {
+		/// The import that was made.
+		import_id: ImportId,
+		/// The Harness whose identity it is.
+		harness: HarnessId,
+		/// The identity as the Harness spells it.
+		native_conversation: NativeConversationId,
+		/// The directory the Harness reported working in, if it reported
+		/// one.
+		working_directory: Option<PathBuf>,
 	},
 	/// A managed Workspace was created for a Conversation (ADR-0025).
 	#[serde(rename = "workspace.created")]
@@ -454,6 +474,7 @@ impl EventKind {
 			| Self::RunProcessesChanged { .. }
 			| Self::RunOutput { .. }
 			| Self::RunNativeConversation { .. }
+			| Self::ConversationImported { .. }
 			| Self::RunCreated {}
 			| Self::RunLifecycleChanged { .. }
 			| Self::SettingChanged { .. }

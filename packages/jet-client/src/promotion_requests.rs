@@ -53,7 +53,8 @@ impl Client {
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::RunExecution(_)
-			| QueryResponse::Search(_)) => Err(unexpected(&other)),
+			| QueryResponse::Search(_)
+			| QueryResponse::ExternalConversations(_)) => Err(unexpected(&other)),
 		}
 	}
 
@@ -105,7 +106,8 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
-			| CommandResponse::ProjectRegistered(_)) => Err(unexpected(&other)),
+			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}
 	}
 }

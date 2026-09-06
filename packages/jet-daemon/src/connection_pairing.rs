@@ -86,7 +86,8 @@ async fn apply(
 		| CommandOutcome::AuditEpochBegun { .. }
 		| CommandOutcome::PairedClientRevoked { .. }
 		| CommandOutcome::ProjectRegistered(_)
-		| CommandOutcome::WorkspacePromotionRecorded(_) => Err(malformed()),
+		| CommandOutcome::WorkspacePromotionRecorded(_)
+		| CommandOutcome::ConversationImported(_) => Err(malformed()),
 	}
 }
 
