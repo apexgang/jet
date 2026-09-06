@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT plan, state FROM run_executions WHERE run_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "plan",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "run_executions",
+            "name": "plan"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "run_executions",
+            "name": "state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "6e7623cc0939775cdb659e5d33304e8ee8186c50d91233e6e58bc2248ad6d647"
+}

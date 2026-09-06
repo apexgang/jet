@@ -41,6 +41,12 @@ mod relative_path;
 mod remote;
 mod remote_pairing;
 mod repository;
+mod run;
+mod run_command;
+mod run_craft;
+mod run_effect;
+mod run_host;
+mod run_state;
 mod security;
 mod seed;
 mod seed_capture;
@@ -51,6 +57,15 @@ mod test_support;
 mod tree_capture;
 mod workspace;
 mod worktree;
+pub use run::{ManagedProcess, ManagedProcessRole, RunActivity, RunExecution};
+pub use run_command::LaunchPlan;
+pub use run_craft::PinnedCraft;
+pub use run_host::{RunConnection, RunFuture, RunHost, RunStartError};
+pub use run_state::Observation as RunObservation;
+
+#[cfg(test)]
+#[path = "run_tests.rs"]
+mod run_tests;
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -87,7 +102,8 @@ pub use error::{
 	RevisionConflict,
 };
 pub use event::{
-	Event, EventId, EventKind, EventPage, EventPayload, EventSequence,
+	Event, EventActor, EventId, EventKind, EventPage, EventPayload,
+	EventSequence,
 };
 pub use jet_store::{AuditBreach, AuditHead};
 pub use jet_store::{
@@ -197,6 +213,7 @@ impl Actor {
 /// One running core bound to one Plane store.
 #[derive(Debug)]
 pub struct Core {
+	run_host: Option<Arc<dyn run_host::RunHost>>,
 	// Serialize authority publication with Commands and fence concurrent reads.
 	remote_access: tokio::sync::Semaphore,
 	remote_sessions: remote::RemoteSessions,
@@ -221,6 +238,12 @@ pub struct Core {
 }
 
 impl Core {
+	/// Installs the trusted host Adapter before accepting managed Runs.
+	pub fn with_run_host(mut self, host: Arc<dyn run_host::RunHost>) -> Self {
+		self.run_host = Some(host);
+		self
+	}
+
 	/// Starts the core on `store`, durably recording this daemon start.
 	///
 	/// # Errors
@@ -267,6 +290,7 @@ impl Core {
 			started_at,
 		);
 		Ok(Self {
+			run_host: None,
 			remote_access: tokio::sync::Semaphore::new(
 				remote::AUTHORITY_READERS as usize,
 			),

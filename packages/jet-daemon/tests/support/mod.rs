@@ -68,7 +68,21 @@ pub async fn start_jetd_process(command: &mut Command) -> Daemon {
 	let mut child = command.spawn().unwrap();
 	let stdout = child.stdout.take().unwrap();
 	let mut lines = BufReader::new(stdout).lines();
-	let ready = lines.next_line().await.unwrap().expect("jetd exited early");
+	let ready = match lines.next_line().await.unwrap() {
+		Some(ready) => ready,
+		None => {
+			use tokio::io::AsyncReadExt;
+			let mut detail = String::new();
+			child
+				.stderr
+				.take()
+				.unwrap()
+				.read_to_string(&mut detail)
+				.await
+				.unwrap();
+			panic!("jetd exited early: {detail}");
+		}
+	};
 	let ready: serde_json::Value = serde_json::from_str(&ready).unwrap();
 	assert_eq!(ready["status"], "ready");
 	Daemon {

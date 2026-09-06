@@ -142,6 +142,19 @@ impl<R: AsyncRead + Unpin> CraftReceiver<R> {
 	pub async fn receive(&mut self) -> Result<CraftCommand, CraftError> {
 		let command = receive(&mut self.reader).await?;
 		let feature = match &command {
+			CraftCommand::Start { .. } | CraftCommand::Acknowledge { .. } => {
+				if self.ready.protocol.version.minor < 1
+					|| !self
+						.ready
+						.protocol
+						.capabilities
+						.iter()
+						.any(|c| c == "runs")
+				{
+					return Err(CraftError::InvalidMessage);
+				}
+				"turns"
+			}
 			CraftCommand::Turn { .. } => "turns",
 			CraftCommand::Action { .. } => "actions",
 			CraftCommand::Shutdown => return Ok(command),
@@ -200,8 +213,8 @@ async fn handshake<R: AsyncRead + Unpin>(
 	// ASVS 2.3.1: a specification cannot make this SDK speak a new codec major.
 	let sdk = ProtocolOffer {
 		family: ProtocolFamily::Craft,
-		versions: vec![ProtocolVersion { major: 1, minor: 0 }],
-		capabilities: vec!["actions".into(), "resume".into()],
+		versions: vec![ProtocolVersion { major: 1, minor: 1 }],
+		capabilities: vec!["actions".into(), "resume".into(), "runs".into()],
 	};
 	let supported = sdk
 		.negotiate(&specification.protocol, mode)

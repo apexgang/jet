@@ -177,7 +177,9 @@ async fn settle(
 	now_unix_ms: i64,
 ) -> Result<(), CoreError> {
 	match effect.kind {
-		EffectKind::StartRun { .. } => Ok(()),
+		EffectKind::StartRun { run_id } => {
+			crate::run_state::settle_start(tx, run_id, state, now_unix_ms).await
+		}
 		EffectKind::PromoteWorkspace { promotion_id } => {
 			promotion_effect::settle(tx, promotion_id, state, now_unix_ms).await
 		}

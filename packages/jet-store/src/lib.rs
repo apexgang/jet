@@ -29,6 +29,7 @@ mod project;
 mod promotion;
 mod records;
 mod run;
+mod run_execution;
 mod setting;
 mod transaction;
 mod workspace;
@@ -79,6 +80,7 @@ pub use records::{
 	RetentionPolicy, RunLifecycle, RunRecord, SettingRecord,
 	SettingScopeRecord, VerifiedSnapshotCoverage, WorkingTreeRecord,
 };
+pub use run_execution::RunExecutionRecord;
 pub use transaction::{ReadTransaction, WriteTransaction};
 pub use workspace::{NewWorkspace, WorkspaceRecord, WorkspaceSeedRecord};
 

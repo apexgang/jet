@@ -122,6 +122,15 @@ pub struct ConversationSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandRequest {
+	/// Start a managed Run with an installed Craft and initial input.
+	StartRun {
+		/// Conversation whose working tree is used.
+		conversation_id: Uuid,
+		/// Installed Craft identity.
+		craft: String,
+		/// Initial Harness input.
+		prompt: String,
+	},
 	/// Create a Conversation with no Runs. Retained unless told otherwise,
 	/// and in no Project unless a working tree is asked for.
 	CreateConversation {

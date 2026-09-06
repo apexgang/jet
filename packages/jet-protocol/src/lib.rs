@@ -24,17 +24,25 @@ mod decimal;
 mod event;
 mod frame;
 mod handshake;
+mod helper;
 mod hex;
 mod message;
 mod pairing;
 mod presentation;
 mod project;
 mod promotion;
+mod run;
 mod setting;
 mod stream;
 mod stream_control;
 mod stream_error;
 mod workspace;
+
+pub use helper::{
+	HelperCommand, HelperConfig, HelperEvent, HelperHello, HelperReady,
+	HelperRecord, NativeStream,
+};
+pub use run::{ManagedProcess, ManagedProcessRole, RunActivity, RunExecution};
 
 pub use account::{
 	AccountBinding, AccountBindingList, AccountBindingStatus, CredentialItem,
@@ -74,17 +82,18 @@ pub use craft_handshake::{CraftHello, CraftReady, CraftResume};
 pub use craft_spec::{
 	BrokerPermission, CraftFeature, CraftHostAccess, CraftSpecification,
 };
-pub use event::{Actor, Event};
+pub use event::{Actor, Event, EventOrigin};
 pub use frame::{
 	CONNECTION_STREAM, Frame, FrameError, FrameKind, FrameLimits, FrameReader,
 	FrameWriter, MAX_CONTROL_FRAME, MAX_DATA_FRAME, StreamId,
 };
 pub use handshake::{
 	ACCOUNT_BINDINGS_MINOR, CODEC_JSON_V1, ClientHello, FENCED_READS_MINOR,
-	MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE, PROJECTS_MINOR,
-	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SECURITY_AUDIT_MINOR,
-	SEEDED_WORKSPACES_MINOR, SETTINGS_AND_CAPABILITIES_MINOR, ServerHello,
-	VersionRange, WORKSPACE_PROMOTION_MINOR, WORKSPACES_MINOR,
+	MANAGED_RUNS_MINOR, MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE,
+	PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR,
+	SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
+	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, VersionRange,
+	WORKSPACE_PROMOTION_MINOR, WORKSPACES_MINOR,
 };
 pub use message::{
 	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,

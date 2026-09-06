@@ -192,25 +192,28 @@ async fn process_requests(
 			return;
 		};
 		let acknowledged = matches!(reply, ServerMessage::CommandResult { .. });
-		if replies
-			.send(Frame::stream_control(stream_id, payload))
-			.await
-			.is_err()
-		{
-			return;
-		}
-		// An acknowledged Command may have committed an Effect; the work it
-		// asks for begins once the acknowledgement is on its way and never
-		// holds up this connection's next request (ADR-0064).
+
+		// A committed Command dispatches its Effect even if its caller has
+		// disconnected before receiving the receipt (ADR-0064).
 		if acknowledged {
 			let effect_core = Arc::clone(&core);
 			tokio::spawn(async move {
+				if let Err(error) = effect_core.perform_runs().await {
+					eprintln!("jetd: cannot record Run start outcome: {error}");
+				}
 				if let Err(error) = effect_core.perform_promotions().await {
 					eprintln!(
 						"jetd: cannot record a Workspace promotion outcome: {error}"
 					);
 				}
 			});
+		}
+		if replies
+			.send(Frame::stream_control(stream_id, payload))
+			.await
+			.is_err()
+		{
+			return;
 		}
 	}
 }

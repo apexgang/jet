@@ -27,8 +27,12 @@ install:
 	cargo fetch
 
 [unix]
-test *args:
+test *args: build-run-helper
 	RUST_MIN_STACK={{ rust_min_stack }} cargo nextest run "$@"
+
+# Subprocess conformance uses the separately deployed generic helper.
+build-run-helper:
+	cargo build -p jet-fueld
 
 # List tests without running them; accepts nextest package and filter arguments.
 [unix]

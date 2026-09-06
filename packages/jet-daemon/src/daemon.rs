@@ -69,7 +69,9 @@ pub(crate) async fn run(
 	// The start is recorded only once the daemon can actually serve.
 	let core =
 		match Core::start(store, WorkspaceHome(home.workspaces_dir())).await {
-			Ok(core) => Arc::new(core),
+			Ok(core) => Arc::new(core.with_run_host(Arc::new(
+				crate::run_host::CraftProcesses::default(),
+			))),
 			Err(error) => {
 				eprintln!("jetd: cannot start the core: {error}");
 				return ExitCode::from(EXIT_FAILURE);
@@ -80,6 +82,10 @@ pub(crate) async fn run(
 	// ADR-0067).
 	if let Err(error) = core.perform_promotions().await {
 		eprintln!("jetd: cannot reconcile Workspace promotions: {error}");
+	}
+	// Settle durable Run admission before serving new Commands.
+	if let Err(error) = core.perform_runs().await {
+		eprintln!("jetd: cannot reconcile Run starts: {error}");
 	}
 	// ADR-0086: the Plane reports what it can do at startup, on the one
 	// line a launcher reads, and on demand afterwards.

@@ -830,6 +830,7 @@ dependencies = [
  "getrandom",
  "jet-client",
  "jet-core",
+ "jet-craft-sdk",
  "jet-protocol",
  "jet-runtime",
  "jet-store",
@@ -837,6 +838,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "tokio",
  "uuid",
@@ -845,6 +847,13 @@ dependencies = [
 [[package]]
 name = "jet-fueld"
 version = "0.2.0"
+dependencies = [
+ "clap",
+ "jet-protocol",
+ "rustix",
+ "serde",
+ "tokio",
+]
 
 [[package]]
 name = "jet-protocol"

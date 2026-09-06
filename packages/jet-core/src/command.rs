@@ -103,6 +103,15 @@ impl CommandEnvelope {
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
+	/// Start a managed Run with one installed Craft and its initial input.
+	StartRun {
+		/// The Conversation whose registered working tree is used.
+		conversation_id: ConversationId,
+		/// Installed Craft identity, never an executable path.
+		craft: String,
+		/// Initial Harness input.
+		prompt: String,
+	},
 	/// Create a Conversation with no Runs, and the Workspace it works in
 	/// when it asks for one (ADR-0025).
 	CreateConversation {
@@ -244,6 +253,7 @@ impl Command {
 	/// (ADR-0086).
 	pub(crate) fn required_capabilities(&self) -> &'static [Capability] {
 		match self {
+			Self::StartRun { .. } => GIT,
 			Self::SetSetting {
 				key: SettingKey::GitAutoCommit,
 				value: SettingValue::Flag(true),
@@ -556,6 +566,25 @@ async fn execute_new(
 		workspace_home,
 	} = context;
 	match command {
+		Command::StartRun {
+			conversation_id, ..
+		} => {
+			let Prepared::Run(plan) = prepared else {
+				return Err(CoreError::internal(
+					"run.unprepared",
+					"missing launch plan",
+				));
+			};
+			crate::run_command::record(
+				tx,
+				actor,
+				command_id,
+				conversation_id,
+				plan,
+				now_unix_ms,
+			)
+			.await
+		}
 		Command::PromoteWorkspace { .. } => {
 			let Prepared::Promotion(prepared) = prepared else {
 				return Err(CoreError::internal(
@@ -742,7 +771,7 @@ async fn create_conversation(
 	Ok(CommandOutcome::ConversationCreated(conversation))
 }
 
-async fn create_run(
+pub(crate) async fn create_run(
 	tx: &mut WriteTransaction,
 	actor: &Actor,
 	conversation_id: ConversationId,
@@ -866,6 +895,14 @@ async fn transition_run(
 	lifecycle: RunLifecycle,
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
+	// ASVS 2.3.1: only supervised process observations may change a managed
+	// Run's lifecycle. A client cannot release its working-tree exclusion.
+	if tx.run_execution(run_id.0).await?.is_some() {
+		return Err(CoreError::conflict(
+			"run.managed_lifecycle",
+			"managed Run lifecycle is owned by execution supervision",
+		));
+	}
 	let Some(current) = tx.run(run_id.0).await? else {
 		return Err(CoreError::not_found(
 			"run.not_found",

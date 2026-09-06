@@ -20,6 +20,8 @@ tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+jet-craft-sdk.workspace = true
+sha2.workspace = true
 ed25519-dalek.workspace = true
 jet-client.workspace = true
 pretty_assertions.workspace = true

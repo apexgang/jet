@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE run_executions SET state = ?2 WHERE run_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "a55ed40441725e0e2eb4d07aedc5c8ded9674dcfc69d6c9467e494d57307d5ff"
+}

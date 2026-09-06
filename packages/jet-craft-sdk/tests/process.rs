@@ -166,7 +166,10 @@ async fn fake_execution(stream: UnixStream) {
 					.unwrap();
 			}
 			CraftCommand::Shutdown => break,
-			CraftCommand::Turn { .. } | CraftCommand::Action { .. } => {
+			CraftCommand::Start { .. }
+			| CraftCommand::Acknowledge { .. }
+			| CraftCommand::Turn { .. }
+			| CraftCommand::Action { .. } => {
 				panic!("unexpected command")
 			}
 		}
