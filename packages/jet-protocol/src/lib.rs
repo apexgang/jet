@@ -13,9 +13,13 @@ mod account;
 mod artifact;
 mod audit;
 mod capability;
+mod compatibility;
 mod connection_auth;
 mod control;
 mod conversation;
+mod craft;
+mod craft_handshake;
+mod craft_spec;
 mod decimal;
 mod event;
 mod frame;
@@ -23,6 +27,7 @@ mod handshake;
 mod hex;
 mod message;
 mod pairing;
+mod presentation;
 mod project;
 mod promotion;
 mod setting;
@@ -47,6 +52,10 @@ pub use capability::{
 	CredentialStoreStatus, DegradedCondition, ExternalTool, ExternalToolStatus,
 	InstalledCraft, Platform, ToolAvailability,
 };
+pub use compatibility::{
+	IncompatibleProtocol, NegotiatedProtocol, Negotiation, ProtocolFamily,
+	ProtocolOffer, ProtocolVersion,
+};
 pub use connection_auth::{
 	ConnectionProof, RemotePairingRequest, RemotePairingResponse,
 	connection_signing_bytes,
@@ -59,6 +68,11 @@ pub use conversation::{
 	CommandRequest, CommandResponse, ConflictState, Conversation,
 	ConversationList, ConversationSnapshot, PageCursor, RetentionPolicy,
 	RevisionConflict, Run, RunLifecycle,
+};
+pub use craft::{CraftAction, CraftApprovalDecision, CraftCommand, CraftEvent};
+pub use craft_handshake::{CraftHello, CraftReady, CraftResume};
+pub use craft_spec::{
+	BrokerPermission, CraftFeature, CraftHostAccess, CraftSpecification,
 };
 pub use event::{Actor, Event};
 pub use frame::{
@@ -82,6 +96,7 @@ pub use pairing::{
 	PairingEnd, PairingGate, PairingKeyAlgorithm, PairingMethod,
 	PairingProgress, PairingSnapshot, PendingPairing,
 };
+pub use presentation::{Presentation, PresentationAction, PresentationBlock};
 pub use project::{
 	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
 	ProjectPreview, Registrability, Repository, Worktree,

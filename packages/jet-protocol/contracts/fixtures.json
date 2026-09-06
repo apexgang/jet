@@ -1,0 +1,77 @@
+[
+  {
+    "schema": "CraftCommand",
+    "valid": true,
+    "payload": "{\"kind\":\"turn\",\"id\":\"t1\",\"text\":\"Hello\",\"future\":true}"
+  },
+  {
+    "schema": "CraftCommand",
+    "valid": false,
+    "payload": "{\"kind\":\"future_command\"}"
+  },
+  {
+    "schema": "CraftCommand",
+    "valid": false,
+    "payload": "{\"kind\":\"action\",\"id\":\"a1\",\"action\":{\"kind\":\"approval\",\"request_id\":\"r1\",\"decision\":\"always_allow\"}}"
+  },
+  {
+    "schema": "CraftCommand",
+    "valid": true,
+    "payload": "{\"kind\":\"action\",\"id\":\"a1\",\"action\":{\"kind\":\"approval\",\"request_id\":\"r1\",\"decision\":\"deny\"}}"
+  },
+  {
+    "schema": "CraftEvent",
+    "valid": true,
+    "payload": "{\"presentation\":[{\"kind\":\"vendor_chart\",\"points\":[9007199254740993],\"extra\":true}],\"native_event\": { \"vendor\": 9007199254740993 },\"kind\":\"output\"}"
+  },
+  {
+    "schema": "CraftEvent",
+    "valid": false,
+    "payload": "{\"kind\":\"future_event\"}"
+  },
+  {
+    "schema": "CraftEvent",
+    "valid": false,
+    "payload": "{\"kind\":\"output\",\"native_event\":{},\"presentation\":[{\"kind\":\"text\",\"text\":5}]}"
+  },
+  {
+    "schema": "ProtocolOffer",
+    "valid": true,
+    "payload": "{\"family\":\"craft\",\"versions\":[{\"major\":2,\"minor\":3},{\"major\":1,\"minor\":7}],\"future\":1}"
+  },
+  {
+    "schema": "ProtocolOffer",
+    "valid": false,
+    "payload": "{\"family\":\"unknown\",\"versions\":[{\"major\":1,\"minor\":0}]}"
+  },
+  {
+    "schema": "ProtocolOffer",
+    "valid": false,
+    "payload": "{\"family\":\"craft\",\"versions\":[{\"major\":4294967296,\"minor\":0}]}"
+  },
+  {
+    "schema": "ProtocolOffer",
+    "valid": false,
+    "payload": "{\"family\":\"craft\",\"versions\":[{\"major\":1,\"minor\":4294967296}]}"
+  },
+  {
+    "schema": "ProtocolOffer",
+    "valid": true,
+    "payload": "{\"family\":\"craft\",\"versions\":[{\"major\":4294967295,\"minor\":4294967295}]}"
+  },
+  {
+    "schema": "CraftCommand",
+    "valid": false,
+    "payload": "{\"kind\":\"future_command\",\"kind\":\"shutdown\"}"
+  },
+  {
+    "schema": "CraftCommand",
+    "valid": false,
+    "payload": "{\"kind\":\"action\",\"id\":\"a\",\"action\":{\"kind\":\"approval\",\"request_id\":\"r\",\"decision\":\"future\",\"decision\":\"deny\"}}"
+  },
+  {
+    "schema": "CraftEvent",
+    "valid": true,
+    "payload": "{\"kind\":\"output\",\"native_event\":{\"kind\":\"native\",\"kind\":\"future\"},\"presentation\":[{\"kind\":\"future_block\",\"text\":\"one\",\"text\":\"two\"}]}"
+  }
+]

@@ -1,0 +1,11 @@
+id = "fake"
+harness = "fake"
+schema = { major = 1, minor = 0 }
+broker_permissions = ["artifact_read"]
+host_access = [{ kind = "executable", name = "fake-harness" }]
+features = [{ name = "turns", required = true }, { name = "actions", required = true }, { name = "resume", required = true }]
+
+[protocol]
+family = "craft"
+versions = [{ major = 1, minor = 0 }]
+capabilities = ["actions", "resume"]

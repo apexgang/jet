@@ -1,0 +1,678 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CraftContracts",
+  "type": "object",
+  "properties": {
+    "command": {
+      "$ref": "#/$defs/CraftCommand"
+    },
+    "event": {
+      "$ref": "#/$defs/CraftEvent"
+    },
+    "hello": {
+      "$ref": "#/$defs/CraftHello"
+    },
+    "presentation": {
+      "$ref": "#/$defs/Presentation"
+    },
+    "ready": {
+      "$ref": "#/$defs/CraftReady"
+    },
+    "specification": {
+      "$ref": "#/$defs/CraftSpecification"
+    }
+  },
+  "required": [
+    "hello",
+    "ready",
+    "command",
+    "event",
+    "specification",
+    "presentation"
+  ],
+  "$defs": {
+    "BrokerPermission": {
+      "description": "Jet-enforced broker permissions, all required declarations in v1.",
+      "oneOf": [
+        {
+          "description": "Read authorized Artifacts through the broker.",
+          "type": "string",
+          "const": "artifact_read"
+        },
+        {
+          "description": "Publish Artifacts through the broker.",
+          "type": "string",
+          "const": "artifact_write"
+        },
+        {
+          "description": "Use authorized paired-Plane tools through the broker.",
+          "type": "string",
+          "const": "remote_tools"
+        }
+      ]
+    },
+    "CraftAction": {
+      "description": "Structured action input; unknown security-sensitive variants fail closed.",
+      "oneOf": [
+        {
+          "description": "Invoke an action offered by the Harness in this execution.",
+          "type": "object",
+          "properties": {
+            "action_id": {
+              "description": "Native action identity.",
+              "type": "string"
+            },
+            "input": {
+              "description": "Harness-native input, interpreted only by the Craft."
+            },
+            "kind": {
+              "type": "string",
+              "const": "invoke"
+            }
+          },
+          "required": [
+            "kind",
+            "action_id",
+            "input"
+          ]
+        },
+        {
+          "description": "Answer an approval after Jet has authorized this exact decision.",
+          "type": "object",
+          "properties": {
+            "decision": {
+              "description": "No implicit blanket or persistent approval exists.",
+              "$ref": "#/$defs/CraftApprovalDecision"
+            },
+            "kind": {
+              "type": "string",
+              "const": "approval"
+            },
+            "request_id": {
+              "description": "Native approval request identity.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "request_id",
+            "decision"
+          ]
+        }
+      ]
+    },
+    "CraftApprovalDecision": {
+      "description": "Explicit decision on exactly one native approval request.",
+      "oneOf": [
+        {
+          "description": "Allow only the identified request under existing policy.",
+          "type": "string",
+          "const": "allow_once"
+        },
+        {
+          "description": "Deny the identified request.",
+          "type": "string",
+          "const": "deny"
+        }
+      ]
+    },
+    "CraftCommand": {
+      "description": "Host-to-Craft Commands, admitted by Jet before crossing this boundary.",
+      "oneOf": [
+        {
+          "description": "Submit one admitted turn.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "description": "Correlation identity; delivery alone is not a durable receipt.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "turn"
+            },
+            "text": {
+              "description": "Harness input.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "text"
+          ]
+        },
+        {
+          "description": "Route an authenticated user action to its native handler.",
+          "type": "object",
+          "properties": {
+            "action": {
+              "description": "Structured native action.",
+              "$ref": "#/$defs/CraftAction"
+            },
+            "id": {
+              "description": "Correlation identity.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "action"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "action"
+          ]
+        },
+        {
+          "description": "Release this execution connection; never deletes a Conversation or\nterminates the Craft process while other execution connections exist.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "shutdown"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      ]
+    },
+    "CraftEvent": {
+      "description": "Craft-to-host events. Native content remains the authoritative payload.",
+      "oneOf": [
+        {
+          "description": "Complete native event accompanied by optional portable views.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "output"
+            },
+            "native_event": {
+              "description": "Original JSON bytes, including unknown data and numeric precision."
+            },
+            "presentation": {
+              "description": "Presentation accompanies, never replaces, the native event.",
+              "type": "array",
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/PresentationBlock"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "native_event"
+          ]
+        },
+        {
+          "description": "Native Command completion; the host persists it before acknowledging.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "description": "Command correlation identity.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "completed"
+            },
+            "native_conversation": {
+              "description": "Native identity retained for an explicitly resumed later execution.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "native_conversation"
+          ]
+        }
+      ]
+    },
+    "CraftFeature": {
+      "description": "A supported Harness feature. Unknown optional features are disabled.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Feature name; v1 understands turns, actions, and resume.",
+          "type": "string"
+        },
+        "required": {
+          "description": "Whether installation must reject an unrecognized feature.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "CraftHello": {
+      "description": "First host control payload after the `jet-craft\\n` preface.",
+      "type": "object",
+      "properties": {
+        "execution_id": {
+          "description": "Stable identity persisted by the host before dispatching external work.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "protocol": {
+          "description": "Host Craft-protocol support, independent of its GUI/helper protocols.",
+          "$ref": "#/$defs/ProtocolOffer"
+        },
+        "resume": {
+          "description": "Absent for a new execution; present only for explicit recovery.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CraftResume"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "specification": {
+          "description": "Host specification-schema support, negotiated independently.",
+          "$ref": "#/$defs/ProtocolOffer"
+        }
+      },
+      "required": [
+        "protocol",
+        "specification",
+        "execution_id"
+      ]
+    },
+    "CraftHostAccess": {
+      "description": "Disclosed same-user host access; not a portable sandbox guarantee.",
+      "oneOf": [
+        {
+          "description": "An executable the Craft expects to launch.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "executable"
+            },
+            "name": {
+              "description": "Executable name or absolute path.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ]
+        },
+        {
+          "description": "A filesystem area the Craft expects to use.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "filesystem"
+            },
+            "path": {
+              "description": "Disclosed filesystem path.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ]
+        },
+        {
+          "description": "An environment input, never its secret value.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "environment"
+            },
+            "name": {
+              "description": "Environment variable name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ]
+        },
+        {
+          "description": "An expected network destination.",
+          "type": "object",
+          "properties": {
+            "destination": {
+              "description": "Destination description shown during installation.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "network"
+            }
+          },
+          "required": [
+            "kind",
+            "destination"
+          ]
+        }
+      ]
+    },
+    "CraftReady": {
+      "description": "Successful negotiation; the host persists the version with the execution.",
+      "type": "object",
+      "properties": {
+        "enabled_features": {
+          "description": "Understood features; unknown optional features remain disabled.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "protocol": {
+          "description": "Selected Craft protocol and capabilities.",
+          "$ref": "#/$defs/NegotiatedProtocol"
+        },
+        "specification": {
+          "description": "Declarations must match the host's accepted installed specification.",
+          "$ref": "#/$defs/CraftSpecification"
+        },
+        "specification_protocol": {
+          "description": "Independently selected specification schema minor.",
+          "$ref": "#/$defs/NegotiatedProtocol"
+        }
+      },
+      "required": [
+        "protocol",
+        "specification_protocol",
+        "specification",
+        "enabled_features"
+      ]
+    },
+    "CraftResume": {
+      "description": "Host-owned recovery context; never evidence that an unacknowledged action failed.",
+      "type": "object",
+      "properties": {
+        "native_conversation": {
+          "description": "Native Conversation to reopen without replaying Commands automatically.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Version pinned when this execution first negotiated.",
+          "$ref": "#/$defs/ProtocolVersion"
+        }
+      },
+      "required": [
+        "version",
+        "native_conversation"
+      ]
+    },
+    "CraftSpecification": {
+      "description": "Contents of `.jet/craft-spec.toml`, also sent as JSON during handshake.",
+      "type": "object",
+      "properties": {
+        "broker_permissions": {
+          "description": "Required broker declarations; the host separately authorizes each use.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BrokerPermission"
+          }
+        },
+        "features": {
+          "description": "Harness feature declarations, never authorization grants.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CraftFeature"
+          }
+        },
+        "harness": {
+          "description": "The single Harness adapted by this Craft.",
+          "type": "string"
+        },
+        "host_access": {
+          "description": "Required host-access disclosures.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CraftHostAccess"
+          }
+        },
+        "id": {
+          "description": "Stable Craft identity.",
+          "type": "string"
+        },
+        "protocol": {
+          "description": "Craft protocol majors and each major's highest minor.",
+          "$ref": "#/$defs/ProtocolOffer"
+        },
+        "schema": {
+          "description": "This document's schema version, independent of Craft wire versions.",
+          "$ref": "#/$defs/ProtocolVersion"
+        }
+      },
+      "required": [
+        "schema",
+        "id",
+        "harness",
+        "protocol"
+      ]
+    },
+    "NegotiatedProtocol": {
+      "description": "The immutable selection callers persist with the execution identity.",
+      "type": "object",
+      "properties": {
+        "capabilities": {
+          "description": "Intersection of understood capability names, sorted and deduplicated.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "family": {
+          "description": "Independently negotiated contract.",
+          "$ref": "#/$defs/ProtocolFamily"
+        },
+        "version": {
+          "description": "Selected version; updates must retain support while it is active.",
+          "$ref": "#/$defs/ProtocolVersion"
+        }
+      },
+      "required": [
+        "family",
+        "version",
+        "capabilities"
+      ]
+    },
+    "Presentation": {
+      "description": "Presentation understood by every GUI; never executable UI code.",
+      "oneOf": [
+        {
+          "description": "Plain text rendered without markup interpretation.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "text"
+            },
+            "text": {
+              "description": "Human-visible text.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ]
+        },
+        {
+          "description": "Markdown rendered with the GUI's normal sanitization rules.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "markdown"
+            },
+            "text": {
+              "description": "Human-visible Markdown.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ]
+        },
+        {
+          "description": "Named native actions routed back through authenticated Jet Commands.",
+          "type": "object",
+          "properties": {
+            "actions": {
+              "description": "Choices available for this native event.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PresentationAction"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "actions"
+            }
+          },
+          "required": [
+            "kind",
+            "actions"
+          ]
+        }
+      ]
+    },
+    "PresentationAction": {
+      "description": "An action description grants no broker permission or approval authority.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Harness-defined identity scoped to this execution.",
+          "type": "string"
+        },
+        "label": {
+          "description": "Plain-text user-facing label.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ]
+    },
+    "PresentationBlock": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Presentation"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "not": {
+                "enum": [
+                  "text",
+                  "markdown",
+                  "actions"
+                ]
+              }
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      ]
+    },
+    "ProtocolFamily": {
+      "description": "Separately versioned contracts; sharing a codec never couples versions.",
+      "oneOf": [
+        {
+          "description": "GUI to daemon protocol.",
+          "type": "string",
+          "const": "client"
+        },
+        {
+          "description": "Harness adapter protocol.",
+          "type": "string",
+          "const": "craft"
+        },
+        {
+          "description": "Execution helper protocol.",
+          "type": "string",
+          "const": "helper"
+        },
+        {
+          "description": "Craft specification schema.",
+          "type": "string",
+          "const": "specification"
+        }
+      ]
+    },
+    "ProtocolOffer": {
+      "description": "A peer's highest minor for each supported major, plus capability names.",
+      "type": "object",
+      "properties": {
+        "capabilities": {
+          "description": "Optional capabilities; unknown names confer no authority.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "family": {
+          "description": "Contract to which this offer applies.",
+          "$ref": "#/$defs/ProtocolFamily"
+        },
+        "versions": {
+          "description": "One entry per major; every minor from zero through this minor works.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProtocolVersion"
+          }
+        }
+      },
+      "required": [
+        "family",
+        "versions"
+      ]
+    },
+    "ProtocolVersion": {
+      "description": "A major and its additive minor, independent of product version.",
+      "type": "object",
+      "properties": {
+        "major": {
+          "description": "Incompatible schema generation, starting at one.",
+          "type": "integer",
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "minor": {
+          "description": "Additive schema generation, starting at zero.",
+          "type": "integer",
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0
+        }
+      },
+      "required": [
+        "major",
+        "minor"
+      ]
+    }
+  }
+}

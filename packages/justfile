@@ -49,6 +49,22 @@ bench-smoke:
 check:
 	cargo check
 
+# Regenerate schema and GUI model declarations from the Craft wire DTOs.
+craft-contracts:
+	mkdir -p jet-protocol/contracts
+	cargo run -p jet-protocol --features schema --example craft-schema > jet-protocol/contracts/craft-v1.schema.json
+	python3 ../scripts/craft-models.py
+
+# Validate the shared corpus in both GUI languages; Node 24+ and Swift required.
+craft-contract-test node_bin="node":
+	#!/usr/bin/env bash
+	set -euo pipefail
+	scratch="$(mktemp -d)"
+	trap 'rm -rf "$scratch"' EXIT
+	"$1" jet-protocol/contracts/tests/fixtures.ts
+	swiftc -module-cache-path "$scratch/cache" jet-protocol/contracts/CraftModels.swift jet-protocol/contracts/tests/main.swift -o "$scratch/check"
+	"$scratch/check" jet-protocol/contracts/craft-v1.schema.json jet-protocol/contracts/fixtures.json
+
 build:
 	cargo build
 
