@@ -68,6 +68,36 @@ impl ReadTransaction {
 		.await?;
 		rows.into_iter().map(read_row).collect()
 	}
+
+	/// Every Run of every Conversation that works in the Local checkout of
+	/// `project_id`, in creation order, terminal ones included. Jet admits
+	/// one live managed Run there at a time (ADR-0025); the caller decides
+	/// which of these are live.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the rows cannot be read.
+	pub async fn local_checkout_runs(
+		&mut self,
+		project_id: Uuid,
+	) -> Result<Vec<RunRecord>, StoreError> {
+		let project_id = project_id.to_string();
+		let rows = sqlx::query_as!(
+			Row,
+			r#"SELECT runs.run_id AS "run_id!", runs.conversation_id,
+				runs.revision, runs.lifecycle, runs.created_at_unix_ms,
+				runs.ended_at_unix_ms
+			 FROM runs
+			 JOIN conversations USING (conversation_id)
+			 WHERE conversations.project_id = ?1
+			   AND conversations.working_tree = 'local_checkout'
+			 ORDER BY runs.rowid"#,
+			project_id
+		)
+		.fetch_all(self.connection())
+		.await?;
+		rows.into_iter().map(read_row).collect()
+	}
 }
 
 impl WriteTransaction {

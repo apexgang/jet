@@ -8,8 +8,8 @@ use crate::test_support::{
 use crate::{
 	BaseSelection, Command, CommandOutcome, Conversation, ConversationId,
 	ConversationSnapshot, Core, CoreError, ErrorCategory, EventKind,
-	EventSequence, ProjectId, Query, QueryResult, RetentionPolicy, WorkingTree,
-	WorkingTreeRequest, Workspace, WorkspaceBase,
+	EventSequence, ProjectId, Query, QueryResult, RetentionPolicy, Run,
+	RunLifecycle, WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase,
 };
 
 async fn start(dir: &tempfile::TempDir) -> Core {
@@ -33,6 +33,19 @@ async fn create(
 		panic!("unexpected outcome {outcome:?}");
 	};
 	Ok(conversation)
+}
+
+async fn create_run(
+	core: &Core,
+	conversation_id: ConversationId,
+) -> Result<Run, CoreError> {
+	let outcome = core
+		.execute(&actor(), request(Command::CreateRun { conversation_id }))
+		.await?;
+	let CommandOutcome::RunCreated(run) = outcome else {
+		panic!("unexpected outcome {outcome:?}");
+	};
+	Ok(run)
 }
 
 async fn snapshot(
@@ -70,6 +83,10 @@ fn in_workspace(
 	base: BaseSelection,
 ) -> WorkingTreeRequest {
 	WorkingTreeRequest::Workspace { project_id, base }
+}
+
+fn in_local_checkout(project_id: ProjectId) -> WorkingTreeRequest {
+	WorkingTreeRequest::LocalCheckout { project_id }
 }
 
 /// What `git` says the worktree at `root` has checked out, and whether
@@ -229,6 +246,64 @@ async fn a_workspace_that_cannot_start_is_refused_without_a_trace() {
 			(ErrorCategory::InvalidInput, "workspace.base_invalid".into()),
 			1,
 			false,
+		)
+	);
+}
+
+/// A Local checkout is explicit and unisolated: it admits one live managed
+/// Run at a time, refuses the next while saying why, and admits it again
+/// once the first has ended. Workspaces of the same Project are never
+/// counted against it (ADR-0025).
+#[tokio::test]
+async fn a_local_checkout_admits_one_live_managed_run_at_a_time() {
+	let dir = tempfile::tempdir().unwrap();
+	let core = start(&dir).await;
+	let project_id = register_repository(&core, &dir.path().join("repo")).await;
+	let other_project =
+		register_repository(&core, &dir.path().join("other")).await;
+	let first = create(&core, in_local_checkout(project_id)).await.unwrap();
+	let second = create(&core, in_local_checkout(project_id)).await.unwrap();
+	let isolated = create(&core, in_workspace(project_id, BaseSelection::Head))
+		.await
+		.unwrap();
+	let elsewhere = create(&core, in_local_checkout(other_project))
+		.await
+		.unwrap();
+
+	let first_run = create_run(&core, first.conversation_id).await.unwrap();
+	let refused = create_run(&core, second.conversation_id).await.unwrap_err();
+	let isolated_run = create_run(&core, isolated.conversation_id).await;
+	let elsewhere_run = create_run(&core, elsewhere.conversation_id).await;
+	core.execute(
+		&actor(),
+		request(Command::TransitionRun {
+			run_id: first_run.run_id,
+			expected_revision: first_run.revision,
+			lifecycle: RunLifecycle::Canceled,
+		}),
+	)
+	.await
+	.unwrap();
+	let admitted = create_run(&core, second.conversation_id).await;
+
+	assert_eq!(
+		(
+			first.working_tree,
+			snapshot(&core, first.conversation_id).await.workspace,
+			(refused.category, refused.code.as_str()),
+			refused.message.contains("outside its management"),
+			isolated_run.is_ok(),
+			elsewhere_run.is_ok(),
+			admitted.map(|run| run.conversation_id),
+		),
+		(
+			WorkingTree::LocalCheckout { project_id },
+			None,
+			(ErrorCategory::Conflict, "run.local_checkout_busy"),
+			true,
+			true,
+			true,
+			Ok(second.conversation_id),
 		)
 	);
 }

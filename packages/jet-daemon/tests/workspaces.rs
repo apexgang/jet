@@ -5,6 +5,7 @@
 
 mod support;
 
+use jet_client::ClientError;
 use jet_protocol::{
 	BaseSelection, ClientMessage, CommandRequest, CommandResponse,
 	ErrorCategory, PROJECTS_MINOR, RetentionPolicy, ServerHello, ServerMessage,
@@ -72,6 +73,66 @@ async fn a_managed_conversation_receives_a_workspace_under_the_jet_home() {
 				created_at_unix_ms: conversation.created_at_unix_ms,
 			},
 			true,
+			true,
+		)
+	);
+}
+
+/// A Local checkout admits one live managed Run, and the refusal of a
+/// second says what Jet cannot lock (ADR-0025).
+#[tokio::test]
+async fn a_local_checkout_refuses_a_second_live_managed_run() {
+	let dir = tempfile::tempdir().unwrap();
+	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	let client = connect(&daemon, Uuid::new_v4()).await;
+	let repository = init_repository(&dir.path().join("repo"));
+	let project = client
+		.register_project(Uuid::now_v7(), repository.to_str().unwrap())
+		.await
+		.unwrap();
+	let mut conversations = Vec::new();
+	for _ in 0..2 {
+		conversations.push(
+			client
+				.create_conversation_in(
+					Uuid::now_v7(),
+					RetentionPolicy::Retain,
+					In::LocalCheckout {
+						project_id: project.project_id,
+					},
+				)
+				.await
+				.unwrap(),
+		);
+	}
+
+	let first = client
+		.create_run(Uuid::now_v7(), conversations[0].conversation_id)
+		.await
+		.unwrap();
+	let second = client
+		.create_run(Uuid::now_v7(), conversations[1].conversation_id)
+		.await
+		.unwrap_err();
+	let ClientError::Remote(refusal) = second else {
+		panic!("expected a stable remote error, got {second:?}");
+	};
+
+	assert_eq!(
+		(
+			first.conversation_id,
+			conversations[1].working_tree,
+			refusal.category,
+			refusal.code.as_str(),
+			refusal.message.contains("outside its management"),
+		),
+		(
+			conversations[0].conversation_id,
+			Some(WorkingTree::LocalCheckout {
+				project_id: project.project_id,
+			}),
+			ErrorCategory::Conflict,
+			"run.local_checkout_busy",
 			true,
 		)
 	);

@@ -317,6 +317,35 @@ pub(crate) async fn create_in_local_checkout(
 	Ok(CommandOutcome::ConversationCreated(conversation))
 }
 
+/// Admits a new Run to a Project's Local checkout: one live managed Run
+/// at a time (ADR-0025).
+///
+/// # Errors
+///
+/// Returns a `conflict` `run.local_checkout_busy` when another
+/// Conversation's Run is live there. The message says what Jet cannot
+/// do about the rest: processes outside its management are not locked.
+pub(crate) async fn admit_local_checkout_run(
+	tx: &mut WriteTransaction,
+	project_id: ProjectId,
+) -> Result<(), CoreError> {
+	let busy = tx
+		.local_checkout_runs(project_id.0)
+		.await?
+		.iter()
+		.any(|run| !run.lifecycle.is_terminal());
+	if busy {
+		return Err(CoreError::conflict(
+			"run.local_checkout_busy",
+			"the Project's Local checkout already has a live managed Run; Jet \
+			 admits one at a time there because it cannot lock the processes \
+			 outside its management, so start this Conversation in a Workspace \
+			 instead",
+		));
+	}
+	Ok(())
+}
+
 /// Creates the Workspace home for the owner alone, if it is not there yet.
 async fn prepare_home(home: &Path) -> Result<(), CoreError> {
 	use std::os::unix::fs::DirBuilderExt;

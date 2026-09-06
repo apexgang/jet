@@ -716,12 +716,12 @@ async fn create_run(
 	conversation_id: ConversationId,
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
-	if tx.conversation(conversation_id.0).await?.is_none() {
+	let Some(conversation) = tx.conversation(conversation_id.0).await? else {
 		return Err(CoreError::not_found(
 			"conversation.not_found",
 			"the Conversation does not exist",
 		));
-	}
+	};
 	let busy = tx
 		.runs(conversation_id.0)
 		.await?
@@ -732,6 +732,12 @@ async fn create_run(
 			"run.conversation_busy",
 			"the Conversation already has a Run that has not ended",
 		));
+	}
+	match WorkingTree::from(conversation.working_tree) {
+		WorkingTree::LocalCheckout { project_id } => {
+			workspace::admit_local_checkout_run(tx, project_id).await?;
+		}
+		WorkingTree::NoProject | WorkingTree::Workspace { .. } => {}
 	}
 	let run: Run = tx
 		.insert_run(NewRun {
