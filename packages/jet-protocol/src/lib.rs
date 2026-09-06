@@ -30,6 +30,7 @@ mod pairing;
 mod presentation;
 mod project;
 mod promotion;
+mod search;
 mod setting;
 mod stream;
 mod stream_control;
@@ -82,9 +83,10 @@ pub use frame::{
 pub use handshake::{
 	ACCOUNT_BINDINGS_MINOR, CODEC_JSON_V1, ClientHello, FENCED_READS_MINOR,
 	MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE, PROJECTS_MINOR,
-	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SECURITY_AUDIT_MINOR,
-	SEEDED_WORKSPACES_MINOR, SETTINGS_AND_CAPABILITIES_MINOR, ServerHello,
-	VersionRange, WORKSPACE_PROMOTION_MINOR, WORKSPACES_MINOR,
+	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SEARCH_MINOR,
+	SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
+	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, VersionRange,
+	WORKSPACE_PROMOTION_MINOR, WORKSPACES_MINOR,
 };
 pub use message::{
 	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,
@@ -106,6 +108,7 @@ pub use promotion::{
 	PromotionConflict, PromotionDestination, PromotionPreview, PromotionState,
 	WorkspacePromotion,
 };
+pub use search::{SearchField, SearchHit, SearchResult};
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,
 	SettingSnapshot, SettingSource, SettingValue,

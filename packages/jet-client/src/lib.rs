@@ -10,6 +10,7 @@ mod pairing_requests;
 mod project_requests;
 mod promotion_requests;
 mod requests;
+mod search_requests;
 mod ssh;
 
 pub use connection::{Client, ClientError};

@@ -421,6 +421,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::WORKSPACE_PROMOTION_MINOR,
 			feature: "the Workspace promotion preview Query",
 		}),
+		QueryRequest::Search { .. } => Some(MinorRequirement {
+			minor: jet_protocol::SEARCH_MINOR,
+			feature: "the Search Query",
+		}),
 		QueryRequest::Status
 		| QueryRequest::Conversations
 		| QueryRequest::Conversation { .. }
