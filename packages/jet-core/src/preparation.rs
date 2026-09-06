@@ -11,7 +11,7 @@ use crate::audit;
 use crate::command::{Command, CommandId};
 use crate::error::CoreError;
 use crate::project::{self, Registrable};
-use crate::workspace::{self, WorkingTreeRequest, WorkspaceSeed};
+use crate::workspace::{self, PreparedWorkspace, WorkingTreeRequest};
 use crate::{Actor, Core};
 
 /// What the preparation of one Command produced for its transaction.
@@ -20,8 +20,9 @@ pub(crate) enum Prepared {
 	Nothing,
 	/// The root a Path grant resolved to and `git` accepted.
 	Registration(Registrable),
-	/// The Project and resolved base a new Workspace starts from.
-	Workspace(WorkspaceSeed),
+	/// The Project, resolved base, and captured seed a new Workspace
+	/// starts from.
+	Workspace(PreparedWorkspace),
 }
 
 impl Core {
@@ -91,10 +92,15 @@ impl Core {
 				project::prepare_registration(actor, grant).await?,
 			)),
 			Command::CreateConversation {
-				working_tree: WorkingTreeRequest::Workspace { project_id, base },
+				working_tree:
+					WorkingTreeRequest::Workspace {
+						project_id,
+						base,
+						seed,
+					},
 				..
 			} => Ok(Prepared::Workspace(
-				workspace::prepare(self, *project_id, base).await?,
+				workspace::prepare(self, *project_id, base, seed).await?,
 			)),
 			Command::CreateConversation { .. }
 			| Command::CreateRun { .. }

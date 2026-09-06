@@ -9,7 +9,8 @@ use crate::{
 	BaseSelection, Command, CommandOutcome, Conversation, ConversationId,
 	ConversationSnapshot, Core, CoreError, ErrorCategory, EventKind,
 	EventSequence, ProjectId, Query, QueryResult, RetentionPolicy, Run,
-	RunLifecycle, WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase,
+	RunLifecycle, SeedSelection, WorkingTree, WorkingTreeRequest, Workspace,
+	WorkspaceBase,
 };
 
 async fn start(dir: &tempfile::TempDir) -> Core {
@@ -82,7 +83,11 @@ fn in_workspace(
 	project_id: ProjectId,
 	base: BaseSelection,
 ) -> WorkingTreeRequest {
-	WorkingTreeRequest::Workspace { project_id, base }
+	WorkingTreeRequest::Workspace {
+		project_id,
+		base,
+		seed: SeedSelection::None,
+	}
 }
 
 fn in_local_checkout(project_id: ProjectId) -> WorkingTreeRequest {
@@ -159,6 +164,7 @@ async fn a_managed_conversation_receives_a_detached_workspace_of_its_own() {
 					selection: BaseSelection::Revision("main".into()),
 					commit: main.clone(),
 				},
+				seed: None,
 				created_at: first.created_at,
 			},
 			&Workspace {
@@ -170,6 +176,7 @@ async fn a_managed_conversation_receives_a_detached_workspace_of_its_own() {
 					selection: BaseSelection::Head,
 					commit: topic.clone(),
 				},
+				seed: None,
 				created_at: second.created_at,
 			},
 			(main.clone(), true),

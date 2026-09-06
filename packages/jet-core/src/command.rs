@@ -559,7 +559,7 @@ async fn execute_new(
 				create_conversation(tx, actor, retention, now_unix_ms).await
 			}
 			WorkingTreeRequest::Workspace { .. } => {
-				let Prepared::Workspace(seed) = prepared else {
+				let Prepared::Workspace(prepared) = prepared else {
 					return Err(CoreError::internal(
 						"workspace.unprepared",
 						"a Workspace creation reached its transaction without \
@@ -570,7 +570,7 @@ async fn execute_new(
 					tx,
 					actor,
 					retention,
-					seed,
+					prepared,
 					workspace_home,
 					now_unix_ms,
 				)

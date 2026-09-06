@@ -87,6 +87,18 @@ pub(crate) async fn add_detached(
 	Ok(())
 }
 
+/// Removes the worktree at `path` from the repository at `root`, whatever
+/// it holds. It undoes an [`add_detached`] whose Workspace cannot be
+/// finished, so the answer is not needed: a directory it leaves behind is
+/// named by no row and collides with no later Conversation.
+pub(crate) async fn remove_forced(root: &Path, path: &str) {
+	let _ = bounded(git(
+		root,
+		&["worktree", "remove", "--force", "--end-of-options", path],
+	))
+	.await;
+}
+
 async fn bounded(
 	invocation: impl Future<Output = Result<Output, CoreError>>,
 ) -> Result<Output, CoreError> {
