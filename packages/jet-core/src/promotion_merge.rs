@@ -4,15 +4,16 @@
 //! captured as a tree through a scratch index, the two trees are merged
 //! against the Workspace's base with `git merge-tree`, which writes the
 //! result as one more tree and names the paths it could not merge, and
-//! the result is compared with the destination to list what promotion
-//! would change. No working tree, index, or reference is touched.
+//! the checkout is asked what it holds that the merge could not see. No
+//! working tree, index, or reference is touched.
 
 use std::path::Path;
 
 use crate::error::CoreError;
 use crate::filesystem::blocking;
+use crate::promotion::{ConflictKind, PromotionConflict};
 use crate::repository::git;
-use crate::tree_capture::{Change, ScratchIndex, diff_trees, object_name};
+use crate::tree_capture::{Change, ScratchIndex, object_name};
 
 /// Longest native Git message kept as local diagnostic detail (ADR-0061).
 const MAX_DETAIL_CHARS: usize = 512;
@@ -29,13 +30,13 @@ pub(crate) struct Merged {
 
 /// Captures the working tree at `root`, staged and unstaged changes alike
 /// and a nested repository dropped, as one tree through a scratch index
-/// under `scratch`.
-pub(crate) async fn snapshot(
+/// at `index`.
+pub(crate) async fn capture(
 	root: &Path,
-	scratch: &Path,
+	index: &Path,
 	head: &str,
 ) -> Result<String, CoreError> {
-	let index = ScratchIndex::new(root, scratch, promotion_failed);
+	let index = ScratchIndex::new(root, index, promotion_failed);
 	index.copy_from_checkout().await?;
 	let (tree, _) = index.capture_everything(head).await?;
 	Ok(tree)
@@ -160,19 +161,85 @@ fn parse_merge(printed: &str) -> Result<Merged, CoreError> {
 	Ok(Merged { tree, conflicts })
 }
 
-/// What `result` changes against `destination`, one record per path.
-pub(crate) async fn changes(
+/// What the Local checkout at `root` holds that the merge did not see,
+/// among the paths `changed` names: an ignored file where the result
+/// adds a path, which the merge never read, and a staged version of a
+/// changed path that differs from its file, which the merge read the
+/// file instead of. Writing either would replace work unseen, so each
+/// is a conflict (ADR-0025).
+pub(crate) async fn collisions(
 	root: &Path,
-	destination: &str,
-	result: &str,
-) -> Result<Vec<Change>, CoreError> {
-	diff_trees(root, destination, result, promotion_failed).await
+	changed: &[Change],
+) -> Result<Vec<PromotionConflict>, CoreError> {
+	let added = changed
+		.iter()
+		.filter(|change| change.is_addition())
+		.map(|change| change.path.clone())
+		.collect();
+	let mut conflicts: Vec<PromotionConflict> = occupied(root, added)
+		.await?
+		.into_iter()
+		.map(|path| PromotionConflict {
+			path,
+			kind: ConflictKind::Untracked,
+		})
+		.collect();
+	let apart = staged_apart(root).await?;
+	conflicts.extend(
+		changed
+			.iter()
+			.filter(|change| apart.contains(&change.path))
+			.map(|change| PromotionConflict {
+				path: change.path.clone(),
+				kind: ConflictKind::Staged,
+			}),
+	);
+	Ok(conflicts)
+}
+
+/// The paths whose index entry at `root` is a version of its own: one
+/// that differs from the file in the working tree and from HEAD alike.
+/// A file edited without staging keeps HEAD's entry, and loses nothing
+/// when the entry is replaced.
+///
+/// `git status` reads the file when an entry's stat data cannot vouch
+/// for it, which an entry just written from a tree never can, and with
+/// optional locks off it writes nothing back.
+pub(crate) async fn staged_apart(
+	root: &Path,
+) -> Result<Vec<String>, CoreError> {
+	let output = git(
+		root,
+		&[
+			"status",
+			"--porcelain=v1",
+			"-z",
+			"--untracked-files=no",
+			"--no-renames",
+		],
+	)
+	.await?;
+	if !output.status.success() {
+		return Err(promotion_failed(output.stderr));
+	}
+	Ok(output
+		.stdout
+		.split('\0')
+		.filter_map(|record| {
+			// `XY path`: X is the index against HEAD, Y the file against
+			// the index. Both changed is a version of its own.
+			let mut letters = record.chars();
+			let (x, y, space) =
+				(letters.next()?, letters.next()?, letters.next()?);
+			(space == ' ' && x != ' ' && y != ' ')
+				.then(|| letters.collect::<String>())
+		})
+		.collect())
 }
 
 /// Which of `paths` the working tree at `root` already holds something
-/// at, tracked or not, so a promotion that would create them is known to
-/// write over what is there.
-pub(crate) async fn occupied(
+/// at, tracked or not.
+async fn occupied(
 	root: &Path,
 	paths: Vec<String>,
 ) -> Result<Vec<String>, CoreError> {

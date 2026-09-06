@@ -22,9 +22,9 @@ pub enum PromotionDestination {
 }
 
 /// What a preview showed and a promotion carries back: the Workspace and
-/// destination as they stood, the result the user looked at, and the
-/// client it was shown to. The Plane refuses a promotion when any of it
-/// has changed since.
+/// destination as they stood, the result and the risk the user looked
+/// at, and the client it was shown to. The Plane refuses a promotion when
+/// any of it has changed since.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromotionBinding {
 	/// The Workspace being promoted.
@@ -42,6 +42,12 @@ pub struct PromotionBinding {
 	pub destination_tree: String,
 	/// The tree the three-way merge produced.
 	pub result_tree: String,
+	/// Whether the destination holds uncommitted changes of its own, which
+	/// the promotion is merged over and never discards.
+	pub destination_dirty: bool,
+	/// The paths the promotion cannot settle. A preview with any is shown
+	/// and never applied.
+	pub conflicts: Vec<PromotionConflict>,
 	/// The Client identity the preview was shown to.
 	pub actor: Uuid,
 }
@@ -53,18 +59,12 @@ pub struct PromotionPreview {
 	/// as a decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
 	pub cursor: u64,
-	/// What the promotion is bound to.
+	/// What the promotion is bound to, risk included.
 	pub binding: PromotionBinding,
-	/// Whether the destination holds uncommitted changes of its own, which
-	/// the promotion is merged over and never discards.
-	pub destination_dirty: bool,
 	/// How many paths the promotion changes in the destination.
 	pub changed_paths: u32,
 	/// The changes, up to the first 4096 of them, in Git's order.
 	pub changes: Vec<PromotedChange>,
-	/// The paths the promotion cannot settle. A preview with any is shown
-	/// and never applied.
-	pub conflicts: Vec<PromotionConflict>,
 }
 
 /// One path a promotion changes in the destination.
@@ -107,6 +107,9 @@ pub enum ConflictKind {
 	/// The Workspace adds the path and the destination already holds an
 	/// ignored file there, which the merge never saw.
 	Untracked,
+	/// The destination's index holds a version of the path that differs
+	/// from its file and from HEAD alike, which the merge never saw.
+	Staged,
 }
 
 /// Where a promotion stands.
@@ -142,8 +145,6 @@ pub struct WorkspacePromotion {
 	pub changed_paths: u32,
 	/// Where the promotion stands.
 	pub state: PromotionState,
-	/// The paths that could not be settled; empty unless conflicted.
-	pub conflicts: Vec<PromotionConflict>,
 	/// When it was recorded, in signed Unix milliseconds.
 	pub recorded_at_unix_ms: i64,
 	/// When it reached a settled state, if it has.

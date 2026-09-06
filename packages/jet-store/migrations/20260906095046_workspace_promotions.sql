@@ -28,6 +28,7 @@ CREATE TABLE workspace_promotions (
 	destination_tree TEXT NOT NULL
 		CHECK (length(destination_tree) BETWEEN 40 AND 64),
 	result_tree TEXT NOT NULL CHECK (length(result_tree) BETWEEN 40 AND 64),
+	destination_dirty INTEGER NOT NULL CHECK (destination_dirty IN (0, 1)),
 	changed_paths INTEGER NOT NULL CHECK (changed_paths >= 0),
 	state TEXT NOT NULL CHECK (
 		state IN ('applying', 'promoted', 'conflicted', 'failed', 'outcome_unknown')
@@ -45,7 +46,7 @@ CREATE TABLE workspace_promotion_conflicts (
 	promotion_id TEXT NOT NULL REFERENCES workspace_promotions (promotion_id),
 	position INTEGER NOT NULL CHECK (position >= 0),
 	path TEXT NOT NULL CHECK (length(path) <= 4096),
-	kind TEXT NOT NULL CHECK (kind IN ('diverged', 'untracked')),
+	kind TEXT NOT NULL CHECK (kind IN ('diverged', 'untracked', 'staged')),
 	PRIMARY KEY (promotion_id, position)
 );
 

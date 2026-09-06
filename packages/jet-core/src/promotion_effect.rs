@@ -7,23 +7,27 @@
 //! [`crate::promotion_apply`]. A destination that moved is a definite
 //! failure that changes nothing. An attempt interrupted after writing
 //! began is looked at again: a checkout that holds the result is done, a
-//! branch still at its previewed tip is safe to try once more, and
-//! anything else is an outcome Jet does not know and does not guess.
+//! branch still at its tip is safe to try once more, and anything else
+//! is an outcome Jet does not know and does not guess.
 
 use std::path::PathBuf;
 
 use jet_store::{
-	EffectKindRecord, EffectStateRecord, PromotionStateRecord, Store,
-	WorkspacePromotionRecord, WriteTransaction,
+	EffectKindRecord, EffectStateRecord, PromotionDestinationRecord,
+	PromotionStateRecord, Store, WorkspacePromotionRecord, WriteTransaction,
 };
 
 use crate::effect::{Effect, EffectAdapter, EffectKind, EffectResult};
 use crate::error::CoreError;
 use crate::event::{EventKind, EventSubject};
-use crate::promotion::{PromotionId, WorkspacePromotion};
+use crate::promotion::{self, PromotionId, WorkspacePromotion};
 use crate::promotion_apply::{self, Observed};
-use crate::workspace::{self, WorkspaceHome};
+use crate::workspace::{self, WorkspaceHome, WorkspaceId};
 use crate::{Actor, ConversationId, Core};
+
+/// Most passes one call makes over the outbox: enough for a branch
+/// promotion to use every attempt its safety allows.
+const PASSES: u32 = 4;
 
 /// Performs promotions through the Plane's Git, with the Plane store to
 /// read what each Effect names.
@@ -32,8 +36,9 @@ struct GitPromoter<'a> {
 	home: &'a WorkspaceHome,
 }
 
-/// What an Effect names, read from the store.
-struct Named {
+/// What an Effect names, read from the store: the promotion and the
+/// Project it applies to.
+struct Target {
 	promotion: WorkspacePromotionRecord,
 	project_root: PathBuf,
 }
@@ -56,11 +61,25 @@ impl Core {
 			store: &self.store,
 			home: &self.workspace_home,
 		};
-		self.reconcile_effects(
-			&mut adapter,
-			EffectKindRecord::PromoteWorkspace,
-		)
-		.await?;
+		// An attempt whose outcome is unknown is looked at again in this
+		// same call, the way a restart would look at it, so a promotion
+		// settles now rather than at the next Command: a checkout becomes
+		// an outcome unknown, a branch still at its tip is tried again
+		// within its bound (ADR-0067).
+		for _ in 0..PASSES {
+			let effects = self
+				.reconcile_effects(
+					&mut adapter,
+					EffectKindRecord::PromoteWorkspace,
+				)
+				.await?;
+			if !effects
+				.iter()
+				.any(|effect| effect.state == EffectStateRecord::InFlight)
+			{
+				break;
+			}
+		}
 		Ok(())
 	}
 }
@@ -70,13 +89,13 @@ impl EffectAdapter for GitPromoter<'_> {
 		let EffectKind::PromoteWorkspace { promotion_id } = effect.kind else {
 			return EffectResult::Unknown;
 		};
-		let Some(named) = self.named(promotion_id).await else {
+		let Some(target) = self.target(promotion_id).await else {
 			return EffectResult::Unknown;
 		};
-		let Named {
+		let Target {
 			promotion,
 			project_root,
-		} = &named;
+		} = &target;
 		let applied =
 			workspace::with_scratch(self.home, "apply", async |scratch| {
 				Ok(promotion_apply::apply(project_root, scratch, promotion)
@@ -93,13 +112,13 @@ impl EffectAdapter for GitPromoter<'_> {
 		let EffectKind::PromoteWorkspace { promotion_id } = effect.kind else {
 			return EffectResult::Unknown;
 		};
-		let Some(named) = self.named(promotion_id).await else {
+		let Some(target) = self.target(promotion_id).await else {
 			return EffectResult::Unknown;
 		};
-		let Named {
+		let Target {
 			promotion,
 			project_root,
-		} = &named;
+		} = &target;
 		let observed =
 			workspace::with_scratch(self.home, "observe", async |scratch| {
 				promotion_apply::observe(project_root, scratch, promotion).await
@@ -112,12 +131,10 @@ impl EffectAdapter for GitPromoter<'_> {
 			// again. A branch still at its tip is looked at again by the
 			// retry its safety allows (ADR-0067).
 			Ok(Observed::Untouched) => match promotion.destination {
-				jet_store::PromotionDestinationRecord::LocalCheckout => {
+				PromotionDestinationRecord::LocalCheckout => {
 					EffectResult::Failed
 				}
-				jet_store::PromotionDestinationRecord::Branch(_) => {
-					EffectResult::Unknown
-				}
+				PromotionDestinationRecord::Branch(_) => EffectResult::Unknown,
 			},
 			Ok(Observed::Elsewhere) | Err(_) => EffectResult::Unknown,
 		}
@@ -127,25 +144,21 @@ impl EffectAdapter for GitPromoter<'_> {
 impl GitPromoter<'_> {
 	/// Reads what the Effect names. A promotion, Workspace, or Project the
 	/// store no longer has is not something this Adapter can act on.
-	async fn named(&self, promotion_id: PromotionId) -> Option<Named> {
+	async fn target(&self, promotion_id: PromotionId) -> Option<Target> {
 		self.store
 			.read(async |tx| {
 				let Some(promotion) = tx.promotion(promotion_id.0).await?
 				else {
 					return Ok(None);
 				};
-				let Some(workspace) =
-					tx.workspace(promotion.workspace_id).await?
-				else {
-					return Ok(None);
-				};
-				let Some(project) = tx.project(workspace.project_id).await?
-				else {
-					return Ok(None);
-				};
-				Ok::<_, CoreError>(Some(Named {
+				let (_, project_root) = promotion::workspace_and_project(
+					tx,
+					WorkspaceId(promotion.workspace_id),
+				)
+				.await?;
+				Ok::<_, CoreError>(Some(Target {
 					promotion,
-					project_root: PathBuf::from(project.root),
+					project_root,
 				}))
 			})
 			.await

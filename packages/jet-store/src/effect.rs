@@ -25,30 +25,6 @@ struct Row {
 }
 
 impl ReadTransaction {
-	/// Effects that still require first execution or restart reconciliation.
-	///
-	/// # Errors
-	///
-	/// Returns a [`StoreError`] when the outbox cannot be read.
-	pub async fn unresolved_effects(
-		&mut self,
-	) -> Result<Vec<EffectRecord>, StoreError> {
-		// ASVS 1.2.4: SQL structure is static; every dynamic value in this
-		// module is passed through SQLite parameters.
-		let rows = sqlx::query_as!(
-			Row,
-			r#"SELECT effect_id AS "effect_id!", command_id, run_id,
-				promotion_id, kind, safety, external_key, max_attempts, state,
-				attempt_count
-			 FROM effects
-			 WHERE state IN ('pending', 'in_flight')
-			 ORDER BY rowid"#
-		)
-		.fetch_all(self.connection())
-		.await?;
-		rows.into_iter().map(read_row).collect()
-	}
-
 	/// The unresolved Effects of one kind, so a worker that performs one
 	/// kind of work leaves the others to theirs.
 	///
@@ -73,30 +49,6 @@ impl ReadTransaction {
 		.fetch_all(self.connection())
 		.await?;
 		rows.into_iter().map(read_row).collect()
-	}
-
-	/// One Effect by identity, whatever its state.
-	///
-	/// # Errors
-	///
-	/// Returns a [`StoreError`] when the row cannot be read.
-	pub async fn effect(
-		&mut self,
-		effect_id: Uuid,
-	) -> Result<Option<EffectRecord>, StoreError> {
-		let effect_id = effect_id.to_string();
-		let row = sqlx::query_as!(
-			Row,
-			r#"SELECT effect_id AS "effect_id!", command_id, run_id,
-				promotion_id, kind, safety, external_key, max_attempts, state,
-				attempt_count
-			 FROM effects
-			 WHERE effect_id = ?1"#,
-			effect_id
-		)
-		.fetch_optional(self.connection())
-		.await?;
-		row.map(read_row).transpose()
 	}
 }
 
@@ -210,6 +162,25 @@ impl WriteTransaction {
 		self.effect(effect_id).await?.ok_or_else(|| {
 			StoreError::Integrity(format!("Effect {effect_id} disappeared"))
 		})
+	}
+
+	async fn effect(
+		&mut self,
+		effect_id: Uuid,
+	) -> Result<Option<EffectRecord>, StoreError> {
+		let effect_id = effect_id.to_string();
+		let row = sqlx::query_as!(
+			Row,
+			r#"SELECT effect_id AS "effect_id!", command_id, run_id,
+				promotion_id, kind, safety, external_key, max_attempts, state,
+				attempt_count
+			 FROM effects
+			 WHERE effect_id = ?1"#,
+			effect_id
+		)
+		.fetch_optional(self.connection())
+		.await?;
+		row.map(read_row).transpose()
 	}
 }
 

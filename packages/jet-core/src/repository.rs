@@ -272,8 +272,8 @@ pub(crate) async fn git_with_index(
 	collect(command(root).env("GIT_INDEX_FILE", index).args(arguments)).await
 }
 
-/// Runs one `git` command at `root` against the index file at `index`,
-/// feeding it `input` on standard input.
+/// Runs one `git` command at `root`, feeding it `input` on standard
+/// input.
 pub(crate) async fn git_with_input(
 	root: &Path,
 	arguments: &[&str],

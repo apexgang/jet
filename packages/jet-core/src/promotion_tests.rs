@@ -83,16 +83,16 @@ async fn a_preview_merges_the_workspace_over_the_checkout_without_touching_it()
 					destination_commit: base.clone(),
 					destination_tree: binding.destination_tree.clone(),
 					result_tree: binding.result_tree.clone(),
+					destination_dirty: true,
+					conflicts: vec![],
 					actor: ClientId(uuid::Uuid::nil()),
 				},
-				destination_dirty: true,
 				changed_paths: 3,
 				changes: vec![
 					change("f.txt", ChangeKind::Modified),
 					change("k.txt", ChangeKind::Deleted),
 					change("new.txt", ChangeKind::Added),
 				],
-				conflicts: vec![],
 			},
 			Some("A\nb\nC\n".into()),
 			Some("new\n".into()),
@@ -108,9 +108,10 @@ async fn a_preview_merges_the_workspace_over_the_checkout_without_touching_it()
 }
 
 /// A path both sides changed in ways Git cannot combine, a path both
-/// sides added with different content, and a path the Workspace adds
-/// where the checkout holds an ignored file are named as conflicts rather
-/// than settled (ADR-0025).
+/// sides added with different content, a path the Workspace adds where
+/// the checkout holds an ignored file, and a changed path whose staged
+/// version differs from its file are named as conflicts rather than
+/// settled (ADR-0025).
 #[tokio::test]
 async fn a_preview_names_what_it_cannot_settle() {
 	let dir = tempfile::tempdir().unwrap();
@@ -125,6 +126,9 @@ async fn a_preview_names_what_it_cannot_settle() {
 	std::fs::write(repository.join(".gitignore"), "local.txt\n").unwrap();
 	std::fs::write(repository.join("local.txt"), "mine\n").unwrap();
 	std::fs::write(workspace.root.join("local.txt"), "theirs\n").unwrap();
+	std::fs::write(repository.join("f.txt"), "staged\n").unwrap();
+	git(&repository, &["add", "f.txt"]);
+	std::fs::write(repository.join("f.txt"), "X\nb\nC\n").unwrap();
 
 	let previewed = preview(
 		&core,
@@ -135,7 +139,7 @@ async fn a_preview_names_what_it_cannot_settle() {
 	.unwrap();
 
 	assert_eq!(
-		(previewed.conflicts, previewed.changed_paths),
+		(previewed.binding.conflicts, previewed.changed_paths),
 		(
 			vec![
 				PromotionConflict {
@@ -149,6 +153,10 @@ async fn a_preview_names_what_it_cannot_settle() {
 				PromotionConflict {
 					path: "local.txt".into(),
 					kind: ConflictKind::Untracked,
+				},
+				PromotionConflict {
+					path: "f.txt".into(),
+					kind: ConflictKind::Staged,
 				},
 			],
 			4,
@@ -235,9 +243,10 @@ async fn a_preview_targets_a_branch_no_working_tree_has_checked_out() {
 					.trim()
 					.to_owned(),
 					result_tree: binding.result_tree.clone(),
+					destination_dirty: false,
+					conflicts: vec![],
 					actor: ClientId(uuid::Uuid::nil()),
 				},
-				destination_dirty: false,
 				changed_paths: 4,
 				changes: vec![
 					change("f.txt", ChangeKind::Modified),
@@ -245,7 +254,6 @@ async fn a_preview_targets_a_branch_no_working_tree_has_checked_out() {
 					change("new.txt", ChangeKind::Added),
 					change("notes.txt", ChangeKind::Added),
 				],
-				conflicts: vec![],
 			},
 			Some("A\nb\nc\n".into()),
 			Some("draft\n".into()),

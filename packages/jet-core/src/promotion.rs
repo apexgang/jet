@@ -11,13 +11,13 @@
 //! A conflict is never resolved by Jet: the preview names it, and nothing
 //! is written over the destination's work.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use jet_store::{
 	PromotionConflictKindRecord, PromotionConflictRecord,
-	PromotionDestinationRecord, PromotionStateRecord, WorkspacePromotionRecord,
-	WorkspaceRecord,
+	PromotionDestinationRecord, PromotionStateRecord, ReadTransaction,
+	WorkspacePromotionRecord, WorkspaceRecord,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -25,7 +25,7 @@ use uuid::Uuid;
 use crate::error::CoreError;
 use crate::event::EventSequence;
 use crate::query::QueryResult;
-use crate::tree_capture::Change;
+use crate::tree_capture::{Change, diff_trees};
 use crate::workspace::{self, WorkspaceHome, WorkspaceId};
 use crate::{Actor, ClientId, Core, promotion_merge as merge, system_time};
 
@@ -58,9 +58,9 @@ pub enum PromotionDestination {
 }
 
 /// What a preview showed and a promotion carries back: the Workspace and
-/// destination as they stood, the result the user looked at, and the
-/// Actor it was shown to. A promotion is refused when any of it has
-/// changed since (ADR-0025).
+/// destination as they stood, the result and the risk the user looked
+/// at, and the Actor it was shown to. A promotion is refused when any of
+/// it has changed since (ADR-0025).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromotionBinding {
 	/// The Workspace being promoted.
@@ -78,6 +78,12 @@ pub struct PromotionBinding {
 	pub destination_tree: String,
 	/// The tree the three-way merge produced.
 	pub result_tree: String,
+	/// Whether the destination holds uncommitted changes of its own, which
+	/// the promotion is merged over and never discards.
+	pub destination_dirty: bool,
+	/// The paths the promotion cannot settle. A preview with any is shown
+	/// and never applied.
+	pub conflicts: Vec<PromotionConflict>,
 	/// The Client identity the preview was shown to.
 	pub actor: ClientId,
 }
@@ -89,18 +95,12 @@ pub struct PromotionBinding {
 pub struct PromotionPreview {
 	/// Newest Event sequence visible when the Workspace was read.
 	pub cursor: EventSequence,
-	/// What the promotion is bound to.
+	/// What the promotion is bound to, risk included.
 	pub binding: PromotionBinding,
-	/// Whether the destination holds uncommitted changes of its own, which
-	/// the promotion is merged over and never discards.
-	pub destination_dirty: bool,
 	/// How many paths the promotion changes in the destination.
 	pub changed_paths: u32,
 	/// The changes, up to [`MAX_PREVIEW_CHANGES`] of them, in Git's order.
 	pub changes: Vec<PromotedChange>,
-	/// The paths the promotion cannot settle. A preview with any is shown
-	/// and never applied.
-	pub conflicts: Vec<PromotionConflict>,
 }
 
 /// One path a promotion changes in the destination.
@@ -143,6 +143,10 @@ pub enum ConflictKind {
 	/// untracked file Git does not ignore is part of what is merged, and
 	/// collides as a divergence instead.
 	Untracked,
+	/// The destination's index holds a version of the path that differs
+	/// from its file and from HEAD alike. The merge saw the file alone,
+	/// and applying it would replace the staged version unseen.
+	Staged,
 }
 
 /// Where a promotion stands (ADR-0025, ADR-0067).
@@ -176,22 +180,19 @@ pub struct WorkspacePromotion {
 	pub changed_paths: u32,
 	/// Where the promotion stands.
 	pub state: PromotionState,
-	/// The paths that could not be settled; empty unless conflicted.
-	pub conflicts: Vec<PromotionConflict>,
 	/// When it was recorded.
 	pub recorded_at: SystemTime,
 	/// When it reached a settled state, if it has.
 	pub settled_at: Option<SystemTime>,
 }
 
-/// A preview as computed, before the journal fence is added.
+/// The Workspace and destination compared as they are right now: a
+/// preview before the journal fence is added.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Computed {
+pub(crate) struct Compared {
 	pub(crate) binding: PromotionBinding,
-	pub(crate) destination_dirty: bool,
 	pub(crate) changed_paths: u32,
 	pub(crate) changes: Vec<PromotedChange>,
-	pub(crate) conflicts: Vec<PromotionConflict>,
 }
 
 impl PromotionDestination {
@@ -239,25 +240,16 @@ pub(crate) async fn preview(
 		.store
 		.read(async |tx| {
 			let cursor = EventSequence(tx.event_cursor().await?);
-			let Some(workspace) = tx.workspace(workspace_id.0).await? else {
-				return Err(workspace_not_found());
-			};
-			let Some(project) = tx.project(workspace.project_id).await? else {
-				return Err(CoreError::not_found(
-					"project.not_found",
-					"the Project is not registered",
-				));
-			};
-			Ok((cursor, workspace, std::path::PathBuf::from(project.root)))
+			let (workspace, project_root) =
+				workspace_and_project(tx, workspace_id).await?;
+			Ok::<_, CoreError>((cursor, workspace, project_root))
 		})
 		.await?;
-	let Computed {
+	let Compared {
 		binding,
-		destination_dirty,
 		changed_paths,
 		changes,
-		conflicts,
-	} = compute(
+	} = compare(
 		&core.workspace_home,
 		actor,
 		&workspace,
@@ -268,26 +260,45 @@ pub(crate) async fn preview(
 	Ok(QueryResult::PromotionPreview(Box::new(PromotionPreview {
 		cursor,
 		binding,
-		destination_dirty,
 		changed_paths,
 		changes,
-		conflicts,
 	})))
 }
 
-/// Computes the preview from the repository as it is right now, outside
-/// any store lock.
-pub(crate) async fn compute(
+/// The Workspace and the root of its Project, as the store has them.
+///
+/// # Errors
+///
+/// Returns `workspace.not_found` or `project.not_found`.
+pub(crate) async fn workspace_and_project(
+	tx: &mut ReadTransaction,
+	workspace_id: WorkspaceId,
+) -> Result<(WorkspaceRecord, PathBuf), CoreError> {
+	let Some(workspace) = tx.workspace(workspace_id.0).await? else {
+		return Err(workspace_not_found());
+	};
+	let Some(project) = tx.project(workspace.project_id).await? else {
+		return Err(CoreError::not_found(
+			"project.not_found",
+			"the Project is not registered",
+		));
+	};
+	Ok((workspace, PathBuf::from(project.root)))
+}
+
+/// Compares the Workspace with the destination as the repository is
+/// right now, outside any store lock.
+pub(crate) async fn compare(
 	home: &WorkspaceHome,
 	actor: &Actor,
 	workspace: &WorkspaceRecord,
 	project_root: &Path,
 	destination: PromotionDestination,
-) -> Result<Computed, CoreError> {
+) -> Result<Compared, CoreError> {
 	tokio::time::timeout(
 		PREVIEW_BUDGET,
 		workspace::with_scratch(home, "promotion", async |scratch| {
-			compute_in(scratch, actor, workspace, project_root, destination)
+			compare_in(scratch, actor, workspace, project_root, destination)
 				.await
 		}),
 	)
@@ -297,13 +308,13 @@ pub(crate) async fn compute(
 	})?
 }
 
-async fn compute_in(
+async fn compare_in(
 	scratch: &Path,
 	actor: &Actor,
 	workspace: &WorkspaceRecord,
 	project_root: &Path,
 	destination: PromotionDestination,
-) -> Result<Computed, CoreError> {
+) -> Result<Compared, CoreError> {
 	let workspace_root = Path::new(&workspace.root);
 	let Some(workspace_head) = merge::resolve(workspace_root, "HEAD").await?
 	else {
@@ -311,7 +322,7 @@ async fn compute_in(
 			"the Workspace has no commit checked out".into(),
 		));
 	};
-	let workspace_tree = merge::snapshot(
+	let workspace_tree = merge::capture(
 		workspace_root,
 		&scratch.join("workspace"),
 		&workspace_head,
@@ -329,8 +340,13 @@ async fn compute_in(
 		&workspace_tree,
 	)
 	.await?;
-	let changed =
-		merge::changes(project_root, &destination_tree, &merged.tree).await?;
+	let changed = diff_trees(
+		project_root,
+		&destination_tree,
+		&merged.tree,
+		merge::promotion_failed,
+	)
+	.await?;
 	let mut conflicts: Vec<PromotionConflict> = merged
 		.conflicts
 		.into_iter()
@@ -340,21 +356,9 @@ async fn compute_in(
 		})
 		.collect();
 	if destination == PromotionDestination::LocalCheckout {
-		let added = changed
-			.iter()
-			.filter(|change| change.is_addition())
-			.map(|change| change.path.clone())
-			.collect();
-		conflicts.extend(
-			merge::occupied(project_root, added).await?.into_iter().map(
-				|path| PromotionConflict {
-					path,
-					kind: ConflictKind::Untracked,
-				},
-			),
-		);
+		conflicts.extend(merge::collisions(project_root, &changed).await?);
 	}
-	Ok(Computed {
+	Ok(Compared {
 		binding: PromotionBinding {
 			workspace_id: WorkspaceId(workspace.workspace_id),
 			destination,
@@ -363,16 +367,16 @@ async fn compute_in(
 			destination_commit,
 			destination_tree,
 			result_tree: merged.tree,
+			destination_dirty,
+			conflicts,
 			actor: actor.client_id(),
 		},
-		destination_dirty,
 		changed_paths: u32::try_from(changed.len()).unwrap_or(u32::MAX),
 		changes: changed
 			.into_iter()
 			.take(MAX_PREVIEW_CHANGES)
 			.map(PromotedChange::from)
 			.collect(),
-		conflicts,
 	})
 }
 
@@ -397,7 +401,7 @@ async fn destination_state(
 					"the Local checkout has no commit checked out".into(),
 				));
 			};
-			let tree = merge::snapshot(
+			let tree = merge::capture(
 				project_root,
 				&scratch.join("destination"),
 				&commit,
@@ -491,6 +495,12 @@ impl From<WorkspacePromotionRecord> for WorkspacePromotion {
 				destination_commit: record.destination_commit,
 				destination_tree: record.destination_tree,
 				result_tree: record.result_tree,
+				destination_dirty: record.destination_dirty,
+				conflicts: record
+					.conflicts
+					.into_iter()
+					.map(Into::into)
+					.collect(),
 				actor: Actor::from_record(record.promoted_by).client_id(),
 			},
 			changed_paths: record.changed_paths,
@@ -503,7 +513,6 @@ impl From<WorkspacePromotionRecord> for WorkspacePromotion {
 					PromotionState::OutcomeUnknown
 				}
 			},
-			conflicts: record.conflicts.into_iter().map(Into::into).collect(),
 			recorded_at: system_time(record.recorded_at_unix_ms),
 			settled_at: record.settled_at_unix_ms.map(system_time),
 		}
@@ -519,6 +528,7 @@ impl From<PromotionConflictRecord> for PromotionConflict {
 				PromotionConflictKindRecord::Untracked => {
 					ConflictKind::Untracked
 				}
+				PromotionConflictKindRecord::Staged => ConflictKind::Staged,
 			},
 		}
 	}
@@ -533,6 +543,7 @@ impl From<&PromotionConflict> for PromotionConflictRecord {
 				ConflictKind::Untracked => {
 					PromotionConflictKindRecord::Untracked
 				}
+				ConflictKind::Staged => PromotionConflictKindRecord::Staged,
 			},
 		}
 	}

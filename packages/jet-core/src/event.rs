@@ -15,9 +15,7 @@ use crate::audit::AuditEpoch;
 use crate::conversation::{ConversationId, RunId};
 use crate::error::CoreError;
 use crate::pairing::{PairingEnd, PairingOfferId};
-use crate::promotion::{
-	PromotionBinding, PromotionConflict, PromotionId, PromotionState,
-};
+use crate::promotion::{PromotionBinding, PromotionId, PromotionState};
 use crate::seed::WorkspaceSeed;
 use crate::setting::{SettingKey, SettingScope, SettingValue};
 use crate::workspace::{WorkingTree, WorkspaceBase, WorkspaceId};
@@ -154,12 +152,11 @@ pub enum EventKind {
 		workspace_id: WorkspaceId,
 		/// The promotion that was recorded.
 		promotion_id: PromotionId,
-		/// What the user confirmed.
+		/// What the user confirmed, the paths that could not be settled
+		/// included.
 		binding: PromotionBinding,
 		/// Where the promotion starts: applying or conflicted.
 		state: PromotionState,
-		/// The paths that could not be settled; empty unless conflicted.
-		conflicts: Vec<PromotionConflict>,
 	},
 	/// A Workspace promotion's Effect settled: the destination was
 	/// verified to hold the result, the Effect failed before changing

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO workspace_promotions\n\t\t\t\t(promotion_id, workspace_id, actor_kind, actor_id,\n\t\t\t\tdestination_kind, destination_branch, base_commit,\n\t\t\t\tworkspace_tree, destination_commit, destination_tree,\n\t\t\t\tresult_tree, destination_dirty, changed_paths, state,\n\t\t\t\trecorded_at_unix_ms, settled_at_unix_ms)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,\n\t\t\t\t?14, ?15, ?16)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 16
+    },
+    "nullable": []
+  },
+  "hash": "2bd2b9c022f55677990995a8fe3cb5fcb3c904794d95fbafcdf8abe53c044d18"
+}

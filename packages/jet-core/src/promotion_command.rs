@@ -22,7 +22,7 @@ use crate::command::{CommandId, CommandOutcome};
 use crate::error::CoreError;
 use crate::event::{EventKind, EventSubject};
 use crate::promotion::{
-	self, Computed, PromotionBinding, PromotionConflict, PromotionState,
+	self, Compared, PromotionBinding, PromotionDestination, PromotionState,
 	WorkspacePromotion,
 };
 use crate::{Actor, Core};
@@ -38,7 +38,6 @@ const BRANCH_ATTEMPTS: u32 = 3;
 pub(crate) struct PreparedPromotion {
 	binding: PromotionBinding,
 	changed_paths: u32,
-	conflicts: Vec<PromotionConflict>,
 }
 
 /// Computes the preview again and refuses a binding it no longer matches,
@@ -66,25 +65,14 @@ pub(crate) async fn prepare(
 	let (workspace, project_root) = core
 		.store
 		.read(async |tx| {
-			let Some(workspace) = tx.workspace(binding.workspace_id.0).await?
-			else {
-				return Err(promotion::workspace_not_found());
-			};
-			let Some(project) = tx.project(workspace.project_id).await? else {
-				return Err(CoreError::not_found(
-					"project.not_found",
-					"the Project is not registered",
-				));
-			};
-			Ok((workspace, std::path::PathBuf::from(project.root)))
+			promotion::workspace_and_project(tx, binding.workspace_id).await
 		})
 		.await?;
-	let Computed {
+	let Compared {
 		binding: current,
 		changed_paths,
-		conflicts,
 		..
-	} = promotion::compute(
+	} = promotion::compare(
 		&core.workspace_home,
 		actor,
 		&workspace,
@@ -108,7 +96,6 @@ pub(crate) async fn prepare(
 	Ok(PreparedPromotion {
 		binding: current,
 		changed_paths,
-		conflicts,
 	})
 }
 
@@ -131,7 +118,6 @@ pub(crate) async fn record(
 	let PreparedPromotion {
 		binding,
 		changed_paths,
-		conflicts,
 	} = prepared;
 	let Some(workspace) = tx.workspace(binding.workspace_id.0).await? else {
 		return Err(promotion::workspace_not_found());
@@ -144,7 +130,7 @@ pub(crate) async fn record(
 			"an earlier promotion of this Workspace is still being applied",
 		));
 	}
-	let state = if conflicts.is_empty() {
+	let state = if binding.conflicts.is_empty() {
 		PromotionStateRecord::Applying
 	} else {
 		PromotionStateRecord::Conflicted
@@ -161,9 +147,10 @@ pub(crate) async fn record(
 			destination_commit: binding.destination_commit.clone(),
 			destination_tree: binding.destination_tree.clone(),
 			result_tree: binding.result_tree.clone(),
+			destination_dirty: binding.destination_dirty,
 			changed_paths,
 			state,
-			conflicts: conflicts.iter().map(Into::into).collect(),
+			conflicts: binding.conflicts.iter().map(Into::into).collect(),
 			recorded_at_unix_ms: now_unix_ms,
 		})
 		.await?
@@ -173,7 +160,6 @@ pub(crate) async fn record(
 		promotion_id: promotion.promotion_id,
 		binding: promotion.binding.clone(),
 		state: promotion.state,
-		conflicts: promotion.conflicts.clone(),
 	};
 	tx.append_event(event.to_record(
 		actor,
@@ -191,15 +177,13 @@ pub(crate) async fn record(
 		// that can be looked at again (ADR-0067).
 		let effect_id = Uuid::now_v7();
 		let safety = match binding.destination {
-			promotion::PromotionDestination::LocalCheckout => {
+			PromotionDestination::LocalCheckout => {
 				EffectSafetyRecord::Ambiguous
 			}
-			promotion::PromotionDestination::Branch(_) => {
-				EffectSafetyRecord::Idempotent {
-					external_key: promotion_id,
-					max_attempts: BRANCH_ATTEMPTS,
-				}
-			}
+			PromotionDestination::Branch(_) => EffectSafetyRecord::Idempotent {
+				external_key: promotion_id,
+				max_attempts: BRANCH_ATTEMPTS,
+			},
 		};
 		tx.insert_effect(&NewEffect {
 			effect_id,

@@ -117,7 +117,7 @@ async fn a_promotion_preview_shows_the_merge_and_changes_nothing() {
 	assert_eq!(
 		(
 			&clean,
-			conflicted.conflicts,
+			conflicted.binding.conflicts,
 			std::fs::read_to_string(repository.join("f.txt")).unwrap(),
 			git(&repository, &["status", "--porcelain"]),
 		),
@@ -132,9 +132,10 @@ async fn a_promotion_preview_shows_the_merge_and_changes_nothing() {
 					destination_commit: base,
 					destination_tree: binding.destination_tree.clone(),
 					result_tree: binding.result_tree.clone(),
+					destination_dirty: true,
+					conflicts: vec![],
 					actor: client_id,
 				},
-				destination_dirty: true,
 				changed_paths: 2,
 				changes: vec![
 					PromotedChange {
@@ -146,7 +147,6 @@ async fn a_promotion_preview_shows_the_merge_and_changes_nothing() {
 						kind: ChangeKind::Added,
 					},
 				],
-				conflicts: vec![],
 			},
 			vec![PromotionConflict {
 				path: "new.txt".into(),
@@ -307,7 +307,7 @@ async fn a_promotion_is_recorded_as_previewed_or_refused_as_stale() {
 			&recorded,
 			shown.as_ref(),
 			(stale.category, stale.code.as_str()),
-			(applying.state, applying.conflicts.len()),
+			(applying.state, applying.binding.conflicts.len()),
 		),
 		(
 			&WorkspacePromotion {
@@ -315,10 +315,6 @@ async fn a_promotion_is_recorded_as_previewed_or_refused_as_stale() {
 				binding: conflicted.binding,
 				changed_paths: 2,
 				state: PromotionState::Conflicted,
-				conflicts: vec![PromotionConflict {
-					path: "f.txt".into(),
-					kind: ConflictKind::Diverged,
-				}],
 				recorded_at_unix_ms: recorded.recorded_at_unix_ms,
 				settled_at_unix_ms: Some(recorded.recorded_at_unix_ms),
 			},

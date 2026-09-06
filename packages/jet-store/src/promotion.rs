@@ -45,6 +45,9 @@ pub enum PromotionConflictKindRecord {
 	/// The Workspace adds the path and the destination holds an ignored
 	/// file there.
 	Untracked,
+	/// The destination's index holds a version of the path that differs
+	/// from its file.
+	Staged,
 }
 
 /// One path a conflicted promotion could not settle.
@@ -78,6 +81,8 @@ pub struct NewWorkspacePromotion {
 	pub destination_tree: String,
 	/// The tree the three-way merge produced.
 	pub result_tree: String,
+	/// Whether the destination held uncommitted changes of its own.
+	pub destination_dirty: bool,
 	/// How many paths the result changes in the destination.
 	pub changed_paths: u32,
 	/// Whether the promotion is applying or was conflicted on arrival.
@@ -109,6 +114,8 @@ pub struct WorkspacePromotionRecord {
 	pub destination_tree: String,
 	/// The tree the three-way merge produced.
 	pub result_tree: String,
+	/// Whether the destination held uncommitted changes of its own.
+	pub destination_dirty: bool,
 	/// How many paths the result changes in the destination.
 	pub changed_paths: u32,
 	/// Where the promotion stands.
@@ -134,6 +141,7 @@ struct Row {
 	destination_commit: String,
 	destination_tree: String,
 	result_tree: String,
+	destination_dirty: i64,
 	changed_paths: i64,
 	state: String,
 	recorded_at_unix_ms: i64,
@@ -175,11 +183,12 @@ impl PromotionConflictKindRecord {
 		match self {
 			Self::Diverged => "diverged",
 			Self::Untracked => "untracked",
+			Self::Staged => "staged",
 		}
 	}
 
 	fn parse(text: &str) -> Option<Self> {
-		[Self::Diverged, Self::Untracked]
+		[Self::Diverged, Self::Untracked, Self::Staged]
 			.into_iter()
 			.find(|kind| kind.as_str() == text)
 	}
@@ -203,8 +212,8 @@ impl ReadTransaction {
 			r#"SELECT promotion_id AS "promotion_id!", workspace_id, actor_kind,
 				actor_id, destination_kind, destination_branch, base_commit,
 				workspace_tree, destination_commit, destination_tree,
-				result_tree, changed_paths, state, recorded_at_unix_ms,
-				settled_at_unix_ms
+				result_tree, destination_dirty, changed_paths, state,
+				recorded_at_unix_ms, settled_at_unix_ms
 			 FROM workspace_promotions
 			 WHERE promotion_id = ?1"#,
 			promotion_id
@@ -232,8 +241,8 @@ impl ReadTransaction {
 			r#"SELECT promotion_id AS "promotion_id!", workspace_id, actor_kind,
 				actor_id, destination_kind, destination_branch, base_commit,
 				workspace_tree, destination_commit, destination_tree,
-				result_tree, changed_paths, state, recorded_at_unix_ms,
-				settled_at_unix_ms
+				result_tree, destination_dirty, changed_paths, state,
+				recorded_at_unix_ms, settled_at_unix_ms
 			 FROM workspace_promotions
 			 WHERE workspace_id = ?1
 			 ORDER BY rowid DESC
@@ -291,6 +300,16 @@ impl ReadTransaction {
 			destination_commit: row.destination_commit,
 			destination_tree: row.destination_tree,
 			result_tree: row.result_tree,
+			destination_dirty: match row.destination_dirty {
+				0 => false,
+				1 => true,
+				other => {
+					return Err(column_error(
+						"destination_dirty",
+						format!("{other} is not a flag"),
+					));
+				}
+			},
 			changed_paths: u32::try_from(row.changed_paths).map_err(|_| {
 				column_error(
 					"changed_paths",
@@ -350,6 +369,7 @@ impl WriteTransaction {
 					("branch", Some(name.as_str()))
 				}
 			};
+		let destination_dirty = i64::from(promotion.destination_dirty);
 		let changed_paths = i64::from(promotion.changed_paths);
 		let state = promotion.state.as_str();
 		sqlx::query!(
@@ -357,10 +377,10 @@ impl WriteTransaction {
 				(promotion_id, workspace_id, actor_kind, actor_id,
 				destination_kind, destination_branch, base_commit,
 				workspace_tree, destination_commit, destination_tree,
-				result_tree, changed_paths, state, recorded_at_unix_ms,
-				settled_at_unix_ms)
+				result_tree, destination_dirty, changed_paths, state,
+				recorded_at_unix_ms, settled_at_unix_ms)
 			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-				?14, ?15)",
+				?14, ?15, ?16)",
 			id,
 			workspace,
 			actor_kind,
@@ -372,6 +392,7 @@ impl WriteTransaction {
 			promotion.destination_commit,
 			promotion.destination_tree,
 			promotion.result_tree,
+			destination_dirty,
 			changed_paths,
 			state,
 			promotion.recorded_at_unix_ms,
@@ -404,6 +425,7 @@ impl WriteTransaction {
 			destination_commit: promotion.destination_commit,
 			destination_tree: promotion.destination_tree,
 			result_tree: promotion.result_tree,
+			destination_dirty: promotion.destination_dirty,
 			changed_paths: promotion.changed_paths,
 			state: promotion.state,
 			conflicts: promotion.conflicts,

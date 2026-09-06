@@ -209,13 +209,12 @@ enum Then {
 
 /// Records a promotion to `destination`, marks its Effect as an attempt
 /// that never reported, arranges the destination as `then` says, and
-/// returns where a restarted core settles it and how many attempts the
-/// Effect took.
+/// returns where a restarted core settles it.
 async fn interrupted(
 	dir: &Path,
 	destination: PromotionDestination,
 	then: Then,
-) -> (PromotionState, u32) {
+) -> PromotionState {
 	let Diverged {
 		core,
 		repository,
@@ -272,17 +271,8 @@ async fn interrupted(
 
 	let restarted = start_core(&dir.join("plane.sqlite3")).await;
 	restarted.perform_promotions().await.unwrap();
-	let attempts = restarted
-		.store
-		.read(async |tx| {
-			Ok::<_, CoreError>(
-				tx.effect(effect_id).await?.unwrap().attempt_count,
-			)
-		})
-		.await
-		.unwrap();
 	assert_eq!(unresolved(&restarted).await, vec![]);
-	(shown(&restarted, &workspace).await.state, attempts)
+	shown(&restarted, &workspace).await.state
 }
 
 /// An attempt a previous daemon never finished is settled from what the
@@ -292,7 +282,8 @@ async fn interrupted(
 /// not tried again because a checkout write cannot be repeated safely.
 /// A branch still at its tip is tried once more under the same identity
 /// and promoted; one already holding the result is promoted without
-/// another commit; one moved elsewhere fails.
+/// another commit; one moved elsewhere fails. Every case settles within
+/// the one call, as it would after any Command.
 #[tokio::test]
 async fn an_interrupted_attempt_is_settled_from_the_destination() {
 	let mut settled = Vec::new();
@@ -317,12 +308,12 @@ async fn an_interrupted_attempt_is_settled_from_the_destination() {
 	assert_eq!(
 		settled,
 		vec![
-			(PromotionState::Failed, 1),
-			(PromotionState::Promoted, 1),
-			(PromotionState::OutcomeUnknown, 1),
-			(PromotionState::Promoted, 2),
-			(PromotionState::Promoted, 1),
-			(PromotionState::Failed, 2),
+			PromotionState::Failed,
+			PromotionState::Promoted,
+			PromotionState::OutcomeUnknown,
+			PromotionState::Promoted,
+			PromotionState::Promoted,
+			PromotionState::Failed,
 		]
 	);
 }

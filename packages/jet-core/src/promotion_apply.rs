@@ -2,7 +2,9 @@
 //! whether one was applied (ADR-0025, ADR-0067).
 //!
 //! Applying to the Local checkout writes the bound result over a
-//! checkout verified, moments before, to be exactly as previewed. A
+//! checkout verified, moments before, to be exactly as previewed, with
+//! nothing the merge could not see appeared since: no ignored file where
+//! the result adds a path, no staged version apart from its file. A
 //! scratch index holding the previewed tree carries the two-tree read
 //! that updates the files, and the checkout's own index is then told
 //! the result's entries for those paths alone, so what the user had
@@ -77,6 +79,15 @@ async fn apply_to_checkout(
 		// previewed, or a Git that cannot look, is a definite failure.
 		Ok(Observed::Elsewhere) | Err(_) => return EffectResult::Failed,
 	}
+	// The trees say nothing about ignored files or the index, so what the
+	// preview checked beside them is checked again here.
+	match changes_of(root, promotion).await {
+		Ok(changed) => match merge::collisions(root, &changed).await {
+			Ok(collisions) if collisions.is_empty() => {}
+			Ok(_) | Err(_) => return EffectResult::Failed,
+		},
+		Err(_) => return EffectResult::Failed,
+	}
 	let index_path = scratch.join("apply");
 	let index = ScratchIndex::new(root, &index_path, promotion_failed);
 	let prepared = async {
@@ -123,13 +134,7 @@ async fn stage_result(
 	root: &Path,
 	promotion: &WorkspacePromotionRecord,
 ) -> Result<(), CoreError> {
-	let changes = diff_trees(
-		root,
-		&promotion.destination_tree,
-		&promotion.result_tree,
-		promotion_failed,
-	)
-	.await?;
+	let changes = changes_of(root, promotion).await?;
 	let info = changes
 		.iter()
 		.map(Change::index_info)
@@ -142,6 +147,20 @@ async fn stage_result(
 		return Err(promotion_failed(staged.stderr));
 	}
 	Ok(())
+}
+
+/// What the promotion changes in the destination, one record per path.
+async fn changes_of(
+	root: &Path,
+	promotion: &WorkspacePromotionRecord,
+) -> Result<Vec<Change>, CoreError> {
+	diff_trees(
+		root,
+		&promotion.destination_tree,
+		&promotion.result_tree,
+		promotion_failed,
+	)
+	.await
 }
 
 async fn apply_to_branch(
@@ -229,6 +248,9 @@ pub(crate) async fn observe(
 	}
 }
 
+/// A checkout holds the result when its files are the result tree and
+/// every path the promotion changes is staged as its file is: an attempt
+/// that wrote the files and stopped before staging them is not done.
 async fn observe_checkout(
 	root: &Path,
 	index: &Path,
@@ -240,14 +262,22 @@ async fn observe_checkout(
 	if head != promotion.destination_commit {
 		return Ok(Observed::Elsewhere);
 	}
-	let tree = merge::snapshot(root, index, &head).await?;
-	Ok(if tree == promotion.result_tree {
-		Observed::Applied
-	} else if tree == promotion.destination_tree {
-		Observed::Untouched
-	} else {
-		Observed::Elsewhere
-	})
+	let tree = merge::capture(root, index, &head).await?;
+	if tree == promotion.destination_tree {
+		return Ok(Observed::Untouched);
+	}
+	if tree != promotion.result_tree {
+		return Ok(Observed::Elsewhere);
+	}
+	let apart = merge::staged_apart(root).await?;
+	let changed = changes_of(root, promotion).await?;
+	Ok(
+		if changed.iter().any(|change| apart.contains(&change.path)) {
+			Observed::Elsewhere
+		} else {
+			Observed::Applied
+		},
+	)
 }
 
 /// A branch holds the result when its tip is a commit of the result tree

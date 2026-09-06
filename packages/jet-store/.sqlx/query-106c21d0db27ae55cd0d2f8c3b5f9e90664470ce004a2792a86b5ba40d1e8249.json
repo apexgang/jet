@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT promotion_id AS \"promotion_id!\", workspace_id, actor_kind,\n\t\t\t\tactor_id, destination_kind, destination_branch, base_commit,\n\t\t\t\tworkspace_tree, destination_commit, destination_tree,\n\t\t\t\tresult_tree, changed_paths, state, recorded_at_unix_ms,\n\t\t\t\tsettled_at_unix_ms\n\t\t\t FROM workspace_promotions\n\t\t\t WHERE promotion_id = ?1",
+  "query": "SELECT promotion_id AS \"promotion_id!\", workspace_id, actor_kind,\n\t\t\t\tactor_id, destination_kind, destination_branch, base_commit,\n\t\t\t\tworkspace_tree, destination_commit, destination_tree,\n\t\t\t\tresult_tree, destination_dirty, changed_paths, state,\n\t\t\t\trecorded_at_unix_ms, settled_at_unix_ms\n\t\t\t FROM workspace_promotions\n\t\t\t WHERE workspace_id = ?1\n\t\t\t ORDER BY rowid DESC\n\t\t\t LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -125,8 +125,19 @@
         }
       },
       {
-        "name": "changed_paths",
+        "name": "destination_dirty",
         "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workspace_promotions",
+            "name": "destination_dirty"
+          }
+        }
+      },
+      {
+        "name": "changed_paths",
+        "ordinal": 12,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -137,7 +148,7 @@
       },
       {
         "name": "state",
-        "ordinal": 12,
+        "ordinal": 13,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -148,7 +159,7 @@
       },
       {
         "name": "recorded_at_unix_ms",
-        "ordinal": 13,
+        "ordinal": 14,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -159,7 +170,7 @@
       },
       {
         "name": "settled_at_unix_ms",
-        "ordinal": 14,
+        "ordinal": 15,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -187,8 +198,9 @@
       false,
       false,
       false,
+      false,
       true
     ]
   },
-  "hash": "1245ee88310c5c552cf0c46714b81848291eb4f35cc27fd611b302e3a375568f"
+  "hash": "106c21d0db27ae55cd0d2f8c3b5f9e90664470ce004a2792a86b5ba40d1e8249"
 }

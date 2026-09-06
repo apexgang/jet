@@ -45,6 +45,8 @@ pub(super) fn binding(binding: PromotionBinding) -> wire::PromotionBinding {
 		destination_commit: binding.destination_commit,
 		destination_tree: binding.destination_tree,
 		result_tree: binding.result_tree,
+		destination_dirty: binding.destination_dirty,
+		conflicts: binding.conflicts.into_iter().map(conflict).collect(),
 		actor: binding.actor.0,
 	}
 }
@@ -53,10 +55,8 @@ pub(super) fn preview(preview: PromotionPreview) -> wire::PromotionPreview {
 	wire::PromotionPreview {
 		cursor: preview.cursor.0,
 		binding: binding(preview.binding),
-		destination_dirty: preview.destination_dirty,
 		changed_paths: preview.changed_paths,
 		changes: preview.changes.into_iter().map(change).collect(),
-		conflicts: preview.conflicts.into_iter().map(conflict).collect(),
 	}
 }
 
@@ -77,6 +77,7 @@ fn conflict(conflict: PromotionConflict) -> wire::PromotionConflict {
 		kind: match conflict.kind {
 			ConflictKind::Diverged => wire::ConflictKind::Diverged,
 			ConflictKind::Untracked => wire::ConflictKind::Untracked,
+			ConflictKind::Staged => wire::ConflictKind::Staged,
 		},
 	}
 }
@@ -92,7 +93,20 @@ pub(super) fn binding_from_wire(
 		destination_commit: binding.destination_commit.clone(),
 		destination_tree: binding.destination_tree.clone(),
 		result_tree: binding.result_tree.clone(),
+		destination_dirty: binding.destination_dirty,
+		conflicts: binding.conflicts.iter().map(conflict_from_wire).collect(),
 		actor: ClientId(binding.actor),
+	}
+}
+
+fn conflict_from_wire(conflict: &wire::PromotionConflict) -> PromotionConflict {
+	PromotionConflict {
+		path: conflict.path.clone(),
+		kind: match conflict.kind {
+			wire::ConflictKind::Diverged => ConflictKind::Diverged,
+			wire::ConflictKind::Untracked => ConflictKind::Untracked,
+			wire::ConflictKind::Staged => ConflictKind::Staged,
+		},
 	}
 }
 
@@ -112,7 +126,6 @@ pub(super) fn promotion(
 				wire::PromotionState::OutcomeUnknown
 			}
 		},
-		conflicts: promotion.conflicts.into_iter().map(conflict).collect(),
 		recorded_at_unix_ms: unix_ms(promotion.recorded_at),
 		settled_at_unix_ms: promotion.settled_at.map(unix_ms),
 	}

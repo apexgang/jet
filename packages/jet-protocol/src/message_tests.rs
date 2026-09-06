@@ -730,9 +730,13 @@ fn a_promotion_preview_has_the_agreed_wire_shape() {
 				destination_commit: "2".repeat(40),
 				destination_tree: "3".repeat(40),
 				result_tree: "4".repeat(40),
+				destination_dirty: true,
+				conflicts: vec![PromotionConflict {
+					path: "src/lib.rs".into(),
+					kind: ConflictKind::Diverged,
+				}],
 				actor: Uuid::nil(),
 			},
-			destination_dirty: true,
 			changed_paths: 2,
 			changes: vec![
 				PromotedChange {
@@ -744,10 +748,6 @@ fn a_promotion_preview_has_the_agreed_wire_shape() {
 					kind: ChangeKind::Added,
 				},
 			],
-			conflicts: vec![PromotionConflict {
-				path: "src/lib.rs".into(),
-				kind: ConflictKind::Diverged,
-			}],
 		})),
 	};
 	assert_eq!(
@@ -755,7 +755,7 @@ fn a_promotion_preview_has_the_agreed_wire_shape() {
 		(
 			r#"{"kind":"query","id":13,"query":{"type":"preview_promotion","workspace_id":"00000000-0000-0000-0000-000000000000","destination":{"kind":"branch","name":"release"}}}"#.to_string(),
 			format!(
-				r#"{{"kind":"query_result","id":13,"result":{{"type":"promotion_preview","cursor":"3","binding":{{"workspace_id":"00000000-0000-0000-0000-000000000000","destination":{{"kind":"local_checkout"}},"base_commit":"{}","workspace_tree":"{}","destination_commit":"{}","destination_tree":"{}","result_tree":"{}","actor":"00000000-0000-0000-0000-000000000000"}},"destination_dirty":true,"changed_paths":2,"changes":[{{"path":"src/lib.rs","kind":"modified"}},{{"path":"docs/new.md","kind":"added"}}],"conflicts":[{{"path":"src/lib.rs","kind":"diverged"}}]}}}}"#,
+				r#"{{"kind":"query_result","id":13,"result":{{"type":"promotion_preview","cursor":"3","binding":{{"workspace_id":"00000000-0000-0000-0000-000000000000","destination":{{"kind":"local_checkout"}},"base_commit":"{}","workspace_tree":"{}","destination_commit":"{}","destination_tree":"{}","result_tree":"{}","destination_dirty":true,"conflicts":[{{"path":"src/lib.rs","kind":"diverged"}}],"actor":"00000000-0000-0000-0000-000000000000"}},"changed_paths":2,"changes":[{{"path":"src/lib.rs","kind":"modified"}},{{"path":"docs/new.md","kind":"added"}}]}}}}"#,
 				"0".repeat(40),
 				"1".repeat(40),
 				"2".repeat(40),
@@ -778,6 +778,11 @@ fn a_workspace_promotion_has_the_agreed_wire_shape() {
 		destination_commit: "2".repeat(40),
 		destination_tree: "3".repeat(40),
 		result_tree: "4".repeat(40),
+		destination_dirty: false,
+		conflicts: vec![PromotionConflict {
+			path: "local.txt".into(),
+			kind: ConflictKind::Untracked,
+		}],
 		actor: Uuid::nil(),
 	};
 	let command = ClientMessage::Command {
@@ -795,17 +800,13 @@ fn a_workspace_promotion_has_the_agreed_wire_shape() {
 				binding,
 				changed_paths: 1,
 				state: PromotionState::Conflicted,
-				conflicts: vec![PromotionConflict {
-					path: "local.txt".into(),
-					kind: ConflictKind::Untracked,
-				}],
 				recorded_at_unix_ms: 1,
 				settled_at_unix_ms: Some(1),
 			},
 		),
 	};
 	let binding_json = format!(
-		r#"{{"workspace_id":"00000000-0000-0000-0000-000000000000","destination":{{"kind":"local_checkout"}},"base_commit":"{}","workspace_tree":"{}","destination_commit":"{}","destination_tree":"{}","result_tree":"{}","actor":"00000000-0000-0000-0000-000000000000"}}"#,
+		r#"{{"workspace_id":"00000000-0000-0000-0000-000000000000","destination":{{"kind":"local_checkout"}},"base_commit":"{}","workspace_tree":"{}","destination_commit":"{}","destination_tree":"{}","result_tree":"{}","destination_dirty":false,"conflicts":[{{"path":"local.txt","kind":"untracked"}}],"actor":"00000000-0000-0000-0000-000000000000"}}"#,
 		"0".repeat(40),
 		"1".repeat(40),
 		"2".repeat(40),
@@ -819,7 +820,7 @@ fn a_workspace_promotion_has_the_agreed_wire_shape() {
 				r#"{{"kind":"command","id":14,"command_id":"00000000-0000-0000-0000-000000000000","command":{{"type":"promote_workspace","binding":{binding_json}}}}}"#
 			),
 			format!(
-				r#"{{"kind":"command_result","id":14,"result":{{"type":"workspace_promotion_recorded","promotion_id":"00000000-0000-0000-0000-000000000000","binding":{binding_json},"changed_paths":1,"state":"conflicted","conflicts":[{{"path":"local.txt","kind":"untracked"}}],"recorded_at_unix_ms":1,"settled_at_unix_ms":1}}}}"#
+				r#"{{"kind":"command_result","id":14,"result":{{"type":"workspace_promotion_recorded","promotion_id":"00000000-0000-0000-0000-000000000000","binding":{binding_json},"changed_paths":1,"state":"conflicted","recorded_at_unix_ms":1,"settled_at_unix_ms":1}}}}"#
 			),
 		)
 	);

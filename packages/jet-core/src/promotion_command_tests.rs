@@ -1,66 +1,16 @@
-use std::path::{Path, PathBuf};
-
 use jet_store::{EffectKindRecord, EffectStateRecord};
 use pretty_assertions::assert_eq;
 
 use crate::test_support::{
-	actor, conversation_snapshot as snapshot, events, git, preview_promotion,
-	register_repository, request, start_core, status,
+	Diverged, actor, conversation_snapshot as snapshot, diverged, events,
+	preview_promotion, request, status,
 };
 use crate::{
-	Actor, BaseSelection, ClientId, Command, CommandOutcome, ConflictKind,
-	Core, CoreError, ErrorCategory, EventKind, PromotionBinding,
-	PromotionConflict, PromotionDestination, PromotionPreview, PromotionState,
-	RetentionPolicy, SeedSelection, WorkingTreeRequest, Workspace,
+	Actor, ClientId, Command, CommandOutcome, ConflictKind, Core, CoreError,
+	ErrorCategory, EventKind, PromotionBinding, PromotionConflict,
+	PromotionDestination, PromotionPreview, PromotionState, Workspace,
 	WorkspacePromotion,
 };
-
-/// A Project whose Local checkout has an unstaged edit at the end of
-/// `f.txt`, and a Workspace that edits the top of `f.txt` and adds
-/// `new.txt`.
-struct Diverged {
-	core: Core,
-	repository: PathBuf,
-	workspace: Workspace,
-}
-
-async fn diverged(dir: &Path) -> Diverged {
-	let core = start_core(&dir.join("plane.sqlite3")).await;
-	let project_id = register_repository(&core, &dir.join("repo")).await;
-	let repository = dir.join("repo").canonicalize().unwrap();
-	std::fs::write(repository.join("f.txt"), "a\nb\nc\n").unwrap();
-	git(&repository, &["add", "-A"]);
-	git(&repository, &["commit", "-q", "-m", "Base"]);
-	let outcome = core
-		.execute(
-			&actor(),
-			request(Command::CreateConversation {
-				retention: RetentionPolicy::Retain,
-				working_tree: WorkingTreeRequest::Workspace {
-					project_id,
-					base: BaseSelection::Head,
-					seed: SeedSelection::None,
-				},
-			}),
-		)
-		.await
-		.unwrap();
-	let CommandOutcome::ConversationCreated(conversation) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
-	};
-	let workspace = snapshot(&core, conversation.conversation_id)
-		.await
-		.workspace
-		.unwrap();
-	std::fs::write(workspace.root.join("f.txt"), "A\nb\nc\n").unwrap();
-	std::fs::write(workspace.root.join("new.txt"), "new\n").unwrap();
-	std::fs::write(repository.join("f.txt"), "a\nb\nC\n").unwrap();
-	Diverged {
-		core,
-		repository,
-		workspace,
-	}
-}
 
 async fn preview(
 	core: &Core,
@@ -114,6 +64,7 @@ async fn a_clean_promotion_is_recorded_with_its_effect() {
 		core,
 		repository,
 		workspace,
+		..
 	} = diverged(dir.path()).await;
 	let previewed =
 		preview(&core, &workspace, PromotionDestination::LocalCheckout).await;
@@ -140,9 +91,8 @@ async fn a_clean_promotion_is_recorded_with_its_effect() {
 			&WorkspacePromotion {
 				promotion_id: promotion.promotion_id,
 				binding: previewed.binding.clone(),
-				changed_paths: 2,
+				changed_paths: 3,
 				state: PromotionState::Applying,
-				conflicts: vec![],
 				recorded_at: promotion.recorded_at,
 				settled_at: None,
 			},
@@ -152,10 +102,9 @@ async fn a_clean_promotion_is_recorded_with_its_effect() {
 				promotion_id: promotion.promotion_id,
 				binding: previewed.binding,
 				state: PromotionState::Applying,
-				conflicts: vec![],
 			}),
 			vec![(promotion.promotion_id.0, EffectStateRecord::Pending)],
-			" M f.txt\n".into(),
+			" M f.txt\nA  o.txt\n?? notes.txt\n".into(),
 		)
 	);
 }
@@ -171,6 +120,7 @@ async fn a_conflicted_promotion_keeps_its_conflicts_and_writes_nothing() {
 		core,
 		repository,
 		workspace,
+		..
 	} = diverged(dir.path()).await;
 	std::fs::write(repository.join("f.txt"), "X\nb\nC\n").unwrap();
 	let previewed =
@@ -196,29 +146,31 @@ async fn a_conflicted_promotion_keeps_its_conflicts_and_writes_nothing() {
 		(
 			&WorkspacePromotion {
 				promotion_id: promotion.promotion_id,
-				binding: previewed.binding,
-				changed_paths: 2,
+				binding: PromotionBinding {
+					conflicts: vec![PromotionConflict {
+						path: "f.txt".into(),
+						kind: ConflictKind::Diverged,
+					}],
+					..previewed.binding
+				},
+				changed_paths: 3,
 				state: PromotionState::Conflicted,
-				conflicts: vec![PromotionConflict {
-					path: "f.txt".into(),
-					kind: ConflictKind::Diverged,
-				}],
 				recorded_at: promotion.recorded_at,
 				settled_at: Some(promotion.recorded_at),
 			},
 			Some(&promotion),
 			vec![],
 			"X\nb\nC\n".into(),
-			" M f.txt\n".into(),
+			" M f.txt\nA  o.txt\n?? notes.txt\n".into(),
 		)
 	);
 }
 
 /// A binding is refused when the preview was shown to another client,
 /// when the destination or the Workspace moved on since it was shown,
-/// when it would change nothing, and while an earlier promotion of the
-/// Workspace is still applying; none of them records anything
-/// (ADR-0025).
+/// when the risk it showed is no longer the risk, when it would change
+/// nothing, and while an earlier promotion of the Workspace is still
+/// applying; none of them records anything (ADR-0025).
 #[tokio::test]
 async fn a_binding_the_world_moved_past_is_refused_without_a_trace() {
 	let dir = tempfile::tempdir().unwrap();
@@ -226,6 +178,7 @@ async fn a_binding_the_world_moved_past_is_refused_without_a_trace() {
 		core,
 		repository,
 		workspace,
+		..
 	} = diverged(dir.path()).await;
 	let other = Actor::InteractiveClient {
 		client_id: ClientId(uuid::Uuid::from_u128(7)),
@@ -235,6 +188,15 @@ async fn a_binding_the_world_moved_past_is_refused_without_a_trace() {
 	let unbound = promote(&core, &other, previewed.binding.clone())
 		.await
 		.unwrap_err();
+	// An ignored file appearing where the Workspace adds a path changes
+	// no tree, only the risk the preview showed.
+	std::fs::write(repository.join(".git/info/exclude"), "new.txt\n").unwrap();
+	std::fs::write(repository.join("new.txt"), "ignored\n").unwrap();
+	let risk_moved = promote(&core, &actor(), previewed.binding.clone())
+		.await
+		.unwrap_err();
+	std::fs::remove_file(repository.join("new.txt")).unwrap();
+	std::fs::remove_file(repository.join(".git/info/exclude")).unwrap();
 	std::fs::write(repository.join("f.txt"), "a\nb\nc\nd\n").unwrap();
 	let destination_moved = promote(&core, &actor(), previewed.binding.clone())
 		.await
@@ -247,6 +209,7 @@ async fn a_binding_the_world_moved_past_is_refused_without_a_trace() {
 		.unwrap_err();
 	std::fs::write(repository.join("f.txt"), "A\nb\nc\n").unwrap();
 	std::fs::write(repository.join("new.txt"), "newer\n").unwrap();
+	std::fs::remove_file(repository.join("k.txt")).unwrap();
 	let previewed =
 		preview(&core, &workspace, PromotionDestination::LocalCheckout).await;
 	let empty = promote(&core, &actor(), previewed.binding)
@@ -266,6 +229,7 @@ async fn a_binding_the_world_moved_past_is_refused_without_a_trace() {
 	assert_eq!(
 		(
 			(unbound.category, unbound.code),
+			(risk_moved.category, risk_moved.code),
 			(destination_moved.category, destination_moved.code),
 			(workspace_moved.category, workspace_moved.code),
 			(empty.category, empty.code),
@@ -280,6 +244,7 @@ async fn a_binding_the_world_moved_past_is_refused_without_a_trace() {
 			),
 			(ErrorCategory::Conflict, "workspace.promotion_stale".into()),
 			(ErrorCategory::Conflict, "workspace.promotion_stale".into()),
+			(ErrorCategory::Conflict, "workspace.promotion_stale".into()),
 			(
 				ErrorCategory::InvalidInput,
 				"workspace.promotion_empty".into()
@@ -288,8 +253,8 @@ async fn a_binding_the_world_moved_past_is_refused_without_a_trace() {
 				ErrorCategory::Conflict,
 				"workspace.promotion_in_progress".into()
 			),
-			3,
 			4,
+			5,
 		)
 	);
 }
