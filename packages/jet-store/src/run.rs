@@ -82,6 +82,9 @@ impl ReadTransaction {
 		project_id: Uuid,
 	) -> Result<Vec<RunRecord>, StoreError> {
 		let project_id = project_id.to_string();
+		// 'local_checkout' is the spelling `WorkingTreeRecord::columns`
+		// gives a Local checkout; the macro takes a literal and no other
+		// form.
 		let rows = sqlx::query_as!(
 			Row,
 			r#"SELECT runs.run_id AS "run_id!", runs.conversation_id,

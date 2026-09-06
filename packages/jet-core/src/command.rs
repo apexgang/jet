@@ -428,7 +428,7 @@ impl Core {
 					command_id,
 					command,
 					prepared,
-					Plane {
+					TransactionContext {
 						security,
 						workspace_home: &self.workspace_home,
 					},
@@ -517,9 +517,9 @@ fn redacted_for_receipt(
 	}
 }
 
-/// What the Plane brings to a Command's transaction that neither the
+/// What the core brings to a Command's transaction that neither the
 /// Command nor its preparation carries.
-struct Plane<'a> {
+struct TransactionContext<'a> {
 	/// Whether the Plane vouched for its Security audit when the Command
 	/// was admitted.
 	security: SecurityState,
@@ -533,13 +533,13 @@ async fn execute_new(
 	command_id: CommandId,
 	command: Command,
 	prepared: Prepared,
-	plane: Plane<'_>,
+	context: TransactionContext<'_>,
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
-	let Plane {
+	let TransactionContext {
 		security,
 		workspace_home,
-	} = plane;
+	} = context;
 	match command {
 		Command::RegisterProject { .. } => {
 			let Prepared::Registration(registrable) = prepared else {
@@ -722,12 +722,7 @@ async fn create_run(
 			"the Conversation does not exist",
 		));
 	};
-	let busy = tx
-		.runs(conversation_id.0)
-		.await?
-		.iter()
-		.any(|run| !run.lifecycle.is_terminal());
-	if busy {
+	if lifecycle::any_live(&tx.runs(conversation_id.0).await?) {
 		return Err(CoreError::conflict(
 			"run.conversation_busy",
 			"the Conversation already has a Run that has not ended",

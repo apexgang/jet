@@ -66,15 +66,9 @@ pub(crate) async fn resolve_commit(
 /// does not finish in time.
 pub(crate) async fn add_detached(
 	root: &Path,
-	path: &Path,
+	path: &str,
 	commit: &str,
 ) -> Result<(), CoreError> {
-	let Some(path) = path.to_str() else {
-		return Err(CoreError::internal(
-			"workspace.root_not_unicode",
-			"a Workspace root was not Unicode",
-		));
-	};
 	let output = bounded(git(
 		root,
 		&[

@@ -52,6 +52,10 @@ _Avoid_: Workspace move, automatic merge, Project transfer
 The user's original working directory for a Project, outside Jet's isolated Workspace lifecycle. Jet permits at most one active managed Run there while external processes remain outside its control.
 _Avoid_: Workspace, Project
 
+**Working tree**:
+Where a Conversation does its work: a managed Workspace of a Project, the Project's Local checkout, or nowhere yet when it has no Project. It is recorded on the Conversation and chosen when the Conversation is created.
+_Avoid_: Placement, checkout mode, worktree
+
 **Conversation view**:
 A GUI view organized around conversations, including retained conversations with no active run.
 _Avoid_: Codex-style view, persistent view

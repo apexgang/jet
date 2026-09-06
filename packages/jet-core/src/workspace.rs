@@ -22,8 +22,8 @@ use crate::command::CommandOutcome;
 use crate::conversation::{Conversation, ConversationId};
 use crate::error::CoreError;
 use crate::event::{EventKind, EventSubject};
-use crate::filesystem::blocking;
-use crate::{Actor, Core, ProjectId, system_time, worktree};
+use crate::filesystem::{blocking, canonicalize};
+use crate::{Actor, Core, ProjectId, lifecycle, system_time, worktree};
 
 /// Longest base selection the core accepts, as text. A branch name is
 /// far shorter; the bound keeps a hostile client from storing a novel.
@@ -209,10 +209,14 @@ pub(crate) async fn prepare(
 /// names, which no later Conversation can collide with: the root is the
 /// Conversation's own identity.
 ///
+/// The Project is read again here: what was prepared describes the
+/// repository, and whether the Project is still registered is the
+/// transaction's to answer.
+///
 /// # Errors
 ///
-/// Returns what the store or Git reports when the Workspace cannot be
-/// made.
+/// Returns `project.not_found` when the Project is no longer registered,
+/// and what the store or Git reports when the Workspace cannot be made.
 pub(crate) async fn create(
 	tx: &mut WriteTransaction,
 	actor: &Actor,
@@ -226,8 +230,13 @@ pub(crate) async fn create(
 		project_root,
 		base,
 	} = seed;
+	if tx.project(project_id.0).await?.is_none() {
+		return Err(project_not_found());
+	}
 	let conversation_id = Uuid::now_v7();
-	let root = home.0.join(conversation_id.to_string());
+	let root = prepare_home(&home.0)
+		.await?
+		.join(conversation_id.to_string());
 	let Some(root_text) = root.to_str().map(str::to_owned) else {
 		return Err(CoreError::internal(
 			"workspace.root_not_unicode",
@@ -250,7 +259,7 @@ pub(crate) async fn create(
 			workspace_id: Uuid::now_v7(),
 			conversation_id,
 			project_id: project_id.0,
-			root: root_text,
+			root: root_text.clone(),
 			base_selection: base.selection.as_revision().to_owned(),
 			base_commit: base.commit.clone(),
 			created_at_unix_ms: now_unix_ms,
@@ -272,9 +281,7 @@ pub(crate) async fn create(
 	};
 	tx.append_event(placed.to_record(actor, subject, now_unix_ms)?)
 		.await?;
-	prepare_home(&home.0).await?;
-	worktree::add_detached(&project_root, &workspace.root, &base.commit)
-		.await?;
+	worktree::add_detached(&project_root, &root_text, &base.commit).await?;
 	Ok(CommandOutcome::ConversationCreated(conversation))
 }
 
@@ -329,12 +336,7 @@ pub(crate) async fn admit_local_checkout_run(
 	tx: &mut WriteTransaction,
 	project_id: ProjectId,
 ) -> Result<(), CoreError> {
-	let busy = tx
-		.local_checkout_runs(project_id.0)
-		.await?
-		.iter()
-		.any(|run| !run.lifecycle.is_terminal());
-	if busy {
+	if lifecycle::any_live(&tx.local_checkout_runs(project_id.0).await?) {
 		return Err(CoreError::conflict(
 			"run.local_checkout_busy",
 			"the Project's Local checkout already has a live managed Run; Jet \
@@ -346,24 +348,31 @@ pub(crate) async fn admit_local_checkout_run(
 	Ok(())
 }
 
-/// Creates the Workspace home for the owner alone, if it is not there yet.
-async fn prepare_home(home: &Path) -> Result<(), CoreError> {
+/// Creates the Workspace home for the owner alone, if it is not there yet,
+/// and returns it as the filesystem names it, so a Workspace root is
+/// canonical however the Jet home was spelled.
+async fn prepare_home(home: &Path) -> Result<PathBuf, CoreError> {
 	use std::os::unix::fs::DirBuilderExt;
-	let home = home.to_path_buf();
+	let created = home.to_path_buf();
 	blocking(move || {
 		std::fs::DirBuilder::new()
 			.recursive(true)
 			.mode(0o700)
-			.create(&home)
+			.create(&created)
 	})
 	.await?
-	.map_err(|error| {
-		CoreError::unavailable(
-			"workspace.home_unavailable",
-			"the Workspace home cannot be created on this Plane",
-			error.to_string(),
-		)
-	})
+	.map_err(home_unavailable)?;
+	canonicalize(home.to_path_buf())
+		.await
+		.map_err(home_unavailable)
+}
+
+fn home_unavailable(error: std::io::Error) -> CoreError {
+	CoreError::unavailable(
+		"workspace.home_unavailable",
+		"the Workspace home cannot be created on this Plane",
+		error.to_string(),
+	)
 }
 
 fn project_not_found() -> CoreError {
