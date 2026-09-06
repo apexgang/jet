@@ -15,6 +15,7 @@ use crate::conversation::{
 use crate::event::Event;
 use crate::pairing::PairingSnapshot;
 use crate::project::{ProjectEntry, ProjectList, ProjectPreview};
+use crate::promotion::{PromotionDestination, PromotionPreview};
 use crate::setting::{SettingScope, SettingSelection, SettingSnapshot};
 
 /// Correlates a client request with its server reply.
@@ -162,6 +163,15 @@ pub enum QueryRequest {
 		/// components.
 		path: String,
 	},
+	/// What promoting a Workspace to a permanent checkout or branch of its
+	/// Project would do, before it is done. The answer binds what it
+	/// compared, and a promotion carries that binding back.
+	PreviewPromotion {
+		/// The Workspace to promote.
+		workspace_id: Uuid,
+		/// Where its changes would go.
+		destination: PromotionDestination,
+	},
 }
 
 /// Query snapshots.
@@ -192,6 +202,8 @@ pub enum QueryResponse {
 	ProjectPreview(ProjectPreview),
 	/// What one path inside a Project names.
 	ProjectEntry(ProjectEntry),
+	/// What promoting a Workspace would do.
+	PromotionPreview(PromotionPreview),
 }
 
 /// One page of journal Events, fenced by the journal position it was read

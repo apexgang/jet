@@ -32,6 +32,8 @@ mod pairing_secret;
 mod preparation;
 mod project;
 mod project_entry;
+mod promotion;
+mod promotion_merge;
 mod query;
 mod relative_path;
 mod remote;
@@ -44,6 +46,7 @@ mod setting;
 mod status;
 #[cfg(test)]
 mod test_support;
+mod tree_capture;
 mod workspace;
 mod worktree;
 
@@ -100,6 +103,10 @@ pub use project::{
 	Registrability, Repository, Worktree,
 };
 pub use project_entry::{EntryKind, ProjectEntry};
+pub use promotion::{
+	ChangeKind, ConflictKind, PromotedChange, PromotionBinding,
+	PromotionConflict, PromotionDestination, PromotionPreview,
+};
 pub use query::{Query, QueryResult};
 pub use relative_path::RelativePath;
 pub use remote::RemoteSession;

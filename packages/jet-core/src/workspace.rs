@@ -228,26 +228,37 @@ pub(crate) async fn prepare(
 	})
 }
 
-/// Captures `seed` through a scratch directory of the Workspace home, which
-/// is the owner's alone and is gone again before this returns.
+/// Captures `seed` through a scratch directory of the Workspace home.
 async fn capture_in_scratch(
 	home: &WorkspaceHome,
 	project_root: &Path,
 	seed: &SeedSelection,
 	commit: &str,
 ) -> Result<CapturedSeed, CoreError> {
+	with_scratch(home, "seed", async |scratch| {
+		seed_capture::capture(project_root, scratch, seed, commit).await
+	})
+	.await
+}
+
+/// Runs `work` with a scratch directory of the Workspace home, which is
+/// the owner's alone and is gone again before this returns.
+pub(crate) async fn with_scratch<T>(
+	home: &WorkspaceHome,
+	purpose: &str,
+	work: impl AsyncFnOnce(&Path) -> Result<T, CoreError>,
+) -> Result<T, CoreError> {
 	use std::os::unix::fs::DirBuilderExt;
 	let scratch = prepare_home(&home.0)
 		.await?
-		.join(format!(".seed-{}", Uuid::now_v7()));
+		.join(format!(".{purpose}-{}", Uuid::now_v7()));
 	let created = scratch.clone();
 	blocking(move || std::fs::DirBuilder::new().mode(0o700).create(&created))
 		.await?
 		.map_err(home_unavailable)?;
-	let captured =
-		seed_capture::capture(project_root, &scratch, seed, commit).await;
+	let result = work(&scratch).await;
 	let _ = blocking(move || std::fs::remove_dir_all(&scratch)).await;
-	captured
+	result
 }
 
 /// Records a Conversation that works in a new Workspace and creates the

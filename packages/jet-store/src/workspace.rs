@@ -104,6 +104,30 @@ impl ReadTransaction {
 		.await?;
 		row.map(read_row).transpose()
 	}
+
+	/// The Workspace identified by `workspace_id`, if recorded.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the row cannot be read.
+	pub async fn workspace(
+		&mut self,
+		workspace_id: Uuid,
+	) -> Result<Option<WorkspaceRecord>, StoreError> {
+		let workspace_id = workspace_id.to_string();
+		let row = sqlx::query_as!(
+			Row,
+			r#"SELECT workspace_id AS "workspace_id!", conversation_id,
+				project_id, root, base_selection, base_commit, seed_tree,
+				seed_changed_paths, created_at_unix_ms
+			 FROM workspaces
+			 WHERE workspace_id = ?1"#,
+			workspace_id
+		)
+		.fetch_optional(self.connection())
+		.await?;
+		row.map(read_row).transpose()
+	}
 }
 
 impl WriteTransaction {

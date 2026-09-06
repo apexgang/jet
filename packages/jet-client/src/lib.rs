@@ -8,6 +8,7 @@ mod connection;
 mod handshake;
 mod pairing_requests;
 mod project_requests;
+mod promotion_requests;
 mod requests;
 mod ssh;
 

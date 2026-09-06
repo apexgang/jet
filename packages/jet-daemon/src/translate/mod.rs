@@ -8,6 +8,7 @@ mod audit;
 mod capability;
 mod pairing;
 mod project;
+mod promotion;
 mod setting;
 
 pub(crate) use capability::snapshot as capabilities;
@@ -26,6 +27,7 @@ use jet_core::{
 	ProjectId, ProviderId, Query, QueryResult, RecoveryAction, RelativePath,
 	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
 	SeedSelection, WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase,
+	WorkspaceId,
 };
 use jet_protocol as wire;
 
@@ -92,6 +94,13 @@ pub(crate) fn query(
 				path: RelativePath::parse(path)?,
 			}
 		}
+		wire::QueryRequest::PreviewPromotion {
+			workspace_id,
+			destination,
+		} => Query::PreviewPromotion {
+			workspace_id: WorkspaceId(*workspace_id),
+			destination: promotion::destination_from_wire(destination),
+		},
 	})
 }
 
@@ -139,6 +148,9 @@ pub(crate) fn query_result(
 		}
 		QueryResult::ProjectEntry(entry) => {
 			wire::QueryResponse::ProjectEntry(project::entry(entry))
+		}
+		QueryResult::PromotionPreview(preview) => {
+			wire::QueryResponse::PromotionPreview(promotion::preview(preview))
 		}
 	})
 }

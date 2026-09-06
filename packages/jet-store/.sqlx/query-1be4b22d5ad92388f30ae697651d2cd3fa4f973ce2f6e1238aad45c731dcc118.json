@@ -1,0 +1,122 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT workspace_id AS \"workspace_id!\", conversation_id,\n\t\t\t\tproject_id, root, base_selection, base_commit, seed_tree,\n\t\t\t\tseed_changed_paths, created_at_unix_ms\n\t\t\t FROM workspaces\n\t\t\t WHERE workspace_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "workspace_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "workspace_id"
+          }
+        }
+      },
+      {
+        "name": "conversation_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "name": "project_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "project_id"
+          }
+        }
+      },
+      {
+        "name": "root",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "root"
+          }
+        }
+      },
+      {
+        "name": "base_selection",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "base_selection"
+          }
+        }
+      },
+      {
+        "name": "base_commit",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "base_commit"
+          }
+        }
+      },
+      {
+        "name": "seed_tree",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "seed_tree"
+          }
+        }
+      },
+      {
+        "name": "seed_changed_paths",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "seed_changed_paths"
+          }
+        }
+      },
+      {
+        "name": "created_at_unix_ms",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "created_at_unix_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "1be4b22d5ad92388f30ae697651d2cd3fa4f973ce2f6e1238aad45c731dcc118"
+}

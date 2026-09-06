@@ -37,7 +37,8 @@ impl Client {
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
-			| QueryResponse::ProjectEntry(_)) => Err(unexpected(&other)),
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)) => Err(unexpected(&other)),
 		}
 	}
 

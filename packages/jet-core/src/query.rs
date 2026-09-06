@@ -16,9 +16,11 @@ use crate::event::{EVENT_PAGE_LIMIT, Event, EventPage, EventSequence};
 use crate::pairing::{self, PairingSnapshot};
 use crate::project::{self, PathGrant, ProjectList, ProjectPreview};
 use crate::project_entry::{self, ProjectEntry};
+use crate::promotion::{self, PromotionDestination, PromotionPreview};
 use crate::relative_path::RelativePath;
 use crate::setting::{self, SettingScope, SettingSelection, SettingSnapshot};
 use crate::status::PlaneStatus;
+use crate::workspace::WorkspaceId;
 use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 
 /// Read-only requests answered with a snapshot.
@@ -94,6 +96,14 @@ pub enum Query {
 		/// The path, relative to the Project's root.
 		path: RelativePath,
 	},
+	/// What promoting a Workspace to a permanent checkout or branch of its
+	/// Project would do, before it is done (ADR-0025).
+	PreviewPromotion {
+		/// The Workspace to promote.
+		workspace_id: WorkspaceId,
+		/// Where its changes would go.
+		destination: PromotionDestination,
+	},
 }
 
 /// Snapshots returned by [`Core::query`].
@@ -123,6 +133,8 @@ pub enum QueryResult {
 	ProjectPreview(ProjectPreview),
 	/// What one path inside a Project names.
 	ProjectEntry(ProjectEntry),
+	/// What promoting a Workspace would do.
+	PromotionPreview(PromotionPreview),
 }
 
 impl Core {
@@ -246,6 +258,12 @@ impl Core {
 			}
 			Query::ProjectEntry { project_id, path } => {
 				project_entry::entry(self, project_id, path).await
+			}
+			Query::PreviewPromotion {
+				workspace_id,
+				destination,
+			} => {
+				promotion::preview(self, actor, workspace_id, destination).await
 			}
 			Query::Projects => {
 				self.store

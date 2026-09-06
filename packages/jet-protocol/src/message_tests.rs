@@ -25,6 +25,10 @@ use crate::project::{
 	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
 	ProjectPreview, Registrability, Repository, Worktree,
 };
+use crate::promotion::{
+	ChangeKind, ConflictKind, PromotedChange, PromotionBinding,
+	PromotionConflict, PromotionDestination, PromotionPreview,
+};
 use crate::workspace::{
 	BaseSelection, SeedSelection, WorkingTreeRequest, Workspace, WorkspaceBase,
 	WorkspaceSeed,
@@ -693,6 +697,68 @@ fn workspace_seeds_have_the_agreed_wire_shape() {
 			r#"{"type":"create_conversation","retention":"retain","working_tree":{"kind":"workspace","project_id":"00000000-0000-0000-0000-000000000000","base":{"kind":"head"}}}"#.to_string(),
 			r#"{"workspace_id":"00000000-0000-0000-0000-000000000000","conversation_id":"00000000-0000-0000-0000-000000000000","project_id":"00000000-0000-0000-0000-000000000000","root":"/home/jet/.jet/workspaces/x","base":{"selection":{"kind":"head"},"commit":"0123456789abcdef0123456789abcdef01234567"},"seed":{"tree":"89abcdef0123456789abcdef0123456789abcdef","changed_paths":2},"created_at_unix_ms":1}"#.to_string(),
 			unseeded,
+		)
+	);
+}
+
+/// A promotion preview names its destination, binds what it compared and
+/// whom it was shown to, and lists every change and conflict as data
+/// (ADR-0025).
+#[test]
+fn a_promotion_preview_has_the_agreed_wire_shape() {
+	let query = ClientMessage::Query {
+		id: 13,
+		query: QueryRequest::PreviewPromotion {
+			workspace_id: Uuid::nil(),
+			destination: PromotionDestination::Branch {
+				name: "release".into(),
+			},
+		},
+	};
+	let result = ServerMessage::QueryResult {
+		id: 13,
+		result: QueryResponse::PromotionPreview(PromotionPreview {
+			cursor: 3,
+			binding: PromotionBinding {
+				workspace_id: Uuid::nil(),
+				destination: PromotionDestination::LocalCheckout,
+				base_commit: "0".repeat(40),
+				workspace_tree: "1".repeat(40),
+				destination_commit: "2".repeat(40),
+				destination_tree: "3".repeat(40),
+				result_tree: "4".repeat(40),
+				actor: Uuid::nil(),
+			},
+			destination_dirty: true,
+			changed_paths: 2,
+			changes: vec![
+				PromotedChange {
+					path: "src/lib.rs".into(),
+					kind: ChangeKind::Modified,
+				},
+				PromotedChange {
+					path: "docs/new.md".into(),
+					kind: ChangeKind::Added,
+				},
+			],
+			conflicts: vec![PromotionConflict {
+				path: "src/lib.rs".into(),
+				kind: ConflictKind::Diverged,
+			}],
+		}),
+	};
+	assert_eq!(
+		(json(&query), json(&result)),
+		(
+			r#"{"kind":"query","id":13,"query":{"type":"preview_promotion","workspace_id":"00000000-0000-0000-0000-000000000000","destination":{"kind":"branch","name":"release"}}}"#.to_string(),
+			format!(
+				r#"{{"kind":"query_result","id":13,"result":{{"type":"promotion_preview","cursor":"3","binding":{{"workspace_id":"00000000-0000-0000-0000-000000000000","destination":{{"kind":"local_checkout"}},"base_commit":"{}","workspace_tree":"{}","destination_commit":"{}","destination_tree":"{}","result_tree":"{}","actor":"00000000-0000-0000-0000-000000000000"}},"destination_dirty":true,"changed_paths":2,"changes":[{{"path":"src/lib.rs","kind":"modified"}},{{"path":"docs/new.md","kind":"added"}}],"conflicts":[{{"path":"src/lib.rs","kind":"diverged"}}]}}}}"#,
+				"0".repeat(40),
+				"1".repeat(40),
+				"2".repeat(40),
+				"3".repeat(40),
+				"4".repeat(40),
+			),
 		)
 	);
 }

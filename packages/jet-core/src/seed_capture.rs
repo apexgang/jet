@@ -22,15 +22,14 @@
 //! that HEAD is the commit the changes were made against. The changes
 //! arrive staged, because a Git link change has no unstaged form.
 
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use crate::error::CoreError;
-use crate::filesystem::blocking;
 use crate::relative_path::RelativePath;
-use crate::repository::{Output, git, git_with_index};
+use crate::repository::{Output, git};
 use crate::seed::SeedSelection;
+use crate::tree_capture::{ScratchIndex, diff_trees};
 use crate::worktree;
 
 /// How long one capture or one application may take. Hashing a large
@@ -39,12 +38,6 @@ const SEED_BUDGET: Duration = Duration::from_secs(300);
 
 /// Longest native Git message kept as local diagnostic detail (ADR-0061).
 const MAX_DETAIL_CHARS: usize = 512;
-
-/// The index mode of a Git link: a commit in another repository.
-const GIT_LINK_MODE: &str = "160000";
-
-/// The mode `diff-tree` gives a path the source tree lacks.
-const ABSENT_MODE: &str = "000000";
 
 /// Local-checkout changes captured as one tree, with the commit they were
 /// made against.
@@ -57,15 +50,6 @@ pub(crate) struct CapturedSeed {
 	pub(crate) tree: String,
 	/// How many paths the tree changes against `head`.
 	pub(crate) changed_paths: u32,
-}
-
-/// One path the captured tree changes against the base.
-#[derive(Debug, PartialEq, Eq)]
-struct Change {
-	path: String,
-	/// Whether the change adds a Git link where the base had nothing: a
-	/// repository nested inside the working tree.
-	nested_repository: bool,
 }
 
 /// Captures `selection` from the Local checkout at `root` into a tree,
@@ -110,33 +94,25 @@ async fn capture_unbounded(
 	if head != base_commit {
 		return Err(base_mismatch());
 	}
-	let index = scratch.join("index");
-	copy_index(root, &index).await?;
-	match selection {
-		SeedSelection::None => {}
-		SeedSelection::AllEligible => stage_everything(root, &index).await?,
-		SeedSelection::Paths(paths) => stage_paths(root, &index, paths).await?,
-	}
-	let mut tree = write_tree(root, &index).await?;
-	let mut changed = changes(root, &head, &tree).await?;
-	let nested: Vec<&str> = changed
-		.iter()
-		.filter(|change| change.nested_repository)
-		.map(|change| change.path.as_str())
-		.collect();
-	if let Some(first) = nested.first() {
-		if matches!(selection, SeedSelection::Paths(_)) {
-			return Err(nested_repository(first));
+	let index_path = scratch.join("index");
+	let index = ScratchIndex::new(root, &index_path, seed_failed);
+	index.copy_from_checkout().await?;
+	let (tree, changed) = match selection {
+		SeedSelection::None | SeedSelection::AllEligible => {
+			index.capture_everything(&head).await?
 		}
-		let mut arguments = vec!["update-index", "--force-remove", "--"];
-		arguments.extend(nested.iter().copied());
-		let removed = git_with_index(root, &index, &arguments).await?;
-		if !removed.status.success() {
-			return Err(seed_failed(removed.stderr));
+		SeedSelection::Paths(paths) => {
+			stage_paths(root, &index, paths).await?;
+			let tree = index.write_tree().await?;
+			let changed = diff_trees(root, &head, &tree, seed_failed).await?;
+			if let Some(nested) =
+				changed.iter().find(|change| change.is_nested_repository())
+			{
+				return Err(nested_repository(&nested.path));
+			}
+			(tree, changed)
 		}
-		tree = write_tree(root, &index).await?;
-		changed = changes(root, &head, &tree).await?;
-	}
+	};
 	Ok(CapturedSeed {
 		head,
 		tree,
@@ -182,70 +158,16 @@ async fn apply_unbounded(
 	Ok(())
 }
 
-/// Copies the checkout's index to `index`. A working tree that was never
-/// checked out has no index yet, and the capture then starts from HEAD.
-async fn copy_index(root: &Path, index: &Path) -> Result<(), CoreError> {
-	let located = git(
-		root,
-		&["rev-parse", "--path-format=absolute", "--git-path", "index"],
-	)
-	.await?;
-	if !located.status.success() {
-		return Err(seed_failed(located.stderr));
-	}
-	let source = PathBuf::from(located.stdout.trim_end());
-	let target = index.to_path_buf();
-	match blocking(move || std::fs::copy(&source, &target)).await? {
-		Ok(_) => Ok(()),
-		Err(error) if error.kind() == io::ErrorKind::NotFound => {
-			let read =
-				git_with_index(root, index, &["read-tree", "HEAD"]).await?;
-			if !read.status.success() {
-				return Err(seed_failed(read.stderr));
-			}
-			Ok(())
-		}
-		Err(error) => Err(seed_failed(error.to_string())),
-	}
-}
-
-/// Stages every eligible change: `git add --all` respects ignore rules,
-/// records a submodule as its checked-out commit, and records a symbolic
-/// link as itself.
-async fn stage_everything(root: &Path, index: &Path) -> Result<(), CoreError> {
-	let added = git_with_index(
-		root,
-		index,
-		&[
-			"--literal-pathspecs",
-			"add",
-			"--all",
-			"--no-warn-embedded-repo",
-			"--",
-			".",
-		],
-	)
-	.await?;
-	if !added.status.success() {
-		return Err(seed_failed(added.stderr));
-	}
-	Ok(())
-}
-
 /// Stages each named path over an index read back to HEAD, so only what
 /// was named comes along. A path that is itself ignored was named on
 /// purpose and is forced in; a directory that is not ignored brings only
 /// its unignored content, as `git add` does, which may be nothing.
 async fn stage_paths(
 	root: &Path,
-	index: &Path,
+	index: &ScratchIndex<'_>,
 	paths: &[RelativePath],
 ) -> Result<(), CoreError> {
-	let reread =
-		git_with_index(root, index, &["read-tree", "-m", "HEAD"]).await?;
-	if !reread.status.success() {
-		return Err(seed_failed(reread.stderr));
-	}
+	index.run(&["read-tree", "-m", "HEAD"]).await?;
 	for path in paths {
 		let standing =
 			git(root, &["check-ignore", "--quiet", "--", path.as_str()])
@@ -265,70 +187,12 @@ async fn stage_paths(
 			arguments.push("--force");
 		}
 		arguments.extend(["--", path.as_str()]);
-		let added = git_with_index(root, index, &arguments).await?;
+		let added = index.try_output(&arguments).await?;
 		if !added.status.success() {
 			return Err(path_refusal(path, &added));
 		}
 	}
 	Ok(())
-}
-
-async fn write_tree(root: &Path, index: &Path) -> Result<String, CoreError> {
-	let written = git_with_index(root, index, &["write-tree"]).await?;
-	if !written.status.success() {
-		return Err(seed_failed(written.stderr));
-	}
-	let tree = written.stdout.trim().to_owned();
-	if tree.len() < 40 || !tree.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-		return Err(seed_failed(written.stdout));
-	}
-	Ok(tree)
-}
-
-/// What `tree` changes against `head`, one record per path.
-async fn changes(
-	root: &Path,
-	head: &str,
-	tree: &str,
-) -> Result<Vec<Change>, CoreError> {
-	let diff = git(root, &["diff-tree", "-r", "-z", head, tree]).await?;
-	if !diff.status.success() {
-		return Err(seed_failed(diff.stderr));
-	}
-	parse_changes(&diff.stdout)
-}
-
-/// Parses `diff-tree -r -z` output: for each path, a record
-/// `:<source mode> <destination mode> <source> <destination> <status>`
-/// followed by the path, each ended by NUL.
-fn parse_changes(records: &str) -> Result<Vec<Change>, CoreError> {
-	let mut fields = records.split('\0');
-	let mut changes = Vec::new();
-	while let Some(record) = fields.next() {
-		if record.is_empty() {
-			break;
-		}
-		let (Some(modes), Some(path)) =
-			(record.strip_prefix(':'), fields.next())
-		else {
-			return Err(seed_failed(format!(
-				"diff-tree answered with an unreadable record {record:?}"
-			)));
-		};
-		let mut modes = modes.split(' ');
-		let (Some(source), Some(destination)) = (modes.next(), modes.next())
-		else {
-			return Err(seed_failed(format!(
-				"diff-tree answered with an unreadable record {record:?}"
-			)));
-		};
-		changes.push(Change {
-			path: path.to_owned(),
-			nested_repository: source == ABSENT_MODE
-				&& destination == GIT_LINK_MODE,
-		});
-	}
-	Ok(changes)
 }
 
 /// Why `git add` would not take a named path, by what it said. The

@@ -14,7 +14,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 10;
+pub const PROTOCOL_MINOR: u32 = 11;
 /// Minor that introduced fresh signed remote connection challenges.
 pub const REMOTE_AUTH_MINOR: u32 = 7;
 /// Minor that introduced fenced status and Conversation pagination.
@@ -40,6 +40,8 @@ pub const WORKSPACES_MINOR: u32 = 9;
 /// Minor that introduced seeding a Workspace from selected Local-checkout
 /// changes, and the seed on a Workspace.
 pub const SEEDED_WORKSPACES_MINOR: u32 = 10;
+/// Minor that introduced previewing a Workspace promotion.
+pub const WORKSPACE_PROMOTION_MINOR: u32 = 11;
 /// The only v1 codec; other codecs are reserved for later negotiation.
 pub const CODEC_JSON_V1: &str = "json-v1";
 
