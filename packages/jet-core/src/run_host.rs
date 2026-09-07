@@ -1,7 +1,7 @@
 //! Execution port: jetd translates Craft/helper traffic into these domain observations.
 use crate::{
-	CoreError, RunId, run_command::LaunchPlan, run_craft::PinnedCraft,
-	run_state::Observation,
+	CoreError, ForkLaunchSource, RunId, run_command::LaunchPlan,
+	run_craft::PinnedCraft, run_state::Observation,
 };
 use std::{future::Future, path::PathBuf, pin::Pin};
 
@@ -21,6 +21,16 @@ pub trait RunHost: std::fmt::Debug + Send + Sync {
 		&self,
 		plan: LaunchPlan,
 	) -> RunFuture<'_, Result<LaunchPlan, CoreError>>;
+	/// Selects native fork delivery only when both pinned Harness contracts
+	/// and the durable source identity are compatible. The safe default keeps
+	/// the portable provenance package selected by Core.
+	fn prepare_fork(
+		&self,
+		plan: LaunchPlan,
+		_source: Option<ForkLaunchSource>,
+	) -> RunFuture<'_, Result<LaunchPlan, CoreError>> {
+		Box::pin(async move { Ok(plan) })
+	}
 	/// Starts the accepted execution, distinguishing rejection from uncertainty.
 	fn start(
 		&self,

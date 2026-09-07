@@ -1,8 +1,8 @@
 //! Concrete out-of-process Craft and helper connections, pinned by accepted digest.
 use crate::run_craft::{self, Contract};
 use jet_core::{
-	CoreError, LaunchPlan, PinnedCraft, RunFuture, RunHost, RunId,
-	RunObservation, RunStartError,
+	CoreError, ForkLaunchSource, LaunchPlan, PinnedCraft, RunFuture, RunHost,
+	RunId, RunObservation, RunStartError,
 };
 use jet_protocol::{
 	CraftCommand, CraftEvent, CraftHello, CraftHostAccess, CraftReady, Frame,
@@ -190,6 +190,13 @@ impl RunHost for CraftProcesses {
 	) -> RunFuture<'_, Result<LaunchPlan, CoreError>> {
 		Box::pin(run_craft::prepare_next_run(plan))
 	}
+	fn prepare_fork(
+		&self,
+		plan: LaunchPlan,
+		source: Option<ForkLaunchSource>,
+	) -> RunFuture<'_, Result<LaunchPlan, CoreError>> {
+		Box::pin(run_craft::prepare_fork(plan, source))
+	}
 	fn start(
 		&self,
 		home: PathBuf,
@@ -288,7 +295,7 @@ pub(crate) async fn start(
 	let runtime = home.join("runtime");
 	private_directory(runtime.clone()).await?;
 	let (reader, writer) =
-		craft_connection(processes, &runtime, run_id, plan).await?;
+		craft_connection(processes, &runtime, run_id, plan, true).await?;
 	let (socket, helper_pid) = helper(&runtime, run_id, plan).await?;
 	let connection = RunConnection {
 		craft_minor: Contract::of(&plan.craft)?.craft_protocol.minor,
@@ -301,7 +308,7 @@ pub(crate) async fn start(
 		connection,
 		CraftCommand::Start {
 			id: plan.turn_id.unwrap_or(run_id.0).to_string(),
-			text: plan.prompt.clone(),
+			text: plan.initial_input()?,
 			helper_socket: socket.to_string_lossy().into_owned(),
 		},
 	))
@@ -312,6 +319,7 @@ pub(crate) async fn craft_connection(
 	runtime: &Path,
 	run_id: RunId,
 	plan: &LaunchPlan,
+	allow_fork: bool,
 ) -> Result<(FrameReader<OwnedReadHalf>, FrameWriter<OwnedWriteHalf>), CoreError>
 {
 	let contract = Contract::of(&plan.craft)?;
@@ -320,11 +328,29 @@ pub(crate) async fn craft_connection(
 	let (read, write) = stream.into_split();
 	let mut reader = FrameReader::new(read);
 	let mut writer = FrameWriter::new(write);
+	let fork =
+		allow_fork
+			.then_some(plan.fork.as_ref())
+			.flatten()
+			.and_then(|fork| {
+				fork.source_native_conversation.as_ref().map(|identity| {
+					jet_protocol::CraftFork {
+						source_native_conversation: identity.clone(),
+						source_conversation_id: fork.source_conversation_id.0,
+						source_run_id: fork.source_run_id.0,
+						checkpoint_turn: fork.checkpoint_turn,
+						checkpoint_commit: fork.checkpoint_commit.clone(),
+						checkpoint_tree: fork.checkpoint_tree.clone(),
+					}
+				})
+			});
 	let offer = ProtocolOffer {
 		family: ProtocolFamily::Craft,
 		versions: vec![contract.craft_protocol],
 		capabilities: if plan.native_conversation.is_some() {
 			vec!["runs".into(), "resume".into()]
+		} else if fork.is_some() {
+			vec!["fork".into(), "runs".into()]
 		} else {
 			vec!["runs".into()]
 		},
@@ -343,6 +369,7 @@ pub(crate) async fn craft_connection(
 				native_conversation: identity.clone(),
 			}
 		}),
+		fork,
 	};
 	send(&mut writer, &hello).await?;
 	let ready: CraftReady = timeout(TIMEOUT, receive(&mut reader))

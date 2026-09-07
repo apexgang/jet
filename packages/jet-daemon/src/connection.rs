@@ -517,6 +517,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 				feature: "importing external Conversations",
 			})
 		}
+		CommandRequest::ForkConversation { .. } => Some(MinorRequirement {
+			minor: jet_protocol::CONVERSATION_FORKS_MINOR,
+			feature: "Conversation forks",
+		}),
 		CommandRequest::CreateConversation { working_tree, .. }
 			if working_tree.is_seeded() =>
 		{

@@ -20,7 +20,7 @@ Every control payload is limited to 1 MiB, 64 nested containers, 4,096 direct en
 Hello has this shape (unknown optional object fields are ignored):
 
 ```json
-{"protocol":{"family":"craft","versions":[{"major":1,"minor":0}],"capabilities":["actions","resume"]},"specification":{"family":"specification","versions":[{"major":1,"minor":0}]},"execution_id":"01900000-0000-7000-8000-000000000001","resume":null}
+{"protocol":{"family":"craft","versions":[{"major":1,"minor":0}],"capabilities":["actions","resume"]},"specification":{"family":"specification","versions":[{"major":1,"minor":0}]},"execution_id":"01900000-0000-7000-8000-000000000001","resume":null,"fork":null}
 ```
 
 Ready contains `protocol` (the negotiated family, singular `version`, and capability intersection), independently negotiated `specification_protocol`, `specification` (the complete accepted declaration), and `enabled_features`. A newer specification minor containing only optional additions remains compatible with an older reader; it is not an execution pin. The host must compare declarations with the installed, user-accepted specification before sending any Command. A peer's self-description is never an authorization grant.
@@ -29,9 +29,20 @@ Ready contains `protocol` (the negotiated family, singular `version`, and capabi
 
 `ProtocolOffer` lists one highest minor per supported major. Major zero, duplicate majors, empty offers, family mismatches, and disjoint versions are rejected. New executions select the newest common major and the smaller minor; capabilities are the sorted, deduplicated intersection. `client`, `craft`, `helper`, and `specification` offers negotiate independently. A newer GUI protocol cannot upgrade a running Craft or helper.
 
-The concrete SDK currently implements Craft 1.1 and specification 1.0. Craft 1.1 adds managed Run supervision through the `runs` capability; see [Managed Run execution](managed-runs.md). Craft 1.0 turns and actions remain supported. There is no previous released Craft major yet; the negotiation conformance test exercises current/previous-major offers with different minor ceilings. Adding a future codec major requires an implementation as well as a declaration. Advertising a new major in TOML cannot make this SDK speak it.
+The concrete SDK currently implements Craft 1.4 and specification 1.0. Craft 1.1 adds managed Run supervision through the `runs` capability; see [Managed Run execution](managed-runs.md). Craft 1.2 adds recovery, Craft 1.3 adds turn and file-change evidence, and Craft 1.4 adds the `fork` feature and capability. Craft 1.0 turns and actions remain supported. There is no previous released Craft major yet; the negotiation conformance test exercises current/previous-major offers with different minor ceilings. Adding a future codec major requires an implementation as well as a declaration. Advertising a new major in TOML cannot make this SDK speak it.
 
 Before acknowledging startup, the host durably records the selected Craft/helper versions with the execution identity. On Craft restart it sends `resume: {"version":{"major":1,"minor":0},"native_conversation":"native-42"}` with the same `execution_id`. The SDK requires that exact saved version from the host, specification, and SDK, plus the `resume` feature and capability. It never chooses a newer major during recovery. Helper recovery uses the same `Negotiation::Resume` contract independently. An updater must use these saved pins to keep an incompatible update staged until executions finish or the user explicitly stops them; download alone does not change the running contract (ADR-0019).
+
+For the first Run of a fork, Craft 1.4 may instead receive `fork` with the
+source native Conversation identity and the immutable Jet checkpoint's source
+Conversation, Run, turn, commit, and tree. `resume` and `fork` are mutually
+exclusive. The SDK accepts `fork` only when the negotiated minor is at least 4
+and the specification enables both the feature and capability. Recovery never
+replays `fork`; subsequent Runs resume the destination's own native identity.
+The handshake supplies context only: an adapter must wait for the corresponding
+`Start` command before invoking the Harness's native fork, just as recovery
+never replays work merely because it receives `resume`.
+See [Conversation forks](conversation-forks.md).
 
 A closed pipe is not evidence that a Command failed. The host reconciles unresolved Effects; the SDK never replays Commands or starts a Harness automatically. The subprocess test terminates a Craft after receiving a completion, starts a new process with the saved native identity and version, and also verifies incompatible recovery is rejected before native output. Persistent supervision and reconciliation are owned by the host, not the adapter SDK.
 
@@ -60,7 +71,7 @@ Completion is `{"kind":"completed","id":"action-1","native_conversation":"native
 
 ## Specification and permissions
 
-The specification declares `schema`, stable `id`, one `harness`, a Craft `protocol` offer, `features`, `broker_permissions`, and `host_access`. Optional collections default to empty. Features have `name` and `required` (default false). The recognized features are `turns`, `actions`, and `resume`; an unknown optional feature is disabled without disabling known features, while an unknown required feature rejects the specification.
+The specification declares `schema`, stable `id`, one `harness`, a Craft `protocol` offer, `features`, `broker_permissions`, and `host_access`. Optional collections default to empty. Features have `name` and `required` (default false). The recognized features are `turns`, `actions`, `resume`, and `fork`; an unknown optional feature is disabled without disabling known features, while an unknown required feature rejects the specification.
 
 Broker permissions are closed names: `artifact_read`, `artifact_write`, and `remote_tools`. Host disclosures are tagged objects: `executable` with `name`, `filesystem` with `path`, `environment` with `name`, and `network` with `destination`. These access declarations are required in schema v1; unknown permission names or host-access kinds reject decoding. Feature flags do not grant access. The host enforces each broker operation using the originating Actor's accepted permissions and records its Security audit through the existing host pipeline. Host disclosures describe same-user access, not portable OS containment.
 

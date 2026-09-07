@@ -9,19 +9,45 @@ use std::{os::unix::fs::PermissionsExt, path::Path};
 use tokio::net::{UnixListener, UnixStream};
 
 pub fn install(home: &Path) {
+	install_craft(home, false, false);
+}
+
+#[allow(dead_code)]
+pub fn install_with_fork(home: &Path, fork: bool) {
+	install_craft(home, fork, true);
+}
+
+fn install_craft(home: &Path, fork: bool, capture_fork: bool) {
 	std::fs::create_dir_all(home.join("crafts")).unwrap();
 	let executable = std::env::current_exe().unwrap();
 	let program = home.join("crafts/fake-craft");
+	let minor = if fork { 4 } else { 3 };
+	let capabilities = if fork {
+		json!(["runs", "resume", "fork"])
+	} else {
+		json!(["runs", "resume"])
+	};
+	let features = if fork {
+		json!([{"name":"turns"},{"name":"resume"},{"name":"fork"}])
+	} else {
+		json!([{"name":"turns"},{"name":"resume"}])
+	};
 	let specification = json!({
 		"schema":{"major":1,"minor":0},"id":"fake","harness":"fake",
-		"protocol":{"family":"craft","versions":[{"major":1,"minor":3}],"capabilities":["runs","resume"]},
-		"features":[{"name":"turns"},{"name":"resume"}],"broker_permissions":[],
+		"protocol":{"family":"craft","versions":[{"major":1,"minor":minor}],"capabilities":capabilities},
+		"features":features,"broker_permissions":[],
 		"host_access":[{"kind":"executable","name":executable},{"kind":"executable","name":"/missing-jet-test-harness"}]
 	});
 	let manifest = home.join("crafts/fake.json");
+	let capture = if capture_fork {
+		"export JET_FAKE_CAPTURE_FORK=1\n"
+	} else {
+		""
+	};
 	let script = format!(
-		"#!/bin/sh\nexport JET_FAKE_MANIFEST={}\nexport JET_CRAFT_SOCKET=\"$2\"\nexec {} --ignored --exact --nocapture fixture::fake_craft_process\n",
+		"#!/bin/sh\nexport JET_FAKE_MANIFEST={}\nexport JET_CRAFT_SOCKET=\"$2\"\n{}exec {} --ignored --exact --nocapture fixture::fake_craft_process\n",
 		quote(manifest.to_str().unwrap()),
+		capture,
 		quote(executable.to_str().unwrap())
 	);
 	std::fs::write(&program, &script).unwrap();
@@ -89,6 +115,7 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 	let execution_id = connection.hello().execution_id;
 	let craft_minor = connection.negotiated().version.minor;
 	let resume = connection.hello().resume.clone();
+	let fork = connection.hello().fork.clone();
 	let (mut receiver, mut sender) = connection.split();
 	let (id, text, helper_socket, source_offset, checkpoint) =
 		match receiver.receive().await.unwrap() {
@@ -139,12 +166,24 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 			.exists();
 	let recovering = text.is_none();
 	if !recovering {
+		let root = Path::new(&ready.descriptor.config.working_directory);
 		std::fs::write(
-			Path::new(&ready.descriptor.config.working_directory)
-				.join("native-resume"),
+			root.join("native-resume"),
 			serde_json::to_string(&resume).unwrap(),
 		)
 		.unwrap();
+		if std::env::var_os("JET_FAKE_CAPTURE_FORK").is_some() {
+			std::fs::write(
+				root.join("native-fork"),
+				serde_json::to_string(&fork).unwrap(),
+			)
+			.unwrap();
+			std::fs::write(
+				root.join("initial-input"),
+				format!("{}\n", text.as_deref().unwrap()),
+			)
+			.unwrap();
+		}
 	}
 	writer
 		.write(&Frame::control(
@@ -402,7 +441,13 @@ fn fake_harness_process() {
 	if input.trim() == "Fail after spawn" {
 		std::process::exit(7);
 	}
-	assert_eq!(input.trim(), "Make a change");
+	assert!(
+		input.trim() == "Make a change"
+			|| input.trim() == "Continue from checkpoint"
+			|| (input.starts_with(
+				"<jet-fork-context version=\"1\" data-only=\"true\">\n"
+			) && input.trim().ends_with("Continue from checkpoint"))
+	);
 	if Path::new("queue").exists() {
 		return queue_fixture::harness();
 	}

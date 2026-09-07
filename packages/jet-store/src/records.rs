@@ -407,7 +407,7 @@ impl WorkingTreeRecord {
 	}
 }
 
-/// Where a Conversation came from (ADR-0010).
+/// Where a Conversation came from (ADR-0010, ADR-0035).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConversationOriginRecord {
 	/// Created in Jet.
@@ -418,19 +418,83 @@ pub enum ConversationOriginRecord {
 		/// The import it continues.
 		import_id: Uuid,
 	},
+	/// Created from one immutable Change checkpoint.
+	Forked {
+		/// Conversation that owns the selected Run.
+		source_conversation_id: Uuid,
+		/// Run that owns the selected checkpoint.
+		source_run_id: Uuid,
+		/// One-based turn boundary selected from that Run.
+		checkpoint_turn: u32,
+	},
 }
 
 impl ConversationOriginRecord {
-	/// The import column, absent for a Conversation created in Jet.
-	pub(crate) fn column(self) -> Option<Uuid> {
+	/// Columns whose valid combinations spell one origin.
+	pub(crate) fn columns(
+		self,
+	) -> (Option<Uuid>, Option<Uuid>, Option<Uuid>, Option<i64>) {
 		match self {
-			Self::New => None,
-			Self::Imported { import_id } => Some(import_id),
+			Self::New => (None, None, None, None),
+			Self::Imported { import_id } => (Some(import_id), None, None, None),
+			Self::Forked {
+				source_conversation_id,
+				source_run_id,
+				checkpoint_turn,
+			} => (
+				None,
+				Some(source_conversation_id),
+				Some(source_run_id),
+				Some(i64::from(checkpoint_turn)),
+			),
 		}
 	}
 
-	pub(crate) fn parse(import_id: Option<Uuid>) -> Self {
-		import_id.map_or(Self::New, |import_id| Self::Imported { import_id })
+	pub(crate) fn parse(
+		import_id: Option<Uuid>,
+		fork_source_conversation_id: Option<Uuid>,
+		fork_source_run_id: Option<Uuid>,
+		fork_checkpoint_turn: Option<i64>,
+	) -> Result<Self, StoreError> {
+		match (
+			import_id,
+			fork_source_conversation_id,
+			fork_source_run_id,
+			fork_checkpoint_turn,
+		) {
+			(None, None, None, None) => Ok(Self::New),
+			(Some(import_id), None, None, None) => {
+				Ok(Self::Imported { import_id })
+			}
+			(
+				None,
+				Some(source_conversation_id),
+				Some(source_run_id),
+				Some(turn),
+			) => {
+				let checkpoint_turn = u32::try_from(turn).map_err(|_| {
+					column_error(
+						"fork_checkpoint_turn",
+						format!("invalid checkpoint turn {turn}"),
+					)
+				})?;
+				if checkpoint_turn == 0 {
+					return Err(column_error(
+						"fork_checkpoint_turn",
+						"a checkpoint turn is positive".into(),
+					));
+				}
+				Ok(Self::Forked {
+					source_conversation_id,
+					source_run_id,
+					checkpoint_turn,
+				})
+			}
+			combination => Err(column_error(
+				"conversation_origin",
+				format!("invalid origin columns {combination:?}"),
+			)),
+		}
 	}
 }
 

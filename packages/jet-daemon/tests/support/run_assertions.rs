@@ -26,6 +26,7 @@ pub async fn wait_for(
 	}
 }
 
+#[allow(dead_code)]
 pub async fn all_events(
 	client: &jet_client::Client,
 ) -> jet_protocol::EventPage {

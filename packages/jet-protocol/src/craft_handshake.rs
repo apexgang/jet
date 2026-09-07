@@ -15,6 +15,25 @@ pub struct CraftResume {
 	pub native_conversation: String,
 }
 
+/// Immutable source context for a new native Harness Conversation. Receiving
+/// this handshake is not authority to perform the fork before `Start`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CraftFork {
+	/// Native Harness Conversation that owns the selected source content.
+	pub source_native_conversation: String,
+	/// Jet Conversation that owns the selected Run.
+	pub source_conversation_id: Uuid,
+	/// Jet Run that owns the selected checkpoint.
+	pub source_run_id: Uuid,
+	/// One-based checkpoint boundary selected by the user.
+	pub checkpoint_turn: u32,
+	/// Checked-out source commit retained by the checkpoint.
+	pub checkpoint_commit: String,
+	/// Exact working-tree object retained by the checkpoint.
+	pub checkpoint_tree: String,
+}
+
 /// First host control payload after the `jet-craft\n` preface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -28,6 +47,10 @@ pub struct CraftHello {
 	/// Absent for a new execution; present only for explicit recovery.
 	#[serde(default)]
 	pub resume: Option<CraftResume>,
+	/// Absent unless this new execution should fork an existing native
+	/// Conversation from the selected immutable checkpoint.
+	#[serde(default)]
+	pub fork: Option<CraftFork>,
 }
 
 /// Successful negotiation; the host persists the version with the execution.

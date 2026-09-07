@@ -27,13 +27,14 @@ use std::path::PathBuf;
 use jet_core::{
 	AccountBindingId, Actor, AuditSequence, AuthenticationString,
 	BaseSelection, ClientId, Command, CommandOutcome, ConflictState,
-	Conversation, ConversationId, ConversationList, ConversationSnapshot,
-	CoreError, ErrorCategory, Event, EventPage, EventPayload, EventSequence,
-	HarnessId, ImportId, NativeConversationId, PairingOfferId, PairingSecret,
-	PairingSignature, PathGrant, PlaneStatus, ProjectId, ProviderId, Query,
-	QueryResult, RecoveryAction, RelativePath, RetentionPolicy, Revision,
-	RevisionConflict, Run, RunId, RunLifecycle, SearchTerms, SeedSelection,
-	WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase, WorkspaceId,
+	Conversation, ConversationId, ConversationList, ConversationOrigin,
+	ConversationSnapshot, CoreError, ErrorCategory, Event, EventPage,
+	EventPayload, EventSequence, HarnessId, ImportId, NativeConversationId,
+	PairingOfferId, PairingSecret, PairingSignature, PathGrant, PlaneStatus,
+	ProjectId, ProviderId, Query, QueryResult, RecoveryAction, RelativePath,
+	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
+	SearchTerms, SeedSelection, WorkingTree, WorkingTreeRequest, Workspace,
+	WorkspaceBase, WorkspaceId,
 };
 use jet_protocol as wire;
 
@@ -302,6 +303,13 @@ pub(crate) fn command(
 		} => Command::CreateConversation {
 			retention: retention_from_wire(*retention),
 			working_tree: working_tree_request(working_tree)?,
+		},
+		wire::CommandRequest::ForkConversation {
+			source_run_id,
+			checkpoint_turn,
+		} => Command::ForkConversation {
+			source_run_id: RunId(*source_run_id),
+			checkpoint_turn: *checkpoint_turn,
 		},
 		wire::CommandRequest::CreateRun { conversation_id } => {
 			Command::CreateRun {
@@ -598,8 +606,17 @@ fn conversation(conversation: &Conversation, minor: u32) -> wire::Conversation {
 			.then(|| working_tree(conversation.working_tree)),
 		// A client that negotiated an older minor does not know where a
 		// Conversation can come from, so it is not told (ADR-0019).
-		origin: (minor >= wire::IMPORTED_CONVERSATIONS_MINOR)
-			.then(|| import::origin(conversation.origin)),
+		origin: match conversation.origin {
+			ConversationOrigin::Forked { .. }
+				if minor < wire::CONVERSATION_FORKS_MINOR =>
+			{
+				None
+			}
+			_ if minor >= wire::IMPORTED_CONVERSATIONS_MINOR => {
+				Some(import::origin(conversation.origin))
+			}
+			_ => None,
+		},
 		created_at_unix_ms: unix_ms(conversation.created_at),
 	}
 }

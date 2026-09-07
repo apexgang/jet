@@ -157,6 +157,14 @@ pub enum Command {
 		/// Where it does its work.
 		working_tree: WorkingTreeRequest,
 	},
+	/// Create a new Conversation and separate Workspace from one immutable
+	/// Change checkpoint (ADR-0035).
+	ForkConversation {
+		/// Run that owns the selected checkpoint.
+		source_run_id: RunId,
+		/// One-based turn boundary to fork from.
+		checkpoint_turn: u32,
+	},
 	/// Record a new Run of a Conversation that has no live Run.
 	CreateRun {
 		/// The Conversation to execute.
@@ -323,6 +331,7 @@ impl Command {
 				working_tree: WorkingTreeRequest::Workspace { .. },
 				..
 			}
+			| Self::ForkConversation { .. }
 			| Self::ResumeImportedConversation {
 				working_tree: WorkingTreeRequest::Workspace { .. },
 				..
@@ -796,6 +805,22 @@ async fn execute_new(
 				.await
 			}
 		},
+		Command::ForkConversation { .. } => {
+			let Prepared::Fork(prepared) = prepared else {
+				return Err(CoreError::internal(
+					"fork.unprepared",
+					"a Conversation fork reached its transaction without its selected checkpoint",
+				));
+			};
+			crate::fork::create(
+				tx,
+				actor,
+				*prepared,
+				workspace_home,
+				now_unix_ms,
+			)
+			.await
+		}
 		Command::ImportConversation { .. } => {
 			import::import(tx, actor, prepared, now_unix_ms).await
 		}

@@ -189,6 +189,14 @@ pub enum CommandRequest {
 		)]
 		working_tree: WorkingTreeRequest,
 	},
+	/// Create a new Conversation and separate Workspace from one immutable
+	/// Change checkpoint.
+	ForkConversation {
+		/// Run that owns the selected checkpoint.
+		source_run_id: Uuid,
+		/// One-based turn boundary to fork from.
+		checkpoint_turn: u32,
+	},
 	/// Record a new Run of a Conversation that has no live Run.
 	CreateRun {
 		/// The Conversation to execute.

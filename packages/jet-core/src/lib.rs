@@ -35,6 +35,7 @@ mod effect;
 mod error;
 mod event;
 mod filesystem;
+mod fork;
 mod import;
 mod lifecycle;
 mod orphan;
@@ -94,7 +95,7 @@ pub use terminal::{
 };
 mod worktree;
 pub use run::{ManagedProcess, ManagedProcessRole, RunActivity, RunExecution};
-pub use run_command::LaunchPlan;
+pub use run_command::{ForkLaunchSource, LaunchFork, LaunchPlan};
 pub use run_craft::PinnedCraft;
 pub use run_host::{
 	RunConnection, RunFuture, RunHost, RunRecoveryCursor, RunRecoveryError,

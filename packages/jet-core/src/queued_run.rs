@@ -102,6 +102,9 @@ async fn continuation(
 			}
 			let mut plan: LaunchPlan =
 				crate::run_state::decode(&execution.plan)?;
+			// Fork delivery creates only the new native Conversation. Later queued
+			// Runs continue the destination's own durable native identity.
+			plan.fork = None;
 			plan.native_conversation =
 				state.native_conversation.or(plan.native_conversation);
 			return Ok(Some(Continuation {

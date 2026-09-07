@@ -266,7 +266,7 @@ pub(crate) async fn connect(
 		return Err(RunRecoveryError::Unsafe);
 	}
 	let (mut reader, mut writer) =
-		run_host::craft_connection(processes, &runtime, id, &plan)
+		run_host::craft_connection(processes, &runtime, id, &plan, false)
 			.await
 			.map_err(|_| RunRecoveryError::Unavailable)?;
 	run_host::send(

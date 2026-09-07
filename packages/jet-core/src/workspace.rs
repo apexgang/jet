@@ -143,7 +143,17 @@ pub(crate) struct PreparedWorkspace {
 	project_id: ProjectId,
 	project_root: PathBuf,
 	base: WorkspaceBase,
-	captured: Option<CapturedSeed>,
+	changes: PreparedChanges,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PreparedChanges {
+	None,
+	/// Local-checkout changes selected as a Workspace seed.
+	Seed(CapturedSeed),
+	/// The selected checkpoint tree. It is applied like a seed internally,
+	/// but remains a Change checkpoint in the public domain model.
+	Checkpoint(CapturedSeed),
 }
 
 impl BaseSelection {
@@ -209,10 +219,10 @@ pub(crate) async fn prepare(
 	let project_root = PathBuf::from(project.root);
 	let commit =
 		worktree::resolve_commit(&project_root, base.as_revision()).await?;
-	let captured = if seed.is_none() {
-		None
+	let changes = if seed.is_none() {
+		PreparedChanges::None
 	} else {
-		Some(
+		PreparedChanges::Seed(
 			capture_in_scratch(
 				&core.workspace_home,
 				&project_root,
@@ -229,8 +239,32 @@ pub(crate) async fn prepare(
 			selection: base.clone(),
 			commit,
 		},
-		captured,
+		changes,
 	})
+}
+
+/// Builds a Workspace preparation from a checkpoint tree already validated
+/// against the source Run and Project by the fork command.
+pub(crate) fn from_checkpoint(
+	project_id: ProjectId,
+	project_root: PathBuf,
+	commit: String,
+	tree: String,
+	changed_paths: u32,
+) -> PreparedWorkspace {
+	PreparedWorkspace {
+		project_id,
+		project_root,
+		base: WorkspaceBase {
+			selection: BaseSelection::Revision(commit.clone()),
+			commit: commit.clone(),
+		},
+		changes: PreparedChanges::Checkpoint(CapturedSeed {
+			head: commit,
+			tree,
+			changed_paths,
+		}),
+	}
 }
 
 /// Captures `seed` through a scratch directory of the Workspace home.
@@ -301,9 +335,12 @@ pub(crate) async fn create(
 		project_id,
 		project_root,
 		base,
-		captured,
+		changes,
 	} = prepared;
-	let seed = captured.as_ref().map(WorkspaceSeed::from);
+	let seed = match &changes {
+		PreparedChanges::Seed(captured) => Some(WorkspaceSeed::from(captured)),
+		PreparedChanges::None | PreparedChanges::Checkpoint(_) => None,
+	};
 	if tx.project(project_id.0).await?.is_none() {
 		return Err(project_not_found());
 	}
@@ -367,6 +404,11 @@ pub(crate) async fn create(
 			.await?;
 	}
 	worktree::add_detached(&project_root, &root_text, &base.commit).await?;
+	let captured = match changes {
+		PreparedChanges::Seed(captured)
+		| PreparedChanges::Checkpoint(captured) => Some(captured),
+		PreparedChanges::None => None,
+	};
 	if let Some(captured) = captured
 		&& let Err(refusal) = seed_capture::apply(&root, &captured).await
 	{

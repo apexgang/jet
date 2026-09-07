@@ -100,7 +100,7 @@ pub use conversation::{
 	RevisionConflict, Run, RunLifecycle,
 };
 pub use craft::{CraftAction, CraftApprovalDecision, CraftCommand, CraftEvent};
-pub use craft_handshake::{CraftHello, CraftReady, CraftResume};
+pub use craft_handshake::{CraftFork, CraftHello, CraftReady, CraftResume};
 pub use craft_spec::{
 	BrokerPermission, CraftFeature, CraftHostAccess, CraftSpecification,
 };
@@ -111,8 +111,8 @@ pub use frame::{
 };
 pub use handshake::{
 	ACCOUNT_BINDINGS_MINOR, CHANGE_CHECKPOINTS_MINOR, CODEC_JSON_V1,
-	ClientHello, EXECUTION_RECOVERY_MINOR, FENCED_READS_MINOR,
-	IMPORTED_CONVERSATIONS_MINOR, MANAGED_RUNS_MINOR,
+	CONVERSATION_FORKS_MINOR, ClientHello, EXECUTION_RECOVERY_MINOR,
+	FENCED_READS_MINOR, IMPORTED_CONVERSATIONS_MINOR, MANAGED_RUNS_MINOR,
 	MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE, PROJECTS_MINOR,
 	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SEARCH_MINOR,
 	SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
