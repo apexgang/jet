@@ -111,6 +111,7 @@ async fn a_client_below_the_import_minor_is_refused() {
 		.send(&ClientMessage::Query {
 			id: 1,
 			query: QueryRequest::ExternalConversations,
+			timeout_ms: None,
 		})
 		.await;
 

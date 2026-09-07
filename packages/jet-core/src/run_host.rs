@@ -80,6 +80,24 @@ pub trait RunHost: std::fmt::Debug + Send + Sync {
 	) -> RunFuture<'_, Result<(), RunRecoveryError>> {
 		Box::pin(async { Err(RunRecoveryError::Unsafe) })
 	}
+	/// Delivers one escalation step to the live native process group of a
+	/// managed Run, leaving the helper and its retained source alive so the
+	/// native exit still reaches Core through the ordinary source path.
+	/// Implementations validate the helper identity before signalling and
+	/// never choose the target from client input (ADR-0083).
+	fn signal(
+		&self,
+		_home: PathBuf,
+		_run_id: RunId,
+		_signal: crate::ExecutionSignal,
+	) -> RunFuture<'_, Result<(), CoreError>> {
+		Box::pin(async {
+			Err(CoreError::conflict(
+				"execution.unavailable",
+				"execution control is unavailable",
+			))
+		})
+	}
 	/// Terminates only the instance selected by an authenticated interactive user.
 	fn terminate(
 		&self,
@@ -112,6 +130,17 @@ pub trait RunConnection: Send + Sync {
 	) -> RunFuture<'_, Result<(), CoreError>>;
 	/// Receives a domain observation, validating transport identities first.
 	fn receive(&self) -> RunFuture<'_, Result<Observation, CoreError>>;
+	/// Whether the pinned Craft negotiated native turn cancellation. A
+	/// connection that answers `false` is only ever stopped by signal
+	/// escalation (ADR-0083).
+	fn supports_native_cancellation(&self) -> bool;
+	/// Asks the Harness to cancel one delivered turn, leaving the Run able
+	/// to accept the next one. Implementations may assume Core admitted the
+	/// request durably first.
+	fn interrupt(
+		&self,
+		turn_id: uuid::Uuid,
+	) -> RunFuture<'_, Result<(), CoreError>>;
 	/// Releases native source only after Core committed its meaning.
 	fn acknowledge(&self, offset: u64) -> RunFuture<'_, Result<(), CoreError>>;
 	/// Closes the execution connection after its terminal source is committed.

@@ -85,6 +85,7 @@ impl Client {
 			other @ (CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
+			| CommandResponse::RunControlAccepted { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
@@ -144,6 +145,7 @@ impl Client {
 			other @ (CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
+			| CommandResponse::RunControlAccepted { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}

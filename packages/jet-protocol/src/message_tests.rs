@@ -97,6 +97,7 @@ fn status_query_and_result_have_the_agreed_wire_shape() {
 	let query = ClientMessage::Query {
 		id: 1,
 		query: QueryRequest::Status,
+		timeout_ms: None,
 	};
 	let result = ServerMessage::QueryResult {
 		id: 1,
@@ -328,6 +329,7 @@ fn sequences_and_revisions_round_trip_as_decimal_strings() {
 	let query = ClientMessage::Query {
 		id: 8,
 		query: QueryRequest::Events { after: u64::MAX },
+		timeout_ms: None,
 	};
 
 	let encoded = json(&query);
@@ -367,6 +369,7 @@ fn the_security_audit_query_and_page_have_the_agreed_wire_shape() {
 	let query = ClientMessage::Query {
 		id: 7,
 		query: QueryRequest::SecurityAudit { after: 0 },
+		timeout_ms: None,
 	};
 	let result = ServerMessage::QueryResult {
 		id: 7,
@@ -566,6 +569,7 @@ fn project_registration_and_listing_have_the_agreed_wire_shape() {
 	let query = ClientMessage::Query {
 		id: 10,
 		query: QueryRequest::Projects,
+		timeout_ms: None,
 	};
 	let list = ServerMessage::QueryResult {
 		id: 10,
@@ -593,6 +597,7 @@ fn a_project_preview_has_the_agreed_wire_shape() {
 			path: "/home/jet/repo".into(),
 			observation: CapabilityObservation::Fresh,
 		},
+		timeout_ms: None,
 	};
 	let result = ServerMessage::QueryResult {
 		id: 11,
@@ -640,6 +645,7 @@ fn a_project_entry_has_the_agreed_wire_shape() {
 			project_id: Uuid::nil(),
 			path: "docs/adr/0101.md".into(),
 		},
+		timeout_ms: None,
 	};
 	let result = ServerMessage::QueryResult {
 		id: 12,
@@ -725,6 +731,7 @@ fn a_promotion_preview_has_the_agreed_wire_shape() {
 				name: "release".into(),
 			},
 		},
+		timeout_ms: None,
 	};
 	let result = ServerMessage::QueryResult {
 		id: 13,
@@ -784,6 +791,7 @@ fn a_search_has_the_agreed_wire_shape() {
 		query: QueryRequest::Search {
 			text: "src/lib.rs release".into(),
 		},
+		timeout_ms: None,
 	};
 	let result = ServerMessage::QueryResult {
 		id: 15,
@@ -884,6 +892,7 @@ fn external_conversations_and_imports_have_the_agreed_wire_shape() {
 	let query = ClientMessage::Query {
 		id: 16,
 		query: QueryRequest::ExternalConversations,
+		timeout_ms: None,
 	};
 	let result = ServerMessage::QueryResult {
 		id: 16,

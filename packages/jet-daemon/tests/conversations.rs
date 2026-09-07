@@ -394,6 +394,7 @@ async fn a_concurrent_write_stales_pagination_and_replays_after_the_fence() {
 		.send(&ClientMessage::Query {
 			id: 1,
 			query: QueryRequest::Conversations,
+			timeout_ms: None,
 		})
 		.await;
 	let ServerMessage::QueryResult {
@@ -407,6 +408,7 @@ async fn a_concurrent_write_stales_pagination_and_replays_after_the_fence() {
 		.send(&ClientMessage::Query {
 			id: 2,
 			query: QueryRequest::Status,
+			timeout_ms: None,
 		})
 		.await;
 	let ServerMessage::QueryResult {

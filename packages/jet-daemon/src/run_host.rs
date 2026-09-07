@@ -158,6 +158,23 @@ impl jet_core::RunConnection for RunConnection {
 			})
 		})
 	}
+	fn supports_native_cancellation(&self) -> bool {
+		self.craft_minor >= 4
+	}
+	fn interrupt(&self, turn_id: Uuid) -> RunFuture<'_, Result<(), CoreError>> {
+		Box::pin(async move {
+			if !self.supports_native_cancellation() {
+				return Err(failed("cancellation requires Craft 1.4"));
+			}
+			send(
+				&mut *self.writer.lock().await,
+				&CraftCommand::Interrupt {
+					id: turn_id.to_string(),
+				},
+			)
+			.await
+		})
+	}
 	fn acknowledge(
 		&self,
 		source_offset: u64,
@@ -265,6 +282,14 @@ impl RunHost for CraftProcesses {
 		})
 	}
 
+	fn signal(
+		&self,
+		home: PathBuf,
+		run_id: RunId,
+		signal: jet_core::ExecutionSignal,
+	) -> RunFuture<'_, Result<(), CoreError>> {
+		Box::pin(crate::execution_signal::deliver(home, run_id, signal))
+	}
 	fn terminate(
 		&self,
 		home: PathBuf,

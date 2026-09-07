@@ -1,6 +1,6 @@
 //! The helper alone owns the Harness, its pipes, and its terminal OS status.
 use crate::spool::Spool;
-use jet_protocol::{HelperConfig, HelperEvent, NativeStream};
+use jet_protocol::{HelperConfig, HelperEvent, NativeSignal, NativeStream};
 use std::{process::Stdio, sync::Arc};
 use tokio::{
 	io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
@@ -21,6 +21,10 @@ impl From<std::io::Error> for LaunchError {
 pub(crate) struct Control {
 	pub(crate) stop: tokio::sync::watch::Receiver<bool>,
 	pub(crate) stopped: tokio::sync::watch::Sender<bool>,
+	/// Escalation steps requested by the host, each with the sequence that
+	/// distinguishes a repeat of the same signal from the previous one.
+	pub(crate) signal:
+		tokio::sync::watch::Receiver<Option<(u64, NativeSignal)>>,
 }
 
 pub(crate) async fn launch(
@@ -81,7 +85,20 @@ pub(crate) async fn launch(
 			Arc::clone(&spool),
 		));
 		let completed = async {
-			let status = child.wait().await;
+			// `wait` is cancel safe: a branch that wins the race leaves the
+			// child unreaped, so signalling its group stays well defined.
+			let status = loop {
+				tokio::select! {
+					status = child.wait() => break status,
+					Ok(()) = control.signal.changed() => {
+						if let Some((_, signal)) =
+							*control.signal.borrow_and_update()
+						{
+							let _ = deliver(harness_pid, signal);
+						}
+					}
+				}
+			};
 			let _ = (&mut input_task).await;
 			let output = (&mut output_task).await;
 			let errors = (&mut error_task).await;
@@ -100,10 +117,8 @@ pub(crate) async fn launch(
 			_ = stop => {
 				// The helper signals only its unreaped child, in the process group
 				// it created. A descriptor-supplied PID can never choose this target.
-				if matches!(child.try_wait(), Ok(None)) {
-					let pid = rustix::process::Pid::from_raw(harness_pid as i32).expect("native PID");
-					if rustix::process::kill_process_group(pid, rustix::process::Signal::KILL).is_err() { return; }
-				}
+				if matches!(child.try_wait(), Ok(None))
+					&& deliver(harness_pid, NativeSignal::Kill).is_err() { return; }
 				if child.wait().await.is_err() { return; }
 				input_task.abort(); output_task.abort(); error_task.abort();
 				control.stopped.send_replace(true);
@@ -125,6 +140,24 @@ pub(crate) async fn launch(
 		}
 	});
 	Ok(())
+}
+
+/// Delivers one signal to the process group the helper created for its
+/// child. A host-supplied identity can never choose this target.
+fn deliver(
+	harness_pid: u32,
+	signal: NativeSignal,
+) -> Result<(), rustix::io::Errno> {
+	let pid =
+		rustix::process::Pid::from_raw(harness_pid as i32).expect("native PID");
+	rustix::process::kill_process_group(
+		pid,
+		match signal {
+			NativeSignal::Interrupt => rustix::process::Signal::INT,
+			NativeSignal::Terminate => rustix::process::Signal::TERM,
+			NativeSignal::Kill => rustix::process::Signal::KILL,
+		},
+	)
 }
 
 async fn pump(

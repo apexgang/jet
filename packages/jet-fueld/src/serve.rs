@@ -2,8 +2,9 @@
 use crate::{native, spool::Spool};
 use jet_protocol::{
 	Frame, FrameReader, FrameWriter, HelperCommand, HelperConfig, HelperEvent,
-	HelperHello, HelperReady, Negotiation, ProtocolFamily, ProtocolOffer,
-	ProtocolVersion, decode_control, encode_control,
+	HelperHello, HelperReady, HelperSignalled, NativeSignal, Negotiation,
+	ProtocolFamily, ProtocolOffer, ProtocolVersion, decode_control,
+	encode_control,
 };
 use std::{os::unix::fs::PermissionsExt, path::Path};
 use tokio::{
@@ -59,6 +60,8 @@ pub(crate) async fn serve(path: &Path) -> std::io::Result<()> {
 		done: tokio::sync::watch::channel(false).0,
 		stop: tokio::sync::watch::channel(false).0,
 		stopped: tokio::sync::watch::channel(false).0,
+		started: tokio::sync::watch::channel(false).0,
+		signal: tokio::sync::watch::channel(None).0,
 	});
 	let mut done = state.done.subscribe();
 	let mut tasks = tokio::task::JoinSet::new();
@@ -99,6 +102,12 @@ struct Execution {
 	done: tokio::sync::watch::Sender<bool>,
 	stop: tokio::sync::watch::Sender<bool>,
 	stopped: tokio::sync::watch::Sender<bool>,
+	/// Whether a native process was ever spawned. Only a live child can be
+	/// signalled, and only through the group the helper itself created.
+	started: tokio::sync::watch::Sender<bool>,
+	/// The newest escalation step, sequenced so an identical repeat is
+	/// still delivered.
+	signal: tokio::sync::watch::Sender<Option<(u64, NativeSignal)>>,
 }
 
 #[expect(
@@ -117,7 +126,7 @@ async fn connection(
 		.map_err(std::io::Error::other)??;
 	let offer = ProtocolOffer {
 		family: ProtocolFamily::Helper,
-		versions: vec![ProtocolVersion { major: 1, minor: 1 }],
+		versions: vec![ProtocolVersion { major: 1, minor: 2 }],
 		capabilities: vec![],
 	};
 	let negotiated = offer
@@ -139,6 +148,23 @@ async fn connection(
 		.await
 		.map_err(std::io::Error::other)??;
 	if matches!(command, HelperCommand::Inspect) {
+		return Ok(());
+	}
+	if let HelperCommand::Signal { instance, signal } = command {
+		// Signalling changes no source and ends no helper, so it never takes
+		// the acknowledgement generation from the live execution stream.
+		if negotiated.version.minor < 2
+			|| instance != state.descriptor.instance
+			|| !*state.started.borrow()
+			|| *state.stop.borrow()
+		{
+			return Err(std::io::Error::other("wrong signal identity"));
+		}
+		state.signal.send_modify(|current| {
+			let sequence = current.map_or(0, |(sequence, _)| sequence) + 1;
+			*current = Some((sequence, signal));
+		});
+		send(&mut writer, &HelperSignalled { instance, signal }).await?;
 		return Ok(());
 	}
 	if let HelperCommand::Terminate { instance } = command {
@@ -213,11 +239,14 @@ async fn connection(
 					native::Control {
 						stop: state.stop.subscribe(),
 						stopped: state.stopped.clone(),
+						signal: state.signal.subscribe(),
 					},
 				)
 				.await
 				{
-					Ok(()) => {}
+					Ok(()) => {
+						state.started.send_replace(true);
+					}
 					Err(native::LaunchError::NotStarted) => {
 						state.stopped.send_replace(true);
 						state.spool.append(HelperEvent::LaunchFailed).await?;
@@ -232,6 +261,7 @@ async fn connection(
 		}
 		HelperCommand::Inspect
 		| HelperCommand::Terminate { .. }
+		| HelperCommand::Signal { .. }
 		| HelperCommand::Recover { .. }
 		| HelperCommand::Acknowledge { .. } => {
 			return Err(std::io::Error::other("invalid helper command"));

@@ -9,10 +9,21 @@ use std::{
 	time::{Duration, Instant},
 };
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct Recovery {
 	pub(crate) monitors: Mutex<HashSet<RunId>>,
+	/// The pinned connection each supervised execution is reachable
+	/// through, so an admitted control request can ask its Craft to cancel
+	/// natively instead of signalling the process (ADR-0083).
+	pub(crate) connections:
+		Mutex<HashMap<RunId, Arc<dyn crate::RunConnection>>>,
 	retries: Mutex<HashMap<RunId, (u32, Instant)>>,
+}
+
+impl std::fmt::Debug for Recovery {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("Recovery").finish_non_exhaustive()
+	}
 }
 
 impl Recovery {
@@ -25,6 +36,21 @@ impl Recovery {
 	}
 	pub(crate) fn progressed(&self, id: RunId) {
 		self.retries.lock().expect("retry lock").remove(&id);
+	}
+}
+
+impl Core {
+	/// The live connection of a supervised execution, when one is attached.
+	pub(crate) fn live_connection(
+		&self,
+		id: RunId,
+	) -> Option<Arc<dyn crate::RunConnection>> {
+		self.run_recovery
+			.connections
+			.lock()
+			.expect("connection lock")
+			.get(&id)
+			.map(Arc::clone)
 	}
 }
 

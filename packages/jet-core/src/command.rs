@@ -140,6 +140,16 @@ pub enum Command {
 	},
 	/// Resolve only the Orphaned execution instance inspected by the user.
 	ResolveExecution(crate::ExecutionResolution),
+	/// Ask one managed Run to end its current turn or its whole execution.
+	/// Withdrawing queued input is a different Command with a different
+	/// effect, and neither is a transport cancellation (ADR-0083,
+	/// ADR-0095).
+	ControlRun {
+		/// The managed Run being controlled.
+		run_id: RunId,
+		/// What is asked of it.
+		control: crate::RunControl,
+	},
 	/// Start a managed Run with one installed Craft and its initial input.
 	StartRun {
 		/// The Conversation whose registered working tree is used.
@@ -311,7 +321,9 @@ impl Command {
 	/// (ADR-0086).
 	pub(crate) fn required_capabilities(&self) -> &'static [Capability] {
 		match self {
-			Self::SubmitTurn { .. } | Self::WithdrawTurn { .. } => &[],
+			Self::SubmitTurn { .. }
+			| Self::WithdrawTurn { .. }
+			| Self::ControlRun { .. } => &[],
 			Self::StartRun { .. } => GIT,
 			Self::SetSetting {
 				key: SettingKey::GitAutoCommit,
@@ -378,6 +390,14 @@ pub enum CommandOutcome {
 	TurnAdmitted(crate::Turn),
 	/// The interactive resolution was durably queued.
 	ExecutionResolutionRecorded(crate::ExecutionResolution),
+	/// The control request was durably accepted; its outcome follows in
+	/// the Run's Events.
+	RunControlAccepted {
+		/// The Run as it stands after accepting the request.
+		run: Run,
+		/// What was asked of it.
+		control: crate::RunControl,
+	},
 	/// The Conversation as created.
 	ConversationCreated(Conversation),
 	/// The Run as created.
@@ -610,6 +630,7 @@ fn redacted_for_receipt(
 			| CommandOutcome::TurnAdmitted(_)
 			| CommandOutcome::ConversationCreated(_)
 			| CommandOutcome::ExecutionResolutionRecorded(_)
+			| CommandOutcome::RunControlAccepted { .. }
 			| CommandOutcome::RunCreated(_)
 			| CommandOutcome::RunTransitioned(_)
 			| CommandOutcome::SettingSet { .. }
@@ -711,6 +732,17 @@ async fn execute_new(
 		Command::ResolveExecution(request) => {
 			crate::orphan::record(tx, actor, command_id, request, now_unix_ms)
 				.await
+		}
+		Command::ControlRun { run_id, control } => {
+			crate::execution_control::record(
+				tx,
+				actor,
+				command_id,
+				run_id,
+				control,
+				now_unix_ms,
+			)
+			.await
 		}
 		Command::StartRun {
 			conversation_id, ..

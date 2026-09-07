@@ -478,6 +478,11 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::MANAGED_RUNS_MINOR,
 			feature: "managed Runs",
 		}),
+		CommandRequest::InterruptTurn { .. }
+		| CommandRequest::StopRun { .. } => Some(MinorRequirement {
+			minor: jet_protocol::EXECUTION_CONTROL_MINOR,
+			feature: "execution control",
+		}),
 		CommandRequest::SetSetting { .. }
 		| CommandRequest::ClearSetting { .. } => Some(MinorRequirement {
 			minor: jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR,

@@ -258,6 +258,20 @@ pub enum EventKind {
 		/// Stable input identity, authenticated client and authoritative order.
 		turn: crate::Turn,
 	},
+	/// An interactive client asked to interrupt the current turn or stop
+	/// the whole execution. Acceptance is not an outcome (ADR-0083).
+	#[serde(rename = "run.control_requested")]
+	RunControlRequested {
+		/// What was asked of the execution.
+		control: crate::RunControl,
+	},
+	/// How a control request actually ended the execution, including which
+	/// escalation step it took.
+	#[serde(rename = "run.terminated")]
+	RunTerminated {
+		/// The request and the step that answered it.
+		termination: crate::RunTermination,
+	},
 	/// An active Run began working or waiting for a specific reason.
 	#[serde(rename = "run.activity_changed")]
 	RunActivityChanged {
@@ -517,6 +531,8 @@ impl EventKind {
 			| Self::TurnChanged { .. }
 			| Self::ConversationCreated { .. }
 			| Self::TerminalStateChanged { .. }
+			| Self::RunControlRequested { .. }
+			| Self::RunTerminated { .. }
 			| Self::RunActivityChanged { .. }
 			| Self::RunProcessesChanged { .. }
 			| Self::RunOutput { .. }

@@ -157,6 +157,7 @@ async fn a_client_below_the_account_binding_minor_is_refused() {
 			query: QueryRequest::AccountBindings {
 				observation: CapabilityObservation::LastObserved,
 			},
+			timeout_ms: None,
 		})
 		.await;
 

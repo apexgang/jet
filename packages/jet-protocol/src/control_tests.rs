@@ -114,7 +114,8 @@ fn unknown_optional_fields_from_newer_minors_are_ignored() {
 		message,
 		ClientMessage::Query {
 			id: 7,
-			query: QueryRequest::Status
+			query: QueryRequest::Status,
+			timeout_ms: None,
 		}
 	);
 }
@@ -124,6 +125,7 @@ fn encoded_control_messages_decode_back_to_the_same_message() {
 	let message = ClientMessage::Query {
 		id: 3,
 		query: QueryRequest::Status,
+		timeout_ms: None,
 	};
 
 	let bytes = encode_control(&message).unwrap();

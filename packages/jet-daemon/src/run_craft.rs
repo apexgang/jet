@@ -69,7 +69,7 @@ pub(crate) async fn load(
 	}
 	let offer = jet_protocol::ProtocolOffer {
 		family: jet_protocol::ProtocolFamily::Craft,
-		versions: vec![jet_protocol::ProtocolVersion { major: 1, minor: 3 }],
+		versions: vec![jet_protocol::ProtocolVersion { major: 1, minor: 4 }],
 		capabilities: vec!["runs".into()],
 	};
 	let negotiated = offer

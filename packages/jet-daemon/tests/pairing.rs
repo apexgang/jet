@@ -226,6 +226,7 @@ async fn a_client_below_the_pairing_minor_is_refused() {
 		.send(&ClientMessage::Query {
 			id: 1,
 			query: QueryRequest::Pairing,
+			timeout_ms: None,
 		})
 		.await;
 

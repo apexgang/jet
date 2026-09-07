@@ -275,6 +275,11 @@ async fn process_requests(
 				if let Err(error) = effect_core.perform_runs().await {
 					eprintln!("jetd: cannot record Run start outcome: {error}");
 				}
+				if let Err(error) = effect_core.perform_run_controls().await {
+					eprintln!(
+						"jetd: cannot carry out an execution control request: {error}"
+					);
+				}
 				if let Err(error) = effect_core.perform_promotions().await {
 					eprintln!(
 						"jetd: cannot record a Workspace promotion outcome: {error}"
@@ -305,9 +310,11 @@ async fn reply_to(
 			id: Some(id),
 			error: malformed(),
 		},
-		ClientMessage::Query { id, query } => {
-			answer(core, actor, minor, id, &query).await
-		}
+		ClientMessage::Query {
+			id,
+			query,
+			timeout_ms,
+		} => bounded_query(core, actor, minor, id, query, timeout_ms).await,
 		ClientMessage::Command {
 			id,
 			command_id,
@@ -329,6 +336,57 @@ async fn reply_to(
 				id: Some(id),
 				error: malformed(),
 			},
+		},
+	}
+}
+
+/// Answers a Query under the client's own relative bound.
+///
+/// A Query is a non-durable read, so giving up on one changes nothing on
+/// the Plane. Commands take no bound at all: once a Command is durably
+/// accepted, no transport-level cancellation may reverse it, and changing
+/// live work needs an explicit Interrupt turn or Stop Run (ADR-0095).
+async fn bounded_query(
+	core: &Core,
+	actor: &Actor,
+	minor: u32,
+	id: jet_protocol::RequestId,
+	query: jet_protocol::QueryRequest,
+	timeout_ms: Option<u32>,
+) -> ServerMessage {
+	let Some(timeout_ms) = timeout_ms else {
+		return answer(core, actor, minor, id, &query).await;
+	};
+	if minor < jet_protocol::EXECUTION_CONTROL_MINOR
+		|| timeout_ms == 0
+		|| timeout_ms > jet_protocol::MAX_QUERY_TIMEOUT_MS
+	{
+		return ServerMessage::Error {
+			id: Some(id),
+			error: wire_error(
+				ErrorCategory::InvalidInput,
+				"request.invalid_timeout",
+				format!(
+					"a Query bound must be 1 to {} milliseconds",
+					jet_protocol::MAX_QUERY_TIMEOUT_MS
+				),
+			),
+		};
+	}
+	match tokio::time::timeout(
+		std::time::Duration::from_millis(timeout_ms.into()),
+		answer(core, actor, minor, id, &query),
+	)
+	.await
+	{
+		Ok(reply) => reply,
+		Err(_) => ServerMessage::Error {
+			id: Some(id),
+			error: wire_error(
+				ErrorCategory::Unavailable,
+				"request.timed_out",
+				"the Query did not finish inside its bound".into(),
+			),
 		},
 	}
 }

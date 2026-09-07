@@ -148,6 +148,9 @@ async fn fake_execution(stream: UnixStream) {
 		.unwrap();
 	while let Some(command) = pending.recv().await {
 		match command {
+			CraftCommand::Interrupt { id } => {
+				panic!("unexpected interrupt of {id}")
+			}
 			CraftCommand::Action {
 				id,
 				action: jet_protocol::CraftAction::Invoke { action_id, input },
