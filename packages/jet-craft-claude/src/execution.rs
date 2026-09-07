@@ -1,11 +1,11 @@
 //! One Run: its Craft connection on one side, its helper and the Harness on
 //! the other. Nothing here owns a process; the helper does (ADR-0060).
-use crate::{harness, native, presentation, specification};
+use crate::{approval, harness, native, presentation, specification};
 use jet_craft_sdk::{CraftConnection, CraftError, CraftReceiver, CraftSender};
 use jet_protocol::{
-	CraftCommand, CraftEvent, CraftSpecification, Frame, FrameReader,
-	FrameWriter, HelperCommand, HelperEvent, HelperHello, HelperRecord,
-	NativeInputMode, NativeStream, ProtocolFamily, ProtocolOffer,
+	CraftAction, CraftCommand, CraftEvent, CraftSpecification, Frame,
+	FrameReader, FrameWriter, HelperCommand, HelperEvent, HelperHello,
+	HelperRecord, NativeInputMode, NativeStream, ProtocolFamily, ProtocolOffer,
 	ProtocolVersion, RunActivity, TurnOutcome, decode_control, encode_control,
 };
 use tokio::net::{
@@ -65,8 +65,10 @@ pub(crate) async fn execution(
 				checkpoint,
 			} => {
 				turn.id = id;
-				turn.pending =
+				let restored: Checkpoint =
 					serde_json::from_str(&checkpoint).unwrap_or_default();
+				turn.pending = restored.pending;
+				turn.asking = restored.asking;
 				(helper_socket, Initial::Recover(source_offset))
 			}
 			CraftCommand::Turn { .. }
@@ -108,7 +110,11 @@ pub(crate) async fn execution(
 							.as_ref()
 							.map(|resume| resume.native_conversation.as_str()),
 					),
-					input: harness::user_message(&text),
+					input: format!(
+						"{}{}",
+						harness::register_server(),
+						harness::user_message(&text)
+					),
 					// The Conversation outlives its first turn, so the Harness
 					// must keep reading (Helper 1.3).
 					input_mode: NativeInputMode::Streaming,
@@ -161,6 +167,7 @@ pub(crate) async fn execution(
 			record.event,
 			&mut turn,
 			&mut sender,
+			&mut writer,
 			ready.helper_pid,
 			minor,
 		)
@@ -170,8 +177,11 @@ pub(crate) async fn execution(
 		sender
 			.send(&CraftEvent::Progress {
 				source_offset: record.source_offset,
-				checkpoint: serde_json::to_string(&turn.pending)
-					.unwrap_or_default(),
+				checkpoint: serde_json::to_string(&Checkpoint {
+					pending: turn.pending.clone(),
+					asking: turn.asking.clone(),
+				})
+				.unwrap_or_default(),
 			})
 			.await?;
 		let CraftCommand::Acknowledge { source_offset } =
@@ -202,6 +212,17 @@ enum Initial {
 	Recover(u64),
 }
 
+/// The adapter state a Run's checkpoint carries, so a restarted Craft reads
+/// the next source record exactly where the previous one stopped, and can
+/// still answer a permission request the Harness is waiting on.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct Checkpoint {
+	/// Native bytes before the next complete line.
+	pending: Vec<u8>,
+	/// A permission request the Harness has not been answered about.
+	asking: Option<approval::Request>,
+}
+
 /// The turn currently in flight and the parser state behind it.
 #[derive(Default)]
 struct Turn {
@@ -213,6 +234,9 @@ struct Turn {
 	cancelling: bool,
 	/// Native bytes before the next complete line, committed as a checkpoint.
 	pending: Vec<u8>,
+	/// A permission request the Harness is waiting on, if there is one. It
+	/// is held rather than answered: this Craft never decides it.
+	asking: Option<approval::Request>,
 }
 
 /// Carry out one admitted Command.
@@ -233,6 +257,7 @@ async fn request(
 				queued: true,
 				cancelling: false,
 				pending: std::mem::take(&mut turn.pending),
+				asking: turn.asking.take(),
 			};
 			input(writer, harness::user_message(&text)).await?;
 			Ok(Flow::Continue)
@@ -250,9 +275,31 @@ async fn request(
 			ask(writer, &HelperCommand::CloseInput).await?;
 			Ok(Flow::Release)
 		}
-		CraftCommand::Start { .. }
+		// Jet authorized this exact decision before it crossed the boundary,
+		// and the Harness has been waiting for it since it asked.
+		CraftCommand::Action {
+			action: CraftAction::Approval {
+				request_id,
+				decision,
+			},
+			..
+		} => {
+			let asking = turn
+				.asking
+				.take_if(|asking| asking.id == request_id)
+				.ok_or(CraftError::InvalidMessage)?;
+			input(writer, asking.decided(decision)).await?;
+			sender
+				.send(&CraftEvent::Activity {
+					activity: RunActivity::Working,
+				})
+				.await?;
+			Ok(Flow::Continue)
+		}
+		// This Craft presents no native actions, so there is none to invoke.
+		CraftCommand::Action { .. }
+		| CraftCommand::Start { .. }
 		| CraftCommand::Recover { .. }
-		| CraftCommand::Action { .. }
 		| CraftCommand::Acknowledge { .. } => Err(CraftError::InvalidMessage),
 	}
 }
@@ -262,6 +309,7 @@ async fn observe(
 	event: HelperEvent,
 	turn: &mut Turn,
 	sender: &mut CraftSender<OwnedWriteHalf>,
+	writer: &mut FrameWriter<OwnedWriteHalf>,
 	helper_pid: u32,
 	minor: u32,
 ) -> Result<(), CraftError> {
@@ -292,7 +340,7 @@ async fn observe(
 				turn.pending.iter().position(|byte| *byte == b'\n')
 			{
 				let line: Vec<u8> = turn.pending.drain(..=end).collect();
-				line_observed(&line, turn, sender, minor).await?;
+				line_observed(&line, turn, sender, writer, minor).await?;
 			}
 			Ok(())
 		}
@@ -308,6 +356,7 @@ async fn line_observed(
 	line: &[u8],
 	turn: &mut Turn,
 	sender: &mut CraftSender<OwnedWriteHalf>,
+	writer: &mut FrameWriter<OwnedWriteHalf>,
 	minor: u32,
 ) -> Result<(), CraftError> {
 	let Ok(native_event) =
@@ -326,6 +375,20 @@ async fn line_observed(
 			native_event,
 		})
 		.await?;
+	// A message for this Craft's own MCP server is answered here, except
+	// the one that asks permission: the Harness waits for Jet on that.
+	match approval::served(&value) {
+		approval::Served::Reply(reply) => return input(writer, reply).await,
+		approval::Served::Asking(request) => {
+			turn.asking = Some(request);
+			return sender
+				.send(&CraftEvent::Activity {
+					activity: RunActivity::WaitingForApproval,
+				})
+				.await;
+		}
+		approval::Served::Ignored => {}
+	}
 	match native::meaning(&value) {
 		native::Meaning::Started { version } => {
 			// ADR-0104: a release outside the matrix still runs, but never

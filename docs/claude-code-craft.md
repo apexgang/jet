@@ -8,7 +8,7 @@ Claude Code is structured throughout, so nothing here reads a terminal (ADR-0002
 
 ```
 claude --print --input-format stream-json --output-format stream-json --verbose \
-       --permission-prompts host --session-id <run>
+       --permission-prompt-tool mcp__jet__approve --session-id <run>
 ```
 
 and both directions are newline-delimited JSON. The process keeps reading its standard input for as long as that input is open, which is what Helper 1.3 exists for (#90): every later turn is a user message written there, and the Harness exits when the input closes.
@@ -41,15 +41,21 @@ ADR-0104 pins v1 parity to explicitly tested releases. This Craft is tested agai
 | Presentation blocks | Jet-equivalent | Views built from native content blocks |
 | Stop Run | Jet-equivalent | Signal escalation through the helper (ADR-0083) |
 | File change evidence | Jet-equivalent | The Harness reports no object identities; Workspace comparison covers checkpoints |
-| Approval requests | Not yet delivered | See below |
+| Approval requests | Native | The Harness's own permission tool, answered by Jet |
 | Harness extensions | Unavailable | Skills, MCP servers, and hooks are #37 |
 
-## Approvals are not yet routed
+## Approvals
 
-`--permission-prompts host` names the SDK host as the answerer, but a host that only speaks the stream-json message protocol never receives the request: anything that would prompt is denied and reported as `system/permission_denied`. The control protocol's `initialize` does not change this — its request accepts `hooks`, `skills`, `sdkMcpServers`, and `title`, and nothing that routes permissions.
+Before using a tool, Claude Code asks the tool named by `--permission-prompt-tool`. The Craft registers an in-process MCP server for that tool with an `initialize` control request written before the first turn, and the Harness then reaches the server by sending its JSON-RPC messages back out as `mcp_message` requests on the same output stream.
 
-The mechanism that does route them is `--permission-prompt-tool` naming a tool on an SDK MCP server the host serves over `mcp_message` control requests. Implementing that server is the remaining acceptance criterion of [#34](https://github.com/apexgang/jet/issues/34); until it lands, a Run gets exactly the tools its permission mode already allows.
+Server plumbing — `initialize`, `tools/list`, and a notification — is answered by the Craft itself, because none of it is a decision. A call of the permission tool is a decision, so the Craft holds it, forwards the native request whole, and reports the Run as waiting for approval. Nothing proceeds until Jet answers with an `approval` action naming that exact request; the Craft then replies to the Harness with `allow` carrying the input it was shown, or `deny`. An allowed call is never edited on the way through: an approval is for what was shown.
+
+The held request travels in the Run's checkpoint, so a Craft that restarts while the Harness waits still delivers the decision instead of leaving it blocked forever.
+
+What does not work, so it is not tried again: `--permission-prompts host` alone never delivers the request — a host that speaks only the stream-json message protocol sees `system/permission_denied` and the call is refused. The control protocol's `initialize` does not route permissions either; its request accepts `hooks`, `skills`, `sdkMcpServers`, and `title`, and nothing else.
 
 ## Validation
 
-`just test -p jet-craft-claude` drives real processes: a host, this Craft, a real `jetfueld`, and a Harness speaking the native protocol. It runs a Conversation of four turns over one process — including one that only ends because it was cancelled natively — and asserts the launch flags, the pinned Conversation identity every completion carries, the turn outcomes, the activity sequence, and that an assistant event's exact bytes and its three views both arrive.
+`just test -p jet-craft-claude` drives real processes: a host, this Craft, a real `jetfueld`, and a Harness speaking the native protocol. It runs a Conversation of five turns over one process — one that only ends because it was cancelled natively, and one that cannot proceed until an approval is answered — and asserts the launch flags, the pinned Conversation identity every completion carries, the turn outcomes, the activity sequence, that an assistant event's exact bytes and its three views both arrive, and that the decision reached the Harness with the input it was shown.
+
+The permission contract itself was verified against Claude Code 2.1.263 directly: registering the server, answering `initialize` and `tools/list`, and allowing one `tools/call` let a real Harness complete a write it would otherwise have been refused.

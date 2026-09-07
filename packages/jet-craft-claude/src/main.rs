@@ -5,6 +5,7 @@
 //! Craft owns no processes, credentials, or core state: it translates between
 //! the Craft protocol and the Claude Code native protocol, and asks this Run's
 //! own helper to launch and feed the Harness.
+mod approval;
 mod execution;
 mod harness;
 mod native;
