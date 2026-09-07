@@ -42,6 +42,14 @@ pub(crate) async fn discover(home: PathBuf) -> Result<Vec<RunId>, CoreError> {
 	.map_err(run_host::failed)
 }
 
+/// The helper protocol recovery and adoption speak. It stays pinned to 1.1
+/// so a newer helper cannot change what an adoption revalidates.
+pub(crate) const RECOVERY_HELPER: ProtocolVersion =
+	ProtocolVersion { major: 1, minor: 1 };
+/// The helper protocol that carries the escalation ladder.
+pub(crate) const CONTROL_HELPER: ProtocolVersion =
+	ProtocolVersion { major: 1, minor: 2 };
+
 pub(crate) async fn describe(
 	home: PathBuf,
 	id: RunId,
@@ -129,10 +137,15 @@ pub(crate) async fn identity(
 	.map_err(|_| RunRecoveryError::Unsafe)?
 }
 
+/// Opens an owner-only helper connection, proving the retained artifact,
+/// the OS process start, and the published descriptor all still agree.
+/// `version` is the exact helper protocol this caller requires; a helper
+/// that negotiates anything else is refused rather than used.
 pub(crate) async fn authenticated(
 	home: PathBuf,
 	id: RunId,
 	expected_pid: Option<u32>,
+	version: ProtocolVersion,
 ) -> Result<
 	(
 		jet_protocol::FrameReader<tokio::net::unix::OwnedReadHalf>,
@@ -171,7 +184,7 @@ pub(crate) async fn authenticated(
 			execution_id: id.0,
 			protocol: ProtocolOffer {
 				family: ProtocolFamily::Helper,
-				versions: vec![ProtocolVersion { major: 1, minor: 1 }],
+				versions: vec![version],
 				capabilities: vec![],
 			},
 		},
@@ -187,7 +200,7 @@ pub(crate) async fn authenticated(
 	// ASVS 8.3.1: ownership, retained artifact, OS start and the live peer must agree.
 	if ready.descriptor != descriptor
 		|| ready.helper_pid != descriptor.pid
-		|| ready.version != (ProtocolVersion { major: 1, minor: 1 })
+		|| ready.version != version
 	{
 		return Err(RunRecoveryError::Unsafe);
 	}
@@ -223,7 +236,7 @@ pub(crate) async fn validate(
 	let runtime = home.join("runtime");
 	let socket = runtime.join(id.0.simple().to_string()).join("h.sock");
 	let (_, mut writer, descriptor) =
-		authenticated(home, id, cursor.helper_pid).await?;
+		authenticated(home, id, cursor.helper_pid, RECOVERY_HELPER).await?;
 	if descriptor.config
 		!= run_host::helper_config(id, plan)
 			.map_err(|_| RunRecoveryError::Unsafe)?

@@ -29,10 +29,12 @@ mod craft_handshake;
 mod craft_spec;
 mod decimal;
 mod event;
+mod execution_control;
 mod execution_recovery;
 mod frame;
 mod handshake;
 mod helper;
+pub use execution_control::{RunControl, RunTermination, TerminationStage};
 pub use execution_recovery::{
 	ExecutionAction, ExecutionMetadata, ExecutionRole, OrphanedExecution,
 	OrphanedExecutions,
@@ -62,7 +64,8 @@ pub use turn::{Turn, TurnQueue, TurnSource, TurnState};
 
 pub use helper::{
 	HelperCommand, HelperConfig, HelperDescriptor, HelperEvent, HelperHello,
-	HelperReady, HelperRecord, HelperReplay, HelperTerminated, NativeStream,
+	HelperReady, HelperRecord, HelperReplay, HelperSignalled, HelperTerminated,
+	NativeSignal, NativeStream,
 };
 pub use run::{ManagedProcess, ManagedProcessRole, RunActivity, RunExecution};
 
@@ -111,8 +114,8 @@ pub use frame::{
 };
 pub use handshake::{
 	ACCOUNT_BINDINGS_MINOR, CHANGE_CHECKPOINTS_MINOR, CODEC_JSON_V1,
-	ClientHello, EXECUTION_RECOVERY_MINOR, FENCED_READS_MINOR,
-	IMPORTED_CONVERSATIONS_MINOR, MANAGED_RUNS_MINOR,
+	ClientHello, EXECUTION_CONTROL_MINOR, EXECUTION_RECOVERY_MINOR,
+	FENCED_READS_MINOR, IMPORTED_CONVERSATIONS_MINOR, MANAGED_RUNS_MINOR,
 	MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE, PROJECTS_MINOR,
 	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SEARCH_MINOR,
 	SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
@@ -125,9 +128,9 @@ pub use import::{
 	ExternalOrigin, ExternalProcess, ImportedConversation,
 };
 pub use message::{
-	ClientMessage, ErrorCategory, EventPage, PlaneStatus, QueryRequest,
-	QueryResponse, RecoveryAction, RequestId, RestartMetadata, ServerMessage,
-	WireError, raw_command,
+	ClientMessage, ErrorCategory, EventPage, MAX_QUERY_TIMEOUT_MS, PlaneStatus,
+	QueryRequest, QueryResponse, RecoveryAction, RequestId, RestartMetadata,
+	ServerMessage, WireError, raw_command,
 };
 pub use pairing::{
 	ClientPublicKey, PairedClient, PairedClientAccess, PairingDisclosure,

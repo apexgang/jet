@@ -68,6 +68,16 @@ pub enum HelperCommand {
 		/// Identity the user inspected.
 		instance: Uuid,
 	},
+	/// Deliver one signal to the native process group without ending this
+	/// helper or releasing its retained source (Helper 1.2). The native
+	/// exit then reaches jetd through the ordinary spool, so partial
+	/// output survives the stop (ADR-0083).
+	Signal {
+		/// Identity the caller validated before asking.
+		instance: Uuid,
+		/// Which signal to deliver.
+		signal: NativeSignal,
+	},
 	/// Read-only handshake completed; leave execution and source untouched.
 	Inspect,
 	/// Reattach after validating the source boundary; never launches a process.
@@ -125,6 +135,19 @@ pub enum HelperEvent {
 	},
 }
 
+/// The escalation ladder jetd may ask a helper to deliver. Each step is an
+/// explicit request; the helper never escalates on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeSignal {
+	/// Interrupt, which a Harness may handle and shut down cleanly.
+	Interrupt,
+	/// Terminate, which it may still handle.
+	Terminate,
+	/// Kill, which it cannot.
+	Kill,
+}
+
 /// Native pipe identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -133,6 +156,16 @@ pub enum NativeStream {
 	Stdout,
 	/// Standard error.
 	Stderr,
+}
+
+/// Confirmation that the signal was delivered to the live native process
+/// group. Delivery is not an exit: the exit arrives as a source record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HelperSignalled {
+	/// The helper instance that delivered it.
+	pub instance: Uuid,
+	/// The signal it delivered.
+	pub signal: NativeSignal,
 }
 
 /// Confirmation sent only after the native child is proven stopped.

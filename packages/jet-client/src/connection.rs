@@ -212,7 +212,14 @@ impl Client {
 		let id = self.next_id();
 		let stream_id = self.request_stream();
 		let reply = self
-			.exchange(stream_id, &ClientMessage::Query { id, query })
+			.exchange(
+				stream_id,
+				&ClientMessage::Query {
+					id,
+					query,
+					timeout_ms: None,
+				},
+			)
 			.await?;
 		match reply {
 			ServerMessage::QueryResult {

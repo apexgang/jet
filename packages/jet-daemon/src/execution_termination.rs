@@ -20,6 +20,7 @@ pub(crate) async fn terminate(
 			home,
 			request.execution_id,
 			Some(metadata.helper_pid),
+			crate::run_recovery::RECOVERY_HELPER,
 		)
 		.await
 		.map_err(|_| run_host::failed("unverified helper identity"))?;
