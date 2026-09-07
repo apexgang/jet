@@ -77,6 +77,10 @@ async fn a_streaming_harness_takes_input_after_launch_and_ends_when_it_closes()
 			std::fs::read_to_string(root.join("input-ended")).unwrap(),
 			"ended"
 		);
+		// A Craft that has nothing left to do closes as soon as it
+		// acknowledges the terminal record. The helper still finishes: its
+		// own ended source, not the peer leaving, decides that.
+		drop((reader, writer));
 		assert!(helper.wait().await.unwrap().success());
 	})
 	.await
