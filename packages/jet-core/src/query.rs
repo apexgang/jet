@@ -28,6 +28,11 @@ use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
+	/// Terminals belonging to one Workspace.
+	WorkspaceTerminals {
+		/// Workspace identity.
+		workspace_id: crate::WorkspaceId,
+	},
 	/// Read a bounded chunk of a checkpoint patch Artifact.
 	ChangeArtifact {
 		/// Canonical SHA-256 content address.
@@ -155,6 +160,13 @@ pub enum Query {
 /// Snapshots returned by [`Core::query`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult {
+	/// Workspace terminal lifecycle snapshots.
+	WorkspaceTerminals {
+		/// Snapshot Event cursor.
+		cursor: EventSequence,
+		/// Retained terminal states.
+		terminals: Vec<crate::WorkspaceTerminal>,
+	},
 	/// Bounded Artifact bytes.
 	ChangeArtifact(crate::ChangeArtifactChunk),
 	/// Immutable boundaries and their patch preview.
@@ -218,6 +230,24 @@ impl Core {
 			.expect("authority gate never closes");
 		actor.authorize(&self.remote_sessions)?;
 		match query {
+			Query::WorkspaceTerminals { workspace_id } => {
+				self.store
+					.read(async |tx| {
+						if tx.workspace(workspace_id.0).await?.is_none() {
+							return Err(crate::terminal::missing());
+						}
+						let terminals =
+							tx.workspace_terminals(workspace_id.0).await?;
+						Ok(QueryResult::WorkspaceTerminals {
+							cursor: EventSequence(tx.event_cursor().await?),
+							terminals: terminals
+								.iter()
+								.map(crate::terminal::snapshot)
+								.collect::<Result<_, _>>()?,
+						})
+					})
+					.await
+			}
 			Query::ChangeArtifact { sha256, offset } => {
 				crate::change_artifact::read(self.run_home(), sha256, offset)
 					.await

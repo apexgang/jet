@@ -30,7 +30,8 @@ impl Client {
 		self.require_minor(jet_protocol::IMPORTED_CONVERSATIONS_MINOR)?;
 		match self.query(QueryRequest::ExternalConversations).await? {
 			QueryResponse::ExternalConversations(list) => Ok(list),
-			other @ (QueryResponse::TurnQueue(_)
+			other @ (QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
@@ -81,7 +82,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::ConversationImported(imported) => Ok(imported),
-			other @ (CommandResponse::TurnAdmitted { .. }
+			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
@@ -139,7 +141,8 @@ impl Client {
 			CommandResponse::ConversationCreated(conversation) => {
 				Ok(conversation)
 			}
-			other @ (CommandResponse::TurnAdmitted { .. }
+			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..

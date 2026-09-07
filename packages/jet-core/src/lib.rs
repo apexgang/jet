@@ -70,8 +70,8 @@ mod turn;
 mod turn_dispatch;
 mod turn_queue;
 pub use orphan::{
-	ExecutionAction, ExecutionMetadata, ExecutionResolution, OrphanedExecution,
-	OrphanedExecutions,
+	ExecutionAction, ExecutionMetadata, ExecutionResolution, ExecutionRole,
+	OrphanedExecution, OrphanedExecutions,
 };
 pub use turn::{Turn, TurnQueue, TurnSource, TurnState};
 mod search;
@@ -81,10 +81,17 @@ mod seed;
 mod seed_capture;
 mod setting;
 mod status;
+mod terminal;
+mod terminal_command;
+mod terminal_effect;
 #[cfg(test)]
 mod test_support;
 mod tree_capture;
 mod workspace;
+pub use terminal::{
+	TerminalHost, TerminalId, TerminalOperation, TerminalOutput, TerminalPlan,
+	TerminalState, WorkspaceTerminal,
+};
 mod worktree;
 pub use run::{ManagedProcess, ManagedProcessRole, RunActivity, RunExecution};
 pub use run_command::LaunchPlan;
@@ -259,6 +266,7 @@ pub struct Core {
 	run_work: tokio::sync::Notify,
 	turn_wake: tokio::sync::watch::Sender<()>,
 	run_host: Option<Arc<dyn run_host::RunHost>>,
+	terminal_host: Option<Arc<dyn terminal::TerminalHost>>,
 	run_recovery: run_recovery::Recovery,
 	// Serialize authority publication with Commands and fence concurrent reads.
 	remote_access: tokio::sync::Semaphore,
@@ -346,6 +354,7 @@ impl Core {
 			run_work: tokio::sync::Notify::new(),
 			turn_wake: tokio::sync::watch::channel(()).0,
 			run_host: None,
+			terminal_host: None,
 			run_recovery: run_recovery::Recovery::default(),
 			remote_access: tokio::sync::Semaphore::new(
 				remote::AUTHORITY_READERS as usize,
@@ -466,3 +475,5 @@ mod paired_client_tests;
 #[cfg(test)]
 #[path = "search_tests.rs"]
 mod search_tests;
+
+mod terminal_orphan;

@@ -95,6 +95,7 @@ pub struct OutboundQueue {
 	last_queued_cursor: u64,
 	event_awaiting_write: Option<u64>,
 	binary: VecDeque<Frame>,
+	ordered: VecDeque<Frame>,
 	binary_bytes: usize,
 	streams: HashMap<StreamId, BinaryStream>,
 }
@@ -123,6 +124,7 @@ impl OutboundQueue {
 			last_queued_cursor: last_delivered_cursor,
 			event_awaiting_write: None,
 			binary: VecDeque::new(),
+			ordered: VecDeque::new(),
 			binary_bytes: 0,
 			streams: HashMap::new(),
 		}
@@ -399,6 +401,17 @@ impl OutboundQueue {
 			self.event_awaiting_write = Some(cursor);
 			return Some(frame);
 		}
+		if let Some(frame) = self.ordered.pop_front() {
+			match frame {
+				Frame::Data { ref payload, .. } => {
+					self.binary_bytes -= payload.len()
+				}
+				Frame::Control { ref payload, .. } => {
+					self.control_bytes -= payload.len()
+				}
+			}
+			return Some(frame);
+		}
 		let frame = self.binary.pop_front()?;
 		self.binary_bytes -= frame.payload().len();
 		Some(frame)
@@ -436,3 +449,6 @@ impl OutboundQueue {
 #[cfg(test)]
 #[path = "stream_tests.rs"]
 mod tests;
+
+#[path = "terminal_queue.rs"]
+mod terminal_queue;

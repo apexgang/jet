@@ -381,6 +381,10 @@ struct MinorRequirement {
 
 fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 	match query {
+		QueryRequest::WorkspaceTerminals { .. } => Some(MinorRequirement {
+			minor: jet_protocol::WORKSPACE_TERMINALS_MINOR,
+			feature: "Workspace terminals",
+		}),
 		QueryRequest::TurnQueue { .. } => Some(MinorRequirement {
 			minor: jet_protocol::TURN_QUEUE_MINOR,
 			feature: "Turn queue",
@@ -456,6 +460,11 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 
 fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 	match command {
+		CommandRequest::OpenTerminal { .. }
+		| CommandRequest::CloseTerminal { .. } => Some(MinorRequirement {
+			minor: jet_protocol::WORKSPACE_TERMINALS_MINOR,
+			feature: "Workspace terminals",
+		}),
 		CommandRequest::ResolveExecution { .. } => Some(MinorRequirement {
 			minor: jet_protocol::EXECUTION_RECOVERY_MINOR,
 			feature: "execution recovery",

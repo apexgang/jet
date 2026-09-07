@@ -156,6 +156,7 @@ async fn a_promotion_is_recorded_with_its_conflicts_and_settled_once() {
 					command_id: Uuid::now_v7(),
 					run_id: None,
 					promotion_id: Some(applying.promotion_id),
+					terminal_id: None,
 					kind: EffectKindRecord::PromoteWorkspace,
 					safety: EffectSafetyRecord::Ambiguous,
 				})

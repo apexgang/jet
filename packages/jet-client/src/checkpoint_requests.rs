@@ -35,7 +35,8 @@ impl Client {
 		self.require_minor(jet_protocol::CHANGE_CHECKPOINTS_MINOR)?;
 		match self.query(query).await? {
 			QueryResponse::ChangeDiff(diff) => Ok(diff),
-			other @ (QueryResponse::OrphanedExecutions(_)
+			other @ (QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::TurnQueue(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
@@ -74,7 +75,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::ChangeArtifact(chunk) => Ok(chunk),
-			other @ (QueryResponse::OrphanedExecutions(_)
+			other @ (QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::TurnQueue(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)

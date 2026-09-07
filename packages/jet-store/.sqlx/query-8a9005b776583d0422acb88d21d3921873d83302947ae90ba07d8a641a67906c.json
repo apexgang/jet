@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE workspace_terminals SET state = ?2 WHERE terminal_id = ?1 AND state <> 'closed'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "8a9005b776583d0422acb88d21d3921873d83302947ae90ba07d8a641a67906c"
+}

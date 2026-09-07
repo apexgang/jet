@@ -69,9 +69,12 @@ pub(crate) async fn run(
 	// The start is recorded only once the daemon can actually serve.
 	let core =
 		match Core::start(store, WorkspaceHome(home.workspaces_dir())).await {
-			Ok(core) => Arc::new(core.with_run_host(Arc::new(
-				crate::run_host::CraftProcesses::default(),
-			))),
+			Ok(core) => Arc::new(
+				core.with_run_host(Arc::new(
+					crate::run_host::CraftProcesses::default(),
+				))
+				.with_terminal_host(Arc::new(crate::terminal_host::Terminals)),
+			),
 			Err(error) => {
 				eprintln!("jetd: cannot start the core: {error}");
 				return ExitCode::from(EXIT_FAILURE);
@@ -82,6 +85,9 @@ pub(crate) async fn run(
 	// ADR-0067).
 	if let Err(error) = core.perform_promotions().await {
 		eprintln!("jetd: cannot reconcile Workspace promotions: {error}");
+	}
+	if let Err(error) = core.perform_terminals().await {
+		eprintln!("jetd: cannot recover terminals: {error}");
 	}
 	// Settle durable Run admission before serving new Commands.
 	if let Err(error) = core.perform_runs().await {
@@ -103,6 +109,9 @@ pub(crate) async fn run(
 	let recovery = tokio::spawn(async move {
 		loop {
 			tokio::time::sleep(Duration::from_secs(1)).await;
+			if let Err(error) = recovery_core.perform_terminals().await {
+				eprintln!("jetd: cannot recover terminals: {error}");
+			}
 			if let Err(error) = recovery_core.recover_runs().await {
 				eprintln!("jetd: cannot recover executions: {error}");
 			}

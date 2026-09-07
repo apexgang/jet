@@ -20,10 +20,20 @@ const MAX_PENDING_REQUESTS: usize = 16;
 /// Bounds replies waiting to enter the byte-bounded priority scheduler.
 const MAX_PENDING_REPLIES: usize = 16;
 
-struct Request {
-	stream_id: StreamId,
-	payload: Vec<u8>,
-	message: ClientMessage,
+enum Request {
+	Control {
+		stream_id: StreamId,
+		payload: Vec<u8>,
+		message: Box<ClientMessage>,
+	},
+	Data {
+		stream_id: StreamId,
+		payload: Vec<u8>,
+	},
+	Credit {
+		stream_id: StreamId,
+		bytes: u64,
+	},
 }
 
 enum Stop {
@@ -41,6 +51,7 @@ pub(super) async fn serve(
 	draining: watch::Receiver<bool>,
 	capacity: Arc<tokio::sync::OwnedSemaphorePermit>,
 ) {
+	let data_limit = writer.limits().data.min(65536) as u32;
 	let (request_tx, request_rx) = mpsc::channel(MAX_PENDING_REQUESTS);
 	let (reply_tx, reply_rx) = mpsc::channel(MAX_PENDING_REPLIES);
 	let drive_inbound = async {
@@ -52,7 +63,8 @@ pub(super) async fn serve(
 				minor,
 				request_rx,
 				reply_tx.clone(),
-				capacity
+				capacity,
+				data_limit
 			),
 		);
 		let final_error = match stop {
@@ -89,13 +101,15 @@ async fn read_requests(
 		};
 		let (stream_id, payload) = match frame {
 			Ok(Frame::Control { stream_id, payload }) => (stream_id, payload),
-			Ok(Frame::Data { .. }) => {
-				return Stop::Protocol(wire_error(
-					ErrorCategory::InvalidInput,
-					"protocol.unexpected_data_frame",
-					"no inbound binary stream is open on this connection"
-						.into(),
-				));
+			Ok(Frame::Data { stream_id, payload }) => {
+				if requests
+					.send(Request::Data { stream_id, payload })
+					.await
+					.is_err()
+				{
+					return Stop::Disconnected;
+				}
+				continue;
 			}
 			Err(FrameError::Closed | FrameError::Io(_)) => {
 				return Stop::Disconnected;
@@ -124,12 +138,16 @@ async fn read_requests(
 			Ok(message) => message,
 			Err(_) => {
 				return Stop::Protocol(match decode_control(&payload) {
-					Ok(StreamControl::Credit { .. }) => wire_error(
-						ErrorCategory::InvalidInput,
-						"protocol.unknown_stream",
-						"credit addressed a binary stream that is not open"
-							.into(),
-					),
+					Ok(StreamControl::Credit { bytes }) => {
+						if requests
+							.send(Request::Credit { stream_id, bytes })
+							.await
+							.is_err()
+						{
+							return Stop::Disconnected;
+						}
+						continue;
+					}
 					Ok(
 						StreamControl::TerminalGap { .. }
 						| StreamControl::TerminalFinished { .. }
@@ -145,10 +163,10 @@ async fn read_requests(
 			}
 		};
 		if requests
-			.send(Request {
+			.send(Request::Control {
 				stream_id,
 				payload,
-				message,
+				message: Box::new(message),
 			})
 			.await
 			.is_err()
@@ -165,13 +183,66 @@ async fn process_requests(
 	mut requests: mpsc::Receiver<Request>,
 	replies: mpsc::Sender<Frame>,
 	capacity: Arc<tokio::sync::OwnedSemaphorePermit>,
+	data_limit: u32,
 ) {
-	while let Some(Request {
-		stream_id,
-		payload,
-		message,
-	}) = requests.recv().await
-	{
+	let mut terminals = crate::terminal_stream::Terminals::new(data_limit);
+	while let Some(request) = requests.recv().await {
+		let (stream_id, payload, message) = match request {
+			Request::Control {
+				stream_id,
+				payload,
+				message,
+			} => (stream_id, payload, *message),
+			Request::Data { stream_id, payload } => {
+				if let Err(error) = terminals
+					.input(stream_id, payload, &core, &actor, minor)
+					.await
+				{
+					let reply = ServerMessage::Error { id: None, error };
+					if let Ok(payload) = encode_control(&reply) {
+						let _ = replies
+							.send(Frame::stream_control(stream_id, payload))
+							.await;
+					}
+					return;
+				}
+				continue;
+			}
+			Request::Credit { stream_id, bytes } => {
+				if let Err(error) = terminals.credit(stream_id, bytes) {
+					if let Ok(payload) = encode_control(&ServerMessage::Error {
+						id: None,
+						error,
+					}) {
+						let _ = replies
+							.send(Frame::stream_control(stream_id, payload))
+							.await;
+					}
+					return;
+				}
+				continue;
+			}
+		};
+		if let Some(reply) = terminals
+			.control(stream_id, &message, &core, &actor, minor, &replies)
+			.await
+		{
+			let Ok(payload) = encode_control(&reply) else {
+				return;
+			};
+			if replies
+				.send(Frame::stream_control(stream_id, payload))
+				.await
+				.is_err()
+			{
+				return;
+			}
+			terminals.start(stream_id);
+			continue;
+		}
+		if terminals.contains(stream_id) {
+			return;
+		}
 		// The store runs SQLite on its own worker thread, so the core is
 		// awaited here rather than moved onto a blocking thread.
 		let request_core = Arc::clone(&core);
@@ -198,6 +269,9 @@ async fn process_requests(
 		if acknowledged {
 			let effect_core = Arc::clone(&core);
 			tokio::spawn(async move {
+				if let Err(error) = effect_core.perform_terminals().await {
+					eprintln!("jetd: cannot settle terminals: {error}");
+				}
 				if let Err(error) = effect_core.perform_runs().await {
 					eprintln!("jetd: cannot record Run start outcome: {error}");
 				}
@@ -226,6 +300,11 @@ async fn reply_to(
 	message: ClientMessage,
 ) -> ServerMessage {
 	match message {
+		ClientMessage::AttachTerminal { id, .. }
+		| ClientMessage::ResizeTerminal { id, .. } => ServerMessage::Error {
+			id: Some(id),
+			error: malformed(),
+		},
 		ClientMessage::Query { id, query } => {
 			answer(core, actor, minor, id, &query).await
 		}
@@ -260,11 +339,14 @@ async fn write_replies(
 ) {
 	let mut queue = OutboundQueue::new(0);
 	while let Some(frame) = replies.recv().await {
-		if queue.queue_control(frame).is_err() {
+		if queue_reply(&mut queue, frame).is_err() {
 			return;
 		}
-		while let Ok(frame) = replies.try_recv() {
-			if queue.queue_control(frame).is_err() {
+		for _ in 1..MAX_PENDING_REPLIES {
+			let Ok(frame) = replies.try_recv() else {
+				break;
+			};
+			if queue_reply(&mut queue, frame).is_err() {
 				return;
 			}
 		}
@@ -274,11 +356,31 @@ async fn write_replies(
 				Ok(false) => break,
 				Err(_) => return,
 			}
-			while let Ok(frame) = replies.try_recv() {
-				if queue.queue_control(frame).is_err() {
-					return;
-				}
-			}
 		}
+	}
+}
+
+fn queue_reply(
+	queue: &mut OutboundQueue,
+	frame: Frame,
+) -> Result<(), jet_protocol::StreamQueueError> {
+	let ordered = match &frame {
+		Frame::Data { .. } => true,
+		Frame::Control { payload, .. } => {
+			matches!(
+				decode_control::<StreamControl>(payload),
+				Ok(StreamControl::TerminalGap { .. }
+					| StreamControl::TerminalFinished { .. })
+			) || matches!(
+				decode_control::<ServerMessage>(payload),
+				Ok(ServerMessage::TerminalAttached { .. }
+					| ServerMessage::TerminalResized { .. })
+			)
+		}
+	};
+	if ordered {
+		queue.queue_terminal_frame(frame)
+	} else {
+		queue.queue_control(frame)
 	}
 }

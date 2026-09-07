@@ -14,6 +14,7 @@ mod promotion;
 mod run;
 mod search;
 mod setting;
+mod terminal;
 mod turn;
 
 pub(crate) use capability::snapshot as capabilities;
@@ -48,6 +49,11 @@ pub(crate) fn query(
 	minor: u32,
 ) -> Result<Query, CoreError> {
 	Ok(match request {
+		wire::QueryRequest::WorkspaceTerminals { workspace_id } => {
+			Query::WorkspaceTerminals {
+				workspace_id: jet_core::WorkspaceId(*workspace_id),
+			}
+		}
 		wire::QueryRequest::ChangeArtifact { sha256, offset } => {
 			Query::ChangeArtifact {
 				sha256: sha256.clone(),
@@ -146,6 +152,15 @@ pub(crate) fn query_result(
 	minor: u32,
 ) -> Result<wire::QueryResponse, CoreError> {
 	Ok(match result {
+		QueryResult::WorkspaceTerminals { cursor, terminals } => {
+			wire::QueryResponse::WorkspaceTerminals {
+				cursor: cursor.0,
+				terminals: terminals
+					.into_iter()
+					.map(terminal::snapshot)
+					.collect(),
+			}
+		}
 		QueryResult::ChangeArtifact(chunk) => {
 			wire::QueryResponse::ChangeArtifact(wire::ChangeArtifactChunk {
 				artifact: checkpoint::artifact(chunk.artifact),
@@ -163,7 +178,7 @@ pub(crate) fn query_result(
 			})
 		}
 		QueryResult::OrphanedExecutions(page) => {
-			wire::QueryResponse::OrphanedExecutions(run::orphans(page))
+			wire::QueryResponse::OrphanedExecutions(run::orphans(page, minor))
 		}
 		QueryResult::RunExecution(execution) => {
 			wire::QueryResponse::RunExecution(run::execution(execution))
@@ -233,6 +248,20 @@ pub(crate) fn command(
 	request: &wire::CommandRequest,
 ) -> Result<Command, CoreError> {
 	Ok(match request {
+		wire::CommandRequest::OpenTerminal {
+			workspace_id,
+			rows,
+			columns,
+		} => Command::OpenTerminal {
+			workspace_id: jet_core::WorkspaceId(*workspace_id),
+			rows: *rows,
+			columns: *columns,
+		},
+		wire::CommandRequest::CloseTerminal { terminal_id } => {
+			Command::CloseTerminal {
+				terminal_id: jet_core::TerminalId(*terminal_id),
+			}
+		}
 		wire::CommandRequest::ResolveExecution {
 			execution_id,
 			instance,
@@ -397,6 +426,9 @@ pub(crate) fn command_outcome(
 	minor: u32,
 ) -> wire::CommandResponse {
 	match outcome {
+		CommandOutcome::Terminal(value) => wire::CommandResponse::Terminal {
+			terminal: terminal::snapshot(value),
+		},
 		CommandOutcome::ExecutionResolutionRecorded(request) => {
 			wire::CommandResponse::ExecutionResolutionRecorded {
 				execution_id: request.execution_id.0,

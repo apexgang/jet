@@ -223,7 +223,9 @@ impl Client {
 				id: reply_id,
 				error,
 			} => Err(remote_error(id, reply_id, error)),
-			other @ ServerMessage::CommandResult { .. } => {
+			other @ (ServerMessage::CommandResult { .. }
+			| ServerMessage::TerminalAttached { .. }
+			| ServerMessage::TerminalResized { .. }) => {
 				Err(ClientError::Unexpected(format!("{other:?}")))
 			}
 		}
@@ -264,7 +266,9 @@ impl Client {
 				id: reply_id,
 				error,
 			} => Err(remote_error(id, reply_id, error)),
-			other @ ServerMessage::QueryResult { .. } => {
+			other @ (ServerMessage::QueryResult { .. }
+			| ServerMessage::TerminalAttached { .. }
+			| ServerMessage::TerminalResized { .. }) => {
 				Err(ClientError::Unexpected(format!("{other:?}")))
 			}
 		}

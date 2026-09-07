@@ -243,6 +243,7 @@ pub(crate) async fn install(
 		command_id: command_id.0,
 		run_id: Some(run.run_id),
 		promotion_id: None,
+		terminal_id: None,
 		kind: EffectKindRecord::StartRun,
 		safety: EffectSafetyRecord::Ambiguous,
 	})

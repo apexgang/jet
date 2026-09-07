@@ -2,6 +2,7 @@
 mod native;
 mod serve;
 mod spool;
+mod terminal;
 
 use clap::Parser;
 #[derive(Parser)]
@@ -12,6 +13,11 @@ struct Cli {
 }
 #[derive(clap::Subcommand)]
 enum Role {
+	/// Own one Workspace terminal PTY.
+	Terminal {
+		#[arg(long)]
+		config: std::path::PathBuf,
+	},
 	/// Own a Harness process for one managed Run.
 	Run {
 		#[arg(long)]
@@ -20,10 +26,11 @@ enum Role {
 }
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
-	let Cli {
-		role: Role::Run { config },
-	} = Cli::parse();
-	match serve::serve(&config).await {
+	let result = match Cli::parse().role {
+		Role::Run { config } => serve::serve(&config).await,
+		Role::Terminal { config } => terminal::serve(&config).await,
+	};
+	match result {
 		Ok(()) => std::process::ExitCode::SUCCESS,
 		Err(_) => {
 			eprintln!("jetfueld: execution supervision failed");

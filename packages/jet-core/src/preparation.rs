@@ -18,6 +18,7 @@ use crate::{Actor, Core};
 
 /// What the preparation of one Command produced for its transaction.
 pub(crate) enum Prepared {
+	Terminal(crate::TerminalPlan),
 	/// A Run pinned to an accepted Craft and validated working tree.
 	Run(crate::run_command::LaunchPlan),
 	/// The Command needs nothing from outside the store.
@@ -96,6 +97,21 @@ impl Core {
 		command: &Command,
 	) -> Result<Prepared, CoreError> {
 		match command {
+			Command::OpenTerminal {
+				workspace_id,
+				rows,
+				columns,
+			} => Ok(Prepared::Terminal(
+				crate::terminal_command::prepare(
+					self,
+					actor,
+					*workspace_id,
+					*rows,
+					*columns,
+				)
+				.await?,
+			)),
+			Command::CloseTerminal { .. } => Ok(Prepared::Nothing),
 			Command::ResolveExecution(request) => {
 				self.prepare_execution_resolution(request).await?;
 				Ok(Prepared::Nothing)

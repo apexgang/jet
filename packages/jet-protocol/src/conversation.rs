@@ -126,6 +126,20 @@ pub struct ConversationSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandRequest {
+	/// Open a PTY under a Workspace-owned helper.
+	OpenTerminal {
+		/// Registered Workspace identity.
+		workspace_id: Uuid,
+		/// Height in cells (1–1000).
+		rows: u16,
+		/// Width in cells (1–1000).
+		columns: u16,
+	},
+	/// Explicitly end a Workspace terminal.
+	CloseTerminal {
+		/// Terminal identity.
+		terminal_id: Uuid,
+	},
 	/// Withdraw only the caller's own queued user input.
 	WithdrawTurn {
 		/// Conversation owning the queue.
@@ -328,6 +342,11 @@ pub enum CommandRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResponse {
+	/// Terminal admission or close was committed.
+	Terminal {
+		/// Current terminal state.
+		terminal: crate::WorkspaceTerminal,
+	},
 	/// The original durable withdrawal result.
 	TurnWithdrawn {
 		/// Input with its final outcome.

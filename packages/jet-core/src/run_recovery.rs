@@ -61,7 +61,12 @@ impl Core {
 		let mut after = None;
 		loop {
 			let page = self.orphaned_executions(after).await?;
-			ids.extend(page.executions.into_iter().map(|o| o.execution_id));
+			ids.extend(
+				page.executions
+					.into_iter()
+					.filter(|o| o.role == crate::ExecutionRole::Run)
+					.map(|o| o.execution_id),
+			);
 			after = page.next;
 			if after.is_none() {
 				break;

@@ -35,9 +35,11 @@ mod run;
 mod run_execution;
 mod search;
 mod setting;
+mod terminal;
 mod transaction;
 mod turn_queue;
 mod workspace;
+pub use terminal::TerminalRecord;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

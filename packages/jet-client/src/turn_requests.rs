@@ -19,7 +19,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::TurnQueue(queue) => Ok(queue),
-			other @ (QueryResponse::Status(_)
+			other @ (QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::Status(_)
 			| QueryResponse::ChangeArtifact(_)
 			| QueryResponse::ChangeDiff(_)
 			| QueryResponse::OrphanedExecutions(_)

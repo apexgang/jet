@@ -34,7 +34,8 @@ mod frame;
 mod handshake;
 mod helper;
 pub use execution_recovery::{
-	ExecutionAction, ExecutionMetadata, OrphanedExecution, OrphanedExecutions,
+	ExecutionAction, ExecutionMetadata, ExecutionRole, OrphanedExecution,
+	OrphanedExecutions,
 };
 mod hex;
 mod import;
@@ -49,8 +50,14 @@ mod setting;
 mod stream;
 mod stream_control;
 mod stream_error;
-mod turn;
+mod terminal;
 mod workspace;
+pub use terminal::{
+	TerminalConfig, TerminalDescriptor, TerminalHelperAction,
+	TerminalHelperReply, TerminalHelperRequest, TerminalState,
+	WorkspaceTerminal,
+};
+mod turn;
 pub use turn::{Turn, TurnQueue, TurnSource, TurnState};
 
 pub use helper::{
@@ -110,7 +117,8 @@ pub use handshake::{
 	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SEARCH_MINOR,
 	SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
 	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, TURN_QUEUE_MINOR,
-	VersionRange, WORKSPACE_PROMOTION_MINOR, WORKSPACES_MINOR,
+	VersionRange, WORKSPACE_PROMOTION_MINOR, WORKSPACE_TERMINALS_MINOR,
+	WORKSPACES_MINOR,
 };
 pub use import::{
 	ConversationOrigin, ExternalConversation, ExternalConversationList,

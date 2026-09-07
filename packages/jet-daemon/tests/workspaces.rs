@@ -50,7 +50,9 @@ async fn a_managed_conversation_receives_a_workspace_under_the_jet_home() {
 
 	let root = home
 		.join("workspaces")
-		.join(conversation.conversation_id.to_string());
+		.join(conversation.conversation_id.to_string())
+		.canonicalize()
+		.unwrap();
 	let workspace = snapshot.workspace.clone().unwrap();
 	assert_eq!(
 		(

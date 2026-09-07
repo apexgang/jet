@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT terminal_id, workspace_id, state, plan FROM workspace_terminals WHERE terminal_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "terminal_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_terminals",
+            "name": "terminal_id"
+          }
+        }
+      },
+      {
+        "name": "workspace_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_terminals",
+            "name": "workspace_id"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_terminals",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "name": "plan",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_terminals",
+            "name": "plan"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1b21eb79314c78f8749ea255ec03d47549d160295c3d35babe1e9447d01e8a59"
+}

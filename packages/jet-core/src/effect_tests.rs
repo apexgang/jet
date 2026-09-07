@@ -240,6 +240,7 @@ async fn an_ambiguous_interrupted_effect_becomes_outcome_unknown_without_retry()
 				command_id: Uuid::now_v7(),
 				run_id: Some(run.run_id.0),
 				promotion_id: None,
+				terminal_id: None,
 				kind: EffectKindRecord::StartRun,
 				safety: EffectSafetyRecord::Ambiguous,
 			})

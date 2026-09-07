@@ -216,6 +216,16 @@ pub struct EventPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum EventKind {
+	/// A Workspace terminal changed lifecycle, without recording terminal bytes.
+	#[serde(rename = "terminal.state_changed")]
+	TerminalStateChanged {
+		/// Terminal identity.
+		terminal_id: crate::TerminalId,
+		/// Owning Workspace.
+		workspace_id: WorkspaceId,
+		/// Observed lifecycle.
+		state: crate::TerminalState,
+	},
 	/// Verified activity evidence was retained for the active turn.
 	#[serde(rename = "change.evidence_recorded")]
 	ChangeEvidenceRecorded {
@@ -506,6 +516,7 @@ impl EventKind {
 			| Self::TurnInput { .. }
 			| Self::TurnChanged { .. }
 			| Self::ConversationCreated { .. }
+			| Self::TerminalStateChanged { .. }
 			| Self::RunActivityChanged { .. }
 			| Self::RunProcessesChanged { .. }
 			| Self::RunOutput { .. }

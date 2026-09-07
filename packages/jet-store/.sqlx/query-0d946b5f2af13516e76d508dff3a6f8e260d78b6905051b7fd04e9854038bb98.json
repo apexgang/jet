@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT terminal_id, workspace_id, state, plan FROM workspace_terminals WHERE workspace_id = ?1 ORDER BY state = 'closed', terminal_id DESC LIMIT 64",
+  "describe": {
+    "columns": [
+      {
+        "name": "terminal_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_terminals",
+            "name": "terminal_id"
+          }
+        }
+      },
+      {
+        "name": "workspace_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_terminals",
+            "name": "workspace_id"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_terminals",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "name": "plan",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_terminals",
+            "name": "plan"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0d946b5f2af13516e76d508dff3a6f8e260d78b6905051b7fd04e9854038bb98"
+}
