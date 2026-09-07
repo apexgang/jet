@@ -15,7 +15,9 @@ pub enum RunControl {
 	StopRun,
 }
 
-/// How far Jet had to go before the execution actually stopped.
+/// How far Jet had to go before the execution actually stopped. Everything
+/// past `Interrupt` is a forced termination: the Harness was given the
+/// chance to end its own work and did not take it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TerminationStage {
@@ -31,15 +33,6 @@ pub enum TerminationStage {
 	/// Every signal was delivered and the execution still could not be
 	/// observed ending; later work requires a new Run.
 	Unobserved,
-}
-
-impl TerminationStage {
-	/// Whether the execution was ended by a signal it could not handle
-	/// cooperatively.
-	#[must_use]
-	pub fn is_forced(self) -> bool {
-		matches!(self, Self::Terminate | Self::Kill | Self::Unobserved)
-	}
 }
 
 /// The exact terminal outcome of one control request, recorded once.

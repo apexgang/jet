@@ -17,9 +17,12 @@ durable, not an outcome: what actually happened arrives as Events.
 
 Interrupting requires a Run that is executing a claimed turn; a Run with
 nothing running, or one already stopping, is refused with
-`run.no_active_turn`, and a Run that has ended with `run.not_controllable`.
-Stopping is accepted from any live lifecycle and moves an active Run to
-`stopping`, so no further input is claimed while it ends. Repeating a
+`run.no_active_turn`. A Run that has ended is refused with
+`run.not_controllable`, and one whose native process does not exist yet
+with `run.not_started`: cancelling a launch is a different, ambiguous
+decision, and an execution that never gets past starting is recovered
+rather than signalled. Stopping is accepted from an executing Run and
+moves it to `stopping`, so no further input is claimed while it ends. Repeating a
 request drives the same durable decision again and asking to stop a Run
 that was only being interrupted replaces the weaker request; how often a
 client asks never chooses how hard Jet stops the work.

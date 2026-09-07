@@ -21,7 +21,9 @@ pub enum RunControl {
 	StopRun,
 }
 
-/// How far Jet had to go before the execution actually stopped.
+/// How far Jet had to go before the execution actually stopped. Everything
+/// past `Interrupt` is a forced termination: the Harness was given the
+/// chance to end its own work and did not take it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TerminationStage {
@@ -104,6 +106,18 @@ pub(crate) async fn record(
 		return Err(CoreError::conflict(
 			"run.not_controllable",
 			"the Run has already ended",
+		));
+	}
+	// Nothing to control before the native process exists. Cancelling a
+	// launch is a different, ambiguous decision, and an execution that
+	// never gets past starting is recovered, not signalled (ADR-0067).
+	if matches!(
+		run.lifecycle,
+		jet_store::RunLifecycle::Created | jet_store::RunLifecycle::Starting
+	) {
+		return Err(CoreError::conflict(
+			"run.not_started",
+			"the Run has no live execution to control yet",
 		));
 	}
 	let conversation_id = crate::ConversationId(run.conversation_id);

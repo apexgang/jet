@@ -152,16 +152,26 @@ impl Controls<'_> {
 			return EffectResult::Unknown;
 		};
 		let mut stage = TerminationStage::Unobserved;
+		let mut delivered = None;
 		for (signal, wait) in LADDER {
 			if host
 				.signal(self.0.run_home(), run_id, signal)
 				.await
 				.is_err()
 			{
-				// A helper that cannot be signalled at all leaves the request
-				// unresolved; nothing here guesses that the work stopped.
-				return EffectResult::Unknown;
+				// A helper that cannot be signalled may have gone because the
+				// step before it worked. Only a Run that is actually over
+				// settles here; nothing guesses that the work stopped.
+				if !self.0.ended_within(run_id, Duration::ZERO).await {
+					return EffectResult::Unknown;
+				}
+				stage = delivered.map_or(
+					TerminationStage::Unobserved,
+					ExecutionSignal::stage,
+				);
+				break;
 			}
+			delivered = Some(signal);
 			if self.0.ended_within(run_id, wait).await {
 				stage = signal.stage();
 				break;
