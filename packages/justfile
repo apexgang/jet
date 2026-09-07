@@ -30,9 +30,9 @@ install:
 test *args: build-run-helper
 	RUST_MIN_STACK={{ rust_min_stack }} cargo nextest run "$@"
 
-# Subprocess conformance uses the separately deployed generic helper.
+# Subprocess conformance uses the separately deployed helper and Crafts.
 build-run-helper:
-	cargo build -p jet-fueld
+	cargo build -p jet-fueld -p jet-craft-claude
 
 # List tests without running them; accepts nextest package and filter arguments.
 [unix]
