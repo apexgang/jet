@@ -320,7 +320,8 @@ pub(crate) async fn start(
 	let runtime = home.join("runtime");
 	private_directory(runtime.clone()).await?;
 	let (reader, writer) =
-		craft_connection(processes, &runtime, run_id, plan, true).await?;
+		craft_connection(processes, &runtime, run_id, plan, ConnectionMode::Launch)
+			.await?;
 	let (socket, helper_pid) = helper(&runtime, run_id, plan).await?;
 	let connection = RunConnection {
 		craft_minor: Contract::of(&plan.craft)?.craft_protocol.minor,
@@ -339,12 +340,18 @@ pub(crate) async fn start(
 	))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConnectionMode {
+	Launch,
+	Recovery,
+}
+
 pub(crate) async fn craft_connection(
 	processes: &CraftProcesses,
 	runtime: &Path,
 	run_id: RunId,
 	plan: &LaunchPlan,
-	allow_fork: bool,
+	mode: ConnectionMode,
 ) -> Result<(FrameReader<OwnedReadHalf>, FrameWriter<OwnedWriteHalf>), CoreError>
 {
 	let contract = Contract::of(&plan.craft)?;
@@ -353,11 +360,8 @@ pub(crate) async fn craft_connection(
 	let (read, write) = stream.into_split();
 	let mut reader = FrameReader::new(read);
 	let mut writer = FrameWriter::new(write);
-	let fork =
-		allow_fork
-			.then_some(plan.fork.as_ref())
-			.flatten()
-			.and_then(|fork| {
+	let fork = match mode {
+		ConnectionMode::Launch => plan.fork.as_ref().and_then(|fork| {
 				fork.source_native_conversation.as_ref().map(|identity| {
 					jet_protocol::CraftFork {
 						source_native_conversation: identity.clone(),
@@ -368,7 +372,9 @@ pub(crate) async fn craft_connection(
 						checkpoint_tree: fork.checkpoint_tree.clone(),
 					}
 				})
-			});
+			}),
+		ConnectionMode::Recovery => None,
+	};
 	let offer = ProtocolOffer {
 		family: ProtocolFamily::Craft,
 		versions: vec![contract.craft_protocol],

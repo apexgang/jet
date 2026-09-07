@@ -9,28 +9,62 @@ use std::{os::unix::fs::PermissionsExt, path::Path};
 use tokio::net::{UnixListener, UnixStream};
 
 pub fn install(home: &Path) {
-	install_craft(home, false, false);
+	install_craft(home, CraftProfile::Standard, ForkCapture::Ignore);
 }
 
 #[allow(dead_code)]
-pub fn install_with_fork(home: &Path, fork: bool) {
-	install_craft(home, fork, true);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForkSupport {
+	Native,
+	Portable,
 }
 
-fn install_craft(home: &Path, fork: bool, capture_fork: bool) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForkCapture {
+	Record,
+	Ignore,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CraftProfile {
+	Standard,
+	NativeFork,
+	PortableFallback,
+}
+
+#[allow(dead_code)]
+pub fn install_with_fork(home: &Path, support: ForkSupport) {
+	let profile = match support {
+		ForkSupport::Native => CraftProfile::NativeFork,
+		ForkSupport::Portable => CraftProfile::PortableFallback,
+	};
+	install_craft(home, profile, ForkCapture::Record);
+}
+
+fn install_craft(
+	home: &Path,
+	profile: CraftProfile,
+	capture: ForkCapture,
+) {
 	std::fs::create_dir_all(home.join("crafts")).unwrap();
 	let executable = std::env::current_exe().unwrap();
 	let program = home.join("crafts/fake-craft");
-	let minor = if fork { 4 } else { 3 };
-	let capabilities = if fork {
-		json!(["runs", "resume", "fork"])
-	} else {
-		json!(["runs", "resume"])
-	};
-	let features = if fork {
-		json!([{"name":"turns"},{"name":"resume"},{"name":"fork"}])
-	} else {
-		json!([{"name":"turns"},{"name":"resume"}])
+	let (minor, capabilities, features) = match profile {
+		CraftProfile::Standard => (
+			4,
+			json!(["runs", "resume"]),
+			json!([{"name":"turns"},{"name":"resume"}]),
+		),
+		CraftProfile::NativeFork => (
+			4,
+			json!(["runs", "resume", "fork"]),
+			json!([{"name":"turns"},{"name":"resume"},{"name":"fork"}]),
+		),
+		CraftProfile::PortableFallback => (
+			3,
+			json!(["runs", "resume"]),
+			json!([{"name":"turns"},{"name":"resume"}]),
+		),
 	};
 	let specification = json!({
 		"schema":{"major":1,"minor":0},"id":"fake","harness":"fake",
@@ -39,10 +73,9 @@ fn install_craft(home: &Path, fork: bool, capture_fork: bool) {
 		"host_access":[{"kind":"executable","name":executable},{"kind":"executable","name":"/bin/sh"},{"kind":"executable","name":"/missing-jet-test-harness"}]
 	});
 	let manifest = home.join("crafts/fake.json");
-	let capture = if capture_fork {
-		"export JET_FAKE_CAPTURE_FORK=1\n"
-	} else {
-		""
+	let capture = match capture {
+		ForkCapture::Record => "export JET_FAKE_CAPTURE_FORK=1\n",
+		ForkCapture::Ignore => "",
 	};
 	let script = format!(
 		"#!/bin/sh\nexport JET_FAKE_MANIFEST={}\nexport JET_CRAFT_SOCKET=\"$2\"\n{}exec {} --ignored --exact --nocapture fixture::fake_craft_process\n",

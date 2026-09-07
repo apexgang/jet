@@ -290,7 +290,10 @@ async fn handshake<R: AsyncRead + Unpin>(
 }
 
 fn git_object(value: &str) -> bool {
-	value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+	(40..=64).contains(&value.len())
+		&& value
+			.bytes()
+			.all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 async fn receive<R: AsyncRead + Unpin, T: DeserializeOwned>(
@@ -322,3 +325,7 @@ async fn send<W: AsyncWrite + Unpin, T: Serialize>(
 		.map_err(|_| CraftError::Timeout)?
 		.map_err(|_| CraftError::Disconnected)
 }
+
+#[cfg(test)]
+#[path = "connection_tests.rs"]
+mod tests;

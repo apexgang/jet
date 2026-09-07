@@ -11,6 +11,17 @@ use crate::transaction::{ReadTransaction, WriteTransaction};
 /// Most operational Events removed in one compaction transaction.
 pub const EVENT_COMPACTION_BATCH_LIMIT: usize = 256;
 
+/// Most semantic transcript Events copied into a Conversation fork.
+const FORK_CONTEXT_EVENT_LIMIT: usize = 256;
+
+/// A bounded semantic Event slice for building a fork's launch context.
+pub struct ForkContextEvents {
+	/// Newest transcript Events through the selected checkpoint, in order.
+	pub events: Vec<EventRecord>,
+	/// Whether older matching Events were omitted by the fixed store bound.
+	pub earlier_events_omitted: bool,
+}
+
 /// One `events` row as SQLite stores it, before its text columns are parsed
 /// back into domain types.
 pub(crate) struct Row {
@@ -27,6 +38,59 @@ pub(crate) struct Row {
 }
 
 impl ReadTransaction {
+	/// The newest bounded transcript slice at or before one checkpoint.
+	///
+	/// # Errors
+	/// Returns a [`StoreError`] when the rows cannot be read.
+	pub async fn fork_context_events(
+		&mut self,
+		conversation_id: uuid::Uuid,
+		run_id: uuid::Uuid,
+		checkpoint_turn: u32,
+	) -> Result<ForkContextEvents, StoreError> {
+		let conversation_id = conversation_id.to_string();
+		let run_id = run_id.to_string();
+		let checkpoint_turn = i64::from(checkpoint_turn);
+		let limit = i64::try_from(FORK_CONTEXT_EVENT_LIMIT + 1)
+			.unwrap_or(i64::MAX);
+		// ASVS 1.2.4/2.2.2: both identity values and the fixed allocation
+		// bound are parameters. Semantic transcript rows cannot be compacted.
+		let mut rows = sqlx::query_as!(
+			Row,
+			r#"SELECT sequence AS "sequence!", event_id, actor_kind,
+				actor_id, recorded_at_unix_ms, conversation_id, run_id, kind,
+				payload_version, payload
+			 FROM events
+			 WHERE conversation_id = ?1
+				AND kind IN ('turn.input', 'turn.changed', 'run.output')
+				AND sequence <= (
+					SELECT sequence FROM events
+					WHERE run_id = ?2
+						AND kind = 'change.checkpoint_recorded'
+						AND json_extract(payload, '$.turn') = ?3
+					ORDER BY sequence DESC LIMIT 1
+				)
+			 ORDER BY sequence DESC LIMIT ?4"#,
+			conversation_id,
+			run_id,
+			checkpoint_turn,
+			limit,
+		)
+		.fetch_all(self.connection())
+		.await?;
+		let earlier_events_omitted = rows.len() > FORK_CONTEXT_EVENT_LIMIT;
+		rows.truncate(FORK_CONTEXT_EVENT_LIMIT);
+		rows.reverse();
+		let events = rows
+			.into_iter()
+			.map(read_event_row)
+			.collect::<Result<_, _>>()?;
+		Ok(ForkContextEvents {
+			events,
+			earlier_events_omitted,
+		})
+	}
+
 	/// Up to `limit` Events strictly after `cursor`, in sequence order.
 	///
 	/// # Errors

@@ -38,7 +38,8 @@ source native Conversation identity and the immutable Jet checkpoint's source
 Conversation, Run, turn, commit, and tree. `resume` and `fork` are mutually
 exclusive. The SDK accepts `fork` only when the negotiated minor is at least 4
 and the specification enables both the feature and capability. Recovery never
-replays `fork`; subsequent Runs resume the destination's own native identity.
+replays `fork`; subsequent Runs never fork the source checkpoint again and
+resume the destination's own native identity when one was retained.
 The handshake supplies context only: an adapter must wait for the corresponding
 `Start` command before invoking the Harness's native fork, just as recovery
 never replays work merely because it receives `resume`.

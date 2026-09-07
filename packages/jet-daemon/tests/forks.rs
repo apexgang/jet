@@ -152,11 +152,14 @@ async fn a_conversation_forks_from_the_selected_checkpoint() {
 /// Craft sees the same checkpoint Workspace plus a bounded provenance header.
 #[tokio::test]
 async fn a_fork_uses_native_support_or_the_portable_context_contract() {
-	for native_supported in [true, false] {
+	for support in [
+		fixture::ForkSupport::Native,
+		fixture::ForkSupport::Portable,
+	] {
 		tokio::time::timeout(std::time::Duration::from_secs(30), async {
 			let dir = tempfile::tempdir_in("/tmp").unwrap();
 			let home = dir.path().join("jet");
-			fixture::install_with_fork(&home, native_supported);
+			fixture::install_with_fork(&home, support);
 			let daemon = start_jetd(&home).await;
 			let owner = Uuid::new_v4();
 			let client = connect(&daemon, owner).await;
@@ -219,7 +222,7 @@ async fn a_fork_uses_native_support_or_the_portable_context_contract() {
 				.workspace
 				.unwrap()
 				.root;
-			if !native_supported {
+			if support == fixture::ForkSupport::Portable {
 				wire.send(&json!({
 					"kind":"command", "id":2, "command_id":Uuid::now_v7(),
 					"command":{
@@ -258,10 +261,13 @@ async fn a_fork_uses_native_support_or_the_portable_context_contract() {
 				.await
 				.unwrap()
 				.runs;
-			assert_eq!(source_runs.len(), 1);
-			assert_eq!(fork_runs.len(), 1);
-			assert_eq!(source_runs[0].run_id, source_run);
-			assert_eq!(fork_runs[0].run_id, fork_run);
+			assert_eq!(
+				(
+					source_runs.iter().map(|run| run.run_id).collect::<Vec<_>>(),
+					fork_runs.iter().map(|run| run.run_id).collect::<Vec<_>>(),
+				),
+				(vec![source_run], vec![fork_run])
+			);
 			assert_ne!(fork_run, source_run);
 
 			let root = std::path::Path::new(&fork_root);
@@ -271,7 +277,7 @@ async fn a_fork_uses_native_support_or_the_portable_context_contract() {
 				&std::fs::read(root.join("native-fork")).unwrap(),
 			)
 			.unwrap();
-			if native_supported {
+			if support == fixture::ForkSupport::Native {
 				assert_eq!(input, "Continue from checkpoint\n");
 				assert_eq!(
 					(
@@ -304,11 +310,54 @@ async fn a_fork_uses_native_support_or_the_portable_context_contract() {
 					"source_conversation_id: {}\nsource_run_id: {}\ncheckpoint_turn: 1\n",
 					source.conversation_id, source_run
 				)));
+				assert!(input.contains("Make a change"));
 				assert!(input.ends_with(
 					"</jet-fork-context>\n\nContinue from checkpoint\n"
 				));
 				assert!(input.len() <= 65_536);
 			}
+
+			wire.send(&json!({
+				"kind":"command", "id":4, "command_id":Uuid::now_v7(),
+				"command":{
+					"type":"start_run", "conversation_id":fork.conversation_id,
+					"craft":"fake", "prompt":"Continue from checkpoint"
+				}
+			}))
+			.await;
+			let continued: Value = wire.receive().await;
+			let continued_run = Uuid::parse_str(
+				continued["result"]["run_id"].as_str().unwrap(),
+			)
+			.unwrap();
+			assertions::wait_for(
+				&mut wire,
+				&continued_run.to_string(),
+				"completed",
+			)
+			.await;
+			assert_eq!(
+				(
+					serde_json::from_slice::<Value>(
+						&std::fs::read(root.join("native-fork")).unwrap(),
+					)
+					.unwrap(),
+					std::fs::read_to_string(root.join("initial-input")).unwrap(),
+					client
+						.conversation(fork.conversation_id)
+						.await
+						.unwrap()
+						.runs
+						.iter()
+						.map(|run| run.run_id)
+						.collect::<Vec<_>>(),
+				),
+				(
+					Value::Null,
+					"Continue from checkpoint\n".into(),
+					vec![fork_run, continued_run],
+				)
+			);
 		})
 		.await
 		.unwrap();

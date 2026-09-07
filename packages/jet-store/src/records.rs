@@ -434,33 +434,52 @@ pub enum ConversationOriginRecord {
 	},
 }
 
+/// Storage columns whose valid combinations spell one Conversation origin.
+pub(crate) struct ConversationOriginColumns {
+	pub(crate) import_id: Option<Uuid>,
+	pub(crate) fork_source_conversation_id: Option<Uuid>,
+	pub(crate) fork_source_run_id: Option<Uuid>,
+	pub(crate) fork_checkpoint_turn: Option<i64>,
+}
+
 impl ConversationOriginRecord {
 	/// Columns whose valid combinations spell one origin.
-	pub(crate) fn columns(
-		self,
-	) -> (Option<Uuid>, Option<Uuid>, Option<Uuid>, Option<i64>) {
+	pub(crate) fn columns(self) -> ConversationOriginColumns {
 		match self {
-			Self::New => (None, None, None, None),
-			Self::Imported { import_id } => (Some(import_id), None, None, None),
+			Self::New => ConversationOriginColumns {
+				import_id: None,
+				fork_source_conversation_id: None,
+				fork_source_run_id: None,
+				fork_checkpoint_turn: None,
+			},
+			Self::Imported { import_id } => ConversationOriginColumns {
+				import_id: Some(import_id),
+				fork_source_conversation_id: None,
+				fork_source_run_id: None,
+				fork_checkpoint_turn: None,
+			},
 			Self::Forked {
 				source_conversation_id,
 				source_run_id,
 				checkpoint_turn,
-			} => (
-				None,
-				Some(source_conversation_id),
-				Some(source_run_id),
-				Some(i64::from(checkpoint_turn)),
-			),
+			} => ConversationOriginColumns {
+				import_id: None,
+				fork_source_conversation_id: Some(source_conversation_id),
+				fork_source_run_id: Some(source_run_id),
+				fork_checkpoint_turn: Some(i64::from(checkpoint_turn)),
+			},
 		}
 	}
 
 	pub(crate) fn parse(
-		import_id: Option<Uuid>,
-		fork_source_conversation_id: Option<Uuid>,
-		fork_source_run_id: Option<Uuid>,
-		fork_checkpoint_turn: Option<i64>,
+		columns: ConversationOriginColumns,
 	) -> Result<Self, StoreError> {
+		let ConversationOriginColumns {
+			import_id,
+			fork_source_conversation_id,
+			fork_source_run_id,
+			fork_checkpoint_turn,
+		} = columns;
 		match (
 			import_id,
 			fork_source_conversation_id,

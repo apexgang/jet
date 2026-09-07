@@ -4,9 +4,10 @@ use uuid::Uuid;
 
 use crate::StoreError;
 use crate::records::{
-	ConversationOriginRecord, ConversationPageKey, ConversationPageStart,
-	ConversationRecord, NewConversation, RetentionPolicy, WorkingTreeRecord,
-	column_error, parse_optional_uuid, parse_uuid,
+	ConversationOriginColumns, ConversationOriginRecord, ConversationPageKey,
+	ConversationPageStart, ConversationRecord, NewConversation,
+	RetentionPolicy, WorkingTreeRecord, column_error, parse_optional_uuid,
+	parse_uuid,
 };
 use crate::transaction::{ReadTransaction, WriteTransaction};
 
@@ -158,12 +159,12 @@ impl WriteTransaction {
 		let retention = record.retention.as_str();
 		let (working_tree, project_id) = record.working_tree.columns();
 		let project_id = project_id.map(|project_id| project_id.to_string());
-		let (
+		let ConversationOriginColumns {
 			import_id,
 			fork_source_conversation_id,
 			fork_source_run_id,
 			fork_checkpoint_turn,
-		) = record.origin.columns();
+		} = record.origin.columns();
 		let import_id = import_id.map(|id| id.to_string());
 		let fork_source_conversation_id =
 			fork_source_conversation_id.map(|id| id.to_string());
@@ -201,18 +202,21 @@ fn read_row(row: Row) -> Result<ConversationRecord, StoreError> {
 			&row.working_tree,
 			parse_optional_uuid("project_id", row.project_id.as_deref())?,
 		)?,
-		origin: ConversationOriginRecord::parse(
-			parse_optional_uuid("import_id", row.import_id.as_deref())?,
-			parse_optional_uuid(
+		origin: ConversationOriginRecord::parse(ConversationOriginColumns {
+			import_id: parse_optional_uuid(
+				"import_id",
+				row.import_id.as_deref(),
+			)?,
+			fork_source_conversation_id: parse_optional_uuid(
 				"fork_source_conversation_id",
 				row.fork_source_conversation_id.as_deref(),
 			)?,
-			parse_optional_uuid(
+			fork_source_run_id: parse_optional_uuid(
 				"fork_source_run_id",
 				row.fork_source_run_id.as_deref(),
 			)?,
-			row.fork_checkpoint_turn,
-		)?,
+			fork_checkpoint_turn: row.fork_checkpoint_turn,
+		})?,
 		created_at_unix_ms: row.created_at_unix_ms,
 	})
 }
