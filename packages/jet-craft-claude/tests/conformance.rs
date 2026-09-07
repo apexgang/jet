@@ -44,6 +44,7 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 
 		let mut events = vec![];
 		let mut turns = 0;
+		let mut answered = false;
 		loop {
 			events.extend(batch(&mut reader, &mut writer).await);
 			let completed = events
@@ -80,17 +81,51 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 						)
 						.await;
 					}
+					// Using a tool needs an approval, so this turn cannot
+					// finish until Jet answers the request behind it.
 					3 => {
 						command(
 							&mut writer,
 							&json!({
-								"kind": "turn", "id": "turn-4", "text": "finish",
+								"kind": "turn", "id": "turn-4", "text": "write",
+							}),
+						)
+						.await;
+					}
+					4 => {
+						command(
+							&mut writer,
+							&json!({
+								"kind": "turn", "id": "turn-5", "text": "finish",
 							}),
 						)
 						.await;
 					}
 					_ => {}
 				}
+			}
+			if !answered
+				&& events.iter().any(|event| {
+					matches!(
+						event,
+						CraftEvent::Activity {
+							activity: RunActivity::WaitingForApproval
+						}
+					)
+				}) {
+				answered = true;
+				command(
+					&mut writer,
+					&json!({
+						"kind": "action", "id": "action-1",
+						"action": {
+							"kind": "approval",
+							"request_id": asked(&events),
+							"decision": "allow_once",
+						},
+					}),
+				)
+				.await;
 			}
 			if events
 				.iter()
@@ -127,6 +162,7 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 				("turn-2".into(), run.to_string()),
 				("turn-3".into(), run.to_string()),
 				("turn-4".into(), run.to_string()),
+				("turn-5".into(), run.to_string()),
 			],
 			"every turn is answered under the pinned native Conversation"
 		);
@@ -135,6 +171,7 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 			vec![
 				TurnOutcome::Completed,
 				TurnOutcome::Interrupted,
+				TurnOutcome::Completed,
 				TurnOutcome::Completed,
 			]
 		);
@@ -146,7 +183,20 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 				RunActivity::WaitingForQuota,
 				RunActivity::Working,
 				RunActivity::Working,
+				RunActivity::WaitingForApproval,
+				RunActivity::Working,
+				RunActivity::Working,
 			]
+		);
+		// The decision reached the Harness as its own answer, carrying the
+		// input it was shown rather than one this Craft edited.
+		assert_eq!(
+			std::fs::read_to_string(root.join("decision.json")).unwrap(),
+			json!({
+				"behavior": "allow",
+				"updatedInput": {"file_path": "note.txt"},
+			})
+			.to_string()
 		);
 		assert!(matches!(
 			events.last(),
@@ -192,6 +242,25 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 	})
 	.await
 	.unwrap();
+}
+
+/// The identity of the permission request the Harness is waiting on, read
+/// from the native event exactly as a client would.
+fn asked(events: &[CraftEvent]) -> String {
+	events
+		.iter()
+		.find_map(|event| {
+			let CraftEvent::Output { native_event, .. } = event else {
+				return None;
+			};
+			let native: Value =
+				serde_json::from_str(native_event.get()).ok()?;
+			(native.pointer("/request/message/method")?.as_str()?
+				== "tools/call")
+				.then(|| native["request_id"].as_str())?
+				.map(str::to_owned)
+		})
+		.expect("the Harness asked through this Craft's own server")
 }
 
 fn completions(events: &[CraftEvent]) -> Vec<(String, String)> {
@@ -310,7 +379,7 @@ fn start_craft(
 	std::fs::create_dir_all(installed.with_file_name(".jet")).unwrap();
 	std::fs::copy(env!("CARGO_BIN_EXE_jet-craft-claude"), &installed).unwrap();
 	let declaration = format!(
-		"id = \"claude-code\"\nharness = \"claude-code\"\nschema = {{ major = 1, minor = 0 }}\nbroker_permissions = []\nhost_access = [{{ kind = \"executable\", name = {:?} }}]\nfeatures = [{{ name = \"turns\", required = true }}]\n\n[protocol]\nfamily = \"craft\"\nversions = [{{ major = 1, minor = 4 }}]\ncapabilities = [\"runs\"]\n",
+		"id = \"claude-code\"\nharness = \"claude-code\"\nschema = {{ major = 1, minor = 0 }}\nbroker_permissions = []\nhost_access = [{{ kind = \"executable\", name = {:?} }}]\nfeatures = [{{ name = \"turns\", required = true }}, {{ name = \"actions\", required = true }}]\n\n[protocol]\nfamily = \"craft\"\nversions = [{{ major = 1, minor = 4 }}]\ncapabilities = [\"runs\", \"actions\"]\n",
 		harness.to_str().unwrap()
 	);
 	std::fs::write(
@@ -343,7 +412,7 @@ async fn accept_craft(
 	let mut reader = FrameReader::new(read);
 	let mut writer = FrameWriter::new(write);
 	let hello = json!({
-		"protocol": {"family": "craft", "versions": [{"major": 1, "minor": 4}], "capabilities": ["runs"]},
+		"protocol": {"family": "craft", "versions": [{"major": 1, "minor": 4}], "capabilities": ["runs", "actions"]},
 		"specification": {"family": "specification", "versions": [{"major": 1, "minor": 0}]},
 		"execution_id": run,
 		"resume": Value::Null,
@@ -376,11 +445,11 @@ async fn event(reader: &mut Reader) -> CraftEvent {
 }
 
 /// A Harness speaking the Claude Code native protocol: newline-delimited JSON
-/// in both directions, for as long as its input stays open.
+/// in both directions, for as long as its input stays open. It reaches its
+/// SDK MCP server by asking the Craft, which is also how it asks permission.
 #[test]
 #[ignore = "invoked as a real Claude Code Harness owned by jetfueld"]
 fn claude_double() {
-	use std::io::{BufRead, Write};
 	let arguments: Vec<String> = std::env::var("JET_CLAUDE_ARGUMENTS")
 		.unwrap()
 		.split_whitespace()
@@ -396,53 +465,139 @@ fn claude_double() {
 		.find(|pair| pair[0] == "--session-id")
 		.map(|pair| pair[1].clone())
 		.expect("the Craft pins the native Conversation identity");
+	let permission = arguments
+		.windows(2)
+		.find(|pair| pair[0] == "--permission-prompt-tool")
+		.map(|pair| pair[1].clone())
+		.expect("the Craft answers permission requests itself");
 
+	let mut input = std::io::BufRead::lines(std::io::stdin().lock());
 	let mut slow = false;
-	for line in std::io::stdin().lock().lines() {
+	let mut served = false;
+	while let Some(line) = input.next() {
 		let event: Value = serde_json::from_str(&line.unwrap()).unwrap();
-		let mut out = std::io::stdout().lock();
-		// Cancellation abandons the turn in flight and answers it.
+		// Cancellation abandons the turn in flight and answers it, which is
+		// the only way a turn the Harness will not finish ever ends.
 		if event["type"] == "control_request" {
-			if slow {
+			if event["request"]["subtype"] == "interrupt" && slow {
 				slow = false;
-				writeln!(out, "{}", result(&session)).unwrap();
-				out.flush().unwrap();
+				emit(
+					&serde_json::from_str::<Value>(&result(&session)).unwrap(),
+				);
 			}
 			continue;
 		}
+		// The Craft registers its server before any turn runs.
+		if event["type"] == "control_response" {
+			continue;
+		}
 		let text = event["message"]["content"][0]["text"].as_str().unwrap();
-		writeln!(
-			out,
-			"{}",
-			json!({
-				"type": "system", "subtype": "init",
-				"claude_code_version": "2.1.263", "session_id": session,
-			})
-		)
-		.unwrap();
-		writeln!(out, "{}", assistant(&session)).unwrap();
+		if !served {
+			served = true;
+			// The server behind the permission tool has to be usable before
+			// it can be trusted to answer, so it is opened like any other.
+			assert_eq!(
+				ask(
+					&mut input,
+					"mcp-1",
+					json!({
+						"jsonrpc": "2.0", "id": 0, "method": "initialize",
+					})
+				)["serverInfo"]["name"],
+				json!("jet")
+			);
+			assert_eq!(
+				ask(
+					&mut input,
+					"mcp-2",
+					json!({
+						"jsonrpc": "2.0", "id": 1, "method": "tools/list",
+					})
+				)["tools"][0]["name"],
+				json!(permission.rsplit("__").next().unwrap())
+			);
+		}
+		emit(&json!({
+			"type": "system", "subtype": "init",
+			"claude_code_version": "2.1.263", "session_id": session,
+		}));
+		emit(&serde_json::from_str::<Value>(&assistant(&session)).unwrap());
 		if text == "second" {
-			writeln!(
-				out,
-				"{}",
-				json!({
-					"type": "rate_limit_event", "session_id": session,
-					"rate_limit_info": {"status": "rejected", "utilization": 1.0},
-				})
-			)
-			.unwrap();
+			emit(&json!({
+				"type": "rate_limit_event", "session_id": session,
+				"rate_limit_info": {"status": "rejected", "utilization": 1.0},
+			}));
 		}
 		if text == "slow" {
 			slow = true;
-			out.flush().unwrap();
 			continue;
 		}
-		writeln!(out, "{}", result(&session)).unwrap();
-		out.flush().unwrap();
+		// Using a tool needs permission, and nothing proceeds until the
+		// answer to that exact request arrives.
+		if text == "write" {
+			let decision = ask(
+				&mut input,
+				"perm-1",
+				json!({
+					"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+					"params": {
+						"name": permission.rsplit("__").next().unwrap(),
+						"arguments": {
+							"tool_name": "Write",
+							"input": {"file_path": "note.txt"},
+							"tool_use_id": "toolu_1",
+						},
+					},
+				}),
+			);
+			std::fs::write(
+				"decision.json",
+				decision["content"][0]["text"].as_str().unwrap(),
+			)
+			.unwrap();
+		}
+		emit(&serde_json::from_str::<Value>(&result(&session)).unwrap());
 		if text == "finish" {
 			return;
 		}
 	}
+}
+
+/// Ask the Craft's own MCP server one message and wait for its answer, the
+/// way the Harness reaches an SDK-hosted server.
+fn ask(
+	input: &mut impl Iterator<Item = std::io::Result<String>>,
+	request_id: &str,
+	message: Value,
+) -> Value {
+	emit(&json!({
+		"type": "control_request", "request_id": request_id,
+		"request": {
+			"subtype": "mcp_message", "server_name": "jet",
+			"message": message,
+		},
+	}));
+	for line in input {
+		let event: Value = serde_json::from_str(&line.unwrap()).unwrap();
+		if event["type"] == "control_response"
+			&& event["response"]["request_id"] == request_id
+		{
+			return event["response"]["response"]["mcp_response"]["result"]
+				.clone();
+		}
+		// A turn cancelled while this Craft answers still ends the turn.
+		if event["type"] == "control_request" {
+			continue;
+		}
+	}
+	panic!("the Craft left {request_id} unanswered")
+}
+
+fn emit(event: &Value) {
+	use std::io::Write;
+	let mut out = std::io::stdout().lock();
+	writeln!(out, "{event}").unwrap();
+	out.flush().unwrap();
 }
 
 fn assistant(session: &str) -> String {
