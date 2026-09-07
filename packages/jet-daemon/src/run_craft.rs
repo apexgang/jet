@@ -28,7 +28,7 @@ impl Contract {
 			jet_protocol::decode_control(pin.adapter_state.as_bytes())
 				.map_err(|_| unavailable())?;
 		if contract.version != 1
-			|| !(1..=3).contains(&contract.craft_protocol.minor)
+			|| !(1..=4).contains(&contract.craft_protocol.minor)
 			|| contract.craft_protocol.major != 1
 			|| contract.helper_protocol.major != 1
 			|| contract.helper_protocol.minor > 1

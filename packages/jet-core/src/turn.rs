@@ -29,7 +29,8 @@ pub enum TurnState {
 	Completed,
 	/// A newer input took the same background slot.
 	Superseded,
-	/// User input canceled pending Auto-continue.
+	/// User input canceled pending Auto-continue, or an Interrupt turn
+	/// ended this claimed work while its Run stayed alive.
 	Canceled,
 	/// Its own client withdrew queued user work.
 	Withdrawn,

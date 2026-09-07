@@ -40,6 +40,7 @@ A closed pipe is not evidence that a Command failed. The host reconciles unresol
 Commands use a closed `kind` discriminator:
 
 - `{"kind":"turn","id":"turn-1","text":"Inspect the changes"}` submits an admitted turn.
+- `{"kind":"interrupt","id":"turn-1"}` (Craft 1.4) asks the Harness to cancel that turn without ending the Run. A Craft that negotiated 1.4 must answer every interrupt with a `turn_ended` boundary for the named turn; see [Execution control](execution-control.md). A host whose Craft did not negotiate 1.4 stops the work by signal escalation instead.
 - `{"kind":"action","id":"action-1","action":{"kind":"invoke","action_id":"inspect","input":{"path":"src"}}}` invokes a presented native action.
 - An approval action has `kind: "approval"`, `request_id`, and `decision: "allow_once" | "deny"`. Unknown action kinds and decisions are rejected. The host authenticates and authorizes the exact request before dispatch; Craft declarations never bypass approval policy.
 - `{"kind":"shutdown"}` releases this execution's adapter connection without deleting a Conversation or closing other execution connections. The host controls process shutdown after the Craft becomes idle.

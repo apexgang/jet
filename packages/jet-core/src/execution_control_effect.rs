@@ -92,7 +92,7 @@ impl Core {
 				state.control = None;
 				state.termination = Some(termination);
 				crate::run_state::save(tx, run_id, &state).await?;
-				crate::run_state::append_termination(
+				crate::execution_control::append_termination(
 					tx,
 					&run.into(),
 					termination,
@@ -130,14 +130,14 @@ impl Controls<'_> {
 		if request.control != RunControl::InterruptTurn {
 			return None;
 		}
-		let turn_id = request.turn_id?;
+		let correlation = request.correlation?;
 		let connection = self.0.live_connection(run_id)?;
 		if !connection.supports_native_cancellation() {
 			return None;
 		}
 		// The Craft answers with its own turn boundary; the Run stays active
 		// and the outcome is recorded when that boundary commits.
-		Some(match connection.interrupt(turn_id).await {
+		Some(match connection.interrupt(correlation).await {
 			Ok(()) => EffectResult::Completed,
 			Err(_) => EffectResult::Unknown,
 		})

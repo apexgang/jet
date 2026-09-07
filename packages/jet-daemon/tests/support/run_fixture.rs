@@ -14,9 +14,9 @@ pub fn install(home: &Path) {
 	let program = home.join("crafts/fake-craft");
 	let specification = json!({
 		"schema":{"major":1,"minor":0},"id":"fake","harness":"fake",
-		"protocol":{"family":"craft","versions":[{"major":1,"minor":3}],"capabilities":["runs","resume"]},
+		"protocol":{"family":"craft","versions":[{"major":1,"minor":4}],"capabilities":["runs","resume"]},
 		"features":[{"name":"turns"},{"name":"resume"}],"broker_permissions":[],
-		"host_access":[{"kind":"executable","name":executable},{"kind":"executable","name":"/missing-jet-test-harness"}]
+		"host_access":[{"kind":"executable","name":executable},{"kind":"executable","name":"/bin/sh"},{"kind":"executable","name":"/missing-jet-test-harness"}]
 	});
 	let manifest = home.join("crafts/fake.json");
 	let script = format!(
@@ -78,6 +78,43 @@ async fn fake_craft_process() {
 		tokio::spawn(async move {
 			execution(stream, specification).await;
 		});
+	}
+}
+
+/// A Harness that ignores every signal it is allowed to ignore, so a stop
+/// has to escalate all the way to kill. It keeps its file and its output.
+const DEAF_HARNESS: &str = r#"
+trap '' INT TERM
+printf 'Harness work\n' > result.txt
+printf '%s\n' '{"text":"Working before the stop"}'
+: > deaf-ready
+while true; do sleep 1; done
+"#;
+
+fn launch(text: &str, root: &Path) -> HelperCommand {
+	if text == "Fail native launch" {
+		return HelperCommand::Launch {
+			program: "/missing-jet-test-harness".into(),
+			arguments: vec![],
+			input: format!("{text}\n"),
+		};
+	}
+	if root.join("deaf").exists() {
+		return HelperCommand::Launch {
+			program: "/bin/sh".into(),
+			arguments: vec!["-c".into(), DEAF_HARNESS.into()],
+			input: format!("{text}\n"),
+		};
+	}
+	HelperCommand::Launch {
+		program: std::env::current_exe().unwrap().to_str().unwrap().into(),
+		arguments: vec![
+			"--ignored".into(),
+			"--exact".into(),
+			"--nocapture".into(),
+			"fixture::fake_harness_process".into(),
+		],
+		input: format!("{text}\n"),
 	}
 }
 
@@ -149,24 +186,10 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 	writer
 		.write(&Frame::control(
 			encode_control(&if let Some(text) = text {
-				HelperCommand::Launch {
-					program: if text == "Fail native launch" {
-						"/missing-jet-test-harness".into()
-					} else {
-						std::env::current_exe()
-							.unwrap()
-							.to_str()
-							.unwrap()
-							.into()
-					},
-					arguments: vec![
-						"--ignored".into(),
-						"--exact".into(),
-						"--nocapture".into(),
-						"fixture::fake_harness_process".into(),
-					],
-					input: format!("{text}\n"),
-				}
+				launch(
+					&text,
+					Path::new(&ready.descriptor.config.working_directory),
+				)
 			} else {
 				HelperCommand::Recover { source_offset }
 			})
@@ -204,11 +227,22 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 			tokio::select! {
 				record = &mut incoming => break record,
 				command = requests.recv() => {
-					let Some(CraftCommand::Turn { id, text }) = command else { return; };
 					let root = Path::new(&ready.descriptor.config.working_directory);
-					assert!(root.join("queue").exists());
-					std::fs::write(root.join("turn-input.tmp"), json!({"id":id,"text":text}).to_string()).unwrap();
-					std::fs::rename(root.join("turn-input.tmp"), root.join("turn-input")).unwrap();
+					match command {
+						Some(CraftCommand::Turn { id, text }) => {
+							assert!(root.join("queue").exists());
+							std::fs::write(root.join("turn-input.tmp"), json!({"id":id,"text":text}).to_string()).unwrap();
+							std::fs::rename(root.join("turn-input.tmp"), root.join("turn-input")).unwrap();
+						}
+						// Native cancellation: the Harness is told to abandon
+						// this turn, and reports the boundary itself. The Run's
+						// own identity names the input it started with.
+						Some(CraftCommand::Interrupt { id: cancelled }) => {
+							let turn = if cancelled == id { "initial".to_string() } else { cancelled };
+							std::fs::write(root.join(format!("interrupted-{turn}")), "cancel").unwrap();
+						}
+						_ => return,
+					}
 				}
 			}
 		};
@@ -242,6 +276,14 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 					};
 					let native: serde_json::Value =
 						serde_json::from_str(native_event.get()).unwrap();
+					if native["interrupted_turn"].is_string() {
+						sender
+							.send(&CraftEvent::TurnEnded {
+								outcome: TurnOutcome::Interrupted,
+							})
+							.await
+							.unwrap();
+					}
 					if let Some(turn_id) = native["turn_id"].as_str() {
 						sender
 							.send(&CraftEvent::Completed {

@@ -74,10 +74,10 @@ impl ExecutionSignal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ControlRequest {
 	pub(crate) control: RunControl,
-	/// The turn that was active when the request was admitted. An
-	/// interruption names the turn it may cancel, so a Craft can never
-	/// apply it to work admitted afterwards.
-	pub(crate) turn_id: Option<uuid::Uuid>,
+	/// The turn that was executing when the request was admitted, which is
+	/// also the identity the pinned Craft was given for it. Naming it here
+	/// keeps a cancellation from ever reaching work admitted afterwards.
+	pub(crate) correlation: Option<uuid::Uuid>,
 }
 
 /// Records an admitted control request against a live managed Run.
@@ -106,8 +106,12 @@ pub(crate) async fn record(
 			"the Run has already ended",
 		));
 	}
+	let conversation_id = crate::ConversationId(run.conversation_id);
+	let queue = crate::turn_queue::load(tx, conversation_id).await?;
+	let active = queue.active_turn(run_id);
 	if control == RunControl::InterruptTurn
-		&& run.lifecycle != jet_store::RunLifecycle::Active
+		&& (run.lifecycle != jet_store::RunLifecycle::Active
+			|| active.is_none())
 	{
 		return Err(CoreError::conflict(
 			"run.no_active_turn",
@@ -117,17 +121,14 @@ pub(crate) async fn record(
 	let mut state: crate::run_state::State =
 		crate::run_state::decode(&record.state)?;
 	if state.control.map(|request| request.control) != Some(control) {
-		let conversation_id = crate::ConversationId(run.conversation_id);
-		let queue = crate::turn_queue::load(tx, conversation_id).await?;
 		state.control = Some(ControlRequest {
 			control,
-			turn_id: queue.active_turn(run_id),
+			correlation: active,
 		});
 		state.termination = None;
 		crate::run_state::save(tx, run_id, &state).await?;
 	}
-	crate::run_state::append_control(tx, actor, &run.into(), control, now)
-		.await?;
+	append_control(tx, actor, &run.into(), control, now).await?;
 	tx.insert_effect(&jet_store::NewEffect {
 		effect_id: uuid::Uuid::now_v7(),
 		command_id: command_id.0,
@@ -143,6 +144,72 @@ pub(crate) async fn record(
 		run: Run::from(run),
 		control,
 	})
+}
+
+/// Records an admitted control request, moving a stop into `stopping` so no
+/// later turn is claimed while the execution is being ended.
+async fn append_control(
+	tx: &mut jet_store::WriteTransaction,
+	actor: &crate::Actor,
+	run: &Run,
+	control: RunControl,
+	now: i64,
+) -> Result<(), CoreError> {
+	crate::run_state::append(
+		tx,
+		&crate::EventActor::from(actor.clone()),
+		run,
+		crate::EventKind::RunControlRequested { control },
+		now,
+	)
+	.await?;
+	if control == RunControl::StopRun
+		&& run.lifecycle == jet_store::RunLifecycle::Active
+	{
+		tx.update_run_lifecycle(
+			run.run_id.0,
+			jet_store::RunLifecycle::Stopping,
+			now,
+		)
+		.await?;
+		crate::run_state::append(
+			tx,
+			&crate::EventActor::from(actor.clone()),
+			run,
+			crate::EventKind::RunLifecycleChanged {
+				from: jet_store::RunLifecycle::Active,
+				to: jet_store::RunLifecycle::Stopping,
+			},
+			now,
+		)
+		.await?;
+	}
+	Ok(())
+}
+
+/// Records how a control request actually ended the work it targeted.
+pub(crate) async fn append_termination(
+	tx: &mut jet_store::WriteTransaction,
+	run: &Run,
+	termination: RunTermination,
+	now: i64,
+) -> Result<(), CoreError> {
+	let record = tx
+		.run_execution(run.run_id.0)
+		.await?
+		.ok_or_else(unmanaged)?;
+	let plan: crate::LaunchPlan = crate::run_state::decode(&record.plan)?;
+	crate::run_state::append(
+		tx,
+		&crate::EventActor::RunSupervisor {
+			run_id: run.run_id,
+			authorized_by: plan.client_id,
+		},
+		run,
+		crate::EventKind::RunTerminated { termination },
+		now,
+	)
+	.await
 }
 
 pub(crate) fn unmanaged() -> CoreError {

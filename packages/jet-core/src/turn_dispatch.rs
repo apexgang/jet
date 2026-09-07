@@ -85,7 +85,12 @@ impl Core {
 }
 
 pub(crate) enum Settlement {
-	Completed { turn_id: Uuid },
+	Completed {
+		turn_id: Uuid,
+	},
+	/// An admitted Interrupt turn ended this claimed work; the Run stays
+	/// able to take the next input (ADR-0083).
+	Canceled,
 	Failed,
 	OutcomeUnknown,
 }
@@ -118,6 +123,7 @@ pub(crate) async fn settle(
 	}
 	let state = match settlement {
 		Settlement::Completed { .. } => TurnState::Completed,
+		Settlement::Canceled => TurnState::Canceled,
 		Settlement::Failed => TurnState::Failed,
 		Settlement::OutcomeUnknown => TurnState::OutcomeUnknown,
 	};

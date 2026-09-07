@@ -6,22 +6,34 @@ pub fn harness() {
 	let mut id = "initial".to_string();
 	loop {
 		std::fs::write("current-turn", &id).unwrap();
+		let interrupted = format!("interrupted-{id}");
 		while Path::new("queue").exists()
 			&& !Path::new(&format!("continue-{id}")).exists()
+			&& !Path::new(&interrupted).exists()
 		{
 			std::thread::sleep(Duration::from_millis(10));
 		}
 		if !Path::new("queue").exists() {
 			return;
 		}
-		let completion = if std::fs::read_to_string(format!("continue-{id}"))
-			.unwrap() == "wrong"
-		{
-			uuid::Uuid::nil().to_string()
+		// A cancelled turn ends without a completion; the Harness itself
+		// stays alive and waits for the next input.
+		if Path::new(&interrupted).exists() {
+			println!("{}", json!({"interrupted_turn":id,"text":"Cancelled"}));
 		} else {
-			id.clone()
-		};
-		println!("{}", json!({"turn_id":completion,"text":"Turn finished"}));
+			let completion =
+				if std::fs::read_to_string(format!("continue-{id}")).unwrap()
+					== "wrong"
+				{
+					uuid::Uuid::nil().to_string()
+				} else {
+					id.clone()
+				};
+			println!(
+				"{}",
+				json!({"turn_id":completion,"text":"Turn finished"})
+			);
+		}
 		std::io::stdout().flush().unwrap();
 		let request = loop {
 			if !Path::new("queue").exists() {

@@ -90,65 +90,6 @@ pub(crate) async fn save(
 	Ok(())
 }
 
-/// Records an admitted control request, moving a stop into `stopping` so no
-/// later turn is claimed while the execution is being ended.
-pub(crate) async fn append_control(
-	tx: &mut WriteTransaction,
-	actor: &crate::Actor,
-	run: &Run,
-	control: crate::RunControl,
-	now: i64,
-) -> Result<(), CoreError> {
-	append(
-		tx,
-		&crate::EventActor::from(actor.clone()),
-		run,
-		EventKind::RunControlRequested { control },
-		now,
-	)
-	.await?;
-	if control == crate::RunControl::StopRun
-		&& run.lifecycle == RunLifecycle::Active
-	{
-		tx.update_run_lifecycle(run.run_id.0, RunLifecycle::Stopping, now)
-			.await?;
-		append(
-			tx,
-			&crate::EventActor::from(actor.clone()),
-			run,
-			EventKind::RunLifecycleChanged {
-				from: RunLifecycle::Active,
-				to: RunLifecycle::Stopping,
-			},
-			now,
-		)
-		.await?;
-	}
-	Ok(())
-}
-
-/// Records how a control request actually ended the work it targeted.
-pub(crate) async fn append_termination(
-	tx: &mut WriteTransaction,
-	run: &Run,
-	termination: crate::RunTermination,
-	now: i64,
-) -> Result<(), CoreError> {
-	let record = tx.run_execution(run.run_id.0).await?.ok_or_else(missing)?;
-	let plan: crate::LaunchPlan = decode(&record.plan)?;
-	append(
-		tx,
-		&crate::EventActor::RunSupervisor {
-			run_id: run.run_id,
-			authorized_by: plan.client_id,
-		},
-		run,
-		EventKind::RunTerminated { termination },
-		now,
-	)
-	.await
-}
-
 /// Facts from the trusted Run Adapter, validated against the durable lifecycle.
 #[derive(Serialize)]
 pub enum Observation {
@@ -337,6 +278,15 @@ async fn record(
 		| Observation::Lost => Some(Settlement::Failed),
 		Observation::Disconnected | Observation::Reconnected => {
 			Some(Settlement::OutcomeUnknown)
+		}
+		// A cancelled turn releases the queue: the Run itself is still
+		// alive and takes the next admitted input (ADR-0083).
+		Observation::TurnEnded(crate::TurnOutcome::Interrupted)
+			if state.control.is_some_and(|request| {
+				request.control == crate::RunControl::InterruptTurn
+			}) =>
+		{
+			Some(Settlement::Canceled)
 		}
 		Observation::Started { .. }
 		| Observation::FileChanged(_)
@@ -573,7 +523,7 @@ fn activity(
 	}
 }
 
-async fn append(
+pub(crate) async fn append(
 	tx: &mut WriteTransaction,
 	actor: &crate::EventActor,
 	run: &Run,
