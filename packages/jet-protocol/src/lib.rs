@@ -42,7 +42,13 @@ mod setting;
 mod stream;
 mod stream_control;
 mod stream_error;
+mod terminal;
 mod workspace;
+pub use terminal::{
+	TerminalConfig, TerminalDescriptor, TerminalHelperAction,
+	TerminalHelperReply, TerminalHelperRequest, TerminalState,
+	WorkspaceTerminal,
+};
 
 pub use helper::{
 	HelperCommand, HelperConfig, HelperDescriptor, HelperEvent, HelperHello,
