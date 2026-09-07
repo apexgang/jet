@@ -57,6 +57,8 @@ pub struct AuditRecordId(pub Uuid);
 /// what happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditDecision {
+	/// An interactive user requested resolution of an Orphaned execution.
+	ExecutionResolutionRequested,
 	/// A remote connection attempted to prove its Paired Client identity.
 	ConnectionAuthenticated,
 	/// A Provider account was bound to this Plane, widening what may
@@ -115,6 +117,8 @@ pub enum AuditDecision {
 /// and identity the store keeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AuditSubject {
+	/// One helper execution, including unmatched identities.
+	Execution(crate::RunId),
 	/// The Plane as a whole.
 	Plane,
 	/// One registered Project.
@@ -215,6 +219,9 @@ impl AuditDecision {
 	#[must_use]
 	pub fn as_str(self) -> &'static str {
 		match self {
+			Self::ExecutionResolutionRequested => {
+				"execution.resolution_requested"
+			}
 			Self::ConnectionAuthenticated => "connection.authenticated",
 			Self::AccountBound => "account.bound",
 			Self::AccountUnbound => "account.unbound",
@@ -246,6 +253,7 @@ impl AuditDecision {
 	/// one a later release would assign.
 	fn risk(self) -> AuditRisk {
 		match self {
+			Self::ExecutionResolutionRequested => AuditRisk::Destructive,
 			Self::ConnectionAuthenticated => AuditRisk::Routine,
 			Self::AccountBound
 			| Self::AccountUnbound
@@ -302,6 +310,7 @@ impl AuditSubject {
 
 	fn kind(self) -> &'static str {
 		match self {
+			Self::Execution(_) => "execution",
 			Self::Plane => "plane",
 			Self::Project(_) => "project",
 			Self::Conversation(_) => "conversation",
@@ -313,6 +322,7 @@ impl AuditSubject {
 
 	fn identity(self) -> Option<String> {
 		match self {
+			Self::Execution(crate::RunId(id)) => Some(id.to_string()),
 			Self::Plane => None,
 			Self::Project(ProjectId(id))
 			| Self::Conversation(ConversationId(id))
@@ -330,6 +340,9 @@ impl AuditSubject {
 /// guards can never drift apart.
 pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 	match command {
+		Command::ResolveExecution(_) => {
+			Some(AuditDecision::ExecutionResolutionRequested)
+		}
 		Command::BindAccount { .. } => Some(AuditDecision::AccountBound),
 		Command::UnbindAccount { .. } => Some(AuditDecision::AccountUnbound),
 		Command::SetSetting { key, value, .. } => stored_setting(*key, value),
@@ -367,6 +380,9 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 /// that exists.
 fn refused_subject(command: &Command) -> AuditSubject {
 	match command {
+		Command::ResolveExecution(request) => {
+			AuditSubject::Execution(request.execution_id)
+		}
 		Command::UnbindAccount { binding_id } => {
 			AuditSubject::AccountBinding(*binding_id)
 		}

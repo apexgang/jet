@@ -93,6 +93,12 @@ pub enum ServerMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryRequest {
+	/// Bounded Orphaned-execution metadata for interactive decisions.
+	OrphanedExecutions {
+		/// Continue after a previous page.
+		#[serde(default)]
+		after: Option<Uuid>,
+	},
 	/// Read the durable execution state of a managed Run.
 	RunExecution {
 		/// Run identity.
@@ -192,6 +198,8 @@ pub enum QueryRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryResponse {
+	/// Read-only recovery candidates.
+	OrphanedExecutions(crate::OrphanedExecutions),
 	/// Durable lifecycle, activity, and Managed processes of a Run.
 	RunExecution(crate::RunExecution),
 	/// Snapshot of the Plane's daemon status.

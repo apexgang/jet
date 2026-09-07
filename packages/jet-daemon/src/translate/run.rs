@@ -42,3 +42,41 @@ fn activity(value: core::RunActivity) -> wire::RunActivity {
 		core::RunActivity::Reconnecting => wire::RunActivity::Reconnecting,
 	}
 }
+
+pub(super) fn action(value: core::ExecutionAction) -> wire::ExecutionAction {
+	match value {
+		core::ExecutionAction::Adopt => wire::ExecutionAction::Adopt,
+		core::ExecutionAction::Leave => wire::ExecutionAction::Leave,
+		core::ExecutionAction::Terminate => wire::ExecutionAction::Terminate,
+	}
+}
+pub(super) fn action_from_wire(
+	value: wire::ExecutionAction,
+) -> core::ExecutionAction {
+	match value {
+		wire::ExecutionAction::Adopt => core::ExecutionAction::Adopt,
+		wire::ExecutionAction::Leave => core::ExecutionAction::Leave,
+		wire::ExecutionAction::Terminate => core::ExecutionAction::Terminate,
+	}
+}
+pub(super) fn orphans(
+	page: core::OrphanedExecutions,
+) -> wire::OrphanedExecutions {
+	wire::OrphanedExecutions {
+		next: page.next.map(|id| id.0),
+		executions: page
+			.executions
+			.into_iter()
+			.map(|execution| wire::OrphanedExecution {
+				execution_id: execution.execution_id.0,
+				metadata: execution.metadata.map(|m| wire::ExecutionMetadata {
+					instance: m.instance,
+					helper_pid: m.helper_pid,
+					root: m.root,
+					project_root: m.project_root,
+					version: m.version,
+				}),
+			})
+			.collect(),
+	}
+}

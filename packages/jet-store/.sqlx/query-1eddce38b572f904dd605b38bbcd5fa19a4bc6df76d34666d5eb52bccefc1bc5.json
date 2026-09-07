@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM orphaned_executions WHERE execution_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1eddce38b572f904dd605b38bbcd5fa19a4bc6df76d34666d5eb52bccefc1bc5"
+}

@@ -120,6 +120,41 @@
       "description": "Host-to-Craft Commands, admitted by Jet before crossing this boundary.",
       "oneOf": [
         {
+          "description": "Reconnect an existing helper without issuing native input (Craft 1.2).",
+          "type": "object",
+          "properties": {
+            "checkpoint": {
+              "description": "Opaque parser state committed with that boundary.",
+              "type": "string"
+            },
+            "helper_socket": {
+              "description": "Validated owner-only helper endpoint.",
+              "type": "string"
+            },
+            "id": {
+              "description": "Original Run identity.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "recover"
+            },
+            "source_offset": {
+              "description": "Last atomically committed source boundary.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "helper_socket",
+            "source_offset",
+            "checkpoint"
+          ]
+        },
+        {
           "description": "Start a Run through its host-provisioned helper (Craft 1.1, runs).",
           "type": "object",
           "properties": {
@@ -290,9 +325,14 @@
           ]
         },
         {
-          "description": "End of a native source record; earlier Events must commit first.",
+          "description": "End of a native source record; earlier Events and parser state commit atomically.\nThe host commits bounded groups with replay-prefix digests while keeping\nthis record retained, then acknowledges after its final checkpoint.",
           "type": "object",
           "properties": {
+            "checkpoint": {
+              "description": "Bounded parser state required to interpret the next source record.",
+              "type": "string",
+              "default": ""
+            },
             "kind": {
               "type": "string",
               "const": "progress"
@@ -306,6 +346,33 @@
           },
           "required": [
             "kind",
+            "source_offset"
+          ]
+        },
+        {
+          "description": "Confirmed attachment to the retained helper at the requested source boundary (1.2).",
+          "type": "object",
+          "properties": {
+            "helper_pid": {
+              "description": "OS identity of the validated helper.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "run_recovered"
+            },
+            "source_offset": {
+              "description": "Requested durable source boundary.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "helper_pid",
             "source_offset"
           ]
         },

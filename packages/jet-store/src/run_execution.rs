@@ -13,6 +13,24 @@ pub struct RunExecutionRecord {
 }
 
 impl ReadTransaction {
+	/// Reads a bounded page of nonterminal managed Run identities for recovery.
+	///
+	/// # Errors
+	/// Returns a store error if the query or identity decoding fails.
+	pub async fn active_execution_ids(
+		&mut self,
+		after: &str,
+	) -> Result<Vec<Uuid>, StoreError> {
+		let rows = sqlx::query_scalar!(
+			r#"SELECT r.run_id AS "run_id!" FROM runs r JOIN run_executions e USING (run_id)
+			WHERE r.lifecycle IN ('starting', 'active', 'stopping') AND r.run_id > ?1
+			ORDER BY r.run_id LIMIT 100"#, after
+		).fetch_all(self.connection()).await?;
+		rows.iter()
+			.map(|id| crate::records::parse_uuid("run_id", id))
+			.collect()
+	}
+
 	/// Reads a Run's execution metadata in the current snapshot.
 	///
 	/// # Errors

@@ -850,9 +850,13 @@ version = "0.2.0"
 dependencies = [
  "clap",
  "jet-protocol",
+ "jet-runtime",
+ "pretty_assertions",
  "rustix",
  "serde",
+ "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -887,6 +891,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror",
  "tokio",

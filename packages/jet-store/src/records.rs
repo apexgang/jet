@@ -205,6 +205,8 @@ pub struct NewCommandReceipt {
 /// Closed durable spelling of external work understood by this release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectKindRecord {
+	/// Resolve one Orphaned execution after interactive authorization.
+	ResolveExecution,
 	/// Start one Run's managed processes.
 	StartRun,
 	/// Apply one Workspace promotion to its destination (ADR-0025).
@@ -214,6 +216,7 @@ pub enum EffectKindRecord {
 impl EffectKindRecord {
 	pub(crate) fn as_str(self) -> &'static str {
 		match self {
+			Self::ResolveExecution => "execution.resolve",
 			Self::StartRun => "run.start",
 			Self::PromoteWorkspace => "workspace.promote",
 		}
@@ -221,6 +224,7 @@ impl EffectKindRecord {
 
 	pub(crate) fn parse(text: &str) -> Option<Self> {
 		match text {
+			"execution.resolve" => Some(Self::ResolveExecution),
 			"run.start" => Some(Self::StartRun),
 			"workspace.promote" => Some(Self::PromoteWorkspace),
 			_ => None,

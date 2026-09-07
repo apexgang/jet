@@ -10,11 +10,15 @@ publish.workspace = true
 [dependencies]
 clap.workspace = true
 jet-protocol.workspace = true
+jet-runtime.workspace = true
+uuid.workspace = true
 rustix.workspace = true
 serde.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+pretty_assertions.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

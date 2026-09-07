@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT request FROM execution_resolutions WHERE effect_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "request",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "execution_resolutions",
+            "name": "request"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d52552e0f04b8e4643bf9dc40042508aafbe11196b2cd810235cfd8a6a4af710"
+}

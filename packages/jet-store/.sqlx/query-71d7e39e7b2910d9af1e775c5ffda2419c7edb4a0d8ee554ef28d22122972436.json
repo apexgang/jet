@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO execution_resolutions (effect_id, request) VALUES (?1, ?2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "71d7e39e7b2910d9af1e775c5ffda2419c7edb4a0d8ee554ef28d22122972436"
+}

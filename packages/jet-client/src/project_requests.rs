@@ -36,7 +36,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::ProjectPreview(preview) => Ok(preview),
-			other @ (QueryResponse::Status(_)
+			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
@@ -83,7 +84,10 @@ impl Client {
 			.await?
 		{
 			CommandResponse::ProjectRegistered(project) => Ok(project),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
@@ -128,7 +132,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::ProjectEntry(entry) => Ok(entry),
-			other @ (QueryResponse::Status(_)
+			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
@@ -156,7 +161,8 @@ impl Client {
 		self.require_minor(jet_protocol::PROJECTS_MINOR)?;
 		match self.query(QueryRequest::Projects).await? {
 			QueryResponse::Projects(list) => Ok(list),
-			other @ (QueryResponse::Status(_)
+			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)

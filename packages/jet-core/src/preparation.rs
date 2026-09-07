@@ -93,6 +93,10 @@ impl Core {
 		command: &Command,
 	) -> Result<Prepared, CoreError> {
 		match command {
+			Command::ResolveExecution(request) => {
+				self.prepare_execution_resolution(request).await?;
+				Ok(Prepared::Nothing)
+			}
 			Command::StartRun {
 				conversation_id,
 				craft,

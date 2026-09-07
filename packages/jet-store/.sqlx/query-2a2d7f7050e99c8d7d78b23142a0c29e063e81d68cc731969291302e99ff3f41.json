@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO orphaned_executions (execution_id, state) VALUES (?1, ?2) ON CONFLICT(execution_id) DO UPDATE SET state = excluded.state",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "2a2d7f7050e99c8d7d78b23142a0c29e063e81d68cc731969291302e99ff3f41"
+}

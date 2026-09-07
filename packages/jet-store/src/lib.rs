@@ -19,6 +19,7 @@ mod audit_retention;
 mod command;
 mod conversation;
 mod effect;
+mod execution_recovery;
 mod journal;
 mod migrations;
 mod paired_client;

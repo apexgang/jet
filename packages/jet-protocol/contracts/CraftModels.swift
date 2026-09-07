@@ -23,6 +23,7 @@ public enum CraftApprovalDecision: String {
 }
 
 public enum CraftCommand {
+    case `recover`(CraftCommandRecover)
     case `start`(CraftCommandStart)
     case `acknowledge`(CraftCommandAcknowledge)
     case `turn`(CraftCommandTurn)
@@ -35,6 +36,7 @@ public enum CraftEvent {
     case `run_started`(CraftEventRunStarted)
     case `activity`(CraftEventActivity)
     case `progress`(CraftEventProgress)
+    case `run_recovered`(CraftEventRunRecovered)
     case `run_ended`(CraftEventRunEnded)
     case `output`(CraftEventOutput)
     case `completed`(CraftEventCompleted)
@@ -135,6 +137,13 @@ public struct CraftActionApproval {
     public let `request_id`: String
 }
 
+public struct CraftCommandRecover {
+    public let `checkpoint`: String
+    public let `helper_socket`: String
+    public let `id`: String
+    public let `source_offset`: UInt64
+}
+
 public struct CraftCommandStart {
     public let `helper_socket`: String
     public let `id`: String
@@ -142,7 +151,7 @@ public struct CraftCommandStart {
 }
 
 public struct CraftCommandAcknowledge {
-    public let `source_offset`: UInt32
+    public let `source_offset`: UInt64
 }
 
 public struct CraftCommandTurn {
@@ -173,11 +182,17 @@ public struct CraftEventActivity {
 }
 
 public struct CraftEventProgress {
-    public let `source_offset`: UInt32
+    public let `checkpoint`: String?
+    public let `source_offset`: UInt64
+}
+
+public struct CraftEventRunRecovered {
+    public let `helper_pid`: UInt32
+    public let `source_offset`: UInt64
 }
 
 public struct CraftEventRunEnded {
-    public let `exit_code`: UInt32?
+    public let `exit_code`: Int32?
 }
 
 public struct CraftEventOutput {
