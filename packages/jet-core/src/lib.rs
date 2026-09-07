@@ -12,6 +12,20 @@ mod account;
 mod audit;
 mod capability;
 mod capability_probe;
+mod change_artifact;
+mod change_artifact_budget;
+mod change_evidence;
+mod checkpoint;
+mod checkpoint_capture;
+mod checkpoint_omissions;
+mod checkpoint_pages;
+mod checkpoint_query;
+mod checkpoint_state;
+pub use checkpoint::{
+	ArtifactAvailability, ChangeArtifact, ChangeArtifactChunk,
+	ChangeCheckpoint, ChangeDiff, ChangeEvidence, ChangeOrigin, ChangeSnapshot,
+	ChangedFile, DiffScope, OmittedFile, TurnOutcome,
+};
 mod clock;
 mod command;
 mod command_receipt;
@@ -79,6 +93,10 @@ pub use run_state::Observation as RunObservation;
 #[cfg(test)]
 #[path = "run_tests.rs"]
 mod run_tests;
+
+#[cfg(test)]
+#[path = "checkpoint_tests.rs"]
+mod checkpoint_tests;
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -169,7 +187,7 @@ pub(crate) const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub struct ClientId(pub Uuid);
 
 /// Durable identity of one Plane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PlaneId(pub Uuid);
 
 /// Durable identity of one registered Project.
@@ -254,6 +272,7 @@ pub struct Core {
 	/// same durable request at once (ADR-0067).
 	effect_reconciliation: tokio::sync::Mutex<()>,
 	conversation_pages: pagination::ConversationPages,
+	checkpoint_pages: checkpoint_pages::Pages,
 	/// Where this core creates Workspaces (ADR-0025).
 	workspace_home: workspace::WorkspaceHome,
 	/// How this core sees the Harness-native Conversations outside its
@@ -331,6 +350,7 @@ impl Core {
 			started_at,
 			effect_reconciliation: tokio::sync::Mutex::new(()),
 			conversation_pages: pagination::ConversationPages::default(),
+			checkpoint_pages: checkpoint_pages::Pages::default(),
 			workspace_home,
 			discovery,
 		};

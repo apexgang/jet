@@ -216,6 +216,24 @@ pub struct EventPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum EventKind {
+	/// Verified activity evidence was retained for the active turn.
+	#[serde(rename = "change.evidence_recorded")]
+	ChangeEvidenceRecorded {
+		/// Active turn number.
+		turn: u32,
+		/// Content transition and its trusted origin.
+		evidence: crate::ChangeEvidence,
+	},
+	/// A turn boundary and its Artifact committed with its source receipt.
+	#[serde(rename = "change.checkpoint_recorded")]
+	ChangeCheckpointRecorded {
+		/// Turn number within the Run.
+		turn: u32,
+		/// Completion or interruption.
+		outcome: crate::TurnOutcome,
+		/// Immutable turn patch.
+		artifact: crate::ChangeArtifact,
+	},
 	/// An active Run began working or waiting for a specific reason.
 	#[serde(rename = "run.activity_changed")]
 	RunActivityChanged {
@@ -469,7 +487,9 @@ impl EventKind {
 	pub fn encode(&self) -> Result<EventPayload, CoreError> {
 		match self {
 			Self::Unrecognized(payload) => Ok(payload.clone()),
-			Self::ConversationCreated { .. }
+			Self::ChangeEvidenceRecorded { .. }
+			| Self::ChangeCheckpointRecorded { .. }
+			| Self::ConversationCreated { .. }
 			| Self::RunActivityChanged { .. }
 			| Self::RunProcessesChanged { .. }
 			| Self::RunOutput { .. }

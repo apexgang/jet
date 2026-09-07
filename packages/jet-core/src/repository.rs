@@ -316,7 +316,7 @@ async fn collect(command: &mut Command) -> Result<Output, CoreError> {
 
 /// A `git` invocation at `root` (ASVS 1.2.5, 5.3.8: an argument array,
 /// never shell source).
-fn command(root: &Path) -> Command {
+pub(crate) fn command(root: &Path) -> Command {
 	let mut command = Command::new(ExternalTool::Git.as_str());
 	// Any inherited GIT_* variable can redirect discovery, rewrite
 	// configuration, or change how pathspecs are read, so none of them

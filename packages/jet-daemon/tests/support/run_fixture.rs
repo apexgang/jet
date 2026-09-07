@@ -12,7 +12,7 @@ pub fn install(home: &Path) {
 	let program = home.join("crafts/fake-craft");
 	let specification = json!({
 		"schema":{"major":1,"minor":0},"id":"fake","harness":"fake",
-		"protocol":{"family":"craft","versions":[{"major":1,"minor":2}],"capabilities":["runs"]},
+		"protocol":{"family":"craft","versions":[{"major":1,"minor":3}],"capabilities":["runs"]},
 		"features":[{"name":"turns"}],"broker_permissions":[],
 		"host_access":[{"kind":"executable","name":executable},{"kind":"executable","name":"/missing-jet-test-harness"}]
 	});
@@ -234,6 +234,15 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 							"injected crash inside dense source record after durable prefix"
 						);
 					}
+					if let Some(change) = native.get("file_change") {
+						sender
+							.send(&CraftEvent::FileChanged {
+								change: serde_json::from_value(change.clone())
+									.unwrap(),
+							})
+							.await
+							.unwrap();
+					}
 					if native["phase"] == "waiting" {
 						for activity in [
 							RunActivity::WaitingForUser,
@@ -339,7 +348,18 @@ fn fake_harness_process() {
 		std::process::exit(7);
 	}
 	assert_eq!(input.trim(), "Make a change");
+	let before = if Path::new("result.txt").exists() {
+		file_object("result.txt")
+	} else {
+		"0".repeat(40)
+	};
+	let before_mode = if Path::new("result.txt").exists() {
+		"100644"
+	} else {
+		"000000"
+	};
 	std::fs::write("result.txt", "Harness work\n").unwrap();
+	let file_change = json!({"activity_id":"result-write", "path":"result.txt", "before_object":before, "after_object":file_object("result.txt"), "before_mode":before_mode, "after_mode":"100644"});
 	if Path::new("dense").exists() {
 		let source = (0..100)
 			.map(|i| format!("{}\n", json!({"dense":i})))
@@ -349,7 +369,7 @@ fn fake_harness_process() {
 	for _ in 0..40 {
 		println!("{}", json!({"text":"x".repeat(8192)}));
 	}
-	println!("{{\"phase\":\"waiting\"}}");
+	println!("{}", json!({"phase":"waiting", "file_change":file_change}));
 	std::io::stdout().flush().unwrap();
 	if Path::new("partial").exists() {
 		print!("{{\"text\":\"par");
@@ -366,4 +386,13 @@ fn fake_harness_process() {
 		"{{ \"text\": \"Finished\", \"native_integer\": 9007199254740993 }}"
 	);
 	std::io::stdout().flush().unwrap();
+}
+
+fn file_object(path: &str) -> String {
+	let output = std::process::Command::new("git")
+		.args(["hash-object", "--", path])
+		.output()
+		.unwrap();
+	assert!(output.status.success());
+	String::from_utf8(output.stdout).unwrap().trim().into()
 }

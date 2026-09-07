@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct State {
+	#[serde(default)]
+	pub(crate) changes: Option<crate::checkpoint_state::Tracking>,
 	pub(crate) activity: Option<RunActivity>,
 	#[serde(default)]
 	pub(crate) disconnected: bool,
@@ -68,6 +70,15 @@ pub(crate) async fn snapshot(
 /// Facts from the trusted Run Adapter, validated against the durable lifecycle.
 #[derive(Serialize)]
 pub enum Observation {
+	/// Native content receipt; the Run Adapter assigns Harness origin.
+	FileChanged(crate::ChangeEvidence),
+	/// The trusted Adapter has held a new turn's input pending durable capture.
+	/// It may release that input only after acknowledging this source boundary.
+	TurnStarted,
+	/// A turn ended while the Run may remain active.
+	TurnEnded(crate::TurnOutcome),
+	/// Legacy Craft Command completion, including native Conversation identity.
+	Completed(String),
 	/// The helper reported that it spawned a Harness.
 	Started {
 		/// Actual helper OS identity.
@@ -137,6 +148,7 @@ impl Core {
             let mut prefix = state.partial_source;
             for observation in observations {
                 prefix.include(&observation)?;
+                crate::checkpoint_state::observe(self, tx, run_id, &observation).await?;
                 record(tx, run_id, observation, now).await?;
             }
             // ADR-0071: bounded groups commit with their replay prefix. Source
@@ -159,7 +171,16 @@ impl Core {
 	) -> Result<(), CoreError> {
 		let now = self.now_unix_ms();
 		self.store
-			.write(async |tx| record(tx, run_id, observation, now).await)
+			.write(async |tx| {
+				crate::checkpoint_state::observe(
+					self,
+					tx,
+					run_id,
+					&observation,
+				)
+				.await?;
+				record(tx, run_id, observation, now).await
+			})
 			.await
 	}
 }
@@ -176,7 +197,11 @@ async fn record(
 	let mut state: State = decode(&record.state)?;
 	let run = tx.run(run_id.0).await?.ok_or_else(missing)?;
 	let actor = match &observation {
-		Observation::Activity(_)
+		Observation::FileChanged(_)
+		| Observation::TurnStarted
+		| Observation::TurnEnded(_)
+		| Observation::Completed(_)
+		| Observation::Activity(_)
 		| Observation::Output { .. }
 		| Observation::NativeConversation(_) => crate::EventActor::Harness {
 			run_id,
@@ -244,6 +269,17 @@ fn apply(
 	let mut next = lifecycle;
 	let mut events = Vec::new();
 	match observation {
+		Observation::FileChanged(_)
+		| Observation::TurnStarted
+		| Observation::TurnEnded(_)
+			if lifecycle == RunLifecycle::Active => {}
+		Observation::Completed(identity) => {
+			return apply(
+				lifecycle,
+				state,
+				Observation::NativeConversation(identity),
+			);
+		}
 		Observation::Lost => {
 			if !lifecycle.is_terminal() {
 				next = RunLifecycle::Lost;
@@ -355,6 +391,9 @@ fn apply(
 			next = RunLifecycle::Failed
 		}
 		Observation::Started { .. }
+		| Observation::FileChanged(_)
+		| Observation::TurnStarted
+		| Observation::TurnEnded(_)
 		| Observation::Activity(_)
 		| Observation::Output { .. }
 		| Observation::NativeConversation(_)

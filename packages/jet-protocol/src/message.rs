@@ -94,6 +94,26 @@ pub enum ServerMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryRequest {
+	/// Read a bounded chunk of a checkpoint patch Artifact.
+	ChangeArtifact {
+		/// Canonical SHA-256 content address.
+		sha256: String,
+		/// Byte offset in decimal-string form.
+		#[serde(with = "crate::decimal")]
+		offset: u64,
+	},
+	/// Compare observed Change checkpoints.
+	ChangeDiff {
+		/// Owning Run.
+		run_id: Uuid,
+		/// Boundaries to compare.
+		scope: crate::DiffScope,
+	},
+	/// Continue changed-file metadata at an opaque, expiring snapshot cursor.
+	NextChangeDiff {
+		/// Cursor supplied by the preceding diff page.
+		cursor: crate::PageCursor,
+	},
 	/// Bounded Orphaned-execution metadata for interactive decisions.
 	OrphanedExecutions {
 		/// Continue after a previous page.
@@ -202,6 +222,10 @@ pub enum QueryRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryResponse {
+	/// Bounded Artifact bytes.
+	ChangeArtifact(crate::ChangeArtifactChunk),
+	/// Immutable boundaries and patch preview.
+	ChangeDiff(Box<crate::ChangeDiff>),
 	/// Read-only recovery candidates.
 	OrphanedExecutions(crate::OrphanedExecutions),
 	/// Durable lifecycle, activity, and Managed processes of a Run.

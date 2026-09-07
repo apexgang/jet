@@ -14,9 +14,11 @@ export type CraftApprovalDecision = "allow_once" | "deny";
 
 export type CraftCommand = { checkpoint: string; helper_socket: string; id: string; kind: "recover"; source_offset: number } | { helper_socket: string; id: string; kind: "start"; text: string } | { kind: "acknowledge"; source_offset: number } | { id: string; kind: "turn"; text: string } | { action: CraftAction; id: string; kind: "action" } | { kind: "shutdown" };
 
-export type CraftEvent = { kind: "run_launch_failed" } | { harness_pid: number; helper_pid: number; kind: "run_started" } | { activity: RunActivity; kind: "activity" } | { checkpoint?: string; kind: "progress"; source_offset: number } | { helper_pid: number; kind: "run_recovered"; source_offset: number } | { exit_code?: number | null; kind: "run_ended" } | { kind: "output"; native_event: RawJSON; presentation?: Array<PresentationBlock> } | { id: string; kind: "completed"; native_conversation: string };
+export type CraftEvent = { kind: "turn_started" } | { kind: "turn_ended"; outcome: TurnOutcome } | { change: CraftFileChange; kind: "file_changed" } | { kind: "run_launch_failed" } | { harness_pid: number; helper_pid: number; kind: "run_started" } | { activity: RunActivity; kind: "activity" } | { checkpoint?: string; kind: "progress"; source_offset: number } | { helper_pid: number; kind: "run_recovered"; source_offset: number } | { exit_code?: number | null; kind: "run_ended" } | { kind: "output"; native_event: RawJSON; presentation?: Array<PresentationBlock> } | { id: string; kind: "completed"; native_conversation: string };
 
 export type CraftFeature = { name: string; required?: boolean };
+
+export type CraftFileChange = { activity_id: string; after_mode: string; after_object: string; before_mode: string; before_object: string; path: string };
 
 export type CraftHello = { execution_id: string; protocol: ProtocolOffer; resume?: CraftResume | null; specification: ProtocolOffer };
 
@@ -41,3 +43,5 @@ export type ProtocolOffer = { capabilities?: Array<string>; family: ProtocolFami
 export type ProtocolVersion = { major: number; minor: number };
 
 export type RunActivity = "working" | "waiting_for_user" | "waiting_for_approval" | "waiting_for_auth" | "waiting_for_quota" | "reconnecting";
+
+export type TurnOutcome = "completed" | "interrupted";

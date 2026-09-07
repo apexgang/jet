@@ -6,6 +6,7 @@
 mod account;
 mod audit;
 mod capability;
+mod checkpoint;
 mod import;
 mod pairing;
 mod project;
@@ -46,6 +47,21 @@ pub(crate) fn query(
 	minor: u32,
 ) -> Result<Query, CoreError> {
 	Ok(match request {
+		wire::QueryRequest::ChangeArtifact { sha256, offset } => {
+			Query::ChangeArtifact {
+				sha256: sha256.clone(),
+				offset: *offset,
+			}
+		}
+		wire::QueryRequest::ChangeDiff { run_id, scope } => Query::ChangeDiff {
+			run_id: RunId(*run_id),
+			scope: checkpoint::scope(scope),
+		},
+		wire::QueryRequest::NextChangeDiff { cursor } => {
+			Query::NextChangeDiff {
+				cursor: jet_core::PageCursor(cursor.0),
+			}
+		}
 		wire::QueryRequest::OrphanedExecutions { after } => {
 			Query::OrphanedExecutions {
 				after: after.map(RunId),
@@ -126,6 +142,16 @@ pub(crate) fn query_result(
 	minor: u32,
 ) -> Result<wire::QueryResponse, CoreError> {
 	Ok(match result {
+		QueryResult::ChangeArtifact(chunk) => {
+			wire::QueryResponse::ChangeArtifact(wire::ChangeArtifactChunk {
+				artifact: checkpoint::artifact(chunk.artifact),
+				offset: chunk.offset,
+				bytes: chunk.bytes,
+			})
+		}
+		QueryResult::ChangeDiff(diff) => {
+			wire::QueryResponse::ChangeDiff(Box::new(checkpoint::diff(*diff)))
+		}
 		QueryResult::OrphanedExecutions(page) => {
 			wire::QueryResponse::OrphanedExecutions(run::orphans(page))
 		}

@@ -40,6 +40,18 @@ async fn managed_run_reports_attention_output_and_durable_completion() {
 		let completed = wait_for(&mut wire, run_id, "completed").await;
 		assert_eq!((completed["activity"].clone(), completed["exit_code"].clone()), (Value::Null, json!(0)));
 		assert!(completed["processes"].as_array().unwrap().iter().all(|p| p["running"] == false));
+        wire.send(&json!({"kind":"query","id":20,"query":{"type":"change_diff","run_id":run_id,"scope":{"kind":"turn","turn":1}}})).await;
+        let checkpoint: Value = wire.receive().await;
+        assert_eq!(checkpoint["kind"], "query_result", "{checkpoint}");
+        let result_file = checkpoint["result"]["files"].as_array().unwrap().iter().find(|f| f["path"] == "result.txt").unwrap();
+        assert_eq!(result_file["origin"], json!({"kind":"harness","run_id":run_id}));
+        assert_eq!(checkpoint["result"]["workspace_id"], workspace.workspace_id.to_string());
+        assert!(checkpoint["result"]["patch"].as_str().unwrap().contains("+Harness work\n"));
+        let diff = client.change_diff(Uuid::parse_str(run_id).unwrap(), jet_protocol::DiffScope::Turn { turn: 1 }).await.unwrap();
+        let chunk = client.change_artifact(diff.artifact.sha256.clone(), 0).await.unwrap();
+        assert_eq!(chunk.artifact, diff.artifact);
+        assert_eq!(String::from_utf8(chunk.bytes).unwrap(), diff.patch);
+
 		let journal = all_events(&client).await;
 		let output = journal.events.iter().find(|e| e.kind == "run.output").unwrap();
         assert_eq!(output.origin, Some(jet_protocol::EventOrigin::Harness { run_id: Uuid::parse_str(run_id).unwrap() }));
@@ -73,6 +85,7 @@ async fn managed_run_reports_attention_output_and_durable_completion() {
         unsupported_start["command_id"] = json!(Uuid::now_v7());
         for request in [
             json!({"kind":"query","id":5,"query":{"type":"run_execution","run_id":run_id}}),
+            json!({"kind":"query","id":6,"query":{"type":"change_diff","run_id":run_id,"scope":{"kind":"turn","turn":1}}}),
             unsupported_start,
         ] {
             old.send(&request).await;
@@ -92,6 +105,9 @@ async fn managed_run_reports_attention_output_and_durable_completion() {
 		assert_eq!(wire.receive::<Value>().await, admitted);
 		assert_eq!(wait_for(&mut wire, run_id, "completed").await, completed);
 		assert_eq!(all_events(&client).await, journal);
+        wire.send(&json!({"kind":"query","id":20,"query":{"type":"change_diff","run_id":run_id,"scope":{"kind":"turn","turn":1}}})).await;
+        assert_eq!(wire.receive::<Value>().await, checkpoint);
+
         let restarted_search = client.search("workspaces").await.unwrap();
         let expected_search: jet_protocol::SearchResult = serde_json::from_value(searched["result"].clone()).unwrap();
         assert_eq!(restarted_search, expected_search);

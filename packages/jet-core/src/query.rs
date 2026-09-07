@@ -28,6 +28,25 @@ use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
+	/// Read a bounded chunk of a checkpoint patch Artifact.
+	ChangeArtifact {
+		/// Canonical SHA-256 content address.
+		sha256: String,
+		/// Byte offset, from zero through the Artifact length.
+		offset: u64,
+	},
+	/// Compare observed Change checkpoints of a managed Run.
+	ChangeDiff {
+		/// Owning Run.
+		run_id: crate::RunId,
+		/// Boundaries to compare.
+		scope: crate::DiffScope,
+	},
+	/// Continue changed-file metadata at an opaque, expiring snapshot cursor.
+	NextChangeDiff {
+		/// Cursor supplied by the preceding diff page.
+		cursor: crate::PageCursor,
+	},
 	/// Bounded read-only metadata for interactive recovery decisions.
 	OrphanedExecutions {
 		/// Continue after the previous page.
@@ -131,6 +150,10 @@ pub enum Query {
 /// Snapshots returned by [`Core::query`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult {
+	/// Bounded Artifact bytes.
+	ChangeArtifact(crate::ChangeArtifactChunk),
+	/// Immutable boundaries and their patch preview.
+	ChangeDiff(Box<crate::ChangeDiff>),
 	/// A bounded page of unsafe execution matches.
 	OrphanedExecutions(crate::OrphanedExecutions),
 	/// Lifecycle, activity, and Managed processes at one journal cursor.
@@ -188,6 +211,23 @@ impl Core {
 			.expect("authority gate never closes");
 		actor.authorize(&self.remote_sessions)?;
 		match query {
+			Query::ChangeArtifact { sha256, offset } => {
+				crate::change_artifact::read(self.run_home(), sha256, offset)
+					.await
+					.map(QueryResult::ChangeArtifact)
+			}
+			Query::ChangeDiff { run_id, scope } => {
+				crate::checkpoint_query::query(
+					self,
+					run_id,
+					scope,
+					crate::checkpoint_pages::Start::First,
+				)
+				.await
+			}
+			Query::NextChangeDiff { cursor } => {
+				crate::checkpoint_query::next(self, cursor).await
+			}
 			Query::OrphanedExecutions { after } => self
 				.orphaned_executions(after)
 				.await

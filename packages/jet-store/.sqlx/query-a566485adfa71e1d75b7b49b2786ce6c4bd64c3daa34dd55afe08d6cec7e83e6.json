@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO change_checkpoints (run_id, turn, payload) VALUES (?1, ?2, ?3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "a566485adfa71e1d75b7b49b2786ce6c4bd64c3daa34dd55afe08d6cec7e83e6"
+}

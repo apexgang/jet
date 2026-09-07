@@ -290,6 +290,7 @@ pub(crate) async fn connect(
 		return Err(RunRecoveryError::Unavailable);
 	}
 	Ok(Box::new(RunConnection {
+		craft_minor: contract.craft_protocol.minor,
 		reader,
 		writer,
 		helper_pid: descriptor.pid,
