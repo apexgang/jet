@@ -292,7 +292,12 @@ async fn connection(
 		loop {
 			// `next` is cancel safe: an unacknowledged record stays queued,
 			// so losing this race to native input re-reads the same record.
+			// It is polled first because a Craft that acknowledges the
+			// terminal record closes immediately afterwards: the source
+			// having ended must settle this connection, not the peer having
+			// left, or the helper would never finish.
 			let record = tokio::select! {
+				biased;
 				record = state.spool.next() => record?,
 				request = requests.recv() => {
 					deliver(state, negotiated.version.minor, request).await?;
