@@ -152,10 +152,9 @@ async fn a_conversation_forks_from_the_selected_checkpoint() {
 /// Craft sees the same checkpoint Workspace plus a bounded provenance header.
 #[tokio::test]
 async fn a_fork_uses_native_support_or_the_portable_context_contract() {
-	for support in [
-		fixture::ForkSupport::Native,
-		fixture::ForkSupport::Portable,
-	] {
+	for support in
+		[fixture::ForkSupport::Native, fixture::ForkSupport::Portable]
+	{
 		tokio::time::timeout(std::time::Duration::from_secs(30), async {
 			let dir = tempfile::tempdir_in("/tmp").unwrap();
 			let home = dir.path().join("jet");
@@ -263,7 +262,10 @@ async fn a_fork_uses_native_support_or_the_portable_context_contract() {
 				.runs;
 			assert_eq!(
 				(
-					source_runs.iter().map(|run| run.run_id).collect::<Vec<_>>(),
+					source_runs
+						.iter()
+						.map(|run| run.run_id)
+						.collect::<Vec<_>>(),
 					fork_runs.iter().map(|run| run.run_id).collect::<Vec<_>>(),
 				),
 				(vec![source_run], vec![fork_run])
@@ -342,7 +344,8 @@ async fn a_fork_uses_native_support_or_the_portable_context_contract() {
 						&std::fs::read(root.join("native-fork")).unwrap(),
 					)
 					.unwrap(),
-					std::fs::read_to_string(root.join("initial-input")).unwrap(),
+					std::fs::read_to_string(root.join("initial-input"))
+						.unwrap(),
 					client
 						.conversation(fork.conversation_id)
 						.await

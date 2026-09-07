@@ -36,7 +36,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::ProjectPreview(preview) => Ok(preview),
-			other @ (QueryResponse::WorkspaceTerminals { .. }
+			other @ (QueryResponse::EditableFile(_)
+			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
@@ -89,7 +90,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::ProjectRegistered(project) => Ok(project),
-			other @ (CommandResponse::Terminal { .. }
+			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::RunControlAccepted { .. }
@@ -142,7 +144,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::ProjectEntry(entry) => Ok(entry),
-			other @ (QueryResponse::WorkspaceTerminals { .. }
+			other @ (QueryResponse::EditableFile(_)
+			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
@@ -176,7 +179,8 @@ impl Client {
 		self.require_minor(jet_protocol::PROJECTS_MINOR)?;
 		match self.query(QueryRequest::Projects).await? {
 			QueryResponse::Projects(list) => Ok(list),
-			other @ (QueryResponse::WorkspaceTerminals { .. }
+			other @ (QueryResponse::EditableFile(_)
+			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)

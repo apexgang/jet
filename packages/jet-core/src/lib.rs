@@ -72,6 +72,8 @@ mod run_state;
 mod turn;
 mod turn_dispatch;
 mod turn_queue;
+mod user_input;
+mod user_input_files;
 pub use execution_control::{
 	ExecutionSignal, RunControl, RunTermination, TerminationStage,
 };
@@ -80,6 +82,9 @@ pub use orphan::{
 	OrphanedExecution, OrphanedExecutions,
 };
 pub use turn::{Turn, TurnQueue, TurnSource, TurnState};
+pub use user_input::{
+	EditableFile, FileRevision, FileTarget, ReviewComment, UserEdit,
+};
 mod search;
 mod search_index;
 mod security;

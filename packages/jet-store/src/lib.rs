@@ -39,6 +39,7 @@ mod setting;
 mod terminal;
 mod transaction;
 mod turn_queue;
+mod user_edit_intent;
 mod workspace;
 pub use terminal::TerminalRecord;
 
@@ -87,8 +88,9 @@ pub use records::{
 	ConversationPageKey, ConversationPageStart, ConversationRecord,
 	EffectKindRecord, EffectRecord, EffectSafetyRecord, EffectStateRecord,
 	EventClass, EventRecord, NewCommandReceipt, NewConversation, NewEffect,
-	NewEvent, NewRun, RetentionPolicy, RunLifecycle, RunRecord, SettingRecord,
-	SettingScopeRecord, VerifiedSnapshotCoverage, WorkingTreeRecord,
+	NewEvent, NewRun, NewUserEditIntent, RetentionPolicy, RunLifecycle,
+	RunRecord, SettingRecord, SettingScopeRecord, UserEditIntentRecord,
+	VerifiedSnapshotCoverage, WorkingTreeRecord,
 };
 pub use run_execution::RunExecutionRecord;
 pub use search::{

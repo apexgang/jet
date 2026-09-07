@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM user_edit_intents WHERE actor_kind = ?1 AND actor_id = ?2 AND command_id = ?3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "4c696d369be127dc6192e7fa42ec1712e96eb788af81534f1301a4185437fe22"
+}

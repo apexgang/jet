@@ -13,11 +13,14 @@ use crate::error::CoreError;
 use crate::import::{self, DiscoveredConversation};
 use crate::project::{self, Registrable};
 use crate::promotion_command::{self, PreparedPromotion};
+use crate::security::SecurityState;
 use crate::workspace::{self, PreparedWorkspace, WorkingTreeRequest};
 use crate::{Actor, Core};
 
 /// What the preparation of one Command produced for its transaction.
 pub(crate) enum Prepared {
+	/// A direct edit resolved and revision-checked at its registered root.
+	UserEdit(crate::user_input::PreparedUserEdit),
 	Terminal(crate::TerminalPlan),
 	/// A Run pinned to an accepted Craft and validated working tree.
 	Run(crate::run_command::LaunchPlan),
@@ -56,6 +59,8 @@ impl Core {
 		actor: &Actor,
 		command_id: CommandId,
 		command: &Command,
+		request_digest: [u8; 32],
+		security: SecurityState,
 		now_unix_ms: i64,
 	) -> Result<Prepared, CoreError> {
 		let actor_record = actor.record();
@@ -72,8 +77,20 @@ impl Core {
 		if recorded {
 			return Ok(Prepared::Nothing);
 		}
+		if matches!(command, Command::ApplyUserEdit { .. }) {
+			security.admit(command.security_class())?;
+		}
 		let admitted = match self.revalidate_capabilities(command).await {
-			Ok(()) => self.prepare(actor, command).await,
+			Ok(()) => {
+				self.prepare(
+					actor,
+					command_id,
+					command,
+					request_digest,
+					now_unix_ms,
+				)
+				.await
+			}
 			Err(refusal) => Err(refusal),
 		};
 		match admitted {
@@ -96,9 +113,33 @@ impl Core {
 	async fn prepare(
 		&self,
 		actor: &Actor,
+		command_id: CommandId,
 		command: &Command,
+		request_digest: [u8; 32],
+		now_unix_ms: i64,
 	) -> Result<Prepared, CoreError> {
 		match command {
+			Command::ApplyUserEdit {
+				target,
+				path,
+				expected_revision,
+				content,
+			} => Ok(Prepared::UserEdit(
+				crate::user_input::prepare(
+					self,
+					crate::user_input::IntentContext {
+						actor,
+						command_id,
+						request_digest,
+						recorded_at_unix_ms: now_unix_ms,
+					},
+					*target,
+					path.clone(),
+					expected_revision.clone(),
+					content.clone(),
+				)
+				.await?,
+			)),
 			Command::OpenTerminal {
 				workspace_id,
 				rows,
@@ -181,6 +222,7 @@ impl Core {
 				}
 			}
 			Command::SubmitTurn { .. }
+			| Command::SubmitReview { .. }
 			| Command::WithdrawTurn { .. }
 			| Command::CreateConversation { .. }
 			| Command::CreateRun { .. }

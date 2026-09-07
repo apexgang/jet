@@ -31,7 +31,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use rustix::io::Errno;
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::error::CoreError;
 
@@ -52,6 +52,16 @@ const MAX_PATH_BYTES: usize = 4096;
 #[serde(transparent)]
 pub struct RelativePath {
 	text: String,
+}
+
+impl<'de> Deserialize<'de> for RelativePath {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		let text = String::deserialize(deserializer)?;
+		Self::parse(&text).map_err(serde::de::Error::custom)
+	}
 }
 
 /// The root of a registered Project or Workspace, as the filesystem names

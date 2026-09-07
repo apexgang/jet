@@ -80,6 +80,11 @@ pub(crate) async fn run(
 				return ExitCode::from(EXIT_FAILURE);
 			}
 		};
+	// A direct edit that reached its atomic replacement before an interruption
+	// is reconciled from its durable intent before clients can retry it.
+	if let Err(error) = core.perform_user_edits().await {
+		eprintln!("jetd: cannot reconcile direct user edits: {error}");
+	}
 	// A promotion a previous daemon did not finish is settled from what its
 	// destination holds before any client can ask for another (ADR-0064,
 	// ADR-0067).

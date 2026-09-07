@@ -136,6 +136,13 @@ pub enum ServerMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryRequest {
+	/// Read bounded UTF-8 file content through a registered root.
+	EditableFile {
+		/// Registered Project or Workspace root.
+		target: crate::FileTarget,
+		/// Path relative to that root.
+		path: String,
+	},
 	/// All retained terminals of one Workspace (at most 64).
 	WorkspaceTerminals {
 		/// Registered Workspace identity.
@@ -274,6 +281,8 @@ pub enum QueryRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryResponse {
+	/// Bounded editable content and its exact file Revision.
+	EditableFile(crate::EditableFile),
 	/// Terminal lifecycle snapshots, separate from Runs.
 	WorkspaceTerminals {
 		/// Snapshot Event cursor.
@@ -414,6 +423,15 @@ pub struct WireError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RecoveryAction {
+	/// Refresh a file before preparing another direct edit.
+	RefreshFile {
+		/// Registered root to refresh.
+		target: crate::FileTarget,
+		/// Validated path relative to that root.
+		path: String,
+		/// Exact file state now authoritative.
+		current_revision: crate::FileRevision,
+	},
 	/// Refresh current Run state before preparing another Command.
 	RefreshRun {
 		/// Run whose current state should be queried.

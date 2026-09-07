@@ -381,6 +381,10 @@ struct MinorRequirement {
 
 fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 	match query {
+		QueryRequest::EditableFile { .. } => Some(MinorRequirement {
+			minor: jet_protocol::USER_INPUT_MINOR,
+			feature: "direct user edits",
+		}),
 		QueryRequest::WorkspaceTerminals { .. } => Some(MinorRequirement {
 			minor: jet_protocol::WORKSPACE_TERMINALS_MINOR,
 			feature: "Workspace terminals",
@@ -460,6 +464,11 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 
 fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 	match command {
+		CommandRequest::ApplyUserEdit { .. }
+		| CommandRequest::SubmitReview { .. } => Some(MinorRequirement {
+			minor: jet_protocol::USER_INPUT_MINOR,
+			feature: "direct user input",
+		}),
 		CommandRequest::OpenTerminal { .. }
 		| CommandRequest::CloseTerminal { .. } => Some(MinorRequirement {
 			minor: jet_protocol::WORKSPACE_TERMINALS_MINOR,

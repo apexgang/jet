@@ -278,16 +278,15 @@ pub(crate) async fn connect(
 	if contract.craft_protocol.minor < 2 {
 		return Err(RunRecoveryError::Unsafe);
 	}
-	let (mut reader, mut writer) =
-		run_host::craft_connection(
-			processes,
-			&runtime,
-			id,
-			&plan,
-			run_host::ConnectionMode::Recovery,
-		)
-			.await
-			.map_err(|_| RunRecoveryError::Unavailable)?;
+	let (mut reader, mut writer) = run_host::craft_connection(
+		processes,
+		&runtime,
+		id,
+		&plan,
+		run_host::ConnectionMode::Recovery,
+	)
+	.await
+	.map_err(|_| RunRecoveryError::Unavailable)?;
 	run_host::send(
 		&mut writer,
 		&jet_protocol::CraftCommand::Recover {

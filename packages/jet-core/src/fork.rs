@@ -1,13 +1,8 @@
 //! Conversation forks from immutable Change checkpoints (ADR-0035).
 
-use std::{
-	collections::BTreeMap,
-	path::PathBuf,
-};
+use std::{collections::BTreeMap, path::PathBuf};
 
-use jet_store::{
-	ForkContextEvents, ForkLaunchContextRecord, RetentionPolicy,
-};
+use jet_store::{ForkContextEvents, ForkLaunchContextRecord, RetentionPolicy};
 use serde::{Deserialize, Serialize};
 
 use crate::command::CommandOutcome;
@@ -127,8 +122,9 @@ pub(crate) async fn prepare(
 			let source = if let Some(execution) =
 				tx.run_execution(source_run_id.0).await?
 			{
-				let source_plan: LaunchPlan = run_state::decode(&execution.plan)
-					.map_err(|_| invalid_checkpoint())?;
+				let source_plan: LaunchPlan =
+					run_state::decode(&execution.plan)
+						.map_err(|_| invalid_checkpoint())?;
 				let source_state: run_state::State =
 					run_state::decode(&execution.state)
 						.map_err(|_| invalid_checkpoint())?;
@@ -231,7 +227,10 @@ pub(crate) async fn create(
 	let (source_craft, source_native_conversation) = match source {
 		Some(source) => (
 			Some(serde_json::to_string(&source.craft).map_err(|error| {
-				CoreError::internal("fork.source_unencodable", error.to_string())
+				CoreError::internal(
+					"fork.source_unencodable",
+					error.to_string(),
+				)
 			})?),
 			source.native_conversation.filter(|identity| {
 				!identity.is_empty()
@@ -291,8 +290,7 @@ fn capture_context(
 					.or_insert((sequence, text));
 			}
 			EventKind::TurnChanged { turn }
-				if turn.state == TurnState::Active
-					&& turn.run_id.is_some() =>
+				if turn.state == TurnState::Active && turn.run_id.is_some() =>
 			{
 				executed.entry(turn.turn_id).or_insert((
 					sequence,

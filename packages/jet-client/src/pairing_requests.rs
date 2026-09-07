@@ -27,7 +27,8 @@ impl Client {
 		self.require_minor(jet_protocol::PAIRING_MINOR)?;
 		match self.query(QueryRequest::Pairing).await? {
 			QueryResponse::Pairing(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::WorkspaceTerminals { .. }
+			other @ (QueryResponse::EditableFile(_)
+			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
@@ -75,7 +76,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingGateSet { gate } => Ok(gate),
-			other @ (CommandResponse::Terminal { .. }
+			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::RunControlAccepted { .. }
@@ -129,7 +131,8 @@ impl Client {
 				pending,
 				disclosure,
 			} => Ok((pending, disclosure)),
-			other @ (CommandResponse::Terminal { .. }
+			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::RunControlAccepted { .. }
@@ -189,7 +192,8 @@ impl Client {
 			CommandResponse::PairingClaimed { pending, challenge } => {
 				Ok((pending, challenge))
 			}
-			other @ (CommandResponse::Terminal { .. }
+			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::RunControlAccepted { .. }
@@ -247,7 +251,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingConfirmed { pending } => Ok(pending),
-			other @ (CommandResponse::Terminal { .. }
+			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::RunControlAccepted { .. }
@@ -301,7 +306,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingCompleted { client } => Ok(client),
-			other @ (CommandResponse::Terminal { .. }
+			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::RunControlAccepted { .. }
@@ -354,7 +360,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairedClientAccessSet { client } => Ok(client),
-			other @ (CommandResponse::Terminal { .. }
+			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::RunControlAccepted { .. }
@@ -405,7 +412,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairedClientRevoked { client_id } => Ok(client_id),
-			other @ (CommandResponse::Terminal { .. }
+			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::RunControlAccepted { .. }

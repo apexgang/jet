@@ -1,7 +1,7 @@
 //! Managed Run admission and immutable launch plans (ADR-0064, ADR-0086).
 
-use crate::run_craft::PinnedCraft;
 use crate::fork::ForkLaunchContext;
+use crate::run_craft::PinnedCraft;
 use crate::{
 	Actor, CommandId, CommandOutcome, ConversationId, Core, CoreError,
 	RunLifecycle, WorkingTree, filesystem, repository,
@@ -134,7 +134,8 @@ pub(crate) async fn prepare(
 					checkpoint_turn,
 				} if !tx
 					.conversation_has_run_execution(conversation_id.0)
-					.await? => {
+					.await? =>
+				{
 					let context = tx
 						.conversation_fork_launch(conversation_id.0)
 						.await?
@@ -301,10 +302,7 @@ pub(crate) async fn record(
 ) -> Result<CommandOutcome, CoreError> {
 	// Preparation runs outside the write lock. Recheck consumption in this
 	// transaction so concurrent StartRun commands cannot reissue the fork.
-	if tx
-		.conversation_has_run_execution(conversation_id.0)
-		.await?
-	{
+	if tx.conversation_has_run_execution(conversation_id.0).await? {
 		plan.fork = None;
 	}
 	let (mut queue, mut changes) = crate::turn_queue::prepare(
@@ -313,7 +311,7 @@ pub(crate) async fn record(
 		command_id,
 		conversation_id,
 		crate::TurnSource::User,
-		plan.prompt.clone(),
+		crate::turn_queue::Admission::Prompt(plan.prompt.clone()),
 	)
 	.await?;
 	if !queue.ready() {

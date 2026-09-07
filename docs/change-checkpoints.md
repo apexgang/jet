@@ -57,14 +57,23 @@ Harness origin from the connection's Run identity. A Craft cannot select user or
 terminal origin. File evidence includes a native activity identity, relative path,
 and the exact before/after Git objects and modes.
 
-Trusted in-process User-edit and Workspace-terminal Adapters use
-`Core::record_change_evidence` with identities derived from their authenticated
-Command or owned terminal operation. These are integration hooks for those
-workflows; this issue does not introduce a file editor or terminal UI. The caller
-must supply an observed operation receipt, not a filesystem notification.
+The direct-edit Command introduced by issue #26 records User-edit evidence with
+identity derived from its authenticated client and exact content observed before
+and after the atomic write. A bounded write-ahead intent lets restart
+reconciliation finish the Actor Event and Command receipt when an interruption
+lands between the filesystem and SQLite commits. Reconciliation records evidence
+only when it performs the pending write; finding the requested bytes already in
+place is sufficient for idempotent completion but is not proof of authorship.
+Trusted Workspace-terminal Adapters continue to use
+`Core::record_change_evidence` with
+identities derived from their owned terminal operation. Evidence is an observed
+operation receipt, never a filesystem notification.
 
 Evidence is durable before turn completion and retained with the immutable
-checkpoint. Attribution requires a complete content/mode chain. Gaps,
+checkpoint. Evidence from edits between turns is retained separately for the gap
+before the next checkpoint, so current and aggregate diffs preserve its User
+origin. If the Run ends before another turn starts, a durable terminal snapshot
+keeps that gap in the Final diff. Attribution requires a complete content/mode chain. Gaps,
 contradictions, uncorrelated edits, and external overwrites remain external or
 unknown; complete chains from several sources are mixed. Conflicting receipts or
 more than 256 receipts mark the turn evidence incomplete without blocking capture.

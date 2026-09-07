@@ -41,11 +41,7 @@ pub fn install_with_fork(home: &Path, support: ForkSupport) {
 	install_craft(home, profile, ForkCapture::Record);
 }
 
-fn install_craft(
-	home: &Path,
-	profile: CraftProfile,
-	capture: ForkCapture,
-) {
+fn install_craft(home: &Path, profile: CraftProfile, capture: ForkCapture) {
 	std::fs::create_dir_all(home.join("crafts")).unwrap();
 	let executable = std::env::current_exe().unwrap();
 	let program = home.join("crafts/fake-craft");

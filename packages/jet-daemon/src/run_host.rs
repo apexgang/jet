@@ -319,9 +319,14 @@ pub(crate) async fn start(
 		})?;
 	let runtime = home.join("runtime");
 	private_directory(runtime.clone()).await?;
-	let (reader, writer) =
-		craft_connection(processes, &runtime, run_id, plan, ConnectionMode::Launch)
-			.await?;
+	let (reader, writer) = craft_connection(
+		processes,
+		&runtime,
+		run_id,
+		plan,
+		ConnectionMode::Launch,
+	)
+	.await?;
 	let (socket, helper_pid) = helper(&runtime, run_id, plan).await?;
 	let connection = RunConnection {
 		craft_minor: Contract::of(&plan.craft)?.craft_protocol.minor,
@@ -362,17 +367,17 @@ pub(crate) async fn craft_connection(
 	let mut writer = FrameWriter::new(write);
 	let fork = match mode {
 		ConnectionMode::Launch => plan.fork.as_ref().and_then(|fork| {
-				fork.source_native_conversation.as_ref().map(|identity| {
-					jet_protocol::CraftFork {
-						source_native_conversation: identity.clone(),
-						source_conversation_id: fork.source_conversation_id.0,
-						source_run_id: fork.source_run_id.0,
-						checkpoint_turn: fork.checkpoint_turn,
-						checkpoint_commit: fork.checkpoint_commit.clone(),
-						checkpoint_tree: fork.checkpoint_tree.clone(),
-					}
-				})
-			}),
+			fork.source_native_conversation.as_ref().map(|identity| {
+				jet_protocol::CraftFork {
+					source_native_conversation: identity.clone(),
+					source_conversation_id: fork.source_conversation_id.0,
+					source_run_id: fork.source_run_id.0,
+					checkpoint_turn: fork.checkpoint_turn,
+					checkpoint_commit: fork.checkpoint_commit.clone(),
+					checkpoint_tree: fork.checkpoint_tree.clone(),
+				}
+			})
+		}),
 		ConnectionMode::Recovery => None,
 	};
 	let offer = ProtocolOffer {

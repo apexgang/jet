@@ -89,7 +89,9 @@ pub(crate) fn documents_of(event: &Event) -> Vec<NewSearchDocument> {
 		}
 		// Identities, hashes, lifecycle states, and counts are not text a
 		// user searches for.
-		EventKind::ChangeEvidenceRecorded { .. }
+		EventKind::UserEditApplied { .. }
+		| EventKind::ReviewSubmitted { .. }
+		| EventKind::ChangeEvidenceRecorded { .. }
 		| EventKind::ChangeCheckpointRecorded { .. }
 		| EventKind::TurnInput { .. }
 		| EventKind::TurnChanged { .. }

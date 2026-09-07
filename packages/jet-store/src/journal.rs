@@ -55,8 +55,8 @@ impl ReadTransaction {
 		let conversation_id = conversation_id.to_string();
 		let run_id = run_id.to_string();
 		let checkpoint_turn = i64::from(checkpoint_turn);
-		let limit = i64::try_from(FORK_CONTEXT_EVENT_LIMIT + 1)
-			.unwrap_or(i64::MAX);
+		let limit =
+			i64::try_from(FORK_CONTEXT_EVENT_LIMIT + 1).unwrap_or(i64::MAX);
 		// ASVS 1.2.4/2.2.2: both identity values and the fixed allocation
 		// bound are parameters. Semantic transcript rows cannot be compacted.
 		let mut rows = sqlx::query_as!(
@@ -82,8 +82,7 @@ impl ReadTransaction {
 		)
 		.fetch_all(self.connection())
 		.await?;
-		let mut earlier_events_omitted =
-			rows.len() > FORK_CONTEXT_EVENT_LIMIT;
+		let mut earlier_events_omitted = rows.len() > FORK_CONTEXT_EVENT_LIMIT;
 		rows.truncate(FORK_CONTEXT_EVENT_LIMIT);
 		rows.reverse();
 		let events = rows

@@ -126,6 +126,24 @@ pub struct ConversationSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandRequest {
+	/// Apply a bounded UTF-8 edit through a registered root.
+	ApplyUserEdit {
+		/// Registered Project or Workspace root.
+		target: crate::FileTarget,
+		/// Path relative to that root.
+		path: String,
+		/// Exact file state the editor read.
+		expected_revision: crate::FileRevision,
+		/// Complete replacement content, at most 128 KiB.
+		content: String,
+	},
+	/// Submit a batch of inline comments as one user Turn.
+	SubmitReview {
+		/// Conversation whose normal queue receives the Turn.
+		conversation_id: Uuid,
+		/// Structured comments, preserved together in submission order.
+		comments: Vec<crate::ReviewComment>,
+	},
 	/// Open a PTY under a Workspace-owned helper.
 	OpenTerminal {
 		/// Registered Workspace identity.
@@ -362,6 +380,15 @@ pub enum CommandRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResponse {
+	/// A direct edit committed to the registered root.
+	UserEditApplied {
+		/// Registered root that was edited.
+		target: crate::FileTarget,
+		/// Validated path relative to the root.
+		path: String,
+		/// Exact resulting Git content and mode.
+		revision: crate::FileRevision,
+	},
 	/// Terminal admission or close was committed.
 	Terminal {
 		/// Current terminal state.

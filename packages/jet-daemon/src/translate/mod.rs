@@ -30,12 +30,12 @@ use jet_core::{
 	BaseSelection, ClientId, Command, CommandOutcome, ConflictState,
 	Conversation, ConversationId, ConversationList, ConversationOrigin,
 	ConversationSnapshot, CoreError, ErrorCategory, Event, EventPage,
-	EventPayload, EventSequence, HarnessId, ImportId, NativeConversationId,
-	PairingOfferId, PairingSecret, PairingSignature, PathGrant, PlaneStatus,
-	ProjectId, ProviderId, Query, QueryResult, RecoveryAction, RelativePath,
-	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
-	SearchTerms, SeedSelection, WorkingTree, WorkingTreeRequest, Workspace,
-	WorkspaceBase, WorkspaceId,
+	EventPayload, EventSequence, FileRevision, FileTarget, HarnessId, ImportId,
+	NativeConversationId, PairingOfferId, PairingSecret, PairingSignature,
+	PathGrant, PlaneStatus, ProjectId, ProviderId, Query, QueryResult,
+	RecoveryAction, RelativePath, RetentionPolicy, Revision, RevisionConflict,
+	Run, RunId, RunLifecycle, SearchTerms, SeedSelection, WorkingTree,
+	WorkingTreeRequest, Workspace, WorkspaceBase, WorkspaceId,
 };
 use jet_protocol as wire;
 
@@ -51,6 +51,12 @@ pub(crate) fn query(
 	minor: u32,
 ) -> Result<Query, CoreError> {
 	Ok(match request {
+		wire::QueryRequest::EditableFile { target, path } => {
+			Query::EditableFile {
+				target: file_target_from_wire(*target),
+				path: RelativePath::parse(path)?,
+			}
+		}
 		wire::QueryRequest::WorkspaceTerminals { workspace_id } => {
 			Query::WorkspaceTerminals {
 				workspace_id: jet_core::WorkspaceId(*workspace_id),
@@ -154,6 +160,15 @@ pub(crate) fn query_result(
 	minor: u32,
 ) -> Result<wire::QueryResponse, CoreError> {
 	Ok(match result {
+		QueryResult::EditableFile(file) => {
+			wire::QueryResponse::EditableFile(wire::EditableFile {
+				cursor: file.cursor.0,
+				target: file_target(file.target),
+				path: file.path.as_str().into(),
+				revision: file_revision(file.revision),
+				content: file.content,
+			})
+		}
 		QueryResult::WorkspaceTerminals { cursor, terminals } => {
 			wire::QueryResponse::WorkspaceTerminals {
 				cursor: cursor.0,
@@ -250,6 +265,33 @@ pub(crate) fn command(
 	request: &wire::CommandRequest,
 ) -> Result<Command, CoreError> {
 	Ok(match request {
+		wire::CommandRequest::ApplyUserEdit {
+			target,
+			path,
+			expected_revision,
+			content,
+		} => Command::ApplyUserEdit {
+			target: file_target_from_wire(*target),
+			path: RelativePath::parse(path)?,
+			expected_revision: file_revision_from_wire(expected_revision),
+			content: content.clone(),
+		},
+		wire::CommandRequest::SubmitReview {
+			conversation_id,
+			comments,
+		} => Command::SubmitReview {
+			conversation_id: ConversationId(*conversation_id),
+			comments: comments
+				.iter()
+				.map(|comment| {
+					Ok(jet_core::ReviewComment {
+						path: RelativePath::parse(&comment.path)?,
+						line: comment.line,
+						comment: comment.comment.clone(),
+					})
+				})
+				.collect::<Result<_, CoreError>>()?,
+		},
 		wire::CommandRequest::OpenTerminal {
 			workspace_id,
 			rows,
@@ -443,6 +485,13 @@ pub(crate) fn command_outcome(
 	minor: u32,
 ) -> wire::CommandResponse {
 	match outcome {
+		CommandOutcome::UserEditApplied(edit) => {
+			wire::CommandResponse::UserEditApplied {
+				target: file_target(edit.target),
+				path: edit.path.as_str().into(),
+				revision: file_revision(edit.revision),
+			}
+		}
 		CommandOutcome::Terminal(value) => wire::CommandResponse::Terminal {
 			terminal: terminal::snapshot(value),
 		},
@@ -860,6 +909,15 @@ pub(crate) fn error(error: CoreError, minor: u32) -> wire::WireError {
 
 fn recovery_action(action: RecoveryAction) -> Option<wire::RecoveryAction> {
 	match action {
+		RecoveryAction::RefreshFile {
+			target,
+			path,
+			current_revision,
+		} => Some(wire::RecoveryAction::RefreshFile {
+			target: file_target(target),
+			path,
+			current_revision: file_revision(current_revision),
+		}),
 		RecoveryAction::RefreshRun { run_id } => {
 			Some(wire::RecoveryAction::RefreshRun { run_id: run_id.0 })
 		}
@@ -869,7 +927,8 @@ fn recovery_action(action: RecoveryAction) -> Option<wire::RecoveryAction> {
 
 fn restart_metadata(action: &RecoveryAction) -> Option<wire::RestartMetadata> {
 	match action {
-		RecoveryAction::RefreshRun { .. } => None,
+		RecoveryAction::RefreshFile { .. }
+		| RecoveryAction::RefreshRun { .. } => None,
 		RecoveryAction::RestartSnapshot { metadata } => Some(match metadata {
 			jet_core::RestartMetadata::CursorExpired {
 				minimum_available_cursor,
@@ -889,6 +948,42 @@ fn restart_metadata(action: &RecoveryAction) -> Option<wire::RestartMetadata> {
 				current_snapshot_revision: current_snapshot_revision.0,
 			},
 		}),
+	}
+}
+
+fn file_target_from_wire(target: wire::FileTarget) -> FileTarget {
+	match target {
+		wire::FileTarget::Project { project_id } => FileTarget::Project {
+			project_id: ProjectId(project_id),
+		},
+		wire::FileTarget::Workspace { workspace_id } => FileTarget::Workspace {
+			workspace_id: WorkspaceId(workspace_id),
+		},
+	}
+}
+
+fn file_target(target: FileTarget) -> wire::FileTarget {
+	match target {
+		FileTarget::Project { project_id } => wire::FileTarget::Project {
+			project_id: project_id.0,
+		},
+		FileTarget::Workspace { workspace_id } => wire::FileTarget::Workspace {
+			workspace_id: workspace_id.0,
+		},
+	}
+}
+
+fn file_revision_from_wire(revision: &wire::FileRevision) -> FileRevision {
+	FileRevision {
+		object: revision.object.clone(),
+		mode: revision.mode.clone(),
+	}
+}
+
+fn file_revision(revision: FileRevision) -> wire::FileRevision {
+	wire::FileRevision {
+		object: revision.object,
+		mode: revision.mode,
 	}
 }
 

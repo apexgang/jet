@@ -28,6 +28,13 @@ use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
+	/// Read bounded UTF-8 content through a registered root.
+	EditableFile {
+		/// Registered Project or Workspace root.
+		target: crate::FileTarget,
+		/// Validated relative path.
+		path: RelativePath,
+	},
 	/// Terminals belonging to one Workspace.
 	WorkspaceTerminals {
 		/// Workspace identity.
@@ -160,6 +167,8 @@ pub enum Query {
 /// Snapshots returned by [`Core::query`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult {
+	/// Bounded editable content and its exact file Revision.
+	EditableFile(crate::EditableFile),
 	/// Workspace terminal lifecycle snapshots.
 	WorkspaceTerminals {
 		/// Snapshot Event cursor.
@@ -230,6 +239,11 @@ impl Core {
 			.expect("authority gate never closes");
 		actor.authorize(&self.remote_sessions)?;
 		match query {
+			Query::EditableFile { target, path } => {
+				crate::user_input::read(self, target, path)
+					.await
+					.map(QueryResult::EditableFile)
+			}
 			Query::WorkspaceTerminals { workspace_id } => {
 				self.store
 					.read(async |tx| {

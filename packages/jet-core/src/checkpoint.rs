@@ -145,6 +145,12 @@ pub enum TurnOutcome {
 /// Immutable turn record. Large payloads stay outside SQLite.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChangeCheckpoint {
+	/// Durable operation receipts for the gap before this turn began.
+	#[serde(default)]
+	pub before_evidence: Vec<ChangeEvidence>,
+	/// Gap receipts conflicted or exceeded the bound.
+	#[serde(default)]
+	pub before_evidence_incomplete: bool,
 	/// Durable operation receipts considered for attribution, including incomplete ones.
 	pub evidence: Vec<ChangeEvidence>,
 	/// Receipts conflicted or exceeded the bound; attribution remains unknown.

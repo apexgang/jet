@@ -202,6 +202,36 @@ pub struct NewCommandReceipt {
 	pub outcome: String,
 }
 
+/// A direct edit durably accepted before its filesystem replacement begins.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewUserEditIntent {
+	/// Authenticated client that submitted the Command.
+	pub actor: ActorRecord,
+	/// Actor-scoped Command identity.
+	pub command_id: Uuid,
+	/// Digest that prevents identity reuse with different content.
+	pub request_digest: [u8; 32],
+	/// When the Command was accepted.
+	pub recorded_at_unix_ms: i64,
+	/// Private, bounded JSON plan needed to finish after restart.
+	pub plan: String,
+}
+
+/// A pending direct edit reconstructed from its write-ahead intent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserEditIntentRecord {
+	/// Authenticated client that submitted the Command.
+	pub actor: ActorRecord,
+	/// Actor-scoped Command identity.
+	pub command_id: Uuid,
+	/// Original request digest.
+	pub request_digest: [u8; 32],
+	/// Original acceptance time.
+	pub recorded_at_unix_ms: i64,
+	/// Private, bounded JSON plan.
+	pub plan: String,
+}
+
 /// Closed durable spelling of external work understood by this release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectKindRecord {
