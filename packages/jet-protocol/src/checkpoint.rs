@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 /// Which immutable boundaries a diff compares.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DiffScope {
 	/// Run baseline compared with the working tree now.
@@ -25,6 +26,7 @@ pub enum DiffScope {
 }
 /// Attribution justified by exact content and durable activity evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ChangeOrigin {
 	/// An authenticated direct edit through Jet.
@@ -51,6 +53,7 @@ pub enum ChangeOrigin {
 #[derive(
 	Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactAvailability {
 	/// Complete bytes are stored under the advertised hash.
@@ -63,6 +66,7 @@ pub enum ArtifactAvailability {
 }
 /// An immutable payload under Jet's SHA-256 Artifact namespace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChangeArtifact {
 	/// Content availability; metadata-only references must not be treated as empty patches.
 	#[serde(default)]
@@ -74,6 +78,7 @@ pub struct ChangeArtifact {
 }
 /// Git state at an observed boundary, independent of Harness commits.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChangeSnapshot {
 	/// False when oversized file content was omitted; file pages retain metadata.
 	pub content_complete: bool,
@@ -86,6 +91,7 @@ pub struct ChangeSnapshot {
 }
 /// One changed path and the Git content that establishes its change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChangedFile {
 	/// Repository-relative path; renames appear as deletion and addition.
 	pub path: String,
@@ -116,6 +122,7 @@ pub enum TurnOutcome {
 }
 /// A diff's boundaries, metadata, and bounded patch preview.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChangeDiff {
 	/// Total number of changed paths across every page.
 	pub total_files: u32,
@@ -123,6 +130,7 @@ pub struct ChangeDiff {
 	pub next_page: Option<crate::PageCursor>,
 	/// Journal fence for the durable metadata; Current also inspects live Git.
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// Plane where these changes were observed.
 	pub plane_id: Uuid,
@@ -152,11 +160,13 @@ pub struct ChangeDiff {
 
 /// A bounded slice of an immutable patch, for clients to verify and assemble.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChangeArtifactChunk {
 	/// Complete content address and size.
 	pub artifact: ChangeArtifact,
 	/// Offset of these bytes in the complete Artifact.
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub offset: u64,
 	/// At most 64 KiB. Empty only at the end of the Artifact.
 	pub bytes: Vec<u8>,

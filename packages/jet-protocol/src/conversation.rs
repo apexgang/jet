@@ -16,6 +16,7 @@ use crate::workspace::{WorkingTree, WorkingTreeRequest, Workspace};
 
 /// Opaque token for continuing one fenced keyset snapshot page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct PageCursor(pub Uuid);
 
@@ -23,6 +24,7 @@ pub struct PageCursor(pub Uuid);
 #[derive(
 	Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RetentionPolicy {
 	/// Keep the Conversation and its history. The default.
@@ -35,6 +37,7 @@ pub enum RetentionPolicy {
 
 /// Mutually exclusive lifecycle state of one Run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RunLifecycle {
 	/// Recorded but not yet launching.
@@ -57,6 +60,7 @@ pub enum RunLifecycle {
 
 /// One Conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Conversation {
 	/// Durable identity.
 	pub conversation_id: Uuid,
@@ -74,6 +78,7 @@ pub struct Conversation {
 
 /// One Run of a Conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Run {
 	/// Durable identity.
 	pub run_id: Uuid,
@@ -82,6 +87,7 @@ pub struct Run {
 	/// Monotonic version used by conflict-sensitive Commands, carried as a
 	/// decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub revision: u64,
 	/// Current lifecycle state.
 	pub lifecycle: RunLifecycle,
@@ -93,10 +99,12 @@ pub struct Run {
 
 /// One bounded page of Conversations, fenced by a journal cursor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ConversationList {
 	/// Newest Event sequence visible when the list was read, carried as a
 	/// decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// Conversations in creation order.
 	pub conversations: Vec<Conversation>,
@@ -107,10 +115,12 @@ pub struct ConversationList {
 
 /// One Conversation with all of its Runs, fenced by a journal cursor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ConversationSnapshot {
 	/// Newest Event sequence visible when the snapshot was read, carried as
 	/// a decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// The Conversation itself.
 	pub conversation: Conversation,
@@ -124,6 +134,7 @@ pub struct ConversationSnapshot {
 
 /// Commands a client may execute.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandRequest {
 	/// Apply a bounded UTF-8 edit through a registered root.
@@ -311,6 +322,7 @@ pub enum CommandRequest {
 		/// The signature over the claim's transcript, as 128 lowercase
 		/// hexadecimal characters.
 		#[serde(with = "crate::hex")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Hex<64>"))]
 		signature: [u8; 64],
 	},
 	/// Stop a Paired client controlling the Plane, or let it control the
@@ -334,6 +346,7 @@ pub enum CommandRequest {
 		/// Revision observed when the Command was prepared, carried as a
 		/// decimal string (ADR-0089).
 		#[serde(with = "crate::decimal")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		expected_revision: u64,
 		/// The state to enter.
 		lifecycle: RunLifecycle,
@@ -378,6 +391,7 @@ pub enum CommandRequest {
 
 /// Durable Command outcomes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResponse {
 	/// A direct edit committed to the registered root.
@@ -471,6 +485,7 @@ pub enum CommandResponse {
 		pending: PendingPairing,
 		/// The challenge to sign, as 64 lowercase hexadecimal characters.
 		#[serde(with = "crate::hex")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Hex<32>"))]
 		challenge: [u8; 32],
 	},
 	/// The Pairing offer after the person at the target confirmed it.
@@ -498,6 +513,7 @@ pub enum CommandResponse {
 		/// The epoch that holds the chain the Plane vouches for, carried as
 		/// a decimal string (ADR-0089).
 		#[serde(with = "crate::decimal")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		epoch: u64,
 	},
 	/// The Project as registered.
@@ -512,10 +528,12 @@ pub enum CommandResponse {
 
 /// Structured state returned when a Revision precondition is stale.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RevisionConflict {
 	/// Revision that is authoritative now, carried as a decimal string
 	/// (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub current_revision: u64,
 	/// Safe current state with which the caller can refresh.
 	pub safe_state: ConflictState,
@@ -523,6 +541,7 @@ pub struct RevisionConflict {
 
 /// Safe resource state attached to a Revision conflict.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConflictState {
 	/// The current Run.

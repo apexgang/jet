@@ -7,6 +7,7 @@ use uuid::Uuid;
 /// names; a Query resolves the Plane's values and then the values of the
 /// scope it names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SettingScope {
 	/// Everything on the Plane.
@@ -26,6 +27,7 @@ pub enum SettingScope {
 /// A Setting this protocol minor names. A spelling it does not name is
 /// refused rather than guessed (ADR-0094).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum SettingKey {
 	/// Whether the Utility model names Conversations automatically.
 	#[serde(rename = "utility.automatic_naming")]
@@ -44,6 +46,7 @@ pub enum SettingKey {
 
 /// One Setting's value. Each key holds exactly one of these shapes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum SettingValue {
 	/// A yes-or-no choice.
@@ -56,6 +59,7 @@ pub enum SettingValue {
 
 /// Which Settings one Query resolves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SettingSelection {
 	/// Every Setting the addressed scope may store.
@@ -69,6 +73,7 @@ pub enum SettingSelection {
 
 /// Where a resolved value came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum SettingSource {
 	/// The Plane's built-in default; no scope stores a value.
@@ -82,6 +87,7 @@ pub enum SettingSource {
 
 /// One Setting as it applies to the scope a Query addressed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ResolvedSetting {
 	/// The Setting.
 	pub key: SettingKey,
@@ -93,10 +99,12 @@ pub struct ResolvedSetting {
 
 /// Settings resolved for one scope, fenced by a journal cursor (ADR-0092).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SettingSnapshot {
 	/// Newest Event sequence visible when the snapshot was read, carried as
 	/// a decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// The scope the Settings were resolved for.
 	pub scope: SettingScope,

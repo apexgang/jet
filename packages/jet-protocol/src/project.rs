@@ -12,6 +12,7 @@ use crate::event::Actor;
 
 /// What a Path grant would register, shown before anything is recorded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ProjectPreview {
 	/// The canonical directory the granted path resolves to.
 	pub root: String,
@@ -22,6 +23,7 @@ pub struct ProjectPreview {
 /// Whether a granted directory can be a Project. What keeps it from
 /// registering is data a client acts on, never a message it parses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "verdict", rename_all = "snake_case")]
 pub enum Registrability {
 	/// An ordinary working tree, described.
@@ -49,6 +51,7 @@ pub enum Registrability {
 
 /// A registrable working tree as the Plane's Git describes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Repository {
 	/// Whether the working tree is the repository's own or a linked one.
 	pub worktree: Worktree,
@@ -62,6 +65,7 @@ pub struct Repository {
 
 /// Which working tree of its repository a Project is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Worktree {
 	/// The repository's own working tree.
@@ -75,6 +79,7 @@ pub enum Worktree {
 
 /// Whether a working tree is checked out in full.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Checkout {
 	/// Every tracked path is present.
@@ -86,6 +91,7 @@ pub enum Checkout {
 /// One submodule as the index records it: a path holding a commit of
 /// another repository.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GitLink {
 	/// The path inside the working tree, as Git spells it.
 	pub path: String,
@@ -96,10 +102,12 @@ pub struct GitLink {
 /// One entry inside a registered Project, addressed by the Project and a
 /// path relative to its root. It carries metadata and never content.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ProjectEntry {
 	/// Newest Event sequence visible when the Project was read, carried as
 	/// a decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// The Project the path was resolved in.
 	pub project_id: Uuid,
@@ -111,6 +119,7 @@ pub struct ProjectEntry {
 
 /// What one path inside a Project names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EntryKind {
 	/// A regular file.
@@ -128,6 +137,7 @@ pub enum EntryKind {
 
 /// One registered Project.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Project {
 	/// Durable identity.
 	pub project_id: Uuid,
@@ -143,10 +153,12 @@ pub struct Project {
 /// Every registered Project on one Plane, fenced by a journal cursor
 /// (ADR-0092).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ProjectList {
 	/// Newest Event sequence visible when the snapshot was read, carried as
 	/// a decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// The Projects in the order they were registered.
 	pub projects: Vec<Project>,

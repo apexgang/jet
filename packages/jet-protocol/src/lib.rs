@@ -40,6 +40,10 @@ pub use execution_recovery::{
 	OrphanedExecutions,
 };
 mod hex;
+#[cfg(feature = "schema")]
+pub(crate) use decimal::{Decimal, optional::OptionalDecimal};
+#[cfg(feature = "schema")]
+pub(crate) use hex::Hex;
 mod import;
 mod message;
 mod pairing;

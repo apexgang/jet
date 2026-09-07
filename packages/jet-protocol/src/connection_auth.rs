@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 /// The two enrollment operations available before remote authentication.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "pairing", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemotePairingRequest {
 	/// Present the out-of-band one-time secret and this installation's key.
@@ -25,12 +26,14 @@ pub enum RemotePairingRequest {
 		offer_id: Uuid,
 		/// Signature of the claim's signing bytes.
 		#[serde(with = "crate::hex")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Hex<64>"))]
 		signature: [u8; 64],
 	},
 }
 
 /// Enrollment-only reply; it never authorizes application streams.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RemotePairingResponse {
 	/// The token was accepted; compare the string on both screens.
@@ -54,10 +57,12 @@ pub enum RemotePairingResponse {
 
 /// The only message accepted in response to a remote challenge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct ConnectionProof {
 	/// Signature of [`connection_signing_bytes`] by the Paired client's key.
 	#[serde(with = "crate::hex")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Hex<64>"))]
 	pub signature: [u8; 64],
 }
 

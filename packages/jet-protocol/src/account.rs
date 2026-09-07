@@ -15,6 +15,7 @@ use crate::capability::CredentialStoreKind;
 /// Which backend a client asks a new binding to resolve its Credential
 /// through.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum CredentialSource {
 	/// The platform credential store, under an item the Plane names.
@@ -35,6 +36,7 @@ pub enum CredentialSource {
 /// The opaque reference a Plane keeps for one binding's Credential, and the
 /// place the secret it resolves to belongs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum CredentialReference {
 	/// An item of the platform credential store.
@@ -60,6 +62,7 @@ pub enum CredentialReference {
 /// One platform credential-store item. The Plane names it after the binding
 /// alone, so no client-supplied text enters Plane-owned state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CredentialItem {
 	/// The service every Jet Credential item lives under.
 	pub service: String,
@@ -69,6 +72,7 @@ pub struct CredentialItem {
 
 /// One Plane-local Account binding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AccountBinding {
 	/// Durable identity.
 	pub binding_id: Uuid,
@@ -92,6 +96,7 @@ pub struct AccountBinding {
 /// so a backend that will not answer becomes one of these and the GUI
 /// starts the operating system's own unlock flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum CredentialState {
 	/// The Plane can see the backend, so the Credential resolves at the
@@ -123,6 +128,7 @@ pub enum CredentialState {
 /// binding is durable Plane state; the state beside it is observed when the
 /// Query runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AccountBindingStatus {
 	/// The binding as the Plane recorded it.
 	pub binding: AccountBinding,
@@ -133,10 +139,12 @@ pub struct AccountBindingStatus {
 /// Every Account binding on one Plane, fenced by a journal cursor
 /// (ADR-0092).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AccountBindingList {
 	/// Newest Event sequence visible when the snapshot was read, carried as
 	/// a decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// The bindings in the order they were established.
 	pub bindings: Vec<AccountBindingStatus>,

@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 /// A registered root through which an ordinary file operation is addressed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FileTarget {
 	/// A registered Project's Local checkout.
@@ -21,6 +22,7 @@ pub enum FileTarget {
 
 /// Exact Git content and mode observed for one file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FileRevision {
 	/// Git blob object, or all zeroes when the file is missing.
 	pub object: String,
@@ -30,9 +32,11 @@ pub struct FileRevision {
 
 /// Bounded UTF-8 content read through a registered root.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EditableFile {
 	/// Journal fence observed with the registered target.
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// Registered root that was read.
 	pub target: FileTarget,
@@ -46,6 +50,7 @@ pub struct EditableFile {
 
 /// One submitted inline review comment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReviewComment {
 	/// Validated path relative to the Conversation's working tree.
 	pub path: String,

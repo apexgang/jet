@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// What an interactive control request asks of one managed execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RunControl {
 	/// End the current turn and leave the Run able to accept the next one.
@@ -19,6 +20,7 @@ pub enum RunControl {
 /// past `Interrupt` is a forced termination: the Harness was given the
 /// chance to end its own work and did not take it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum TerminationStage {
 	/// The Harness cancelled its own turn; no signal was sent and the Run
@@ -37,6 +39,7 @@ pub enum TerminationStage {
 
 /// The exact terminal outcome of one control request, recorded once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RunTermination {
 	/// The request this outcome answers.
 	pub control: RunControl,

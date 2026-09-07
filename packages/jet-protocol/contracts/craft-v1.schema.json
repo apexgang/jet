@@ -226,6 +226,24 @@
           ]
         },
         {
+          "description": "Ask the Harness to cancel the identified turn without ending the\nRun (Craft 1.4). A Craft that negotiated 1.4 must answer every\nInterrupt with a `TurnEnded` boundary for that turn.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "description": "Correlation identity of the turn to cancel.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "interrupt"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        {
           "description": "Route an authenticated user action to its native handler.",
           "type": "object",
           "properties": {

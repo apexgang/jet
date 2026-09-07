@@ -53,21 +53,48 @@ bench-smoke:
 check:
 	cargo check
 
-# Regenerate schema and GUI model declarations from the Craft wire DTOs.
-craft-contracts:
-	mkdir -p jet-protocol/contracts
-	cargo run -p jet-protocol --features schema --example craft-schema > jet-protocol/contracts/craft-v1.schema.json
-	python3 ../scripts/craft-models.py
+# Regenerate every wire schema and its GUI models from the Rust wire DTOs.
+contracts: (emit-contracts justfile_directory() / "..")
 
-# Validate the shared corpus in both GUI languages; Node 24+ and Swift required.
-craft-contract-test node_bin="node":
+# Emit the contracts under one root, laid out exactly as they are committed.
+[private]
+emit-contracts root:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	contracts="{{ root }}/packages/jet-protocol/contracts"
+	typescript="{{ root }}/apps/jet-tauri/src/lib/protocol"
+	swift="{{ root }}/apps/jet/jet/Protocol"
+	mkdir -p "$contracts" "$typescript" "$swift"
+	cargo run -q -p jet-protocol --features schema --example craft-schema > "$contracts/craft-v1.schema.json"
+	cargo run -q -p jet-protocol --features schema --example jet-schema > "$contracts/jet-v1.schema.json"
+	# Craft models serve the contract test; only clients need the Jet models.
+	python3 ../scripts/wire-models.py "$contracts/craft-v1.schema.json" "$contracts/CraftModels.ts" "$contracts/CraftModels.swift"
+	python3 ../scripts/wire-models.py "$contracts/jet-v1.schema.json" "$typescript/JetModels.ts" "$swift/JetModels.swift"
+
+# Fail when a committed contract no longer matches the Rust wire DTOs.
+contracts-check:
 	#!/usr/bin/env bash
 	set -euo pipefail
 	scratch="$(mktemp -d)"
 	trap 'rm -rf "$scratch"' EXIT
-	"$1" jet-protocol/contracts/tests/fixtures.ts
-	swiftc -module-cache-path "$scratch/cache" jet-protocol/contracts/CraftModels.swift jet-protocol/contracts/tests/main.swift -o "$scratch/check"
-	"$scratch/check" jet-protocol/contracts/craft-v1.schema.json jet-protocol/contracts/fixtures.json
+	root="$(cd .. && pwd)"
+	just emit-contracts "$scratch"
+	( cd "$scratch" && find . -type f -print0 ) | while IFS= read -r -d '' artifact; do
+		diff -u "$root/$artifact" "$scratch/$artifact"
+	done
+
+# Validate the shared corpora in both GUI languages; Node 24+ and Swift required.
+contracts-test node_bin="node":
+	#!/usr/bin/env bash
+	set -euo pipefail
+	scratch="$(mktemp -d)"
+	trap 'rm -rf "$scratch"' EXIT
+	"$1" jet-protocol/contracts/tests/craft-fixtures.ts
+	"$1" jet-protocol/contracts/tests/jet-fixtures.ts
+	swiftc -module-cache-path "$scratch/cache" jet-protocol/contracts/CraftModels.swift jet-protocol/contracts/tests/main.swift -o "$scratch/craft"
+	"$scratch/craft" jet-protocol/contracts/craft-v1.schema.json jet-protocol/contracts/craft-fixtures.json
+	swiftc -module-cache-path "$scratch/cache" ../apps/jet/jet/Protocol/JetModels.swift jet-protocol/contracts/tests/main.swift -o "$scratch/jet"
+	"$scratch/jet" jet-protocol/contracts/jet-v1.schema.json jet-protocol/contracts/jet-fixtures.json
 
 build:
 	cargo build

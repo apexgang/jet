@@ -1,5 +1,9 @@
-//! The same compatibility corpus is consumed by Rust, Swift, and TypeScript.
-use jet_protocol::{CraftCommand, CraftEvent, ProtocolOffer, decode_control};
+//! The same compatibility corpora are consumed by Rust, Swift, and TypeScript.
+use jet_protocol::{
+	ClientHello, ClientMessage, ConnectionProof, CraftCommand, CraftEvent,
+	Event, PlaneStatus, ProtocolOffer, ServerHello, ServerMessage,
+	StreamControl, decode_control,
+};
 use pretty_assertions::assert_eq;
 use serde::Deserialize;
 
@@ -10,19 +14,44 @@ struct Fixture {
 	payload: String,
 }
 
-#[test]
-fn shared_gui_contract_fixtures_match_the_wire_decoder() {
-	let fixtures: Vec<Fixture> =
-		serde_json::from_str(include_str!("../contracts/fixtures.json"))
-			.unwrap();
+/// Decodes every fixture in one corpus through the decoder its schema names.
+fn accepts_exactly(corpus: &str, decode: impl Fn(&str, &[u8]) -> bool) {
+	let fixtures: Vec<Fixture> = serde_json::from_str(corpus).unwrap();
 	for fixture in fixtures {
-		let payload = fixture.payload.as_bytes();
-		let accepted = match fixture.schema.as_str() {
+		let accepted = decode(&fixture.schema, fixture.payload.as_bytes());
+		assert_eq!(accepted, fixture.valid, "{}", fixture.payload);
+	}
+}
+
+#[test]
+fn shared_craft_contract_fixtures_match_the_wire_decoder() {
+	accepts_exactly(
+		include_str!("../contracts/craft-fixtures.json"),
+		|schema, payload| match schema {
 			"CraftCommand" => decode_control::<CraftCommand>(payload).is_ok(),
 			"CraftEvent" => decode_control::<CraftEvent>(payload).is_ok(),
 			"ProtocolOffer" => decode_control::<ProtocolOffer>(payload).is_ok(),
 			_ => panic!("unknown fixture schema"),
-		};
-		assert_eq!(accepted, fixture.valid, "{}", fixture.payload);
-	}
+		},
+	);
+}
+
+#[test]
+fn shared_client_contract_fixtures_match_the_wire_decoder() {
+	accepts_exactly(
+		include_str!("../contracts/jet-fixtures.json"),
+		|schema, payload| match schema {
+			"ClientHello" => decode_control::<ClientHello>(payload).is_ok(),
+			"ServerHello" => decode_control::<ServerHello>(payload).is_ok(),
+			"ClientMessage" => decode_control::<ClientMessage>(payload).is_ok(),
+			"ServerMessage" => decode_control::<ServerMessage>(payload).is_ok(),
+			"ConnectionProof" => {
+				decode_control::<ConnectionProof>(payload).is_ok()
+			}
+			"StreamControl" => decode_control::<StreamControl>(payload).is_ok(),
+			"Event" => decode_control::<Event>(payload).is_ok(),
+			"PlaneStatus" => decode_control::<PlaneStatus>(payload).is_ok(),
+			_ => panic!("unknown fixture schema"),
+		},
+	);
 }

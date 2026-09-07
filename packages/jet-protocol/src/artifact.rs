@@ -58,6 +58,19 @@ impl<'de> Deserialize<'de> for Sha256Digest {
 	}
 }
 
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for Sha256Digest {
+	fn schema_name() -> std::borrow::Cow<'static, str> {
+		"Sha256Digest".into()
+	}
+
+	fn json_schema(
+		generator: &mut schemars::SchemaGenerator,
+	) -> schemars::Schema {
+		<crate::Hex<32> as schemars::JsonSchema>::json_schema(generator)
+	}
+}
+
 /// A value was not a canonical SHA-256 digest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("SHA-256 must be 64 lowercase hexadecimal characters")]

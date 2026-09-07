@@ -17,6 +17,7 @@ const STREAM_HEADER_LEN: usize = 9;
 
 /// The typed number of one multiplexed stream on a connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct StreamId(u32);
 
 impl StreamId {

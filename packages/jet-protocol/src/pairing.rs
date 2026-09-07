@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 /// Whether a Plane accepts new Pairings right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum PairingGate {
 	/// A new GUI client may begin Pairing.
@@ -23,6 +24,7 @@ pub enum PairingGate {
 
 /// How the Plane hands one offer's one-time secret to the person pairing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum PairingMethod {
 	/// An eight-digit numeric code, read off the target and typed into the
@@ -39,6 +41,7 @@ pub enum PairingMethod {
 /// the key so a Plane that later speaks a second one can tell which key is
 /// which.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum PairingKeyAlgorithm {
 	/// Ed25519, the only algorithm a v1 Client identity uses.
@@ -48,11 +51,13 @@ pub enum PairingKeyAlgorithm {
 /// The public half of one Client identity: the durable credential a
 /// completed Pairing leaves behind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ClientPublicKey {
 	/// The algorithm it signs with.
 	pub algorithm: PairingKeyAlgorithm,
 	/// The key itself, as 64 lowercase hexadecimal characters.
 	#[serde(with = "crate::hex")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Hex<32>"))]
 	pub key: [u8; 32],
 }
 
@@ -60,6 +65,7 @@ pub struct ClientPublicKey {
 /// offer. It is disclosed once: a retry of the Command that opened the
 /// offer is answered without it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "disclosure", rename_all = "snake_case")]
 pub enum PairingDisclosure {
 	/// The eight-digit code, grouped as `xxxx-yyyy`.
@@ -79,6 +85,7 @@ pub enum PairingDisclosure {
 
 /// Whether a Paired client may control the Plane right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum PairedClientAccess {
 	/// It may.
@@ -90,6 +97,7 @@ pub enum PairedClientAccess {
 
 /// One GUI client a Plane has Paired with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PairedClient {
 	/// The Client identity that was Paired.
 	pub client_id: Uuid,
@@ -106,6 +114,7 @@ pub struct PairedClient {
 
 /// Why a Pairing offer is over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum PairingEnd {
 	/// Its window passed.
@@ -118,6 +127,7 @@ pub enum PairingEnd {
 
 /// How far the Plane's one Pairing offer has got.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "progress", rename_all = "snake_case")]
 pub enum PairingProgress {
 	/// Issued, and waiting for a client to present its secret.
@@ -148,6 +158,7 @@ pub enum PairingProgress {
 
 /// The Plane's one Pairing offer, without the secret it was issued with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PendingPairing {
 	/// Durable identity.
 	pub offer_id: Uuid,
@@ -167,10 +178,12 @@ pub struct PendingPairing {
 /// One Plane's Pairing as it stands, fenced by a journal cursor
 /// (ADR-0092).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PairingSnapshot {
 	/// Newest Event sequence visible when the snapshot was read, carried as
 	/// a decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// Whether a new GUI client may begin Pairing.
 	pub gate: PairingGate,

@@ -54,6 +54,21 @@ Before initializing a large change to `packages`, run `just fix -p <project>` (i
 - Keep the `sqlite-bundled` feature and never set `LIBSQLITE3_SYS_USE_PKG_CONFIG`. Either one silently links the distribution's SQLite, which may lack the FTS5 that ADR-0057 requires.
 - `sqlx-cli` 0.9.0 is a separately installed developer tool with default features disabled and `sqlite,rustls` enabled; keep it out of workspace dependencies.
 
+## Wire contracts
+
+`jet-protocol` is the source of both wire contracts, and the GUIs compile
+models generated from them.
+
+- Run `just contracts` in the same commit as any change to a wire DTO, and
+  gate on `just contracts-check`. Nothing else notices a stale contract; the
+  committed schema and the app models are what clients build against.
+- A field using `serde(with)` must also name its schema stand-in
+  (`crate::Decimal`, `crate::OptionalDecimal`, `crate::Hex<N>`), because
+  schemars sees the Rust type rather than the wire form.
+- Cover a new message shape in `contracts/jet-fixtures.json` or
+  `contracts/craft-fixtures.json`, which Rust, Swift, and TypeScript all read.
+  See [Jet wire contracts](../docs/wire-contracts.md).
+
 ## Code review rules
 
 ### Crate API surface

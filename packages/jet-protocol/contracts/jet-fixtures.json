@@ -1,0 +1,142 @@
+[
+  {
+    "schema": "ClientHello",
+    "valid": true,
+    "payload": "{\"protocol\":{\"min\":1,\"max\":1},\"minor\":19,\"codec\":\"json-v1\",\"client_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"max_control_frame\":1048576,\"max_data_frame\":262144,\"capabilities\":[],\"future_flag\":true}"
+  },
+  {
+    "schema": "ClientHello",
+    "valid": true,
+    "payload": "{\"protocol\":{\"min\":1,\"max\":1},\"minor\":19,\"codec\":\"json-v1\",\"client_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"max_control_frame\":1048576,\"max_data_frame\":262144}"
+  },
+  {
+    "schema": "ClientHello",
+    "valid": false,
+    "payload": "{\"protocol\":{\"min\":1,\"max\":1},\"minor\":19,\"client_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"max_control_frame\":1048576,\"max_data_frame\":262144}"
+  },
+  {
+    "schema": "ServerHello",
+    "valid": true,
+    "payload": "{\"kind\":\"challenge\",\"nonce\":\"3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f\"}"
+  },
+  {
+    "schema": "ServerHello",
+    "valid": false,
+    "payload": "{\"kind\":\"challenge\",\"nonce\":\"3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F\"}"
+  },
+  {
+    "schema": "ServerHello",
+    "valid": false,
+    "payload": "{\"kind\":\"challenge\",\"nonce\":\"3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f\"}"
+  },
+  {
+    "schema": "ServerHello",
+    "valid": true,
+    "payload": "{\"kind\":\"welcome\",\"protocol\":1,\"minor\":19,\"codec\":\"json-v1\",\"max_control_frame\":1048576,\"max_data_frame\":262144}"
+  },
+  {
+    "schema": "ServerHello",
+    "valid": false,
+    "payload": "{\"kind\":\"future_hello\"}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":7,\"query\":{\"type\":\"status\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":7,\"query\":{\"type\":\"status\"},\"timeout_ms\":1000}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"future_message\",\"id\":7}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"query\",\"id\":7,\"query\":{\"type\":\"future_query\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"query\",\"id\":7,\"id\":8,\"query\":{\"type\":\"status\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"attach_terminal\",\"id\":3,\"terminal_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"after\":\"0\",\"credit\":\"65536\"}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"attach_terminal\",\"id\":3,\"terminal_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"after\":\"007\",\"credit\":\"65536\"}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"attach_terminal\",\"id\":3,\"terminal_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"after\":0,\"credit\":\"65536\"}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"error\",\"error\":{\"category\":\"unauthorized\",\"code\":\"pairing_required\",\"retryable\":false,\"message\":\"pair this client first\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"error\",\"error\":{\"category\":\"future_category\",\"code\":\"pairing_required\",\"retryable\":false,\"message\":\"pair this client first\"}}"
+  },
+  {
+    "schema": "ConnectionProof",
+    "valid": true,
+    "payload": "{\"signature\":\"a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\"}"
+  },
+  {
+    "schema": "ConnectionProof",
+    "valid": false,
+    "payload": "{\"signature\":\"a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\",\"future_flag\":true}"
+  },
+  {
+    "schema": "StreamControl",
+    "valid": true,
+    "payload": "{\"type\":\"credit\",\"bytes\":65536}"
+  },
+  {
+    "schema": "StreamControl",
+    "valid": true,
+    "payload": "{\"type\":\"terminal_finished\",\"total_bytes\":\"1048576\"}"
+  },
+  {
+    "schema": "StreamControl",
+    "valid": false,
+    "payload": "{\"type\":\"terminal_finished\",\"total_bytes\":1048576}"
+  },
+  {
+    "schema": "Event",
+    "valid": true,
+    "payload": "{\"sequence\":\"42\",\"event_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e70\",\"actor\":{\"type\":\"interactive_client\",\"client_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"},\"recorded_at_unix_ms\":1757000000000,\"kind\":\"conversation_created\",\"payload_version\":1,\"payload\":{\"amount\":9007199254740993,\"repeated\":1,\"repeated\":2},\"future_flag\":true}"
+  },
+  {
+    "schema": "Event",
+    "valid": false,
+    "payload": "{\"sequence\":42,\"event_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e70\",\"actor\":{\"type\":\"interactive_client\",\"client_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"},\"recorded_at_unix_ms\":1757000000000,\"kind\":\"conversation_created\",\"payload_version\":1,\"payload\":{}}"
+  },
+  {
+    "schema": "PlaneStatus",
+    "valid": true,
+    "payload": "{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e71\",\"daemon_starts\":4,\"started_at_unix_ms\":1757000000000,\"core_version\":\"0.2.0\"}"
+  },
+  {
+    "schema": "PlaneStatus",
+    "valid": true,
+    "payload": "{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e71\",\"daemon_starts\":4,\"started_at_unix_ms\":1757000000000,\"core_version\":\"0.2.0\",\"cursor\":\"42\"}"
+  },
+  {
+    "schema": "PlaneStatus",
+    "valid": false,
+    "payload": "{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e71\",\"daemon_starts\":4,\"started_at_unix_ms\":1757000000000,\"core_version\":\"0.2.0\",\"cursor\":\"007\"}"
+  }
+]

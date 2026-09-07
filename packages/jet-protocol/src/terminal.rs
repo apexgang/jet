@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 /// Durable terminal lifecycle, independent from Runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum TerminalState {
 	/// The durable launch Effect is pending.
@@ -20,6 +21,7 @@ pub enum TerminalState {
 
 /// One Workspace-owned PTY; no Run identity is involved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WorkspaceTerminal {
 	/// Stable terminal identity.
 	pub terminal_id: Uuid,
@@ -31,6 +33,7 @@ pub struct WorkspaceTerminal {
 
 /// Immutable host-written launch boundary for a terminal-role helper.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalConfig {
 	/// Terminal identity.
 	pub terminal_id: Uuid,
@@ -52,6 +55,7 @@ pub struct TerminalConfig {
 
 /// Atomic, owner-only terminal helper identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalDescriptor {
 	/// Private helper protocol version, checked independently of product versions.
 	pub protocol: crate::ProtocolVersion,
@@ -73,6 +77,7 @@ pub struct TerminalDescriptor {
 
 /// One instance-bound operation on the private terminal helper protocol.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalHelperRequest {
 	/// Selected terminal helper protocol.
 	pub protocol: crate::ProtocolVersion,
@@ -84,6 +89,7 @@ pub struct TerminalHelperRequest {
 
 /// Private terminal helper operations. Never interpreted by a Craft.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TerminalHelperAction {
 	/// Read a bounded range without changing another client's cursor.
@@ -108,6 +114,7 @@ pub enum TerminalHelperAction {
 
 /// Reply header followed by a raw data frame when `length` is nonzero.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalHelperReply {
 	/// First returned byte; a larger value than requested explicitly identifies a gap.
 	pub offset: u64,
