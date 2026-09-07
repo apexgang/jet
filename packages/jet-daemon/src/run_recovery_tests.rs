@@ -12,6 +12,8 @@ async fn a_changed_boot_proves_loss_even_when_the_previous_pid_is_live() {
 	let id = RunId(Uuid::new_v4());
 	let current = jet_runtime::execution_boot_identity().unwrap();
 	let plan = |boot: &str| LaunchPlan {
+		turn_id: None,
+		native_conversation: None,
 		version: 1,
 		root: home.path().into(),
 		project_root: home.path().into(),

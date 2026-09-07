@@ -16,6 +16,11 @@ pub trait RunHost: std::fmt::Debug + Send + Sync {
 		home: PathBuf,
 		id: String,
 	) -> RunFuture<'_, Result<PinnedCraft, CoreError>>;
+	/// Refreshes metadata for a new Run without selecting a different artifact.
+	fn prepare_next_run(
+		&self,
+		plan: LaunchPlan,
+	) -> RunFuture<'_, Result<LaunchPlan, CoreError>>;
 	/// Starts the accepted execution, distinguishing rejection from uncertainty.
 	fn start(
 		&self,
@@ -98,16 +103,19 @@ pub enum RunStartError {
 	Unknown,
 }
 /// One authenticated, pinned Run connection. No protocol DTO crosses this port.
-pub trait RunConnection: Send {
-	/// Receives a domain observation, validating transport identities first.
-	fn receive(&mut self) -> RunFuture<'_, Result<Observation, CoreError>>;
-	/// Releases native source only after Core committed its meaning.
-	fn acknowledge(
-		&mut self,
-		offset: u64,
+pub trait RunConnection: Send + Sync {
+	/// Delivers one durably claimed turn; errors leave its outcome uncertain.
+	fn submit_turn(
+		&self,
+		turn_id: uuid::Uuid,
+		prompt: String,
 	) -> RunFuture<'_, Result<(), CoreError>>;
+	/// Receives a domain observation, validating transport identities first.
+	fn receive(&self) -> RunFuture<'_, Result<Observation, CoreError>>;
+	/// Releases native source only after Core committed its meaning.
+	fn acknowledge(&self, offset: u64) -> RunFuture<'_, Result<(), CoreError>>;
 	/// Closes the execution connection after its terminal source is committed.
-	fn finish(&mut self) -> RunFuture<'_, Result<(), CoreError>>;
+	fn finish(&self) -> RunFuture<'_, Result<(), CoreError>>;
 }
 
 /// Durable source and process evidence supplied to recovery by Core.

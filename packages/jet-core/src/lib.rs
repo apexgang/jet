@@ -40,6 +40,7 @@ mod promotion_command;
 mod promotion_effect;
 mod promotion_merge;
 mod query;
+mod queued_run;
 mod relative_path;
 mod remote;
 mod remote_pairing;
@@ -52,6 +53,7 @@ mod run_host;
 mod run_recovery;
 mod run_state;
 mod turn;
+mod turn_dispatch;
 mod turn_queue;
 pub use orphan::{
 	ExecutionAction, ExecutionMetadata, ExecutionResolution, OrphanedExecution,

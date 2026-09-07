@@ -257,3 +257,21 @@ pub(crate) async fn commit(
 	}
 	save(tx, id, queue).await
 }
+impl Queue {
+	pub(crate) fn ready(&self) -> bool {
+		!self.entries.is_empty()
+			&& self
+				.entries
+				.iter()
+				.all(|entry| entry.turn.state == TurnState::Queued)
+	}
+	pub(crate) fn claim(&mut self, run_id: crate::RunId) -> Option<Entry> {
+		if !self.ready() {
+			return None;
+		}
+		let entry = self.entries.first_mut()?;
+		entry.turn.state = TurnState::Active;
+		entry.turn.run_id = Some(run_id);
+		Some(entry.clone())
+	}
+}
