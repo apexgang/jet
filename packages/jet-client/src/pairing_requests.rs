@@ -28,6 +28,7 @@ impl Client {
 		match self.query(QueryRequest::Pairing).await? {
 			QueryResponse::Pairing(snapshot) => Ok(snapshot),
 			other @ (QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
@@ -41,6 +42,8 @@ impl Client {
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::ChangeArtifact(_)
+			| QueryResponse::ChangeDiff(_)
 			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)
 			| QueryResponse::ExternalConversations(_)) => Err(unexpected(&other)),
@@ -73,6 +76,8 @@ impl Client {
 		{
 			CommandResponse::PairingGateSet { gate } => Ok(gate),
 			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
@@ -124,6 +129,8 @@ impl Client {
 				disclosure,
 			} => Ok((pending, disclosure)),
 			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
@@ -181,6 +188,8 @@ impl Client {
 				Ok((pending, challenge))
 			}
 			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
@@ -236,6 +245,8 @@ impl Client {
 		{
 			CommandResponse::PairingConfirmed { pending } => Ok(pending),
 			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
@@ -287,6 +298,8 @@ impl Client {
 		{
 			CommandResponse::PairingCompleted { client } => Ok(client),
 			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
@@ -337,6 +350,8 @@ impl Client {
 		{
 			CommandResponse::PairedClientAccessSet { client } => Ok(client),
 			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
@@ -385,6 +400,8 @@ impl Client {
 		{
 			CommandResponse::PairedClientRevoked { client_id } => Ok(client_id),
 			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}

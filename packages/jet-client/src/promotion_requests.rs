@@ -41,6 +41,7 @@ impl Client {
 		{
 			QueryResponse::PromotionPreview(preview) => Ok(*preview),
 			other @ (QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
@@ -54,6 +55,8 @@ impl Client {
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::ChangeArtifact(_)
+			| QueryResponse::ChangeDiff(_)
 			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)
 			| QueryResponse::ExternalConversations(_)) => Err(unexpected(&other)),
@@ -94,6 +97,8 @@ impl Client {
 				Ok(promotion)
 			}
 			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}

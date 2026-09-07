@@ -385,9 +385,19 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::WORKSPACE_TERMINALS_MINOR,
 			feature: "Workspace terminals",
 		}),
+		QueryRequest::TurnQueue { .. } => Some(MinorRequirement {
+			minor: jet_protocol::TURN_QUEUE_MINOR,
+			feature: "Turn queue",
+		}),
 		QueryRequest::OrphanedExecutions { .. } => Some(MinorRequirement {
 			minor: jet_protocol::EXECUTION_RECOVERY_MINOR,
 			feature: "execution recovery",
+		}),
+		QueryRequest::ChangeDiff { .. }
+		| QueryRequest::NextChangeDiff { .. }
+		| QueryRequest::ChangeArtifact { .. } => Some(MinorRequirement {
+			minor: jet_protocol::CHANGE_CHECKPOINTS_MINOR,
+			feature: "Change checkpoints",
 		}),
 		QueryRequest::RunExecution { .. } => Some(MinorRequirement {
 			minor: jet_protocol::MANAGED_RUNS_MINOR,
@@ -458,6 +468,11 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		CommandRequest::ResolveExecution { .. } => Some(MinorRequirement {
 			minor: jet_protocol::EXECUTION_RECOVERY_MINOR,
 			feature: "execution recovery",
+		}),
+		CommandRequest::SubmitTurn { .. }
+		| CommandRequest::WithdrawTurn { .. } => Some(MinorRequirement {
+			minor: jet_protocol::TURN_QUEUE_MINOR,
+			feature: "Turn queue",
 		}),
 		CommandRequest::StartRun { .. } => Some(MinorRequirement {
 			minor: jet_protocol::MANAGED_RUNS_MINOR,

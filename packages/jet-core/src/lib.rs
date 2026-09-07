@@ -12,6 +12,20 @@ mod account;
 mod audit;
 mod capability;
 mod capability_probe;
+mod change_artifact;
+mod change_artifact_budget;
+mod change_evidence;
+mod checkpoint;
+mod checkpoint_capture;
+mod checkpoint_omissions;
+mod checkpoint_pages;
+mod checkpoint_query;
+mod checkpoint_state;
+pub use checkpoint::{
+	ArtifactAvailability, ChangeArtifact, ChangeArtifactChunk,
+	ChangeCheckpoint, ChangeDiff, ChangeEvidence, ChangeOrigin, ChangeSnapshot,
+	ChangedFile, DiffScope, OmittedFile, TurnOutcome,
+};
 mod clock;
 mod command;
 mod command_receipt;
@@ -40,6 +54,7 @@ mod promotion_command;
 mod promotion_effect;
 mod promotion_merge;
 mod query;
+mod queued_run;
 mod relative_path;
 mod remote;
 mod remote_pairing;
@@ -51,10 +66,14 @@ mod run_effect;
 mod run_host;
 mod run_recovery;
 mod run_state;
+mod turn;
+mod turn_dispatch;
+mod turn_queue;
 pub use orphan::{
 	ExecutionAction, ExecutionMetadata, ExecutionResolution, ExecutionRole,
 	OrphanedExecution, OrphanedExecutions,
 };
+pub use turn::{Turn, TurnQueue, TurnSource, TurnState};
 mod search;
 mod search_index;
 mod security;
@@ -86,6 +105,10 @@ pub use run_state::Observation as RunObservation;
 #[cfg(test)]
 #[path = "run_tests.rs"]
 mod run_tests;
+
+#[cfg(test)]
+#[path = "checkpoint_tests.rs"]
+mod checkpoint_tests;
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -176,7 +199,7 @@ pub(crate) const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub struct ClientId(pub Uuid);
 
 /// Durable identity of one Plane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PlaneId(pub Uuid);
 
 /// Durable identity of one registered Project.
@@ -240,6 +263,8 @@ impl Actor {
 /// One running core bound to one Plane store.
 #[derive(Debug)]
 pub struct Core {
+	run_work: tokio::sync::Notify,
+	turn_wake: tokio::sync::watch::Sender<()>,
 	run_host: Option<Arc<dyn run_host::RunHost>>,
 	terminal_host: Option<Arc<dyn terminal::TerminalHost>>,
 	run_recovery: run_recovery::Recovery,
@@ -262,6 +287,7 @@ pub struct Core {
 	/// same durable request at once (ADR-0067).
 	effect_reconciliation: tokio::sync::Mutex<()>,
 	conversation_pages: pagination::ConversationPages,
+	checkpoint_pages: checkpoint_pages::Pages,
 	/// Where this core creates Workspaces (ADR-0025).
 	workspace_home: workspace::WorkspaceHome,
 	/// How this core sees the Harness-native Conversations outside its
@@ -325,6 +351,8 @@ impl Core {
 			started_at,
 		);
 		let core = Self {
+			run_work: tokio::sync::Notify::new(),
+			turn_wake: tokio::sync::watch::channel(()).0,
 			run_host: None,
 			terminal_host: None,
 			run_recovery: run_recovery::Recovery::default(),
@@ -340,6 +368,7 @@ impl Core {
 			started_at,
 			effect_reconciliation: tokio::sync::Mutex::new(()),
 			conversation_pages: pagination::ConversationPages::default(),
+			checkpoint_pages: checkpoint_pages::Pages::default(),
 			workspace_home,
 			discovery,
 		};

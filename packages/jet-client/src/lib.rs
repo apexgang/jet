@@ -4,6 +4,7 @@
 //! on `jet-protocol` and never links the core or SQLite (ADR-0050,
 //! ADR-0057).
 
+mod checkpoint_requests;
 mod connection;
 mod handshake;
 mod import_requests;
@@ -13,6 +14,7 @@ mod promotion_requests;
 mod requests;
 mod search_requests;
 mod ssh;
+mod turn_requests;
 
 pub use connection::{Client, ClientError};
 pub use handshake::ClientIdentity;

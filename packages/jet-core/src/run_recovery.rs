@@ -234,7 +234,7 @@ impl Core {
 		id: RunId,
 	) -> Result<(), RunRecoveryError> {
 		let (plan, cursor, terminal) = self.recovery_context(id).await?;
-		let mut connection = self
+		let connection = self
 			.run_host
 			.as_ref()
 			.ok_or(RunRecoveryError::Unsafe)?

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO turn_queues (conversation_id, state, pending_count) VALUES (?1, ?2, ?3) ON CONFLICT(conversation_id) DO UPDATE SET state = excluded.state, pending_count = excluded.pending_count",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "09e27c5c842332f69566a42dd8fc21640d4a81a9b61f11585eb510e5eccb188e"
+}

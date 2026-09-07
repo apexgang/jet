@@ -16,6 +16,7 @@ mod audit_head;
 mod audit_integrity;
 mod audit_read;
 mod audit_retention;
+mod checkpoint;
 mod command;
 mod conversation;
 mod effect;
@@ -36,6 +37,7 @@ mod search;
 mod setting;
 mod terminal;
 mod transaction;
+mod turn_queue;
 mod workspace;
 pub use terminal::TerminalRecord;
 

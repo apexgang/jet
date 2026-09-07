@@ -24,7 +24,9 @@ pub(crate) fn invalidated_client(
 			PairedClientAccess::Disabled => Some(client.client_id),
 			PairedClientAccess::Enabled => None,
 		},
-		CommandOutcome::ConversationCreated(_)
+		CommandOutcome::TurnAdmitted(_)
+		| CommandOutcome::TurnWithdrawn(_)
+		| CommandOutcome::ConversationCreated(_)
 		| CommandOutcome::ExecutionResolutionRecorded(_)
 		| CommandOutcome::RunCreated(_)
 		| CommandOutcome::RunTransitioned(_)

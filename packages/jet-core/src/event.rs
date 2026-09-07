@@ -226,6 +226,38 @@ pub enum EventKind {
 		/// Observed lifecycle.
 		state: crate::TerminalState,
 	},
+	/// Verified activity evidence was retained for the active turn.
+	#[serde(rename = "change.evidence_recorded")]
+	ChangeEvidenceRecorded {
+		/// Active turn number.
+		turn: u32,
+		/// Content transition and its trusted origin.
+		evidence: crate::ChangeEvidence,
+	},
+	/// A turn boundary and its Artifact committed with its source receipt.
+	#[serde(rename = "change.checkpoint_recorded")]
+	ChangeCheckpointRecorded {
+		/// Turn number within the Run.
+		turn: u32,
+		/// Completion or interruption.
+		outcome: crate::TurnOutcome,
+		/// Immutable turn patch.
+		artifact: crate::ChangeArtifact,
+	},
+	/// One bounded UTF-8 segment of admitted input; concatenate in Event order.
+	#[serde(rename = "turn.input")]
+	TurnInput {
+		/// Admission whose original input this segment belongs to.
+		turn_id: Uuid,
+		/// At most 8192 UTF-8 bytes, keeping escaped JSON below the store limit.
+		text: String,
+	},
+	/// An admission or subsequent observable queue outcome.
+	#[serde(rename = "turn.changed")]
+	TurnChanged {
+		/// Stable input identity, authenticated client and authoritative order.
+		turn: crate::Turn,
+	},
 	/// An active Run began working or waiting for a specific reason.
 	#[serde(rename = "run.activity_changed")]
 	RunActivityChanged {
@@ -479,7 +511,11 @@ impl EventKind {
 	pub fn encode(&self) -> Result<EventPayload, CoreError> {
 		match self {
 			Self::Unrecognized(payload) => Ok(payload.clone()),
-			Self::ConversationCreated { .. }
+			Self::ChangeEvidenceRecorded { .. }
+			| Self::ChangeCheckpointRecorded { .. }
+			| Self::TurnInput { .. }
+			| Self::TurnChanged { .. }
+			| Self::ConversationCreated { .. }
 			| Self::TerminalStateChanged { .. }
 			| Self::RunActivityChanged { .. }
 			| Self::RunProcessesChanged { .. }

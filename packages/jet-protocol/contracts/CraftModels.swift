@@ -32,6 +32,9 @@ public enum CraftCommand {
 }
 
 public enum CraftEvent {
+    case `turn_started`(CraftEventTurnStarted)
+    case `turn_ended`(CraftEventTurnEnded)
+    case `file_changed`(CraftEventFileChanged)
     case `run_launch_failed`(CraftEventRunLaunchFailed)
     case `run_started`(CraftEventRunStarted)
     case `activity`(CraftEventActivity)
@@ -45,6 +48,15 @@ public enum CraftEvent {
 public struct CraftFeature {
     public let `name`: String
     public let `required`: Bool?
+}
+
+public struct CraftFileChange {
+    public let `activity_id`: String
+    public let `after_mode`: String
+    public let `after_object`: String
+    public let `before_mode`: String
+    public let `before_object`: String
+    public let `path`: String
 }
 
 public struct CraftHello {
@@ -127,6 +139,11 @@ public enum RunActivity: String {
     case `reconnecting` = "reconnecting"
 }
 
+public enum TurnOutcome: String {
+    case `completed` = "completed"
+    case `interrupted` = "interrupted"
+}
+
 public struct CraftActionInvoke {
     public let `action_id`: String
     public let `input`: Any
@@ -166,6 +183,18 @@ public struct CraftCommandAction {
 
 public struct CraftCommandShutdown {
 
+}
+
+public struct CraftEventTurnStarted {
+
+}
+
+public struct CraftEventTurnEnded {
+    public let `outcome`: TurnOutcome
+}
+
+public struct CraftEventFileChanged {
+    public let `change`: CraftFileChange
 }
 
 public struct CraftEventRunLaunchFailed {

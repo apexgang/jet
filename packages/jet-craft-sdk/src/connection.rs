@@ -50,6 +50,7 @@ pub struct CraftReceiver<R> {
 
 /// Native output send half; awaiting sends supplies bounded backpressure.
 pub struct CraftSender<W> {
+	minor: u32,
 	writer: FrameWriter<W>,
 }
 
@@ -121,12 +122,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> CraftConnection<R, W> {
 	/// Separate input and output so adapters can forward asynchronous native
 	/// events while a Command receive remains pending, without canceling it.
 	pub fn split(self) -> (CraftReceiver<R>, CraftSender<W>) {
+		let minor = self.ready.protocol.version.minor;
 		(
 			CraftReceiver {
 				reader: self.reader,
 				ready: self.ready,
 			},
 			CraftSender {
+				minor,
 				writer: self.writer,
 			},
 		)
@@ -190,6 +193,15 @@ impl<W: AsyncWrite + Unpin> CraftSender<W> {
 	/// # Errors
 	/// Rejects oversized or malformed output and closes on a slow/disconnected peer.
 	pub async fn send(&mut self, event: &CraftEvent) -> Result<(), CraftError> {
+		if self.minor < 3
+			&& matches!(
+				event,
+				CraftEvent::TurnStarted
+					| CraftEvent::TurnEnded { .. }
+					| CraftEvent::FileChanged { .. }
+			) {
+			return Err(CraftError::InvalidMessage);
+		}
 		send(&mut self.writer, event).await
 	}
 }
@@ -219,7 +231,7 @@ async fn handshake<R: AsyncRead + Unpin>(
 	// ASVS 2.3.1: a specification cannot make this SDK speak a new codec major.
 	let sdk = ProtocolOffer {
 		family: ProtocolFamily::Craft,
-		versions: vec![ProtocolVersion { major: 1, minor: 2 }],
+		versions: vec![ProtocolVersion { major: 1, minor: 3 }],
 		capabilities: vec!["actions".into(), "resume".into(), "runs".into()],
 	};
 	let supported = sdk

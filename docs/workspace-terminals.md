@@ -1,6 +1,6 @@
 # Workspace terminals
 
-Jet protocol 1.16 adds Workspace terminals (issue #24; ADR-0004,
+Jet protocol 1.18 adds Workspace terminals (issue #24; ADR-0004,
 ADR-0038, ADR-0082). `open_terminal` takes a registered `workspace_id`
 and initial `rows` and `columns`, each from 1 to 1000. The durable Command
 result contains a `terminal` with `terminal_id`, `workspace_id`, and

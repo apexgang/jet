@@ -37,6 +37,7 @@ impl Client {
 		{
 			QueryResponse::ProjectPreview(preview) => Ok(preview),
 			other @ (QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
@@ -50,6 +51,8 @@ impl Client {
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::ChangeArtifact(_)
+			| QueryResponse::ChangeDiff(_)
 			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)
 			| QueryResponse::ExternalConversations(_)) => Err(unexpected(&other)),
@@ -87,6 +90,8 @@ impl Client {
 		{
 			CommandResponse::ProjectRegistered(project) => Ok(project),
 			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
@@ -137,6 +142,7 @@ impl Client {
 		{
 			QueryResponse::ProjectEntry(entry) => Ok(entry),
 			other @ (QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
@@ -150,6 +156,8 @@ impl Client {
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::ChangeArtifact(_)
+			| QueryResponse::ChangeDiff(_)
 			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)
 			| QueryResponse::ExternalConversations(_)) => Err(unexpected(&other)),
@@ -168,6 +176,7 @@ impl Client {
 		match self.query(QueryRequest::Projects).await? {
 			QueryResponse::Projects(list) => Ok(list),
 			other @ (QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
@@ -181,6 +190,8 @@ impl Client {
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::ChangeArtifact(_)
+			| QueryResponse::ChangeDiff(_)
 			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)
 			| QueryResponse::ExternalConversations(_)) => Err(unexpected(&other)),

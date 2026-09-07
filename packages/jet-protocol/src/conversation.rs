@@ -140,6 +140,23 @@ pub enum CommandRequest {
 		/// Terminal identity.
 		terminal_id: Uuid,
 	},
+	/// Withdraw only the caller's own queued user input.
+	WithdrawTurn {
+		/// Conversation owning the queue.
+		conversation_id: Uuid,
+		/// Admitted input identity.
+		turn_id: Uuid,
+	},
+	/// Admit input to one Conversation. Source selects a slot, not an Actor.
+	SubmitTurn {
+		/// Conversation that owns the input.
+		conversation_id: Uuid,
+		/// Input class; user work is never replaced.
+		#[serde(default)]
+		source: crate::TurnSource,
+		/// Input of 1 to 65536 UTF-8 bytes.
+		prompt: String,
+	},
 	/// Resolve only the helper instance inspected by an interactive user.
 	ResolveExecution {
 		/// Selected execution.
@@ -329,6 +346,16 @@ pub enum CommandResponse {
 	Terminal {
 		/// Current terminal state.
 		terminal: crate::WorkspaceTerminal,
+	},
+	/// The original durable withdrawal result.
+	TurnWithdrawn {
+		/// Input with its final outcome.
+		turn: crate::Turn,
+	},
+	/// The original durable admission, unchanged by later queue progress.
+	TurnAdmitted {
+		/// Plane-assigned input identity and sequence.
+		turn: crate::Turn,
 	},
 	/// The interactive decision was durably queued.
 	ExecutionResolutionRecorded {

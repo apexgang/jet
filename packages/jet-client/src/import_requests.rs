@@ -31,6 +31,7 @@ impl Client {
 		match self.query(QueryRequest::ExternalConversations).await? {
 			QueryResponse::ExternalConversations(list) => Ok(list),
 			other @ (QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
@@ -45,6 +46,8 @@ impl Client {
 			| QueryResponse::ProjectPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::ChangeArtifact(_)
+			| QueryResponse::ChangeDiff(_)
 			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)) => Err(unexpected(&other)),
 		}
@@ -80,6 +83,8 @@ impl Client {
 		{
 			CommandResponse::ConversationImported(imported) => Ok(imported),
 			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
@@ -137,6 +142,8 @@ impl Client {
 				Ok(conversation)
 			}
 			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
 			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}

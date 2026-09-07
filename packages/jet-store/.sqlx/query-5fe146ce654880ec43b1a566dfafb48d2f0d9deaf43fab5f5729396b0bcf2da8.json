@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT conversation_id AS \"conversation_id!\" FROM turn_queues WHERE pending_count > 0 AND conversation_id > ?1 ORDER BY conversation_id LIMIT 100",
+  "describe": {
+    "columns": [
+      {
+        "name": "conversation_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "turn_queues",
+            "name": "conversation_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "5fe146ce654880ec43b1a566dfafb48d2f0d9deaf43fab5f5729396b0bcf2da8"
+}

@@ -97,6 +97,15 @@ pub(crate) async fn run(
 		eprintln!("jetd: cannot recover executions: {error}");
 	}
 	let recovery_core = Arc::clone(&core);
+	let work_core = Arc::clone(&core);
+	let run_work = tokio::spawn(async move {
+		loop {
+			work_core.wait_for_run_work().await;
+			if let Err(error) = work_core.perform_runs().await {
+				eprintln!("jetd: cannot dispatch queued Run work: {error}");
+			}
+		}
+	});
 	let recovery = tokio::spawn(async move {
 		loop {
 			tokio::time::sleep(Duration::from_secs(1)).await;
@@ -124,6 +133,7 @@ pub(crate) async fn run(
 	);
 	let exit = serve(listener, &core).await;
 	recovery.abort();
+	run_work.abort();
 	close_store(&core).await;
 	drop(lock);
 	exit

@@ -28,7 +28,7 @@ impl Contract {
 			jet_protocol::decode_control(pin.adapter_state.as_bytes())
 				.map_err(|_| unavailable())?;
 		if contract.version != 1
-			|| !(1..=2).contains(&contract.craft_protocol.minor)
+			|| !(1..=3).contains(&contract.craft_protocol.minor)
 			|| contract.craft_protocol.major != 1
 			|| contract.helper_protocol.major != 1
 			|| contract.helper_protocol.minor > 1
@@ -69,7 +69,7 @@ pub(crate) async fn load(
 	}
 	let offer = jet_protocol::ProtocolOffer {
 		family: jet_protocol::ProtocolFamily::Craft,
-		versions: vec![jet_protocol::ProtocolVersion { major: 1, minor: 2 }],
+		versions: vec![jet_protocol::ProtocolVersion { major: 1, minor: 3 }],
 		capabilities: vec!["runs".into()],
 	};
 	let negotiated = offer
@@ -101,6 +101,37 @@ pub(crate) async fn load(
 	};
 	pin.verify().await?;
 	Ok(pin)
+}
+
+/// A later Run retains its accepted artifact and protocol, with fresh boot evidence.
+pub(crate) async fn prepare_next_run(
+	mut plan: jet_core::LaunchPlan,
+) -> Result<jet_core::LaunchPlan, CoreError> {
+	let mut contract = Contract::of(&plan.craft)?;
+	if plan.native_conversation.is_some()
+		&& (!contract
+			.specification
+			.enabled_features()
+			.map_err(|_| unavailable())?
+			.iter()
+			.any(|feature| feature == "resume")
+			|| !contract
+				.specification
+				.protocol
+				.capabilities
+				.iter()
+				.any(|capability| capability == "resume"))
+	{
+		return Err(unavailable());
+	}
+	contract.boot_identity =
+		filesystem::blocking(jet_runtime::execution_boot_identity)
+			.await?
+			.map_err(|_| unavailable())?;
+	plan.craft.adapter_state =
+		serde_json::to_string(&contract).map_err(|_| unavailable())?;
+	plan.craft.verify().await?;
+	Ok(plan)
 }
 
 fn bounded_read(path: &Path, limit: u64) -> std::io::Result<Vec<u8>> {

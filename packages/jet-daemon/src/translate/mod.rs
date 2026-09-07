@@ -6,6 +6,7 @@
 mod account;
 mod audit;
 mod capability;
+mod checkpoint;
 mod import;
 mod pairing;
 mod project;
@@ -14,6 +15,7 @@ mod run;
 mod search;
 mod setting;
 mod terminal;
+mod turn;
 
 pub(crate) use capability::snapshot as capabilities;
 pub(crate) use pairing::{client as paired_client, pending as pairing_pending};
@@ -52,6 +54,21 @@ pub(crate) fn query(
 				workspace_id: jet_core::WorkspaceId(*workspace_id),
 			}
 		}
+		wire::QueryRequest::ChangeArtifact { sha256, offset } => {
+			Query::ChangeArtifact {
+				sha256: sha256.clone(),
+				offset: *offset,
+			}
+		}
+		wire::QueryRequest::ChangeDiff { run_id, scope } => Query::ChangeDiff {
+			run_id: RunId(*run_id),
+			scope: checkpoint::scope(scope),
+		},
+		wire::QueryRequest::NextChangeDiff { cursor } => {
+			Query::NextChangeDiff {
+				cursor: jet_core::PageCursor(cursor.0),
+			}
+		}
 		wire::QueryRequest::OrphanedExecutions { after } => {
 			Query::OrphanedExecutions {
 				after: after.map(RunId),
@@ -59,6 +76,9 @@ pub(crate) fn query(
 		}
 		wire::QueryRequest::RunExecution { run_id } => Query::RunExecution {
 			run_id: RunId(*run_id),
+		},
+		wire::QueryRequest::TurnQueue { conversation_id } => Query::TurnQueue {
+			conversation_id: ConversationId(*conversation_id),
 		},
 		wire::QueryRequest::Status => Query::Status,
 		wire::QueryRequest::Conversations
@@ -140,6 +160,22 @@ pub(crate) fn query_result(
 					.map(terminal::snapshot)
 					.collect(),
 			}
+		}
+		QueryResult::ChangeArtifact(chunk) => {
+			wire::QueryResponse::ChangeArtifact(wire::ChangeArtifactChunk {
+				artifact: checkpoint::artifact(chunk.artifact),
+				offset: chunk.offset,
+				bytes: chunk.bytes,
+			})
+		}
+		QueryResult::ChangeDiff(diff) => {
+			wire::QueryResponse::ChangeDiff(Box::new(checkpoint::diff(*diff)))
+		}
+		QueryResult::TurnQueue(queue) => {
+			wire::QueryResponse::TurnQueue(wire::TurnQueue {
+				cursor: queue.cursor.0,
+				turns: queue.turns.into_iter().map(turn::turn).collect(),
+			})
 		}
 		QueryResult::OrphanedExecutions(page) => {
 			wire::QueryResponse::OrphanedExecutions(run::orphans(page, minor))
@@ -235,6 +271,22 @@ pub(crate) fn command(
 			instance: *instance,
 			action: run::action_from_wire(*action),
 		}),
+		wire::CommandRequest::WithdrawTurn {
+			conversation_id,
+			turn_id,
+		} => Command::WithdrawTurn {
+			conversation_id: ConversationId(*conversation_id),
+			turn_id: *turn_id,
+		},
+		wire::CommandRequest::SubmitTurn {
+			conversation_id,
+			source,
+			prompt,
+		} => Command::SubmitTurn {
+			conversation_id: ConversationId(*conversation_id),
+			source: turn::source_from_wire(*source),
+			prompt: prompt.clone(),
+		},
 		wire::CommandRequest::StartRun {
 			conversation_id,
 			craft,
@@ -381,6 +433,16 @@ pub(crate) fn command_outcome(
 			wire::CommandResponse::ExecutionResolutionRecorded {
 				execution_id: request.execution_id.0,
 				action: run::action(request.action),
+			}
+		}
+		CommandOutcome::TurnWithdrawn(value) => {
+			wire::CommandResponse::TurnWithdrawn {
+				turn: turn::turn(value),
+			}
+		}
+		CommandOutcome::TurnAdmitted(value) => {
+			wire::CommandResponse::TurnAdmitted {
+				turn: turn::turn(value),
 			}
 		}
 		CommandOutcome::ConversationCreated(created) => {
@@ -656,8 +718,11 @@ fn event(event: &Event) -> Result<wire::Event, CoreError> {
 	let EventPayload {
 		kind,
 		payload_version,
-		payload,
+		mut payload,
 	} = event.kind.encode()?;
+	if let jet_core::EventKind::TurnChanged { turn: value } = &event.kind {
+		payload = serde_json::json!({"turn":turn::turn(value.clone())});
+	}
 	Ok(wire::Event {
 		sequence: event.sequence.0,
 		event_id: event.event_id.0,

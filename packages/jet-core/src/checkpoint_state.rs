@@ -1,0 +1,202 @@
+//! Checkpoints commit with the source receipt that completed their turn.
+use crate::{
+	ChangeCheckpoint, ChangeSnapshot, ConversationId, Core, CoreError, PlaneId,
+	RunId, TurnOutcome, WorkspaceId,
+};
+use crate::{
+	change_artifact, checkpoint_capture,
+	run_state::{self, Observation, State},
+};
+use jet_store::WriteTransaction;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Tracking {
+	#[serde(default)]
+	pub(crate) evidence: Vec<crate::ChangeEvidence>,
+	#[serde(default)]
+	pub(crate) evidence_incomplete: bool,
+	pub(crate) baseline: ChangeSnapshot,
+	pub(crate) active: Option<ChangeSnapshot>,
+	pub(crate) completed: u32,
+}
+impl Core {
+	pub(crate) async fn begin_run_changes(
+		&self,
+		run_id: RunId,
+		plan: &crate::LaunchPlan,
+	) -> Result<(), CoreError> {
+		let before = checkpoint_capture::snapshot(
+			self,
+			&plan.root,
+			run_id,
+			checkpoint_capture::Retention::Durable,
+		)
+		.await?;
+		self.store
+			.write(async |tx| {
+				let execution =
+					tx.run_execution(run_id.0).await?.ok_or_else(missing)?;
+				let mut state: State = run_state::decode(&execution.state)?;
+				if state.changes.is_some() {
+					return Err(change_artifact::failed(
+						"Run capture already exists",
+					));
+				}
+				state.changes = Some(Tracking {
+					evidence: vec![],
+					evidence_incomplete: false,
+					baseline: before.clone(),
+					active: Some(before),
+					completed: 0,
+				});
+				save(tx, run_id, &state).await
+			})
+			.await
+	}
+}
+pub(crate) async fn observe(
+	core: &Core,
+	tx: &mut WriteTransaction,
+	run_id: RunId,
+	observation: &Observation,
+) -> Result<(), CoreError> {
+	if let Observation::FileChanged(evidence) = observation {
+		if evidence.origin != (crate::ChangeOrigin::Harness { run_id }) {
+			return Err(change_artifact::failed(
+				"a Craft cannot claim another origin",
+			));
+		}
+		return crate::change_evidence::record(
+			core,
+			tx,
+			run_id,
+			evidence.clone(),
+		)
+		.await;
+	}
+	if matches!(observation, Observation::TurnStarted) {
+		let execution =
+			tx.run_execution(run_id.0).await?.ok_or_else(missing)?;
+		let mut state: State = run_state::decode(&execution.state)?;
+		let tracking = state.changes.as_mut().ok_or_else(missing)?;
+		if tracking.active.is_some() {
+			// The queue captures before delivery; a Craft may report that same
+			// start afterward. Keep the earlier durable boundary.
+			return Ok(());
+		}
+		let plan: crate::LaunchPlan = run_state::decode(&execution.plan)?;
+		tracking.active = Some(
+			checkpoint_capture::snapshot(
+				core,
+				&plan.root,
+				run_id,
+				checkpoint_capture::Retention::Durable,
+			)
+			.await?,
+		);
+		return save(tx, run_id, &state).await;
+	}
+	let outcome = match observation {
+		Observation::Completed(_)
+		| Observation::NativeConversation(_)
+		| Observation::TurnCompleted { .. } => TurnOutcome::Completed,
+		Observation::TurnEnded(outcome) => *outcome,
+		Observation::Ended(_) | Observation::Lost => TurnOutcome::Interrupted,
+		_ => return Ok(()),
+	};
+	let execution = tx.run_execution(run_id.0).await?.ok_or_else(missing)?;
+	let mut state: State = run_state::decode(&execution.state)?;
+	let Some(tracking) = &mut state.changes else {
+		return Ok(());
+	};
+	let Some(before) = tracking.active.take() else {
+		return Ok(());
+	};
+	let plan: crate::LaunchPlan = run_state::decode(&execution.plan)?;
+	let after = checkpoint_capture::snapshot(
+		core,
+		&plan.root,
+		run_id,
+		checkpoint_capture::Retention::Durable,
+	)
+	.await?;
+	let mut files =
+		checkpoint_capture::files(&plan.root, &before, &after).await?;
+	if !tracking.evidence_incomplete {
+		crate::change_evidence::attribute(&mut files, &tracking.evidence);
+	}
+	let artifact = checkpoint_capture::patch(
+		core,
+		&plan.root,
+		run_id,
+		&before.tree,
+		&after.tree,
+	)
+	.await?;
+	let run = tx.run(run_id.0).await?.ok_or_else(missing)?;
+	tracking.completed += 1;
+	let checkpoint = ChangeCheckpoint {
+		evidence: std::mem::take(&mut tracking.evidence),
+		evidence_incomplete: std::mem::take(&mut tracking.evidence_incomplete),
+		plane_id: PlaneId(tx.plane().await?.plane_id),
+		workspace_id: tx
+			.workspace_of(run.conversation_id)
+			.await?
+			.map(|w| WorkspaceId(w.workspace_id)),
+		conversation_id: ConversationId(run.conversation_id),
+		run_id,
+		turn: tracking.completed,
+		outcome,
+		before,
+		after,
+		files,
+		artifact,
+	};
+	// ASVS 2.3.3: the immutable record, semantic Event, replay prefix, and
+	// active-turn projection are one transaction; the Artifact was synced first.
+	tx.insert_change_checkpoint(
+		run_id.0,
+		checkpoint.turn,
+		&serde_json::to_string(&checkpoint).map_err(change_artifact::failed)?,
+	)
+	.await?;
+	tx.append_event(
+		crate::EventKind::ChangeCheckpointRecorded {
+			turn: checkpoint.turn,
+			outcome,
+			artifact: checkpoint.artifact.clone(),
+		}
+		.to_record_as(
+			crate::EventActor::RunSupervisor {
+				run_id,
+				authorized_by: plan.client_id,
+			},
+			crate::event::EventSubject::Run {
+				conversation_id: checkpoint.conversation_id,
+				run_id,
+			},
+			core.now_unix_ms(),
+		)?,
+	)
+	.await?;
+	save(tx, run_id, &state).await
+}
+async fn save(
+	tx: &mut WriteTransaction,
+	run_id: RunId,
+	state: &State,
+) -> Result<(), CoreError> {
+	tx.update_run_execution(
+		run_id.0,
+		&serde_json::to_string(state).map_err(change_artifact::failed)?,
+	)
+	.await?;
+	Ok(())
+}
+pub(crate) fn missing() -> CoreError {
+	CoreError::not_found(
+		"checkpoint.not_found",
+		"the requested Change checkpoint does not exist",
+	)
+}
