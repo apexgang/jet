@@ -19,3 +19,9 @@ pub use home::JetHome;
 pub use ipc::{IpcError, LocalListener};
 pub use lock::{DaemonMetadata, InstallationChannel, LifetimeLock, LockError};
 pub use no_visa::NoVisaOperation;
+
+mod pty;
+pub use pty::{TerminalPipes, TerminalPty};
+
+mod terminal_spool;
+pub use terminal_spool::{TerminalReplay, TerminalSpool};
