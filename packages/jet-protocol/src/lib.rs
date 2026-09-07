@@ -42,7 +42,9 @@ mod setting;
 mod stream;
 mod stream_control;
 mod stream_error;
+mod turn;
 mod workspace;
+pub use turn::{Turn, TurnQueue, TurnSource, TurnState};
 
 pub use helper::{
 	HelperCommand, HelperConfig, HelperDescriptor, HelperEvent, HelperHello,
