@@ -42,7 +42,9 @@ mod setting;
 mod stream;
 mod stream_control;
 mod stream_error;
+mod turn;
 mod workspace;
+pub use turn::{Turn, TurnQueue, TurnSource, TurnState};
 
 pub use helper::{
 	HelperCommand, HelperConfig, HelperDescriptor, HelperEvent, HelperHello,
@@ -99,8 +101,8 @@ pub use handshake::{
 	MANAGED_RUNS_MINOR, MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE,
 	PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR,
 	SEARCH_MINOR, SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
-	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, VersionRange,
-	WORKSPACE_PROMOTION_MINOR, WORKSPACES_MINOR,
+	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, TURN_QUEUE_MINOR,
+	VersionRange, WORKSPACE_PROMOTION_MINOR, WORKSPACES_MINOR,
 };
 pub use import::{
 	ConversationOrigin, ExternalConversation, ExternalConversationList,

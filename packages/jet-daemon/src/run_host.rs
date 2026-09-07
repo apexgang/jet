@@ -38,15 +38,36 @@ struct CraftProcess {
 }
 
 pub(crate) struct RunConnection {
-	pub(crate) reader: FrameReader<OwnedReadHalf>,
-	pub(crate) writer: FrameWriter<OwnedWriteHalf>,
+	pub(crate) reader: Mutex<FrameReader<OwnedReadHalf>>,
+	pub(crate) writer: Mutex<FrameWriter<OwnedWriteHalf>>,
 	pub(crate) helper_pid: u32,
 	pub(crate) run_id: RunId,
 }
+#[expect(
+	clippy::await_holding_invalid_type,
+	reason = "independent read and write locks preserve partial frames while serializing complete outbound Craft messages"
+)]
 impl jet_core::RunConnection for RunConnection {
-	fn receive(&mut self) -> RunFuture<'_, Result<RunObservation, CoreError>> {
+	fn submit_turn(
+		&self,
+		turn_id: Uuid,
+		prompt: String,
+	) -> RunFuture<'_, Result<(), CoreError>> {
 		Box::pin(async move {
-			let event: CraftEvent = receive(&mut self.reader).await?;
+			send(
+				&mut *self.writer.lock().await,
+				&CraftCommand::Turn {
+					id: turn_id.to_string(),
+					text: prompt,
+				},
+			)
+			.await
+		})
+	}
+	fn receive(&self) -> RunFuture<'_, Result<RunObservation, CoreError>> {
+		Box::pin(async move {
+			let event: CraftEvent =
+				receive(&mut *self.reader.lock().await).await?;
 			Ok(match event {
 				CraftEvent::RunStarted {
 					helper_pid,
@@ -81,10 +102,14 @@ impl jet_core::RunConnection for RunConnection {
 					id,
 					native_conversation,
 				} => {
-					if id != self.run_id.0.to_string() {
-						return Err(failed("wrong completion identity"));
+					if id == self.run_id.0.to_string() {
+						RunObservation::NativeConversation(native_conversation)
+					} else {
+						RunObservation::TurnCompleted {
+							turn_id: id.parse().map_err(failed)?,
+							native_conversation,
+						}
 					}
-					RunObservation::NativeConversation(native_conversation)
 				}
 				CraftEvent::RunEnded { exit_code } => {
 					RunObservation::Ended(exit_code)
@@ -100,20 +125,20 @@ impl jet_core::RunConnection for RunConnection {
 		})
 	}
 	fn acknowledge(
-		&mut self,
+		&self,
 		source_offset: u64,
 	) -> RunFuture<'_, Result<(), CoreError>> {
 		Box::pin(async move {
 			send(
-				&mut self.writer,
+				&mut *self.writer.lock().await,
 				&CraftCommand::Acknowledge { source_offset },
 			)
 			.await
 		})
 	}
-	fn finish(&mut self) -> RunFuture<'_, Result<(), CoreError>> {
+	fn finish(&self) -> RunFuture<'_, Result<(), CoreError>> {
 		Box::pin(async move {
-			send(&mut self.writer, &CraftCommand::Shutdown).await
+			send(&mut *self.writer.lock().await, &CraftCommand::Shutdown).await
 		})
 	}
 }
@@ -124,6 +149,12 @@ impl RunHost for CraftProcesses {
 		id: String,
 	) -> RunFuture<'_, Result<PinnedCraft, CoreError>> {
 		Box::pin(async move { run_craft::load(&home, &id).await })
+	}
+	fn prepare_next_run(
+		&self,
+		plan: LaunchPlan,
+	) -> RunFuture<'_, Result<LaunchPlan, CoreError>> {
+		Box::pin(run_craft::prepare_next_run(plan))
 	}
 	fn start(
 		&self,
@@ -136,7 +167,7 @@ impl RunHost for CraftProcesses {
 			let (mut connection, command) = start(self, home, run_id, &plan)
 				.await
 				.map_err(|_| RunStartError::NotStarted)?;
-			send(&mut connection.writer, &command)
+			send(connection.writer.get_mut(), &command)
 				.await
 				.map_err(|_| RunStartError::Unknown)?;
 			Ok(Box::new(connection) as Box<dyn jet_core::RunConnection>)
@@ -227,14 +258,14 @@ pub(crate) async fn start(
 	let (socket, helper_pid) = helper(&runtime, run_id, plan).await?;
 	let connection = RunConnection {
 		run_id,
-		reader,
-		writer,
+		reader: Mutex::new(reader),
+		writer: Mutex::new(writer),
 		helper_pid,
 	};
 	Ok((
 		connection,
 		CraftCommand::Start {
-			id: run_id.0.to_string(),
+			id: plan.turn_id.unwrap_or(run_id.0).to_string(),
 			text: plan.prompt.clone(),
 			helper_socket: socket.to_string_lossy().into_owned(),
 		},
@@ -257,7 +288,11 @@ pub(crate) async fn craft_connection(
 	let offer = ProtocolOffer {
 		family: ProtocolFamily::Craft,
 		versions: vec![contract.craft_protocol],
-		capabilities: vec!["runs".into()],
+		capabilities: if plan.native_conversation.is_some() {
+			vec!["runs".into(), "resume".into()]
+		} else {
+			vec!["runs".into()]
+		},
 	};
 	let hello = CraftHello {
 		protocol: offer.clone(),
@@ -267,14 +302,27 @@ pub(crate) async fn craft_connection(
 			capabilities: vec![],
 		},
 		execution_id: run_id.0,
-		resume: None,
+		resume: plan.native_conversation.as_ref().map(|identity| {
+			jet_protocol::CraftResume {
+				version: contract.craft_protocol,
+				native_conversation: identity.clone(),
+			}
+		}),
 	};
 	send(&mut writer, &hello).await?;
 	let ready: CraftReady = timeout(TIMEOUT, receive(&mut reader))
 		.await
 		.map_err(failed)??;
 	let expected = offer
-		.negotiate(&contract.specification.protocol, Negotiation::NewExecution)
+		.negotiate(
+			&contract.specification.protocol,
+			hello
+				.resume
+				.as_ref()
+				.map_or(Negotiation::NewExecution, |resume| {
+					Negotiation::Resume(resume.version)
+				}),
+		)
 		.map_err(failed)?;
 	if ready.specification != contract.specification
 		|| ready.protocol != expected

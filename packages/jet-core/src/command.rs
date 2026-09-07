@@ -108,6 +108,22 @@ impl CommandEnvelope {
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
+	/// Withdraw only the caller's own queued user input.
+	WithdrawTurn {
+		/// Conversation owning the queue.
+		conversation_id: ConversationId,
+		/// Admitted input identity.
+		turn_id: Uuid,
+	},
+	/// Admit input to the authoritative Conversation queue.
+	SubmitTurn {
+		/// Conversation that owns the input.
+		conversation_id: ConversationId,
+		/// Independently coalesced input class; not Actor authority.
+		source: crate::TurnSource,
+		/// Bounded Harness input.
+		prompt: String,
+	},
 	/// Resolve only the Orphaned execution instance inspected by the user.
 	ResolveExecution(crate::ExecutionResolution),
 	/// Start a managed Run with one installed Craft and its initial input.
@@ -281,6 +297,7 @@ impl Command {
 	/// (ADR-0086).
 	pub(crate) fn required_capabilities(&self) -> &'static [Capability] {
 		match self {
+			Self::SubmitTurn { .. } | Self::WithdrawTurn { .. } => &[],
 			Self::StartRun { .. } => GIT,
 			Self::SetSetting {
 				key: SettingKey::GitAutoCommit,
@@ -337,6 +354,10 @@ impl Command {
 /// The durable result of a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
+	/// Durable withdrawal of queued user work.
+	TurnWithdrawn(crate::Turn),
+	/// Durable input identity and its original queue admission.
+	TurnAdmitted(crate::Turn),
 	/// The interactive resolution was durably queued.
 	ExecutionResolutionRecorded(crate::ExecutionResolution),
 	/// The Conversation as created.
@@ -543,6 +564,8 @@ impl Core {
 		// The Command is durable and acknowledged by its receipt; the
 		// index follows in its own transaction, and a start or a later
 		// Command finishes what an interruption here leaves (ADR-0036).
+		self.turn_wake.send_replace(());
+		self.run_work.notify_one();
 		self.index_search().await?;
 		Ok(outcome)
 	}
@@ -565,7 +588,9 @@ fn redacted_for_receipt(
 			})
 		}
 		Ok(
-			outcome @ (CommandOutcome::ConversationCreated(_)
+			outcome @ (CommandOutcome::TurnWithdrawn(_)
+			| CommandOutcome::TurnAdmitted(_)
+			| CommandOutcome::ConversationCreated(_)
 			| CommandOutcome::ExecutionResolutionRecorded(_)
 			| CommandOutcome::RunCreated(_)
 			| CommandOutcome::RunTransitioned(_)
@@ -612,6 +637,35 @@ async fn execute_new(
 		workspace_home,
 	} = context;
 	match command {
+		Command::WithdrawTurn {
+			conversation_id,
+			turn_id,
+		} => {
+			crate::turn_queue::withdraw(
+				tx,
+				actor,
+				conversation_id,
+				turn_id,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::SubmitTurn {
+			conversation_id,
+			source,
+			prompt,
+		} => {
+			crate::turn_queue::admit(
+				tx,
+				actor,
+				command_id,
+				conversation_id,
+				source,
+				prompt,
+				now_unix_ms,
+			)
+			.await
+		}
 		Command::ResolveExecution(request) => {
 			crate::orphan::record(tx, actor, command_id, request, now_unix_ms)
 				.await

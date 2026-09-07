@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Durable domain plan: authority, working roots, and the exact accepted artifact.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaunchPlan {
 	/// Domain plan format version.
 	pub version: u32,
@@ -26,6 +26,12 @@ pub struct LaunchPlan {
 	pub craft: PinnedCraft,
 	/// Authorized initial input.
 	pub prompt: String,
+	/// Stable Turn correlation; absent on executions accepted before the queue.
+	#[serde(default)]
+	pub turn_id: Option<Uuid>,
+	/// Native identity explicitly continued by this new execution.
+	#[serde(default)]
+	pub native_conversation: Option<String>,
 	/// Client that authorized admission; separate from subsequent Event origins.
 	pub client_id: crate::ClientId,
 }
@@ -104,6 +110,8 @@ pub(crate) async fn prepare(
 			.pin(core.run_home(), craft.into())
 			.await?,
 		prompt: prompt.into(),
+		turn_id: None,
+		native_conversation: None,
 		client_id: actor.client_id(),
 	};
 	plan.revalidate().await?;
@@ -153,14 +161,54 @@ pub(crate) async fn record(
 	actor: &Actor,
 	command_id: CommandId,
 	conversation_id: ConversationId,
-	plan: LaunchPlan,
+	mut plan: LaunchPlan,
 	now: i64,
 ) -> Result<CommandOutcome, CoreError> {
+	let (mut queue, mut changes) = crate::turn_queue::prepare(
+		tx,
+		actor,
+		command_id,
+		conversation_id,
+		crate::TurnSource::User,
+		plan.prompt.clone(),
+	)
+	.await?;
+	if !queue.ready() {
+		return Err(CoreError::conflict(
+			"turn.unresolved",
+			"an earlier turn still owns execution",
+		));
+	}
 	let CommandOutcome::RunCreated(run) =
 		crate::command::create_run(tx, actor, conversation_id, now).await?
 	else {
 		unreachable!("Run creation")
 	};
+	let entry = queue.claim(run.run_id).expect("initial input admitted");
+	plan.prompt = entry.prompt.clone();
+	plan.turn_id = Some(entry.turn.turn_id);
+	changes.push(entry);
+	crate::turn_queue::commit(
+		tx,
+		actor,
+		conversation_id,
+		&queue,
+		&changes,
+		now,
+	)
+	.await?;
+	install(tx, actor, command_id, run, plan, now).await
+}
+
+pub(crate) async fn install(
+	tx: &mut WriteTransaction,
+	actor: &Actor,
+	command_id: CommandId,
+	run: crate::Run,
+	plan: LaunchPlan,
+	now: i64,
+) -> Result<CommandOutcome, CoreError> {
+	let conversation_id = run.conversation_id;
 	let state = serde_json::json!({"activity":null,"processes":[],"native_conversation":null,"exit_code":null});
 	tx.insert_run_execution(
 		run.run_id.0,

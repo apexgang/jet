@@ -381,6 +381,10 @@ struct MinorRequirement {
 
 fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 	match query {
+		QueryRequest::TurnQueue { .. } => Some(MinorRequirement {
+			minor: jet_protocol::TURN_QUEUE_MINOR,
+			feature: "Turn queue",
+		}),
 		QueryRequest::OrphanedExecutions { .. } => Some(MinorRequirement {
 			minor: jet_protocol::EXECUTION_RECOVERY_MINOR,
 			feature: "execution recovery",
@@ -449,6 +453,11 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		CommandRequest::ResolveExecution { .. } => Some(MinorRequirement {
 			minor: jet_protocol::EXECUTION_RECOVERY_MINOR,
 			feature: "execution recovery",
+		}),
+		CommandRequest::SubmitTurn { .. }
+		| CommandRequest::WithdrawTurn { .. } => Some(MinorRequirement {
+			minor: jet_protocol::TURN_QUEUE_MINOR,
+			feature: "Turn queue",
 		}),
 		CommandRequest::StartRun { .. } => Some(MinorRequirement {
 			minor: jet_protocol::MANAGED_RUNS_MINOR,

@@ -40,6 +40,7 @@ mod promotion_command;
 mod promotion_effect;
 mod promotion_merge;
 mod query;
+mod queued_run;
 mod relative_path;
 mod remote;
 mod remote_pairing;
@@ -51,10 +52,14 @@ mod run_effect;
 mod run_host;
 mod run_recovery;
 mod run_state;
+mod turn;
+mod turn_dispatch;
+mod turn_queue;
 pub use orphan::{
 	ExecutionAction, ExecutionMetadata, ExecutionResolution, OrphanedExecution,
 	OrphanedExecutions,
 };
+pub use turn::{Turn, TurnQueue, TurnSource, TurnState};
 mod search;
 mod search_index;
 mod security;
@@ -233,6 +238,8 @@ impl Actor {
 /// One running core bound to one Plane store.
 #[derive(Debug)]
 pub struct Core {
+	run_work: tokio::sync::Notify,
+	turn_wake: tokio::sync::watch::Sender<()>,
 	run_host: Option<Arc<dyn run_host::RunHost>>,
 	run_recovery: run_recovery::Recovery,
 	// Serialize authority publication with Commands and fence concurrent reads.
@@ -317,6 +324,8 @@ impl Core {
 			started_at,
 		);
 		let core = Self {
+			run_work: tokio::sync::Notify::new(),
+			turn_wake: tokio::sync::watch::channel(()).0,
 			run_host: None,
 			run_recovery: run_recovery::Recovery::default(),
 			remote_access: tokio::sync::Semaphore::new(

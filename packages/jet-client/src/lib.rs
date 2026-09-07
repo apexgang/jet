@@ -13,6 +13,7 @@ mod promotion_requests;
 mod requests;
 mod search_requests;
 mod ssh;
+mod turn_requests;
 
 pub use connection::{Client, ClientError};
 pub use handshake::ClientIdentity;

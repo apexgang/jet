@@ -261,6 +261,12 @@ impl crate::RunHost for AdmissionHost {
 			})
 		})
 	}
+	fn prepare_next_run(
+		&self,
+		plan: crate::LaunchPlan,
+	) -> crate::RunFuture<'_, Result<crate::LaunchPlan, crate::CoreError>> {
+		Box::pin(async move { Ok(plan) })
+	}
 	fn start(
 		&self,
 		_home: std::path::PathBuf,
