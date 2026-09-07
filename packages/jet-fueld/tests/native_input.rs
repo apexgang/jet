@@ -19,6 +19,10 @@ type Writer = FrameWriter<OwnedWriteHalf>;
 /// records that it saw the end of it. A sealed launch ends it immediately.
 const ECHO_HARNESS: &str = "while IFS= read -r line; do printf 'echo:%s\\n' \"$line\"; done; printf 'ended' > input-ended";
 
+/// Reads one line and then outlives its own input, so nothing else is
+/// pending when a refusal is what is being observed.
+const LINGERING_HARNESS: &str = "IFS= read -r line; printf 'echo:%s\\n' \"$line\"; while true; do sleep 1; done";
+
 #[tokio::test]
 async fn a_streaming_harness_takes_input_after_launch_and_ends_when_it_closes()
 {
@@ -26,7 +30,7 @@ async fn a_streaming_harness_takes_input_after_launch_and_ends_when_it_closes()
 		let (root, id, socket, mut helper) = start_helper().await;
 		let (mut reader, mut writer, ready) = connect(&socket, id, 3).await;
 		assert_eq!(ready.version, ProtocolVersion { major: 1, minor: 3 });
-		launch(&mut writer, NativeInputMode::Streaming).await;
+		launch(&mut writer, ECHO_HARNESS, NativeInputMode::Streaming).await;
 		assert!(matches!(
 			settle(&mut reader, &mut writer).await,
 			HelperEvent::Started { .. }
@@ -90,15 +94,20 @@ async fn a_streaming_harness_takes_input_after_launch_and_ends_when_it_closes()
 #[tokio::test]
 async fn input_is_refused_below_helper_1_3_and_by_a_sealed_launch() {
 	tokio::time::timeout(Duration::from_secs(120), async {
+		// Each refusal is asked for only once the Harness has gone quiet, so
+		// what is tested is the refusal and never a race with a record the
+		// helper is right to deliver first.
+
 		// A Helper 1.2 peer cannot write input, whatever the launch declared.
 		let (_, id, socket, mut helper) = start_helper().await;
 		let (mut reader, mut writer, ready) = connect(&socket, id, 2).await;
 		assert_eq!(ready.version, ProtocolVersion { major: 1, minor: 2 });
-		launch(&mut writer, NativeInputMode::Streaming).await;
+		launch(&mut writer, ECHO_HARNESS, NativeInputMode::Streaming).await;
 		assert!(matches!(
 			settle(&mut reader, &mut writer).await,
 			HelperEvent::Started { .. }
 		));
+		assert_eq!(line(&mut reader, &mut writer).await, "echo:first");
 		send(
 			&mut writer,
 			&HelperCommand::Input {
@@ -112,11 +121,11 @@ async fn input_is_refused_below_helper_1_3_and_by_a_sealed_launch() {
 		);
 		helper.start_kill().unwrap();
 
-		// A sealed launch opened no input to write to, and its Harness has
-		// already read the end of the input it did get.
-		let (root, id, socket, mut helper) = start_helper().await;
+		// A sealed launch opened no input to write to. This Harness outlives
+		// its own input, so the refusal is the only thing left to happen.
+		let (_, id, socket, mut helper) = start_helper().await;
 		let (mut reader, mut writer, _) = connect(&socket, id, 3).await;
-		launch(&mut writer, NativeInputMode::Sealed).await;
+		launch(&mut writer, LINGERING_HARNESS, NativeInputMode::Sealed).await;
 		assert!(matches!(
 			settle(&mut reader, &mut writer).await,
 			HelperEvent::Started { .. }
@@ -133,26 +142,23 @@ async fn input_is_refused_below_helper_1_3_and_by_a_sealed_launch() {
 			reader.read().await.is_err(),
 			"a sealed launch has no open input"
 		);
+		helper.start_kill().unwrap();
 
-		// The refusal ended one connection, never the execution: the sealed
-		// Harness still ends on its own end of input.
-		drop((reader, writer));
-		let (mut reader, mut writer, ready) = connect(&socket, id, 3).await;
-		send(
-			&mut writer,
-			&HelperCommand::Recover {
-				source_offset: ready.descriptor.replay.acknowledged,
-			},
-		)
-		.await;
+		// The seal itself is what a Harness that ends on end of input sees.
+		let (root, id, socket, mut helper) = start_helper().await;
+		let (mut reader, mut writer, _) = connect(&socket, id, 3).await;
+		launch(&mut writer, ECHO_HARNESS, NativeInputMode::Sealed).await;
 		let exit_code = loop {
 			match settle(&mut reader, &mut writer).await {
 				HelperEvent::Exited { exit_code } => break exit_code,
-				HelperEvent::Output { .. } => continue,
+				HelperEvent::Started { .. } | HelperEvent::Output { .. } => {
+					continue;
+				}
 				event => panic!("unexpected native observation: {event:?}"),
 			}
 		};
 		assert_eq!(exit_code, Some(0));
+		drop((reader, writer));
 		assert!(helper.wait().await.unwrap().success());
 		assert_eq!(
 			std::fs::read_to_string(root.join("input-ended")).unwrap(),
@@ -163,13 +169,17 @@ async fn input_is_refused_below_helper_1_3_and_by_a_sealed_launch() {
 	.unwrap();
 }
 
-/// Start the echo Harness with the declared input mode.
-async fn launch(writer: &mut Writer, input_mode: NativeInputMode) {
+/// Start a Harness with the declared input mode.
+async fn launch(
+	writer: &mut Writer,
+	script: &str,
+	input_mode: NativeInputMode,
+) {
 	send(
 		writer,
 		&HelperCommand::Launch {
 			program: "/bin/sh".into(),
-			arguments: vec!["-c".into(), ECHO_HARNESS.into()],
+			arguments: vec!["-c".into(), script.into()],
 			input: "first\n".into(),
 			input_mode,
 		},
