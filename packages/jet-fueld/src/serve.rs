@@ -62,6 +62,7 @@ pub(crate) async fn serve(path: &Path) -> std::io::Result<()> {
 		stopped: tokio::sync::watch::channel(false).0,
 		started: tokio::sync::watch::channel(false).0,
 		signal: tokio::sync::watch::channel(None).0,
+		input: tokio::sync::Mutex::new(None),
 	});
 	let mut done = state.done.subscribe();
 	let mut tasks = tokio::task::JoinSet::new();
@@ -108,6 +109,10 @@ struct Execution {
 	/// The newest escalation step, sequenced so an identical repeat is
 	/// still delivered.
 	signal: tokio::sync::watch::Sender<Option<(u64, NativeSignal)>>,
+	/// Standard input of a Harness launched as `Streaming`, held here so it
+	/// outlives the connection that launched it and a reconnecting Craft
+	/// keeps writing to the same Harness. Taking it closes the pipe.
+	input: tokio::sync::Mutex<Option<native::NativeInput>>,
 }
 
 #[expect(
@@ -126,7 +131,7 @@ async fn connection(
 		.map_err(std::io::Error::other)??;
 	let offer = ProtocolOffer {
 		family: ProtocolFamily::Helper,
-		versions: vec![ProtocolVersion { major: 1, minor: 2 }],
+		versions: vec![ProtocolVersion { major: 1, minor: 3 }],
 		capabilities: vec![],
 	};
 	let negotiated = offer
@@ -219,6 +224,7 @@ async fn connection(
 			program,
 			arguments,
 			input,
+			input_mode,
 		} => {
 			let request =
 				encode_control(&command).map_err(std::io::Error::other)?;
@@ -235,6 +241,7 @@ async fn connection(
 					program.clone(),
 					arguments.clone(),
 					input.clone(),
+					*input_mode,
 					std::sync::Arc::clone(&state.spool),
 					native::Control {
 						stop: state.stop.subscribe(),
@@ -244,7 +251,8 @@ async fn connection(
 				)
 				.await
 				{
-					Ok(()) => {
+					Ok(native_input) => {
+						*state.input.lock().await = native_input;
 						state.started.send_replace(true);
 					}
 					Err(native::LaunchError::NotStarted) => {
@@ -263,28 +271,103 @@ async fn connection(
 		| HelperCommand::Terminate { .. }
 		| HelperCommand::Signal { .. }
 		| HelperCommand::Recover { .. }
+		| HelperCommand::Input { .. }
+		| HelperCommand::CloseInput
 		| HelperCommand::Acknowledge { .. } => {
 			return Err(std::io::Error::other("invalid helper command"));
 		}
 	}
+	// One bounded reader task keeps a partially decoded frame alive while
+	// source records and native input share this connection. Reading inside
+	// the select! below would instead abandon a frame mid-decode.
+	let (commands, mut requests) = tokio::sync::mpsc::channel(8);
+	let reader_task = tokio::spawn(async move {
+		while let Ok(command) = receive::<HelperCommand>(&mut reader).await {
+			if commands.send(command).await.is_err() {
+				break;
+			}
+		}
+	});
 	let replay = async {
-		while let Some(record) = state.spool.next().await? {
+		loop {
+			// `next` is cancel safe: an unacknowledged record stays queued,
+			// so losing this race to native input re-reads the same record.
+			let record = tokio::select! {
+				record = state.spool.next() => record?,
+				request = requests.recv() => {
+					deliver(state, negotiated.version.minor, request).await?;
+					continue;
+				}
+			};
+			let Some(record) = record else { break };
 			send(&mut writer, &record).await?;
-			let HelperCommand::Acknowledge { source_offset } =
-				receive(&mut reader).await?
-			else {
-				return Err(std::io::Error::other(
-					"expected source acknowledgement",
-				));
+			// Native input may arrive before the acknowledgement it precedes.
+			let source_offset = loop {
+				let request = requests.recv().await;
+				if let Some(HelperCommand::Acknowledge { source_offset }) =
+					request
+				{
+					break source_offset;
+				}
+				deliver(state, negotiated.version.minor, request).await?;
 			};
 			state.spool.acknowledge(source_offset).await?;
 		}
 		state.done.send_replace(true);
 		Ok(())
 	};
-	tokio::select! {
+	let result = tokio::select! {
 		result = replay => result,
 		_ = generation.changed() => Err(std::io::Error::other("replaced execution connection")),
+	};
+	reader_task.abort();
+	result
+}
+
+/// Carry one native input request to the Harness this connection launched.
+/// Nothing else belongs on the record stream, and the helper never inspects
+/// or frames the bytes it writes.
+async fn deliver(
+	state: &Execution,
+	minor: u32,
+	request: Option<HelperCommand>,
+) -> std::io::Result<()> {
+	let Some(request) = request else {
+		return Err(std::io::Error::other("helper connection closed"));
+	};
+	match request {
+		HelperCommand::Input { text } if minor >= 3 => {
+			// Release the guard before waiting on the Harness: a Harness that
+			// has not drained its input must not also block closing it.
+			let open = state.input.lock().await.clone();
+			let Some(open) = open else {
+				return Err(std::io::Error::other(
+					"native input is not streaming",
+				));
+			};
+			open.write(text).await
+		}
+		// Taking the writer closes the pipe, and the Harness reads end of
+		// input. No signal is delivered and no retained source is released.
+		HelperCommand::CloseInput if minor >= 3 => {
+			if state.input.lock().await.take().is_none() {
+				return Err(std::io::Error::other(
+					"native input is not streaming",
+				));
+			}
+			Ok(())
+		}
+		HelperCommand::Input { .. } | HelperCommand::CloseInput => {
+			Err(std::io::Error::other("native input requires Helper 1.3"))
+		}
+		HelperCommand::Inspect
+		| HelperCommand::Terminate { .. }
+		| HelperCommand::Signal { .. }
+		| HelperCommand::Recover { .. }
+		| HelperCommand::Launch { .. }
+		| HelperCommand::Acknowledge { .. } => {
+			Err(std::io::Error::other("expected source acknowledgement"))
+		}
 	}
 }
 

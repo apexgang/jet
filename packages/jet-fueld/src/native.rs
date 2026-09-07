@@ -1,6 +1,8 @@
 //! The helper alone owns the Harness, its pipes, and its terminal OS status.
 use crate::spool::Spool;
-use jet_protocol::{HelperConfig, HelperEvent, NativeSignal, NativeStream};
+use jet_protocol::{
+	HelperConfig, HelperEvent, NativeInputMode, NativeSignal, NativeStream,
+};
 use std::{process::Stdio, sync::Arc};
 use tokio::{
 	io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
@@ -27,14 +29,35 @@ pub(crate) struct Control {
 		tokio::sync::watch::Receiver<Option<(u64, NativeSignal)>>,
 }
 
+/// Open standard input of a `Streaming` Harness. Bytes stay opaque: the
+/// helper writes them verbatim and frames nothing. Awaiting a write applies
+/// the Harness's own backpressure to the Craft that asked for it. A clone
+/// keeps the input open only for as long as that clone lives.
+#[derive(Clone)]
+pub(crate) struct NativeInput {
+	writes: tokio::sync::mpsc::Sender<String>,
+}
+
+impl NativeInput {
+	/// Write native input, waiting while the Harness has not drained earlier
+	/// bytes. Fails once the Harness or its input is gone.
+	pub(crate) async fn write(&self, text: String) -> std::io::Result<()> {
+		self.writes
+			.send(text)
+			.await
+			.map_err(|_| std::io::Error::other("native input is closed"))
+	}
+}
+
 pub(crate) async fn launch(
 	config: &HelperConfig,
 	program: String,
 	arguments: Vec<String>,
 	input: String,
+	input_mode: NativeInputMode,
 	spool: Arc<Spool>,
 	mut control: Control,
-) -> Result<(), LaunchError> {
+) -> Result<Option<NativeInput>, LaunchError> {
 	if !config.executables.contains(&program)
 		|| arguments.len() > 256
 		|| arguments.iter().map(String::len).sum::<usize>() > 65_536
@@ -69,11 +92,24 @@ pub(crate) async fn launch(
 	let mut stdin = child.stdin.take().expect("piped input");
 	let stdout = child.stdout.take().expect("piped output");
 	let stderr = child.stderr.take().expect("piped errors");
+	// A sealed launch drops its sender at once, so the writer sees end of
+	// input immediately after the initial write and the Harness reads EOF.
+	let (writes, mut pending) = tokio::sync::mpsc::channel::<String>(8);
+	let native_input = match input_mode {
+		NativeInputMode::Sealed => None,
+		NativeInputMode::Streaming => Some(NativeInput { writes }),
+	};
 	tokio::spawn(async move {
-		let mut input_task =
-			tokio::spawn(
-				async move { stdin.write_all(input.as_bytes()).await },
-			);
+		let mut input_task = tokio::spawn(async move {
+			stdin.write_all(input.as_bytes()).await?;
+			stdin.flush().await?;
+			while let Some(text) = pending.recv().await {
+				stdin.write_all(text.as_bytes()).await?;
+				stdin.flush().await?;
+			}
+			// Dropping the pipe here is the close, and the only one.
+			Ok::<(), std::io::Error>(())
+		});
 		let mut output_task = tokio::spawn(pump(
 			stdout,
 			NativeStream::Stdout,
@@ -99,6 +135,10 @@ pub(crate) async fn launch(
 					}
 				}
 			};
+			// The child is reaped, so nothing can consume further input and a
+			// streaming writer would otherwise wait for a close that no
+			// longer means anything.
+			input_task.abort();
 			let _ = (&mut input_task).await;
 			let output = (&mut output_task).await;
 			let errors = (&mut error_task).await;
@@ -139,7 +179,7 @@ pub(crate) async fn launch(
 			eprintln!("jetfueld: native exit could not be retained");
 		}
 	});
-	Ok(())
+	Ok(native_input)
 }
 
 /// Delivers one signal to the process group the helper created for its

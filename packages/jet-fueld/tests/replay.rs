@@ -29,7 +29,7 @@ async fn a_full_run_spool_backpressures_and_replays_every_native_byte() {
         let mut helper = tokio::process::Command::new(env!("CARGO_BIN_EXE_jetfueld")).args(["run", "--config"]).arg(path).kill_on_drop(true).spawn().unwrap();
         let socket = root.join("h.sock");
         let (mut reader, mut writer, _) = connect(&socket, id).await;
-        send(&mut writer, &HelperCommand::Launch { program: "/bin/sh".into(), arguments: vec!["-c".into(), "/bin/dd if=/dev/zero bs=4096 count=20000 2>/dev/null; printf done > complete".into()], input: String::new() }).await;
+        send(&mut writer, &HelperCommand::Launch { program: "/bin/sh".into(), arguments: vec!["-c".into(), "/bin/dd if=/dev/zero bs=4096 count=20000 2>/dev/null; printf done > complete".into()], input: String::new(), input_mode: NativeInputMode::Sealed }).await;
         assert!(matches!(receive::<HelperRecord>(&mut reader).await.event, HelperEvent::Started { .. }));
         drop((reader, writer));
         let bound = 64 * 1024 * 1024;

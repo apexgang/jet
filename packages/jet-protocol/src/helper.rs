@@ -59,6 +59,23 @@ pub struct HelperReady {
 	pub descriptor: HelperDescriptor,
 }
 
+/// Whether a launched Harness keeps reading after its initial input.
+#[derive(
+	Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeInputMode {
+	/// Close standard input once the initial input is written, so a Harness
+	/// that reads to end of input proceeds. Decoding a launch that names no
+	/// mode selects this, which is what every Craft had before Helper 1.3.
+	#[default]
+	Sealed,
+	/// Keep standard input open for later `Input` until `CloseInput`
+	/// (Helper 1.3). A Harness driven by a bidirectional native protocol
+	/// takes its later turns, approval answers, and cancellations there.
+	Streaming,
+}
+
 /// Craft requests at the generic helper boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -93,7 +110,21 @@ pub enum HelperCommand {
 		arguments: Vec<String>,
 		/// Initial native input written to standard input.
 		input: String,
+		/// Whether this Harness accepts later `Input` (Helper 1.3).
+		#[serde(default)]
+		input_mode: NativeInputMode,
 	},
+	/// Write more native input to a Harness launched as `Streaming`
+	/// (Helper 1.3). The bytes stay opaque to the helper, which neither
+	/// frames nor interprets them.
+	Input {
+		/// Native input written verbatim to standard input.
+		text: String,
+	},
+	/// Close a `Streaming` Harness's standard input (Helper 1.3). A Harness
+	/// that ends on end of input stops here. No signal is delivered and no
+	/// retained source is released, so its exit reaches the host as usual.
+	CloseInput,
 	/// Release source records only after jetd committed their semantics.
 	Acknowledge {
 		/// End offset of the durably processed spool record.
