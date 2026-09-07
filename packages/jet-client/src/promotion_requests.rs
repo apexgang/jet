@@ -40,7 +40,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::PromotionPreview(preview) => Ok(*preview),
-			other @ (QueryResponse::OrphanedExecutions(_)
+			other @ (QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
@@ -92,7 +93,8 @@ impl Client {
 			CommandResponse::WorkspacePromotionRecorded(promotion) => {
 				Ok(promotion)
 			}
-			other @ (CommandResponse::ExecutionResolutionRecorded {
+			other @ (CommandResponse::Terminal { .. }
+			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
 			| CommandResponse::ConversationCreated(_)

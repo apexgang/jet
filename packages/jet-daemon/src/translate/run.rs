@@ -61,13 +61,24 @@ pub(super) fn action_from_wire(
 }
 pub(super) fn orphans(
 	page: core::OrphanedExecutions,
+	minor: u32,
 ) -> wire::OrphanedExecutions {
 	wire::OrphanedExecutions {
 		next: page.next.map(|id| id.0),
 		executions: page
 			.executions
 			.into_iter()
+			.filter(|execution| {
+				minor >= wire::WORKSPACE_TERMINALS_MINOR
+					|| execution.role == core::ExecutionRole::Run
+			})
 			.map(|execution| wire::OrphanedExecution {
+				role: match execution.role {
+					core::ExecutionRole::Run => wire::ExecutionRole::Run,
+					core::ExecutionRole::Terminal => {
+						wire::ExecutionRole::Terminal
+					}
+				},
 				execution_id: execution.execution_id.0,
 				metadata: execution.metadata.map(|m| wire::ExecutionMetadata {
 					instance: m.instance,

@@ -108,6 +108,20 @@ impl CommandEnvelope {
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
+	/// Open a Workspace-owned terminal.
+	OpenTerminal {
+		/// Registered Workspace.
+		workspace_id: crate::WorkspaceId,
+		/// Height.
+		rows: u16,
+		/// Width.
+		columns: u16,
+	},
+	/// Close a Workspace terminal explicitly.
+	CloseTerminal {
+		/// Terminal to close.
+		terminal_id: crate::TerminalId,
+	},
 	/// Resolve only the Orphaned execution instance inspected by the user.
 	ResolveExecution(crate::ExecutionResolution),
 	/// Start a managed Run with one installed Craft and its initial input.
@@ -317,6 +331,8 @@ impl Command {
 			| Self::ResumeImportedConversation { .. }
 			| Self::SetSetting { .. }
 			| Self::ClearSetting { .. }
+			| Self::OpenTerminal { .. }
+			| Self::CloseTerminal { .. }
 			| Self::ResolveExecution(_)
 			| Self::TransitionRun { .. } => &[],
 		}
@@ -337,6 +353,8 @@ impl Command {
 /// The durable result of a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
+	/// Terminal request committed.
+	Terminal(crate::WorkspaceTerminal),
 	/// The interactive resolution was durably queued.
 	ExecutionResolutionRecorded(crate::ExecutionResolution),
 	/// The Conversation as created.
@@ -582,6 +600,7 @@ fn redacted_for_receipt(
 			| CommandOutcome::PairedClientRevoked { .. }
 			| CommandOutcome::ProjectRegistered(_)
 			| CommandOutcome::WorkspacePromotionRecorded(_)
+			| CommandOutcome::Terminal(_)
 			| CommandOutcome::ConversationImported(_)),
 		) => Ok(outcome.clone()),
 		Err(error) => Err(error.clone()),
@@ -612,6 +631,29 @@ async fn execute_new(
 		workspace_home,
 	} = context;
 	match command {
+		Command::OpenTerminal { .. } => {
+			let Prepared::Terminal(plan) = prepared else {
+				return Err(crate::terminal::unavailable());
+			};
+			crate::terminal_command::open(
+				tx,
+				actor,
+				command_id,
+				plan,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::CloseTerminal { terminal_id } => {
+			crate::terminal_command::close(
+				tx,
+				actor,
+				command_id,
+				terminal_id,
+				now_unix_ms,
+			)
+			.await
+		}
 		Command::ResolveExecution(request) => {
 			crate::orphan::record(tx, actor, command_id, request, now_unix_ms)
 				.await
@@ -1032,6 +1074,7 @@ async fn transition_run(
 			command_id: command_id.0,
 			run_id: Some(run_id.0),
 			promotion_id: None,
+			terminal_id: None,
 			kind: EffectKindRecord::StartRun,
 			safety: EffectSafetyRecord::Idempotent {
 				external_key: effect_id,

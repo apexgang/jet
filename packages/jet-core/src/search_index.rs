@@ -94,6 +94,7 @@ pub(crate) fn documents_of(event: &Event) -> Vec<NewSearchDocument> {
 		| EventKind::WorkspaceSeeded { .. }
 		| EventKind::WorkspacePromotionSettled { .. }
 		| EventKind::RunCreated {}
+		| EventKind::TerminalStateChanged { .. }
 		| EventKind::RunLifecycleChanged { .. }
         | EventKind::RunActivityChanged { .. }
         | EventKind::RunProcessesChanged { .. }

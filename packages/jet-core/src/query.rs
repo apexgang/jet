@@ -28,6 +28,11 @@ use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
+	/// Terminals belonging to one Workspace.
+	WorkspaceTerminals {
+		/// Workspace identity.
+		workspace_id: crate::WorkspaceId,
+	},
 	/// Bounded read-only metadata for interactive recovery decisions.
 	OrphanedExecutions {
 		/// Continue after the previous page.
@@ -131,6 +136,13 @@ pub enum Query {
 /// Snapshots returned by [`Core::query`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult {
+	/// Workspace terminal lifecycle snapshots.
+	WorkspaceTerminals {
+		/// Snapshot Event cursor.
+		cursor: EventSequence,
+		/// Retained terminal states.
+		terminals: Vec<crate::WorkspaceTerminal>,
+	},
 	/// A bounded page of unsafe execution matches.
 	OrphanedExecutions(crate::OrphanedExecutions),
 	/// Lifecycle, activity, and Managed processes at one journal cursor.
@@ -188,6 +200,24 @@ impl Core {
 			.expect("authority gate never closes");
 		actor.authorize(&self.remote_sessions)?;
 		match query {
+			Query::WorkspaceTerminals { workspace_id } => {
+				self.store
+					.read(async |tx| {
+						if tx.workspace(workspace_id.0).await?.is_none() {
+							return Err(crate::terminal::missing());
+						}
+						let terminals =
+							tx.workspace_terminals(workspace_id.0).await?;
+						Ok(QueryResult::WorkspaceTerminals {
+							cursor: EventSequence(tx.event_cursor().await?),
+							terminals: terminals
+								.iter()
+								.map(crate::terminal::snapshot)
+								.collect::<Result<_, _>>()?,
+						})
+					})
+					.await
+			}
 			Query::OrphanedExecutions { after } => self
 				.orphaned_executions(after)
 				.await

@@ -16,6 +16,7 @@ struct Row {
 	command_id: String,
 	run_id: Option<String>,
 	promotion_id: Option<String>,
+	terminal_id: Option<String>,
 	kind: String,
 	safety: String,
 	external_key: Option<String>,
@@ -39,7 +40,7 @@ impl ReadTransaction {
 		let rows = sqlx::query_as!(
 			Row,
 			r#"SELECT effect_id AS "effect_id!", command_id, run_id,
-				promotion_id, kind, safety, external_key, max_attempts, state,
+				promotion_id, terminal_id, kind, safety, external_key, max_attempts, state,
 				attempt_count
 			 FROM effects
 			 WHERE state IN ('pending', 'in_flight') AND kind = ?1
@@ -68,20 +69,22 @@ impl WriteTransaction {
 		let run_id = effect.run_id.as_ref().map(ToString::to_string);
 		let promotion_id =
 			effect.promotion_id.as_ref().map(ToString::to_string);
+		let terminal_id = effect.terminal_id.map(|id| id.to_string());
 		let kind = effect.kind.as_str();
 		let external_key = external_key.as_ref().map(ToString::to_string);
 		let max_attempts = i64::from(max_attempts);
 		sqlx::query!(
 			"INSERT INTO effects (
-				effect_id, command_id, run_id, promotion_id, kind, safety,
+				effect_id, command_id, run_id, promotion_id, terminal_id, kind, safety,
 				external_key, max_attempts, state, attempt_count
 			 ) VALUES (
-				?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 0
+				?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', 0
 			 )",
 			effect_id,
 			command_id,
 			run_id,
 			promotion_id,
+			terminal_id,
 			kind,
 			safety,
 			external_key,
@@ -172,7 +175,7 @@ impl WriteTransaction {
 		let row = sqlx::query_as!(
 			Row,
 			r#"SELECT effect_id AS "effect_id!", command_id, run_id,
-				promotion_id, kind, safety, external_key, max_attempts, state,
+				promotion_id, terminal_id, kind, safety, external_key, max_attempts, state,
 				attempt_count
 			 FROM effects
 			 WHERE effect_id = ?1"#,
@@ -193,6 +196,10 @@ fn read_row(row: Row) -> Result<EffectRecord, StoreError> {
 		promotion_id: parse_optional_uuid(
 			"promotion_id",
 			row.promotion_id.as_deref(),
+		)?,
+		terminal_id: parse_optional_uuid(
+			"terminal_id",
+			row.terminal_id.as_deref(),
 		)?,
 		// ASVS 1.5.2: durable kind input is decoded through a closed
 		// allowlist.

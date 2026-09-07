@@ -216,6 +216,16 @@ pub struct EventPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum EventKind {
+	/// A Workspace terminal changed lifecycle, without recording terminal bytes.
+	#[serde(rename = "terminal.state_changed")]
+	TerminalStateChanged {
+		/// Terminal identity.
+		terminal_id: crate::TerminalId,
+		/// Owning Workspace.
+		workspace_id: WorkspaceId,
+		/// Observed lifecycle.
+		state: crate::TerminalState,
+	},
 	/// An active Run began working or waiting for a specific reason.
 	#[serde(rename = "run.activity_changed")]
 	RunActivityChanged {
@@ -470,6 +480,7 @@ impl EventKind {
 		match self {
 			Self::Unrecognized(payload) => Ok(payload.clone()),
 			Self::ConversationCreated { .. }
+			| Self::TerminalStateChanged { .. }
 			| Self::RunActivityChanged { .. }
 			| Self::RunProcessesChanged { .. }
 			| Self::RunOutput { .. }

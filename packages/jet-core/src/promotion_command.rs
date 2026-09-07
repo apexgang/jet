@@ -190,6 +190,7 @@ pub(crate) async fn record(
 			command_id: command_id.0,
 			run_id: None,
 			promotion_id: Some(promotion_id),
+			terminal_id: None,
 			kind: EffectKindRecord::PromoteWorkspace,
 			safety,
 		})

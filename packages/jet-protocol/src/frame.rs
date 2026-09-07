@@ -328,6 +328,11 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
 		self.limits = limits;
 	}
 
+	/// Returns the negotiated output frame bounds.
+	pub fn limits(&self) -> FrameLimits {
+		self.limits
+	}
+
 	/// Switches subsequent frames to the negotiated stream envelope.
 	pub fn enable_multiplexing(&mut self) {
 		self.multiplexed = true;

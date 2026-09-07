@@ -88,6 +88,7 @@ async fn apply(
 		| CommandOutcome::PairedClientRevoked { .. }
 		| CommandOutcome::ProjectRegistered(_)
 		| CommandOutcome::WorkspacePromotionRecorded(_)
+		| CommandOutcome::Terminal(_)
 		| CommandOutcome::ConversationImported(_) => Err(malformed()),
 	}
 }

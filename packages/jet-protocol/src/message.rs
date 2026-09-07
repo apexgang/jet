@@ -27,6 +27,28 @@ pub type RequestId = u64;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ClientMessage {
+	/// Bind this numbered stream to a terminal. Disconnecting leaves it alive.
+	AttachTerminal {
+		/// Request correlation.
+		id: RequestId,
+		/// Terminal identity.
+		terminal_id: Uuid,
+		/// First desired output byte.
+		#[serde(with = "crate::decimal")]
+		after: u64,
+		/// Initial output byte credit; further credit uses StreamControl.
+		#[serde(with = "crate::decimal")]
+		credit: u64,
+	},
+	/// Resize the terminal attached to this stream.
+	ResizeTerminal {
+		/// Request correlation.
+		id: RequestId,
+		/// Height in cells.
+		rows: u16,
+		/// Width in cells.
+		columns: u16,
+	},
 	/// Run a Query and return its snapshot.
 	Query {
 		/// Correlation identifier echoed in the reply.
@@ -67,6 +89,16 @@ pub fn raw_command(frame: &[u8]) -> Result<Box<RawValue>, ControlError> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ServerMessage {
+	/// The numbered stream now accepts terminal input and receives output.
+	TerminalAttached {
+		/// Request correlation.
+		id: RequestId,
+	},
+	/// The attached PTY accepted its new dimensions.
+	TerminalResized {
+		/// Request correlation.
+		id: RequestId,
+	},
 	/// Successful Query snapshot.
 	QueryResult {
 		/// Identifier of the request being answered.
@@ -94,6 +126,11 @@ pub enum ServerMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryRequest {
+	/// All retained terminals of one Workspace (at most 64).
+	WorkspaceTerminals {
+		/// Registered Workspace identity.
+		workspace_id: Uuid,
+	},
 	/// Bounded Orphaned-execution metadata for interactive decisions.
 	OrphanedExecutions {
 		/// Continue after a previous page.
@@ -202,6 +239,14 @@ pub enum QueryRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryResponse {
+	/// Terminal lifecycle snapshots, separate from Runs.
+	WorkspaceTerminals {
+		/// Snapshot Event cursor.
+		#[serde(with = "crate::decimal")]
+		cursor: u64,
+		/// Retained Workspace terminals.
+		terminals: Vec<crate::WorkspaceTerminal>,
+	},
 	/// Read-only recovery candidates.
 	OrphanedExecutions(crate::OrphanedExecutions),
 	/// Durable lifecycle, activity, and Managed processes of a Run.

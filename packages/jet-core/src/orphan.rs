@@ -19,9 +19,29 @@ pub struct ExecutionMetadata {
 	/// Helper product version.
 	pub version: String,
 }
+/// Role of an independently preserved execution.
+#[derive(
+	Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionRole {
+	/// A Harness Run (also the role of older descriptors).
+	#[default]
+	Run,
+	/// A Workspace terminal.
+	Terminal,
+}
+impl ExecutionRole {
+	fn is_run(&self) -> bool {
+		*self == Self::Run
+	}
+}
 /// A persisted unsafe match, never an automatically resumable Run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrphanedExecution {
+	/// Execution role; absent on pre-terminal protocol snapshots.
+	#[serde(default, skip_serializing_if = "ExecutionRole::is_run")]
+	pub role: ExecutionRole,
 	/// Execution identity, which need not exist in authoritative Run state.
 	pub execution_id: RunId,
 	/// Owner-only metadata if it can safely be inspected.
@@ -64,6 +84,7 @@ impl Core {
 			None => None,
 		};
 		let json = serde_json::to_string(&OrphanedExecution {
+			role: ExecutionRole::Run,
 			execution_id: id,
 			metadata,
 		})
@@ -108,6 +129,9 @@ impl Core {
 		}
 		if request.action == ExecutionAction::Leave {
 			return Ok(());
+		}
+		if orphan.role == ExecutionRole::Terminal {
+			return crate::terminal_orphan::prepare(self, request).await;
 		}
 		let host = self.run_host.as_ref().ok_or_else(unavailable)?;
 		let current =
@@ -166,6 +190,7 @@ pub(crate) async fn record(
 		command_id: command_id.0,
 		run_id: None,
 		promotion_id: None,
+		terminal_id: None,
 		kind: jet_store::EffectKindRecord::ResolveExecution,
 		safety: jet_store::EffectSafetyRecord::Ambiguous,
 	})
@@ -210,6 +235,14 @@ impl EffectAdapter for Resolutions<'_> {
 		if self.0.prepare_execution_resolution(&request).await.is_err() {
 			return EffectResult::Failed;
 		}
+		if self
+			.0
+			.is_terminal_orphan(request.execution_id)
+			.await
+			.unwrap_or(false)
+		{
+			return crate::terminal_orphan::execute(self.0, &request).await;
+		}
 		match request.action {
 			ExecutionAction::Leave => EffectResult::Completed,
 			ExecutionAction::Adopt => {
@@ -240,6 +273,7 @@ pub(crate) async fn settle(
 	tx: &mut jet_store::WriteTransaction,
 	effect: &Effect,
 	state: jet_store::EffectStateRecord,
+	now: i64,
 ) -> Result<(), CoreError> {
 	if state == jet_store::EffectStateRecord::Completed {
 		let json = tx
@@ -248,6 +282,7 @@ pub(crate) async fn settle(
 			.ok_or_else(unavailable)?;
 		let request: ExecutionResolution = crate::run_state::decode(&json)?;
 		if request.action != ExecutionAction::Leave {
+			crate::terminal_orphan::settle(tx, &request, now).await?;
 			tx.remove_orphaned_execution(request.execution_id.0).await?;
 		}
 	}

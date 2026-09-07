@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO workspace_terminals (terminal_id, workspace_id, state, plan) VALUES (?1, ?2, ?3, ?4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "c55d0d0426141b8ee3f02d63dc6d05d20e32a18f0e51124c3ce779d19183eb96"
+}

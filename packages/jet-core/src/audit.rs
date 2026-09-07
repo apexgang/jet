@@ -57,6 +57,12 @@ pub struct AuditRecordId(pub Uuid);
 /// what happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditDecision {
+	/// A terminal open was admitted.
+	TerminalOpened,
+	/// A terminal close was admitted.
+	TerminalClosed,
+	/// A client submitted ephemeral terminal input; bytes are excluded.
+	TerminalInput,
 	/// An interactive user requested resolution of an Orphaned execution.
 	ExecutionResolutionRequested,
 	/// A remote connection attempted to prove its Paired Client identity.
@@ -117,6 +123,7 @@ pub enum AuditDecision {
 /// and identity the store keeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AuditSubject {
+	Terminal(crate::TerminalId),
 	/// One helper execution, including unmatched identities.
 	Execution(crate::RunId),
 	/// The Plane as a whole.
@@ -222,6 +229,9 @@ impl AuditDecision {
 			Self::ExecutionResolutionRequested => {
 				"execution.resolution_requested"
 			}
+			Self::TerminalOpened => "terminal.opened",
+			Self::TerminalClosed => "terminal.closed",
+			Self::TerminalInput => "terminal.input",
 			Self::ConnectionAuthenticated => "connection.authenticated",
 			Self::AccountBound => "account.bound",
 			Self::AccountUnbound => "account.unbound",
@@ -254,7 +264,7 @@ impl AuditDecision {
 	fn risk(self) -> AuditRisk {
 		match self {
 			Self::ExecutionResolutionRequested => AuditRisk::Destructive,
-			Self::ConnectionAuthenticated => AuditRisk::Routine,
+			Self::TerminalOpened | Self::TerminalClosed | Self::TerminalInput | Self::ConnectionAuthenticated => AuditRisk::Routine,
 			Self::AccountBound
 			| Self::AccountUnbound
 			| Self::GitAutomationEnabled
@@ -310,6 +320,7 @@ impl AuditSubject {
 
 	fn kind(self) -> &'static str {
 		match self {
+			Self::Terminal(_) => "terminal",
 			Self::Execution(_) => "execution",
 			Self::Plane => "plane",
 			Self::Project(_) => "project",
@@ -322,6 +333,7 @@ impl AuditSubject {
 
 	fn identity(self) -> Option<String> {
 		match self {
+			Self::Terminal(crate::TerminalId(id)) => Some(id.to_string()),
 			Self::Execution(crate::RunId(id)) => Some(id.to_string()),
 			Self::Plane => None,
 			Self::Project(ProjectId(id))
@@ -340,6 +352,8 @@ impl AuditSubject {
 /// guards can never drift apart.
 pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 	match command {
+		Command::OpenTerminal { .. } => Some(AuditDecision::TerminalOpened),
+		Command::CloseTerminal { .. } => Some(AuditDecision::TerminalClosed),
 		Command::ResolveExecution(_) => {
 			Some(AuditDecision::ExecutionResolutionRequested)
 		}
@@ -382,6 +396,10 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 /// that exists.
 fn refused_subject(command: &Command) -> AuditSubject {
 	match command {
+		Command::OpenTerminal { .. } => AuditSubject::Plane,
+		Command::CloseTerminal { terminal_id } => {
+			AuditSubject::Terminal(*terminal_id)
+		}
 		Command::ResolveExecution(request) => {
 			AuditSubject::Execution(request.execution_id)
 		}

@@ -205,6 +205,10 @@ pub struct NewCommandReceipt {
 /// Closed durable spelling of external work understood by this release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectKindRecord {
+	/// Start a Workspace terminal.
+	StartTerminal,
+	/// Close a Workspace terminal.
+	CloseTerminal,
 	/// Resolve one Orphaned execution after interactive authorization.
 	ResolveExecution,
 	/// Start one Run's managed processes.
@@ -216,6 +220,8 @@ pub enum EffectKindRecord {
 impl EffectKindRecord {
 	pub(crate) fn as_str(self) -> &'static str {
 		match self {
+			Self::StartTerminal => "terminal.start",
+			Self::CloseTerminal => "terminal.close",
 			Self::ResolveExecution => "execution.resolve",
 			Self::StartRun => "run.start",
 			Self::PromoteWorkspace => "workspace.promote",
@@ -224,6 +230,8 @@ impl EffectKindRecord {
 
 	pub(crate) fn parse(text: &str) -> Option<Self> {
 		match text {
+			"terminal.start" => Some(Self::StartTerminal),
+			"terminal.close" => Some(Self::CloseTerminal),
 			"execution.resolve" => Some(Self::ResolveExecution),
 			"run.start" => Some(Self::StartRun),
 			"workspace.promote" => Some(Self::PromoteWorkspace),
@@ -316,6 +324,8 @@ pub struct NewEffect {
 	pub run_id: Option<Uuid>,
 	/// Workspace promotion the work applies.
 	pub promotion_id: Option<Uuid>,
+	/// Workspace terminal affected by the work.
+	pub terminal_id: Option<Uuid>,
 	/// Closed Effect kind understood by the core.
 	pub kind: EffectKindRecord,
 	/// Evidence and retry bound governing interrupted attempts.
@@ -333,6 +343,8 @@ pub struct EffectRecord {
 	pub run_id: Option<Uuid>,
 	/// Workspace promotion the work applies.
 	pub promotion_id: Option<Uuid>,
+	/// Workspace terminal affected by the work.
+	pub terminal_id: Option<Uuid>,
 	/// Closed Effect kind understood by the core.
 	pub kind: EffectKindRecord,
 	/// Evidence and retry bound governing interrupted attempts.

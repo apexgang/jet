@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT effect_id AS \"effect_id!\", command_id, run_id,\n\t\t\t\tpromotion_id, kind, safety, external_key, max_attempts, state,\n\t\t\t\tattempt_count\n\t\t\t FROM effects\n\t\t\t WHERE state IN ('pending', 'in_flight') AND kind = ?1\n\t\t\t ORDER BY rowid",
+  "query": "SELECT effect_id AS \"effect_id!\", command_id, run_id,\n\t\t\t\tpromotion_id, terminal_id, kind, safety, external_key, max_attempts, state,\n\t\t\t\tattempt_count\n\t\t\t FROM effects\n\t\t\t WHERE state IN ('pending', 'in_flight') AND kind = ?1\n\t\t\t ORDER BY rowid",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,19 @@
         }
       },
       {
-        "name": "kind",
+        "name": "terminal_id",
         "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "effects",
+            "name": "terminal_id"
+          }
+        }
+      },
+      {
+        "name": "kind",
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "safety",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "external_key",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,7 +93,7 @@
       },
       {
         "name": "max_attempts",
-        "ordinal": 7,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,7 +104,7 @@
       },
       {
         "name": "state",
-        "ordinal": 8,
+        "ordinal": 9,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -104,7 +115,7 @@
       },
       {
         "name": "attempt_count",
-        "ordinal": 9,
+        "ordinal": 10,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -122,6 +133,7 @@
       false,
       true,
       true,
+      true,
       false,
       false,
       true,
@@ -130,5 +142,5 @@
       false
     ]
   },
-  "hash": "d34f4707d6ef53f7447fb760cd2d7f7d959b26514d03ca111f48b0521f7ebe1c"
+  "hash": "fe6d745900d73bdc1b2e70da9a6514714eb6f5e741d58dcb8dc97c197332ce9e"
 }

@@ -16,9 +16,29 @@ pub struct ExecutionMetadata {
 	/// Helper product version.
 	pub version: String,
 }
+/// Role of an independently preserved execution.
+#[derive(
+	Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionRole {
+	/// A Harness Run (also the role of older descriptors).
+	#[default]
+	Run,
+	/// A Workspace terminal.
+	Terminal,
+}
+impl ExecutionRole {
+	fn is_run(&self) -> bool {
+		*self == Self::Run
+	}
+}
 /// A live execution recovery could not match safely.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrphanedExecution {
+	/// Execution role; absent on pre-terminal protocol snapshots.
+	#[serde(default, skip_serializing_if = "ExecutionRole::is_run")]
+	pub role: ExecutionRole,
 	/// Execution selected by the user.
 	pub execution_id: Uuid,
 	/// Owner-only metadata when safely readable.

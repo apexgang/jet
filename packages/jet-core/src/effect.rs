@@ -10,6 +10,12 @@ use crate::{CommandId, Core, CoreError, PromotionId, RunId, promotion_effect};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum EffectKind {
+	StartTerminal {
+		terminal_id: crate::TerminalId,
+	},
+	CloseTerminal {
+		terminal_id: crate::TerminalId,
+	},
 	ResolveExecution,
 	StartRun {
 		run_id: RunId,
@@ -178,8 +184,19 @@ async fn settle(
 	now_unix_ms: i64,
 ) -> Result<(), CoreError> {
 	match effect.kind {
+		EffectKind::StartTerminal { terminal_id }
+		| EffectKind::CloseTerminal { terminal_id } => {
+			crate::terminal_effect::settle(
+				tx,
+				terminal_id,
+				&effect.kind,
+				state,
+				now_unix_ms,
+			)
+			.await
+		}
 		EffectKind::ResolveExecution => {
-			crate::orphan::settle(tx, effect, state).await
+			crate::orphan::settle(tx, effect, state, now_unix_ms).await
 		}
 		EffectKind::StartRun { run_id } => {
 			crate::run_state::settle_start(tx, run_id, state, now_unix_ms).await
@@ -195,6 +212,16 @@ impl TryFrom<EffectRecord> for Effect {
 
 	fn try_from(record: EffectRecord) -> Result<Self, CoreError> {
 		let kind = match record.kind {
+			EffectKindRecord::StartTerminal => EffectKind::StartTerminal {
+				terminal_id: crate::TerminalId(
+					record.terminal_id.ok_or_else(crate::terminal::missing)?,
+				),
+			},
+			EffectKindRecord::CloseTerminal => EffectKind::CloseTerminal {
+				terminal_id: crate::TerminalId(
+					record.terminal_id.ok_or_else(crate::terminal::missing)?,
+				),
+			},
 			EffectKindRecord::ResolveExecution => EffectKind::ResolveExecution,
 			EffectKindRecord::StartRun => EffectKind::StartRun {
 				run_id: RunId(record.run_id.ok_or_else(|| {

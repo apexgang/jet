@@ -29,7 +29,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Search(result) => Ok(result),
-			other @ (QueryResponse::OrphanedExecutions(_)
+			other @ (QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
