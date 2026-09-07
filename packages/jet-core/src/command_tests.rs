@@ -10,9 +10,10 @@ use crate::test_support::{
 };
 use crate::{
 	Command, CommandEnvelope, CommandOutcome, Conversation, ConversationId,
-	ConversationSnapshot, Core, CoreError, ErrorCategory, EventKind, EventPage,
-	EventPayload, EventSequence, Query, QueryResult, RetentionPolicy, Revision,
-	Run, RunId, RunLifecycle, WorkingTree, WorkingTreeRequest,
+	ConversationOrigin, ConversationSnapshot, Core, CoreError, ErrorCategory,
+	EventKind, EventPage, EventPayload, EventSequence, Query, QueryResult,
+	RetentionPolicy, Revision, Run, RunId, RunLifecycle, WorkingTree,
+	WorkingTreeRequest,
 };
 
 async fn create_conversation(
@@ -134,6 +135,7 @@ async fn a_conversation_exists_and_is_queryable_before_any_run() {
 			EventKind::ConversationCreated {
 				retention: RetentionPolicy::Retain,
 				working_tree: WorkingTree::NoProject,
+				origin: ConversationOrigin::New,
 			}
 		)]
 	);
@@ -383,6 +385,7 @@ async fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 				conversation_id: original.conversation_id,
 				retention: RetentionPolicy::Retain,
 				working_tree: WorkingTree::NoProject,
+				origin: ConversationOrigin::New,
 				created_at: start,
 			}]
 		)

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT rowid AS \"rowid!\",\n\t\t\t\tconversation_id AS \"conversation_id!\", retention,\n\t\t\t\tworking_tree, project_id, created_at_unix_ms\n\t\t\t FROM conversations\n\t\t\t WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
+  "query": "SELECT rowid AS \"rowid!\",\n\t\t\t\tconversation_id AS \"conversation_id!\", retention,\n\t\t\t\tworking_tree, project_id, import_id, created_at_unix_ms\n\t\t\t FROM conversations\n\t\t\t WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
   "describe": {
     "columns": [
       {
@@ -59,8 +59,19 @@
         }
       },
       {
-        "name": "created_at_unix_ms",
+        "name": "import_id",
         "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "import_id"
+          }
+        }
+      },
+      {
+        "name": "created_at_unix_ms",
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -79,8 +90,9 @@
       false,
       false,
       true,
+      true,
       false
     ]
   },
-  "hash": "cff822e004e718de2509cf932e07a2e40d1ff52dee4e967f3deaf20cf6563ead"
+  "hash": "c0095832976134d389414005d71ab4db9df2b6e94d126823f7c8c31a3617c925"
 }

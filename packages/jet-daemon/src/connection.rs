@@ -433,6 +433,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::SEARCH_MINOR,
 			feature: "the Search Query",
 		}),
+		QueryRequest::ExternalConversations => Some(MinorRequirement {
+			minor: jet_protocol::IMPORTED_CONVERSATIONS_MINOR,
+			feature: "the external Conversation Query",
+		}),
 		QueryRequest::Status
 		| QueryRequest::Conversations
 		| QueryRequest::Conversation { .. }
@@ -482,6 +486,13 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::WORKSPACE_PROMOTION_MINOR,
 			feature: "Workspace promotion",
 		}),
+		CommandRequest::ImportConversation { .. }
+		| CommandRequest::ResumeImportedConversation { .. } => {
+			Some(MinorRequirement {
+				minor: jet_protocol::IMPORTED_CONVERSATIONS_MINOR,
+				feature: "importing external Conversations",
+			})
+		}
 		CommandRequest::CreateConversation { working_tree, .. }
 			if working_tree.is_seeded() =>
 		{

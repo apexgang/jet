@@ -3,8 +3,9 @@ use uuid::Uuid;
 
 use super::{NewSearchDocument, SEARCH_DOCUMENT_BODY_LIMIT, SearchHitRecord};
 use crate::{
-	ActorRecord, EventClass, NewConversation, NewEvent, RetentionPolicy, Store,
-	StoreError, VerifiedSnapshotCoverage, WorkingTreeRecord,
+	ActorRecord, ConversationOriginRecord, EventClass, NewConversation,
+	NewEvent, RetentionPolicy, Store, StoreError, VerifiedSnapshotCoverage,
+	WorkingTreeRecord,
 };
 
 const NOW_UNIX_MS: i64 = 1_700_000_000_000;
@@ -39,6 +40,7 @@ async fn conversation(store: &Store) -> Uuid {
 				conversation_id,
 				retention: RetentionPolicy::Retain,
 				working_tree: WorkingTreeRecord::NoProject,
+				origin: ConversationOriginRecord::New,
 				created_at_unix_ms: NOW_UNIX_MS,
 			})
 			.await

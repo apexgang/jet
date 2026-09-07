@@ -20,6 +20,7 @@ mod command;
 mod conversation;
 mod effect;
 mod execution_recovery;
+mod import;
 mod journal;
 mod migrations;
 mod paired_client;
@@ -58,6 +59,7 @@ pub use audit_epoch::AuditGap;
 pub use audit_head::{AuditHead, audit_head_path};
 pub use audit_integrity::{AuditBreach, AuditIntegrity, AuditIntegrityFailure};
 pub use conversation::CONVERSATION_PAGE_LIMIT;
+pub use import::{ImportedConversationRecord, NewImportedConversation};
 pub use journal::EVENT_COMPACTION_BATCH_LIMIT;
 pub use paired_client::{
 	NewPairedClient, PairedClientAccess, PairedClientRecord,
@@ -75,11 +77,11 @@ pub use promotion::{
 	WorkspacePromotionRecord,
 };
 pub use records::{
-	ActorRecord, CommandReceiptRecord, ConversationPageKey,
-	ConversationPageStart, ConversationRecord, EffectKindRecord, EffectRecord,
-	EffectSafetyRecord, EffectStateRecord, EventClass, EventRecord,
-	NewCommandReceipt, NewConversation, NewEffect, NewEvent, NewRun,
-	RetentionPolicy, RunLifecycle, RunRecord, SettingRecord,
+	ActorRecord, CommandReceiptRecord, ConversationOriginRecord,
+	ConversationPageKey, ConversationPageStart, ConversationRecord,
+	EffectKindRecord, EffectRecord, EffectSafetyRecord, EffectStateRecord,
+	EventClass, EventRecord, NewCommandReceipt, NewConversation, NewEffect,
+	NewEvent, NewRun, RetentionPolicy, RunLifecycle, RunRecord, SettingRecord,
 	SettingScopeRecord, VerifiedSnapshotCoverage, WorkingTreeRecord,
 };
 pub use run_execution::RunExecutionRecord;
