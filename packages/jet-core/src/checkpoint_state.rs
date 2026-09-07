@@ -13,11 +13,17 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Tracking {
 	#[serde(default)]
+	pub(crate) between_turn_evidence: Vec<crate::ChangeEvidence>,
+	#[serde(default)]
+	pub(crate) between_turn_evidence_incomplete: bool,
+	#[serde(default)]
 	pub(crate) evidence: Vec<crate::ChangeEvidence>,
 	#[serde(default)]
 	pub(crate) evidence_incomplete: bool,
 	pub(crate) baseline: ChangeSnapshot,
 	pub(crate) active: Option<ChangeSnapshot>,
+	#[serde(default)]
+	pub(crate) terminal: Option<ChangeSnapshot>,
 	pub(crate) completed: u32,
 }
 impl Core {
@@ -44,10 +50,13 @@ impl Core {
 					));
 				}
 				state.changes = Some(Tracking {
+					between_turn_evidence: vec![],
+					between_turn_evidence_incomplete: false,
 					evidence: vec![],
 					evidence_incomplete: false,
 					baseline: before.clone(),
 					active: Some(before),
+					terminal: None,
 					completed: 0,
 				});
 				save(tx, run_id, &state).await
@@ -97,12 +106,18 @@ pub(crate) async fn observe(
 		);
 		return save(tx, run_id, &state).await;
 	}
+	let terminal = matches!(
+		observation,
+		Observation::Ended(_) | Observation::Lost | Observation::LaunchFailed
+	);
 	let outcome = match observation {
 		Observation::Completed(_)
 		| Observation::NativeConversation(_)
 		| Observation::TurnCompleted { .. } => TurnOutcome::Completed,
 		Observation::TurnEnded(outcome) => *outcome,
-		Observation::Ended(_) | Observation::Lost => TurnOutcome::Interrupted,
+		Observation::Ended(_)
+		| Observation::Lost
+		| Observation::LaunchFailed => TurnOutcome::Interrupted,
 		_ => return Ok(()),
 	};
 	let execution = tx.run_execution(run_id.0).await?.ok_or_else(missing)?;
@@ -110,10 +125,22 @@ pub(crate) async fn observe(
 	let Some(tracking) = &mut state.changes else {
 		return Ok(());
 	};
+	let plan: crate::LaunchPlan = run_state::decode(&execution.plan)?;
 	let Some(before) = tracking.active.take() else {
+		if terminal {
+			tracking.terminal = Some(
+				checkpoint_capture::snapshot(
+					core,
+					&plan.root,
+					run_id,
+					checkpoint_capture::Retention::Durable,
+				)
+				.await?,
+			);
+			return save(tx, run_id, &state).await;
+		}
 		return Ok(());
 	};
-	let plan: crate::LaunchPlan = run_state::decode(&execution.plan)?;
 	let after = checkpoint_capture::snapshot(
 		core,
 		&plan.root,
@@ -123,6 +150,9 @@ pub(crate) async fn observe(
 	.await?;
 	let mut files =
 		checkpoint_capture::files(&plan.root, &before, &after).await?;
+	if terminal {
+		tracking.terminal = Some(after.clone());
+	}
 	if !tracking.evidence_incomplete {
 		crate::change_evidence::attribute(&mut files, &tracking.evidence);
 	}
@@ -137,6 +167,10 @@ pub(crate) async fn observe(
 	let run = tx.run(run_id.0).await?.ok_or_else(missing)?;
 	tracking.completed += 1;
 	let checkpoint = ChangeCheckpoint {
+		before_evidence: std::mem::take(&mut tracking.between_turn_evidence),
+		before_evidence_incomplete: std::mem::take(
+			&mut tracking.between_turn_evidence_incomplete,
+		),
 		evidence: std::mem::take(&mut tracking.evidence),
 		evidence_incomplete: std::mem::take(&mut tracking.evidence_incomplete),
 		plane_id: PlaneId(tx.plane().await?.plane_id),

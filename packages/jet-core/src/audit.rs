@@ -378,10 +378,12 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 			Some(AuditDecision::ProjectRegistered)
 		}
 		Command::BeginAuditEpoch
+		| Command::ApplyUserEdit { .. }
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
 		| Command::SubmitTurn { .. }
+		| Command::SubmitReview { .. }
 		| Command::WithdrawTurn { .. }
 		| Command::PromoteWorkspace { .. }
 		| Command::ImportConversation { .. }
@@ -415,6 +417,7 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		Command::SetSetting { scope, .. }
 		| Command::ClearSetting { scope, .. } => AuditSubject::of_scope(*scope),
 		Command::BindAccount { .. }
+		| Command::ApplyUserEdit { .. }
 		| Command::RegisterProject { .. }
 		| Command::PromoteWorkspace { .. }
 		| Command::BeginAuditEpoch
@@ -427,6 +430,7 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
 		| Command::SubmitTurn { .. }
+		| Command::SubmitReview { .. }
 		| Command::WithdrawTurn { .. }
 		| Command::ImportConversation { .. }
 		| Command::ResumeImportedConversation { .. }

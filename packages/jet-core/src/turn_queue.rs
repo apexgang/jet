@@ -16,7 +16,26 @@ pub(crate) struct Queue {
 pub(crate) struct Entry {
 	pub(crate) turn: Turn,
 	pub(crate) prompt: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub(crate) review: Option<Vec<crate::ReviewComment>>,
 	pub(crate) command_id: Uuid,
+}
+
+pub(crate) enum Admission {
+	Prompt(String),
+	Review {
+		prompt: String,
+		comments: Vec<crate::ReviewComment>,
+	},
+}
+
+impl Admission {
+	fn into_parts(self) -> (String, Option<Vec<crate::ReviewComment>>) {
+		match self {
+			Self::Prompt(prompt) => (prompt, None),
+			Self::Review { prompt, comments } => (prompt, Some(comments)),
+		}
+	}
 }
 
 pub(crate) async fn load(
@@ -100,6 +119,16 @@ pub(crate) async fn changed(
 	)
 	.await?;
 	if entry.turn.state == TurnState::Queued {
+		if let Some(comments) = &entry.review {
+			tx.append_event(
+				EventKind::ReviewSubmitted {
+					turn_id: entry.turn.turn_id,
+					comments: comments.clone(),
+				}
+				.to_record(actor, subject, now)?,
+			)
+			.await?;
+		}
 		// Even all-control-character input must fit the 64 KiB Event payload.
 		// Splitting at UTF-8 boundaries preserves the exact original text.
 		let mut text = entry.prompt.as_str();
@@ -129,7 +158,8 @@ pub(crate) async fn admit(
 	now: i64,
 ) -> Result<CommandOutcome, CoreError> {
 	let (queue, changes) =
-		prepare(tx, actor, command_id, id, source, prompt).await?;
+		prepare(tx, actor, command_id, id, source, Admission::Prompt(prompt))
+			.await?;
 	let turn = queue
 		.entries
 		.last()
@@ -139,6 +169,86 @@ pub(crate) async fn admit(
 	commit(tx, actor, id, &queue, &changes, now).await?;
 	Ok(CommandOutcome::TurnAdmitted(turn))
 }
+
+pub(crate) async fn admit_review(
+	tx: &mut WriteTransaction,
+	actor: &Actor,
+	command_id: crate::CommandId,
+	id: ConversationId,
+	comments: Vec<crate::ReviewComment>,
+	now: i64,
+) -> Result<CommandOutcome, CoreError> {
+	// ASVS 5.1.1, 5.1.3: preserve structure only after every nested value
+	// has passed explicit count, line, path, and text bounds.
+	if comments.is_empty() || comments.len() > 128 {
+		return Err(CoreError::invalid_input(
+			"review.invalid_comments",
+			"a review contains 1 to 128 comments",
+		));
+	}
+	if comments.iter().any(|comment| {
+		comment.line == 0
+			|| comment.comment.is_empty()
+			|| comment.comment.len() > 8192
+	}) {
+		return Err(CoreError::invalid_input(
+			"review.invalid_comment",
+			"each review comment has a one-based line and 1 to 8192 bytes of text",
+		));
+	}
+	let prompt = review_prompt(&comments);
+	if prompt.len() > 65_536 {
+		return Err(CoreError::invalid_input(
+			"review.too_large",
+			"the submitted review must fit in one Turn",
+		));
+	}
+	let event_payload = serde_json::to_vec(&serde_json::json!({
+		"turn_id": Uuid::nil(),
+		"comments": &comments,
+	}))
+	.map_err(|error| {
+		CoreError::internal("review.unencodable", error.to_string())
+	})?;
+	if event_payload.len() > 65_536 {
+		return Err(CoreError::invalid_input(
+			"review.too_large",
+			"the submitted review must fit in one durable Event",
+		));
+	}
+	let (queue, changes) = prepare(
+		tx,
+		actor,
+		command_id,
+		id,
+		TurnSource::User,
+		Admission::Review { prompt, comments },
+	)
+	.await?;
+	let turn = queue
+		.entries
+		.last()
+		.expect("admission appended")
+		.turn
+		.clone();
+	commit(tx, actor, id, &queue, &changes, now).await?;
+	Ok(CommandOutcome::TurnAdmitted(turn))
+}
+
+fn review_prompt(comments: &[crate::ReviewComment]) -> String {
+	use std::fmt::Write as _;
+	let mut prompt = String::from("Review comments:\n");
+	for comment in comments {
+		let _ = write!(
+			prompt,
+			"\n{}:{}\n{}\n",
+			comment.path.as_str(),
+			comment.line,
+			comment.comment
+		);
+	}
+	prompt
+}
 // Validate everything before journal writes: authoritative refusals retain receipts.
 pub(crate) async fn prepare(
 	tx: &mut ReadTransaction,
@@ -146,8 +256,9 @@ pub(crate) async fn prepare(
 	command_id: crate::CommandId,
 	id: ConversationId,
 	source: TurnSource,
-	prompt: String,
+	admission: Admission,
 ) -> Result<(Queue, Vec<Entry>), CoreError> {
+	let (prompt, review) = admission.into_parts();
 	// ASVS 2.2.1, 2.3.3, 2.3.4: bounds, sequences and replacements share
 	// the receipt's write transaction, so a refusal cannot consume user work.
 	if prompt.is_empty() || prompt.len() > 65_536 {
@@ -200,6 +311,7 @@ pub(crate) async fn prepare(
 			run_id: None,
 		},
 		prompt,
+		review,
 		command_id: command_id.0,
 	};
 	removed.push(entry.clone());

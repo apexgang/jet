@@ -170,7 +170,7 @@ pub(crate) async fn record(
 		command_id,
 		conversation_id,
 		crate::TurnSource::User,
-		plan.prompt.clone(),
+		crate::turn_queue::Admission::Prompt(plan.prompt.clone()),
 	)
 	.await?;
 	if !queue.ready() {

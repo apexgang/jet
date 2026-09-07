@@ -15,6 +15,7 @@ mod requests;
 mod search_requests;
 mod ssh;
 mod turn_requests;
+mod user_input_requests;
 
 pub use connection::{Client, ClientError};
 pub use handshake::ClientIdentity;

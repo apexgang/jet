@@ -216,6 +216,26 @@ pub struct EventPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum EventKind {
+	/// An authenticated direct edit changed one file through a registered root.
+	#[serde(rename = "user_edit.applied")]
+	UserEditApplied {
+		/// Root through which the edit was authorized.
+		target: crate::FileTarget,
+		/// Validated path relative to that root.
+		path: crate::RelativePath,
+		/// Exact state before the edit.
+		before_revision: crate::FileRevision,
+		/// Exact state after the edit.
+		after_revision: crate::FileRevision,
+	},
+	/// One structured review batch entered the normal Turn queue.
+	#[serde(rename = "review.submitted")]
+	ReviewSubmitted {
+		/// Queue admission that owns the review.
+		turn_id: Uuid,
+		/// Comments in the order the user submitted them.
+		comments: Vec<crate::ReviewComment>,
+	},
 	/// A Workspace terminal changed lifecycle, without recording terminal bytes.
 	#[serde(rename = "terminal.state_changed")]
 	TerminalStateChanged {
@@ -511,7 +531,9 @@ impl EventKind {
 	pub fn encode(&self) -> Result<EventPayload, CoreError> {
 		match self {
 			Self::Unrecognized(payload) => Ok(payload.clone()),
-			Self::ChangeEvidenceRecorded { .. }
+			Self::UserEditApplied { .. }
+			| Self::ReviewSubmitted { .. }
+			| Self::ChangeEvidenceRecorded { .. }
 			| Self::ChangeCheckpointRecorded { .. }
 			| Self::TurnInput { .. }
 			| Self::TurnChanged { .. }

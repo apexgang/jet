@@ -39,7 +39,10 @@ use crate::workspace::{
 	BaseSelection, SeedSelection, WorkingTreeRequest, Workspace, WorkspaceBase,
 	WorkspaceSeed,
 };
-use crate::{ControlError, decode_control};
+use crate::{
+	ControlError, EditableFile, FileRevision, FileTarget, ReviewComment,
+	decode_control,
+};
 
 fn json(value: &impl serde::Serialize) -> String {
 	serde_json::to_string(value).unwrap()
@@ -945,4 +948,97 @@ fn external_conversations_and_imports_have_the_agreed_wire_shape() {
 			r#"{"kind":"command","id":17,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"resume_imported_conversation","import_id":"00000000-0000-0000-0000-000000000000","retention":"retain","working_tree":{"kind":"local_checkout","project_id":"00000000-0000-0000-0000-000000000000"}}}"#.to_string(),
 		)
 	);
+}
+
+#[test]
+fn direct_edits_and_reviews_have_the_agreed_wire_shape() {
+	let target = FileTarget::Project {
+		project_id: Uuid::nil(),
+	};
+	let revision = FileRevision {
+		object: "a".repeat(40),
+		mode: "100644".into(),
+	};
+	let query = ClientMessage::Query {
+		id: 18,
+		query: QueryRequest::EditableFile {
+			target,
+			path: "src/lib.rs".into(),
+		},
+	};
+	let result = ServerMessage::QueryResult {
+		id: 18,
+		result: QueryResponse::EditableFile(EditableFile {
+			cursor: 9,
+			target,
+			path: "src/lib.rs".into(),
+			revision: revision.clone(),
+			content: Some("fn main() {}\n".into()),
+		}),
+	};
+	let edit = ClientMessage::Command {
+		id: 19,
+		command_id: Uuid::nil(),
+		command: CommandRequest::ApplyUserEdit {
+			target,
+			path: "src/lib.rs".into(),
+			expected_revision: revision,
+			content: "fn main() { work(); }\n".into(),
+		},
+	};
+	let review = ClientMessage::Command {
+		id: 20,
+		command_id: Uuid::nil(),
+		command: CommandRequest::SubmitReview {
+			conversation_id: Uuid::nil(),
+			comments: vec![ReviewComment {
+				path: "src/lib.rs".into(),
+				line: 4,
+				comment: "Keep the error structured.".into(),
+			}],
+		},
+	};
+	assert_eq!(
+		(json(&query), json(&result), json(&edit), json(&review)),
+		(
+			r#"{"kind":"query","id":18,"query":{"type":"editable_file","target":{"kind":"project","project_id":"00000000-0000-0000-0000-000000000000"},"path":"src/lib.rs"}}"#.into(),
+			r#"{"kind":"query_result","id":18,"result":{"type":"editable_file","cursor":"9","target":{"kind":"project","project_id":"00000000-0000-0000-0000-000000000000"},"path":"src/lib.rs","revision":{"object":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mode":"100644"},"content":"fn main() {}\n"}}"#.into(),
+			r#"{"kind":"command","id":19,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"apply_user_edit","target":{"kind":"project","project_id":"00000000-0000-0000-0000-000000000000"},"path":"src/lib.rs","expected_revision":{"object":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mode":"100644"},"content":"fn main() { work(); }\n"}}"#.into(),
+			r#"{"kind":"command","id":20,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"submit_review","conversation_id":"00000000-0000-0000-0000-000000000000","comments":[{"path":"src/lib.rs","line":4,"comment":"Keep the error structured."}]}}"#.into(),
+		)
+	);
+}
+
+#[test]
+fn maximum_direct_edit_content_fits_one_control_frame_when_json_escaped() {
+	let content = "\0".repeat(128 * 1024);
+	let target = FileTarget::Project {
+		project_id: Uuid::nil(),
+	};
+	let revision = FileRevision {
+		object: "a".repeat(40),
+		mode: "100644".into(),
+	};
+	let command = ClientMessage::Command {
+		id: 1,
+		command_id: Uuid::nil(),
+		command: CommandRequest::ApplyUserEdit {
+			target,
+			path: "notes.md".into(),
+			expected_revision: revision.clone(),
+			content: content.clone(),
+		},
+	};
+	let response = ServerMessage::QueryResult {
+		id: 2,
+		result: QueryResponse::EditableFile(EditableFile {
+			cursor: 0,
+			target,
+			path: "notes.md".into(),
+			revision,
+			content: Some(content),
+		}),
+	};
+	assert!(json(&command).len() <= crate::MAX_CONTROL_FRAME);
+	assert!(json(&response).len() <= crate::MAX_CONTROL_FRAME);
 }

@@ -62,28 +62,32 @@ pub(crate) async fn query(
 					c.after
 				}
 			};
-			let (after, outcome, files, artifact) =
-				if to == 0 && !matches!(scope, DiffScope::Turn { .. }) {
-					(
-						tracking.baseline.clone(),
-						None,
-						vec![],
-						tracking.baseline.uncommitted.clone(),
-					)
-				} else {
-					let c: ChangeCheckpoint = run_state::decode(
-						&tx.change_checkpoint(run_id.0, to)
-							.await?
-							.ok_or_else(missing)?,
-					)?;
-					(
-						c.after,
-						matches!(scope, DiffScope::Turn { .. })
-							.then_some(c.outcome),
-						c.files,
-						c.artifact,
-					)
-				};
+			let (after, outcome, files, artifact) = if scope == DiffScope::Final
+			{
+				let after = tracking.terminal.clone().ok_or_else(missing)?;
+				let artifact = after.uncommitted.clone();
+				(after, None, vec![], artifact)
+			} else if to == 0 && !matches!(scope, DiffScope::Turn { .. }) {
+				(
+					tracking.baseline.clone(),
+					None,
+					vec![],
+					tracking.baseline.uncommitted.clone(),
+				)
+			} else {
+				let c: ChangeCheckpoint = run_state::decode(
+					&tx.change_checkpoint(run_id.0, to)
+						.await?
+						.ok_or_else(missing)?,
+				)?;
+				(
+					c.after,
+					matches!(scope, DiffScope::Turn { .. })
+						.then_some(c.outcome),
+					c.files,
+					c.artifact,
+				)
+			};
 			let mut checkpoints = Vec::new();
 			if !matches!(scope, DiffScope::Turn { .. }) {
 				let end = if scope == DiffScope::Current {
@@ -142,21 +146,31 @@ pub(crate) async fn query(
 		let mut evidence = Vec::new();
 		let mut previous = diff.before.clone();
 		for checkpoint in checkpoints {
-			append_transitions(
-				&mut evidence,
+			let mut before_files =
 				checkpoint_capture::files(&root, &previous, &checkpoint.before)
-					.await?,
-			);
+					.await?;
+			if !checkpoint.before_evidence_incomplete {
+				crate::change_evidence::attribute(
+					&mut before_files,
+					&checkpoint.before_evidence,
+				);
+			}
+			append_transitions(&mut evidence, before_files);
 			append_transitions(&mut evidence, checkpoint.files);
 			previous = checkpoint.after;
 		}
 		if scope == DiffScope::Current {
 			if let Some(active) = tracking.active {
-				append_transitions(
-					&mut evidence,
+				let mut before_files =
 					checkpoint_capture::files(&root, &previous, &active)
-						.await?,
-				);
+						.await?;
+				if !tracking.between_turn_evidence_incomplete {
+					crate::change_evidence::attribute(
+						&mut before_files,
+						&tracking.between_turn_evidence,
+					);
+				}
+				append_transitions(&mut evidence, before_files);
 				let mut active_files =
 					checkpoint_capture::files(&root, &active, &diff.after)
 						.await?;
@@ -168,12 +182,28 @@ pub(crate) async fn query(
 				}
 				append_transitions(&mut evidence, active_files);
 			} else {
-				append_transitions(
-					&mut evidence,
+				let mut between_files =
 					checkpoint_capture::files(&root, &previous, &diff.after)
-						.await?,
+						.await?;
+				if !tracking.between_turn_evidence_incomplete {
+					crate::change_evidence::attribute(
+						&mut between_files,
+						&tracking.between_turn_evidence,
+					);
+				}
+				append_transitions(&mut evidence, between_files);
+			}
+		} else if scope == DiffScope::Final {
+			let mut terminal_files =
+				checkpoint_capture::files(&root, &previous, &diff.after)
+					.await?;
+			if !tracking.between_turn_evidence_incomplete {
+				crate::change_evidence::attribute(
+					&mut terminal_files,
+					&tracking.between_turn_evidence,
 				);
 			}
+			append_transitions(&mut evidence, terminal_files);
 		}
 		crate::change_evidence::attribute(&mut diff.files, &evidence);
 		diff.artifact = checkpoint_capture::patch(

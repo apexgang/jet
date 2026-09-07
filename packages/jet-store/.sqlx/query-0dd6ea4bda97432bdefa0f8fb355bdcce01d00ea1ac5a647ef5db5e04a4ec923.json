@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO user_edit_intents (actor_kind, actor_id, command_id, request_digest, recorded_at_unix_ms, plan) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(actor_kind, actor_id, command_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "0dd6ea4bda97432bdefa0f8fb355bdcce01d00ea1ac5a647ef5db5e04a4ec923"
+}

@@ -51,6 +51,7 @@ mod stream;
 mod stream_control;
 mod stream_error;
 mod terminal;
+mod user_input;
 mod workspace;
 pub use terminal::{
 	TerminalConfig, TerminalDescriptor, TerminalHelperAction,
@@ -59,6 +60,7 @@ pub use terminal::{
 };
 mod turn;
 pub use turn::{Turn, TurnQueue, TurnSource, TurnState};
+pub use user_input::{EditableFile, FileRevision, FileTarget, ReviewComment};
 
 pub use helper::{
 	HelperCommand, HelperConfig, HelperDescriptor, HelperEvent, HelperHello,
@@ -117,8 +119,8 @@ pub use handshake::{
 	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SEARCH_MINOR,
 	SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
 	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, TURN_QUEUE_MINOR,
-	VersionRange, WORKSPACE_PROMOTION_MINOR, WORKSPACE_TERMINALS_MINOR,
-	WORKSPACES_MINOR,
+	USER_INPUT_MINOR, VersionRange, WORKSPACE_PROMOTION_MINOR,
+	WORKSPACE_TERMINALS_MINOR, WORKSPACES_MINOR,
 };
 pub use import::{
 	ConversationOrigin, ExternalConversation, ExternalConversationList,

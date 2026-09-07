@@ -4,7 +4,7 @@ use jet_store::StoreError;
 use serde::{Deserialize, Serialize};
 
 use crate::capability::Capability;
-use crate::{EventSequence, Revision, Run, RunId};
+use crate::{EventSequence, FileRevision, FileTarget, Revision, Run, RunId};
 
 /// Stable metadata explaining how a client must restart a stale read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,8 +29,17 @@ pub enum RestartMetadata {
 }
 
 /// Structured action a caller may take to recover from an error.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RecoveryAction {
+	/// Refresh a file before preparing another direct edit.
+	RefreshFile {
+		/// Registered root to refresh.
+		target: FileTarget,
+		/// Validated relative path.
+		path: String,
+		/// Exact state now authoritative.
+		current_revision: FileRevision,
+	},
 	/// Refresh the current state of a Run before preparing another Command.
 	RefreshRun {
 		/// Run whose current state should be queried.
@@ -209,12 +218,28 @@ impl CoreError {
 		}
 	}
 
+	pub(crate) fn conflict_with_action(
+		code: &'static str,
+		message: impl Into<String>,
+		action: RecoveryAction,
+	) -> Self {
+		Self {
+			category: ErrorCategory::Conflict,
+			code: code.into(),
+			retryable: false,
+			message: message.into(),
+			detail: None,
+			revision_conflict: None,
+			recovery_actions: vec![action],
+		}
+	}
+
 	pub(crate) fn revision_conflict(
 		code: &'static str,
 		message: impl Into<String>,
 		revision_conflict: RevisionConflict,
 	) -> Self {
-		let recovery_actions = match revision_conflict.safe_state {
+		let recovery_actions = match &revision_conflict.safe_state {
 			ConflictState::Run(run) => {
 				vec![RecoveryAction::RefreshRun { run_id: run.run_id }]
 			}

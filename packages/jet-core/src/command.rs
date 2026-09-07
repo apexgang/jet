@@ -103,11 +103,34 @@ impl CommandEnvelope {
 			request_digest: digest.finalize().into(),
 		})
 	}
+
+	#[cfg(test)]
+	pub(crate) fn request_digest(&self) -> [u8; 32] {
+		self.request_digest
+	}
 }
 
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
+	/// Apply a bounded UTF-8 edit through a registered root.
+	ApplyUserEdit {
+		/// Registered Project or Workspace root.
+		target: crate::FileTarget,
+		/// Validated relative path.
+		path: crate::RelativePath,
+		/// Exact file state the editor read.
+		expected_revision: crate::FileRevision,
+		/// Complete replacement content.
+		content: String,
+	},
+	/// Submit structured inline comments as one queued user Turn.
+	SubmitReview {
+		/// Conversation whose queue receives the Turn.
+		conversation_id: ConversationId,
+		/// Validated comments in submission order.
+		comments: Vec<crate::ReviewComment>,
+	},
 	/// Open a Workspace-owned terminal.
 	OpenTerminal {
 		/// Registered Workspace.
@@ -311,7 +334,9 @@ impl Command {
 	/// (ADR-0086).
 	pub(crate) fn required_capabilities(&self) -> &'static [Capability] {
 		match self {
-			Self::SubmitTurn { .. } | Self::WithdrawTurn { .. } => &[],
+			Self::SubmitTurn { .. }
+			| Self::SubmitReview { .. }
+			| Self::WithdrawTurn { .. } => &[],
 			Self::StartRun { .. } => GIT,
 			Self::SetSetting {
 				key: SettingKey::GitAutoCommit,
@@ -319,6 +344,7 @@ impl Command {
 				..
 			}
 			| Self::RegisterProject { .. }
+			| Self::ApplyUserEdit { .. }
 			| Self::CreateConversation {
 				working_tree: WorkingTreeRequest::Workspace { .. },
 				..
@@ -370,6 +396,8 @@ impl Command {
 /// The durable result of a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
+	/// A direct edit committed to its registered root.
+	UserEditApplied(crate::UserEdit),
 	/// Terminal request committed.
 	Terminal(crate::WorkspaceTerminal),
 	/// Durable withdrawal of queued user work.
@@ -497,7 +525,14 @@ impl Core {
 		let security = *self.security.read().await;
 		let recorded_at_unix_ms = self.now_unix_ms();
 		let prepared = self
-			.admit(actor, command_id, &command, recorded_at_unix_ms)
+			.admit(
+				actor,
+				command_id,
+				&command,
+				request_digest,
+				security,
+				recorded_at_unix_ms,
+			)
 			.await?;
 		let mut invalidated_client = None;
 		let outcome = self
@@ -532,6 +567,7 @@ impl Core {
 					command,
 					prepared,
 					TransactionContext {
+						core: self,
 						security,
 						workspace_home: &self.workspace_home,
 					},
@@ -606,7 +642,8 @@ fn redacted_for_receipt(
 			})
 		}
 		Ok(
-			outcome @ (CommandOutcome::TurnWithdrawn(_)
+			outcome @ (CommandOutcome::UserEditApplied(_)
+			| CommandOutcome::TurnWithdrawn(_)
 			| CommandOutcome::TurnAdmitted(_)
 			| CommandOutcome::ConversationCreated(_)
 			| CommandOutcome::ExecutionResolutionRecorded(_)
@@ -635,6 +672,8 @@ fn redacted_for_receipt(
 /// What the core brings to a Command's transaction that neither the
 /// Command nor its preparation carries.
 struct TransactionContext<'a> {
+	/// Core services needed by trusted in-process adapters.
+	core: &'a Core,
 	/// Whether the Plane vouched for its Security audit when the Command
 	/// was admitted.
 	security: SecurityState,
@@ -652,10 +691,42 @@ async fn execute_new(
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
 	let TransactionContext {
+		core,
 		security,
 		workspace_home,
 	} = context;
 	match command {
+		Command::ApplyUserEdit { .. } => {
+			let Prepared::UserEdit(prepared) = prepared else {
+				return Err(CoreError::internal(
+					"user_edit.unprepared",
+					"a direct edit reached its transaction without preparation",
+				));
+			};
+			crate::user_input::apply(
+				core,
+				tx,
+				actor,
+				command_id,
+				prepared,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::SubmitReview {
+			conversation_id,
+			comments,
+		} => {
+			crate::turn_queue::admit_review(
+				tx,
+				actor,
+				command_id,
+				conversation_id,
+				comments,
+				now_unix_ms,
+			)
+			.await
+		}
 		Command::OpenTerminal { .. } => {
 			let Prepared::Terminal(plan) = prepared else {
 				return Err(crate::terminal::unavailable());

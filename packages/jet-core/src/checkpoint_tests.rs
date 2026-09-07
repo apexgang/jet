@@ -340,6 +340,421 @@ async fn only_complete_content_evidence_attributes_user_terminal_and_harness_cha
 }
 
 #[tokio::test]
+async fn a_direct_edit_records_user_evidence_for_the_active_turn() {
+	let dir = tempfile::tempdir().unwrap();
+	let (core, sender) = start(dir.path()).await;
+	let root = dir.path().join("repo");
+	let project_id = register_repository(&core, &root).await;
+	std::fs::write(root.join("notes.md"), "Before\n").unwrap();
+	let CommandOutcome::ConversationCreated(conversation) = core
+		.execute(
+			&actor(),
+			request(Command::CreateConversation {
+				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRequest::LocalCheckout { project_id },
+			}),
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("Conversation")
+	};
+	let CommandOutcome::RunCreated(run) = core
+		.execute(
+			&actor(),
+			request(Command::StartRun {
+				conversation_id: conversation.conversation_id,
+				craft: "fake".into(),
+				prompt: "Edit".into(),
+			}),
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("Run")
+	};
+	core.perform_runs().await.unwrap();
+	wait_for(&core, run.run_id, RunLifecycle::Active).await;
+	let target = FileTarget::Project { project_id };
+	let QueryResult::EditableFile(file) = core
+		.query(
+			&actor(),
+			Query::EditableFile {
+				target,
+				path: RelativePath::parse("notes.md").unwrap(),
+			},
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("Editable file")
+	};
+	let CommandOutcome::UserEditApplied(_) = core
+		.execute(
+			&actor(),
+			request(Command::ApplyUserEdit {
+				target,
+				path: RelativePath::parse("notes.md").unwrap(),
+				expected_revision: file.revision,
+				content: "After\n".into(),
+			}),
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("User edit")
+	};
+	sender
+		.send(RunObservation::Completed("native".into()))
+		.await
+		.unwrap();
+	sender
+		.send(RunObservation::Progress {
+			offset: 1,
+			checkpoint: String::new(),
+		})
+		.await
+		.unwrap();
+	let diff = wait_diff(&core, run.run_id, DiffScope::Turn { turn: 1 }).await;
+	let QueryResult::RunExecution(execution) = core
+		.query(&actor(), Query::RunExecution { run_id: run.run_id })
+		.await
+		.unwrap()
+	else {
+		panic!("Run execution")
+	};
+	assert_eq!(execution.run.lifecycle, RunLifecycle::Active);
+	let edited = diff
+		.files
+		.iter()
+		.find(|file| file.path == "notes.md")
+		.expect("edited file");
+	assert_eq!(
+		edited.origin,
+		ChangeOrigin::UserEdit {
+			client_id: actor().client_id(),
+		}
+	);
+	let QueryResult::EditableFile(file) = core
+		.query(
+			&actor(),
+			Query::EditableFile {
+				target,
+				path: RelativePath::parse("notes.md").unwrap(),
+			},
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("Editable file")
+	};
+	let CommandOutcome::UserEditApplied(_) = core
+		.execute(
+			&actor(),
+			request(Command::ApplyUserEdit {
+				target,
+				path: RelativePath::parse("notes.md").unwrap(),
+				expected_revision: file.revision,
+				content: "Between turns\n".into(),
+			}),
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("User edit between turns")
+	};
+	assert_eq!(
+		std::fs::read_to_string(root.join("notes.md")).unwrap(),
+		"Between turns\n"
+	);
+	let between_turn_evidence = core
+		.store
+		.read(async |tx| {
+			let execution = tx.run_execution(run.run_id.0).await?.unwrap();
+			let state: crate::run_state::State =
+				crate::run_state::decode(&execution.state)?;
+			Ok::<_, CoreError>(state.changes.unwrap().between_turn_evidence)
+		})
+		.await
+		.unwrap();
+	assert_eq!(between_turn_evidence.len(), 1);
+	let current = wait_diff(&core, run.run_id, DiffScope::Current).await;
+	assert_eq!(
+		current
+			.files
+			.iter()
+			.find(|file| file.path == "notes.md")
+			.expect("current direct edit")
+			.origin,
+		ChangeOrigin::UserEdit {
+			client_id: actor().client_id(),
+		}
+	);
+	sender.send(RunObservation::TurnStarted).await.unwrap();
+	sender
+		.send(RunObservation::TurnEnded(TurnOutcome::Completed))
+		.await
+		.unwrap();
+	sender
+		.send(RunObservation::Progress {
+			offset: 2,
+			checkpoint: String::new(),
+		})
+		.await
+		.unwrap();
+	let subsequent = wait_diff(
+		&core,
+		run.run_id,
+		DiffScope::Historical {
+			from_turn: 0,
+			to_turn: 2,
+		},
+	)
+	.await;
+	assert_eq!(
+		subsequent
+			.files
+			.iter()
+			.find(|file| file.path == "notes.md")
+			.expect("direct edit retained by a later checkpoint")
+			.origin,
+		ChangeOrigin::UserEdit {
+			client_id: actor().client_id(),
+		}
+	);
+	let QueryResult::EditableFile(file) = core
+		.query(
+			&actor(),
+			Query::EditableFile {
+				target,
+				path: RelativePath::parse("notes.md").unwrap(),
+			},
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("Editable file")
+	};
+	let CommandOutcome::UserEditApplied(_) = core
+		.execute(
+			&actor(),
+			request(Command::ApplyUserEdit {
+				target,
+				path: RelativePath::parse("notes.md").unwrap(),
+				expected_revision: file.revision,
+				content: "Terminal gap\n".into(),
+			}),
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("User edit before terminal boundary")
+	};
+	sender.send(RunObservation::Ended(Some(0))).await.unwrap();
+	sender
+		.send(RunObservation::Progress {
+			offset: 3,
+			checkpoint: String::new(),
+		})
+		.await
+		.unwrap();
+	wait_for(&core, run.run_id, RunLifecycle::Completed).await;
+	let final_diff = wait_diff(&core, run.run_id, DiffScope::Final).await;
+	assert_eq!(
+		final_diff
+			.files
+			.iter()
+			.find(|file| file.path == "notes.md")
+			.expect("terminal-gap direct edit")
+			.origin,
+		ChangeOrigin::UserEdit {
+			client_id: actor().client_id(),
+		}
+	);
+}
+
+#[tokio::test]
+async fn a_direct_edit_intent_finishes_after_restart_before_receipt_replay() {
+	let dir = tempfile::tempdir().unwrap();
+	let (core, _sender) = start(dir.path()).await;
+	let root = dir.path().join("repo");
+	let project_id = register_repository(&core, &root).await;
+	std::fs::write(root.join("notes.md"), "Before\n").unwrap();
+	std::fs::write(root.join("external.md"), "Before\n").unwrap();
+	let CommandOutcome::ConversationCreated(conversation) = core
+		.execute(
+			&actor(),
+			request(Command::CreateConversation {
+				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRequest::LocalCheckout { project_id },
+			}),
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("Conversation")
+	};
+	let CommandOutcome::RunCreated(run) = core
+		.execute(
+			&actor(),
+			request(Command::StartRun {
+				conversation_id: conversation.conversation_id,
+				craft: "fake".into(),
+				prompt: "Edit".into(),
+			}),
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("Run")
+	};
+	core.perform_runs().await.unwrap();
+	wait_for(&core, run.run_id, RunLifecycle::Active).await;
+	let target = FileTarget::Project { project_id };
+	let QueryResult::EditableFile(file) = core
+		.query(
+			&actor(),
+			Query::EditableFile {
+				target,
+				path: RelativePath::parse("notes.md").unwrap(),
+			},
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("Editable file")
+	};
+	let command_id = crate::test_support::command_id();
+	let command = Command::ApplyUserEdit {
+		target,
+		path: RelativePath::parse("notes.md").unwrap(),
+		expected_revision: file.revision.clone(),
+		content: "After\n".into(),
+	};
+	let envelope = crate::test_support::request_with_id(command_id, command);
+	crate::user_input::prepare(
+		&core,
+		crate::user_input::IntentContext {
+			actor: &actor(),
+			command_id,
+			request_digest: envelope.request_digest(),
+			recorded_at_unix_ms: core.now_unix_ms(),
+		},
+		target,
+		RelativePath::parse("notes.md").unwrap(),
+		file.revision,
+		"After\n".into(),
+	)
+	.await
+	.unwrap();
+	assert_eq!(
+		std::fs::read_to_string(root.join("notes.md")).unwrap(),
+		"Before\n"
+	);
+	let QueryResult::EditableFile(external) = core
+		.query(
+			&actor(),
+			Query::EditableFile {
+				target,
+				path: RelativePath::parse("external.md").unwrap(),
+			},
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("Editable file")
+	};
+	let external_command_id = crate::test_support::command_id();
+	let external_command = Command::ApplyUserEdit {
+		target,
+		path: RelativePath::parse("external.md").unwrap(),
+		expected_revision: external.revision.clone(),
+		content: "After\n".into(),
+	};
+	let external_envelope = crate::test_support::request_with_id(
+		external_command_id,
+		external_command,
+	);
+	crate::user_input::prepare(
+		&core,
+		crate::user_input::IntentContext {
+			actor: &actor(),
+			command_id: external_command_id,
+			request_digest: external_envelope.request_digest(),
+			recorded_at_unix_ms: core.now_unix_ms(),
+		},
+		target,
+		RelativePath::parse("external.md").unwrap(),
+		external.revision,
+		"After\n".into(),
+	)
+	.await
+	.unwrap();
+	std::fs::write(root.join("external.md"), "After\n").unwrap();
+	core.close().await;
+
+	let (restarted, _) = start(dir.path()).await;
+	restarted.perform_user_edits().await.unwrap();
+	assert_eq!(
+		std::fs::read_to_string(root.join("notes.md")).unwrap(),
+		"After\n"
+	);
+	assert_eq!(
+		std::fs::read_to_string(root.join("external.md")).unwrap(),
+		"After\n"
+	);
+	let CommandOutcome::UserEditApplied(replayed) =
+		restarted.execute(&actor(), envelope).await.unwrap()
+	else {
+		panic!("replayed user edit")
+	};
+	let QueryResult::EditableFile(opened) = restarted
+		.query(
+			&actor(),
+			Query::EditableFile {
+				target,
+				path: RelativePath::parse("notes.md").unwrap(),
+			},
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("Editable file")
+	};
+	assert_eq!(replayed.revision, opened.revision);
+	let CommandOutcome::UserEditApplied(_) = restarted
+		.execute(&actor(), external_envelope)
+		.await
+		.unwrap()
+	else {
+		panic!("replayed externally satisfied edit")
+	};
+	let QueryResult::Events(events) = restarted
+		.query(
+			&actor(),
+			Query::Events {
+				after: EventSequence(0),
+			},
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("Events")
+	};
+	let evidence_paths = events
+		.events
+		.into_iter()
+		.filter_map(|event| match event.kind {
+			EventKind::ChangeEvidenceRecorded { evidence, .. } => {
+				Some(evidence.path)
+			}
+			_ => None,
+		})
+		.collect::<Vec<_>>();
+	assert_eq!(evidence_paths, vec!["notes.md"]);
+}
+
+#[tokio::test]
 async fn large_patches_remain_readable_in_bounded_chunks_without_following_links()
  {
 	let dir = tempfile::tempdir().unwrap();

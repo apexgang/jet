@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT actor_kind, actor_id, command_id, request_digest, recorded_at_unix_ms, plan FROM user_edit_intents ORDER BY rowid",
+  "describe": {
+    "columns": [
+      {
+        "name": "actor_kind",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_edit_intents",
+            "name": "actor_kind"
+          }
+        }
+      },
+      {
+        "name": "actor_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_edit_intents",
+            "name": "actor_id"
+          }
+        }
+      },
+      {
+        "name": "command_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_edit_intents",
+            "name": "command_id"
+          }
+        }
+      },
+      {
+        "name": "request_digest",
+        "ordinal": 3,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "user_edit_intents",
+            "name": "request_digest"
+          }
+        }
+      },
+      {
+        "name": "recorded_at_unix_ms",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "user_edit_intents",
+            "name": "recorded_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "plan",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_edit_intents",
+            "name": "plan"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d524122db78b90bd7000408e71cb6223607fc7752758572383ba81a4d821394d"
+}
