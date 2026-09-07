@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO conversations\n\t\t\t\t(conversation_id, retention, working_tree, project_id,\n\t\t\t\t\timport_id, fork_source_conversation_id,\n\t\t\t\t\tfork_source_run_id, fork_checkpoint_turn,\n\t\t\t\t\tcreated_at_unix_ms)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "ab76db6a4688680b336bfa18d978f28ee1716c1cd67fb6139877f7a0678f75da"
+}

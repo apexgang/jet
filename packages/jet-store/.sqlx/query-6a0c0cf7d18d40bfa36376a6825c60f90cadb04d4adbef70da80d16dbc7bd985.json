@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT conversation_id AS \"conversation_id!\", retention,\n\t\t\t\tworking_tree, project_id, import_id, created_at_unix_ms\n\t\t\t FROM conversations\n\t\t\t WHERE conversation_id = ?1",
+  "query": "SELECT conversation_id AS \"conversation_id!\", retention,\n\t\t\t\tworking_tree, project_id, import_id,\n\t\t\t\tfork_source_conversation_id, fork_source_run_id,\n\t\t\t\tfork_checkpoint_turn, created_at_unix_ms\n\t\t\t FROM conversations\n\t\t\t WHERE conversation_id = ?1",
   "describe": {
     "columns": [
       {
@@ -59,8 +59,41 @@
         }
       },
       {
-        "name": "created_at_unix_ms",
+        "name": "fork_source_conversation_id",
         "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "fork_source_conversation_id"
+          }
+        }
+      },
+      {
+        "name": "fork_source_run_id",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "fork_source_run_id"
+          }
+        }
+      },
+      {
+        "name": "fork_checkpoint_turn",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "fork_checkpoint_turn"
+          }
+        }
+      },
+      {
+        "name": "created_at_unix_ms",
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -79,8 +112,11 @@
       false,
       true,
       true,
+      true,
+      true,
+      true,
       false
     ]
   },
-  "hash": "9c46429c03fea471cae785fc5e3c332b8d8b801a0c98f2640cb76eb68debf29c"
+  "hash": "6a0c0cf7d18d40bfa36376a6825c60f90cadb04d4adbef70da80d16dbc7bd985"
 }

@@ -19,6 +19,7 @@ mod audit_retention;
 mod checkpoint;
 mod command;
 mod conversation;
+mod conversation_fork;
 mod effect;
 mod execution_recovery;
 mod import;
@@ -63,8 +64,9 @@ pub use audit_epoch::AuditGap;
 pub use audit_head::{AuditHead, audit_head_path};
 pub use audit_integrity::{AuditBreach, AuditIntegrity, AuditIntegrityFailure};
 pub use conversation::CONVERSATION_PAGE_LIMIT;
+pub use conversation_fork::ForkLaunchContextRecord;
 pub use import::{ImportedConversationRecord, NewImportedConversation};
-pub use journal::EVENT_COMPACTION_BATCH_LIMIT;
+pub use journal::{EVENT_COMPACTION_BATCH_LIMIT, ForkContextEvents};
 pub use paired_client::{
 	NewPairedClient, PairedClientAccess, PairedClientRecord,
 };
@@ -358,3 +360,7 @@ fn is_unavailable(error: &sqlx::Error) -> bool {
 #[cfg(test)]
 #[path = "store_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "conversation_fork_tests.rs"]
+mod conversation_fork_tests;

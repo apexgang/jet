@@ -17,8 +17,8 @@ use crate::conversation::{
 use crate::event::{Actor, Event};
 use crate::handshake::{ClientHello, ServerHello, VersionRange};
 use crate::import::{
-	ExternalConversation, ExternalConversationList, ExternalOrigin,
-	ExternalProcess, ImportedConversation,
+	ConversationOrigin, ExternalConversation, ExternalConversationList,
+	ExternalOrigin, ExternalProcess, ImportedConversation,
 };
 use crate::pairing::{
 	ClientPublicKey, PairedClient, PairedClientAccess, PairingGate,
@@ -181,6 +181,28 @@ fn conversation_commands_and_results_have_the_agreed_wire_shape() {
 		(
 			r#"{"kind":"command","id":2,"command_id":"00000000-0000-0000-0000-000000000000","command":{"type":"create_conversation","retention":"retain"}}"#.to_string(),
 			r#"{"kind":"command_result","id":2,"result":{"type":"conversation_created","conversation_id":"00000000-0000-0000-0000-000000000000","retention":"retain","created_at_unix_ms":1700000000000}}"#.to_string(),
+		)
+	);
+}
+
+#[test]
+fn conversation_forks_have_the_agreed_wire_shape() {
+	let source_conversation_id = Uuid::from_u128(1);
+	let source_run_id = Uuid::from_u128(2);
+	let command = CommandRequest::ForkConversation {
+		source_run_id,
+		checkpoint_turn: 7,
+	};
+	let origin = ConversationOrigin::Forked {
+		source_conversation_id,
+		source_run_id,
+		checkpoint_turn: 7,
+	};
+	assert_eq!(
+		(json(&command), json(&origin)),
+		(
+			r#"{"type":"fork_conversation","source_run_id":"00000000-0000-0000-0000-000000000002","checkpoint_turn":7}"#.to_string(),
+			r#"{"kind":"forked","source_conversation_id":"00000000-0000-0000-0000-000000000001","source_run_id":"00000000-0000-0000-0000-000000000002","checkpoint_turn":7}"#.to_string(),
 		)
 	);
 }

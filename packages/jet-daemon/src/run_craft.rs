@@ -1,6 +1,6 @@
 //! Owner-provisioned Craft declarations translated into an opaque execution pin.
 use crate::run_host::filesystem;
-use jet_core::{CoreError, PinnedCraft};
+use jet_core::{CoreError, ForkLaunchSource, PinnedCraft};
 use jet_protocol::{CraftSpecification, ProtocolVersion};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -70,7 +70,7 @@ pub(crate) async fn load(
 	let offer = jet_protocol::ProtocolOffer {
 		family: jet_protocol::ProtocolFamily::Craft,
 		versions: vec![jet_protocol::ProtocolVersion { major: 1, minor: 4 }],
-		capabilities: vec!["runs".into()],
+		capabilities: vec!["fork".into(), "runs".into()],
 	};
 	let negotiated = offer
 		.negotiate(
@@ -101,6 +101,52 @@ pub(crate) async fn load(
 	};
 	pin.verify().await?;
 	Ok(pin)
+}
+
+/// Chooses native delivery only from accepted, compatible Harness contracts.
+/// Missing or incompatible source execution metadata deliberately falls back
+/// to Core's provenance-marked context package.
+pub(crate) async fn prepare_fork(
+	mut plan: jet_core::LaunchPlan,
+	source: Option<ForkLaunchSource>,
+) -> Result<jet_core::LaunchPlan, CoreError> {
+	let Some(source) = source else {
+		return Ok(plan);
+	};
+	let destination = Contract::of(&plan.craft)?;
+	let Ok(source_contract) = Contract::of(&source.craft) else {
+		return Ok(plan);
+	};
+	let features = destination
+		.specification
+		.enabled_features()
+		.map_err(|_| unavailable())?;
+	let supports_fork = destination.craft_protocol.minor >= 4
+		&& destination.specification.harness
+			== source_contract.specification.harness
+		&& features.iter().any(|feature| feature == "fork")
+		&& destination
+			.specification
+			.protocol
+			.capabilities
+			.iter()
+			.any(|capability| capability == "fork");
+	let Some(identity) = source.native_conversation.filter(|identity| {
+		!identity.is_empty()
+			&& identity.len() <= 4096
+			&& !identity.chars().any(char::is_control)
+	}) else {
+		return Ok(plan);
+	};
+	if supports_fork {
+		let Some(fork) = plan.fork.as_mut() else {
+			return Err(unavailable());
+		};
+		// ASVS 8.3.1: a declaration enables negotiation but grants no new file,
+		// process, credential, or broker authority to the destination execution.
+		fork.source_native_conversation = Some(identity);
+	}
+	Ok(plan)
 }
 
 /// A later Run retains its accepted artifact and protocol, with fresh boot evidence.

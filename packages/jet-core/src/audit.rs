@@ -379,6 +379,7 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		}
 		Command::BeginAuditEpoch
 		| Command::CreateConversation { .. }
+		| Command::ForkConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
 		| Command::SubmitTurn { .. }
@@ -425,6 +426,7 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::ConfirmPairing { .. }
 		| Command::CompletePairing { .. }
 		| Command::CreateConversation { .. }
+		| Command::ForkConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
 		| Command::SubmitTurn { .. }

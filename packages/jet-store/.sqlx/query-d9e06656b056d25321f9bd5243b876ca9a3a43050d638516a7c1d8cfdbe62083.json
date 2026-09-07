@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO conversation_fork_launches\n\t\t\t\t(conversation_id, checkpoint_commit, checkpoint_tree,\n\t\t\t\t source_craft, source_native_conversation, context)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "d9e06656b056d25321f9bd5243b876ca9a3a43050d638516a7c1d8cfdbe62083"
+}

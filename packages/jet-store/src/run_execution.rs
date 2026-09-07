@@ -13,6 +13,27 @@ pub struct RunExecutionRecord {
 }
 
 impl ReadTransaction {
+	/// Whether this Conversation already owns a managed execution.
+	///
+	/// # Errors
+	/// Returns a store error if the query cannot complete.
+	pub async fn conversation_has_run_execution(
+		&mut self,
+		conversation_id: Uuid,
+	) -> Result<bool, StoreError> {
+		let conversation_id = conversation_id.to_string();
+		let found = sqlx::query_scalar!(
+			r#"SELECT EXISTS (
+				SELECT 1 FROM runs JOIN run_executions USING (run_id)
+				WHERE conversation_id = ?1
+			) AS "found!: bool""#,
+			conversation_id,
+		)
+		.fetch_one(self.connection())
+		.await?;
+		Ok(found)
+	}
+
 	/// Reads a bounded page of nonterminal managed Run identities for recovery.
 	///
 	/// # Errors

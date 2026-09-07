@@ -6,6 +6,7 @@
 
 mod checkpoint_requests;
 mod connection;
+mod fork_requests;
 mod handshake;
 mod import_requests;
 mod pairing_requests;

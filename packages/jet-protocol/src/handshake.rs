@@ -16,6 +16,9 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// not know (ADR-0019).
 pub const PROTOCOL_MINOR: u32 = 19;
 
+/// Conversation forks from immutable Change checkpoints.
+pub const CONVERSATION_FORKS_MINOR: u32 = 19;
+
 /// Interrupt turn, Stop Run, and bounded Query timeouts.
 pub const EXECUTION_CONTROL_MINOR: u32 = 19;
 /// Change checkpoints and evidence-backed diff Queries.

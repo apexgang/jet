@@ -80,5 +80,14 @@ pub(super) fn origin(origin: ConversationOrigin) -> wire::ConversationOrigin {
 				import_id: import_id.0,
 			}
 		}
+		ConversationOrigin::Forked {
+			source_conversation_id,
+			source_run_id,
+			checkpoint_turn,
+		} => wire::ConversationOrigin::Forked {
+			source_conversation_id: source_conversation_id.0,
+			source_run_id: source_run_id.0,
+			checkpoint_turn,
+		},
 	}
 }

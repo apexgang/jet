@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS (\n\t\t\t\tSELECT 1 FROM runs JOIN run_executions USING (run_id)\n\t\t\t\tWHERE conversation_id = ?1\n\t\t\t) AS \"found!: bool\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "found!: bool",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9f8986f981beabc1dda49f38b9dd74793372947d9f5199613c9b90eb12ebaf98"
+}

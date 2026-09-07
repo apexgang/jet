@@ -20,7 +20,9 @@ export type CraftFeature = { name: string; required?: boolean };
 
 export type CraftFileChange = { activity_id: string; after_mode: string; after_object: string; before_mode: string; before_object: string; path: string };
 
-export type CraftHello = { execution_id: string; protocol: ProtocolOffer; resume?: CraftResume | null; specification: ProtocolOffer };
+export type CraftFork = { checkpoint_commit: string; checkpoint_tree: string; checkpoint_turn: number; source_conversation_id: string; source_native_conversation: string; source_run_id: string };
+
+export type CraftHello = { execution_id: string; fork?: CraftFork | null; protocol: ProtocolOffer; resume?: CraftResume | null; specification: ProtocolOffer };
 
 export type CraftHostAccess = { kind: "executable"; name: string } | { kind: "filesystem"; path: string } | { kind: "environment"; name: string } | { destination: string; kind: "network" };
 
