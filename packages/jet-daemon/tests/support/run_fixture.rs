@@ -97,6 +97,7 @@ fn launch(text: &str, root: &Path) -> HelperCommand {
 			program: "/missing-jet-test-harness".into(),
 			arguments: vec![],
 			input: format!("{text}\n"),
+			input_mode: NativeInputMode::Sealed,
 		};
 	}
 	if root.join("deaf").exists() {
@@ -104,6 +105,7 @@ fn launch(text: &str, root: &Path) -> HelperCommand {
 			program: "/bin/sh".into(),
 			arguments: vec!["-c".into(), DEAF_HARNESS.into()],
 			input: format!("{text}\n"),
+			input_mode: NativeInputMode::Sealed,
 		};
 	}
 	HelperCommand::Launch {
@@ -115,6 +117,7 @@ fn launch(text: &str, root: &Path) -> HelperCommand {
 			"fixture::fake_harness_process".into(),
 		],
 		input: format!("{text}\n"),
+		input_mode: NativeInputMode::Sealed,
 	}
 }
 

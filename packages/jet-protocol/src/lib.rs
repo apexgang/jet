@@ -65,7 +65,7 @@ pub use turn::{Turn, TurnQueue, TurnSource, TurnState};
 pub use helper::{
 	HelperCommand, HelperConfig, HelperDescriptor, HelperEvent, HelperHello,
 	HelperReady, HelperRecord, HelperReplay, HelperSignalled, HelperTerminated,
-	NativeSignal, NativeStream,
+	NativeInputMode, NativeSignal, NativeStream,
 };
 pub use run::{ManagedProcess, ManagedProcessRole, RunActivity, RunExecution};
 
