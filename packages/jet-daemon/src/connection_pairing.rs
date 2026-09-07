@@ -72,7 +72,9 @@ async fn apply(
 				client: crate::translate::paired_client(client),
 			})
 		}
-		CommandOutcome::ConversationCreated(_)
+		CommandOutcome::TurnAdmitted(_)
+		| CommandOutcome::TurnWithdrawn(_)
+		| CommandOutcome::ConversationCreated(_)
 		| CommandOutcome::ExecutionResolutionRecorded(_)
 		| CommandOutcome::RunCreated(_)
 		| CommandOutcome::RunTransitioned(_)

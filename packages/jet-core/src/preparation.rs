@@ -153,7 +153,9 @@ impl Core {
 					| WorkingTreeRequest::LocalCheckout { .. } => Ok(Prepared::Nothing),
 				}
 			}
-			Command::CreateConversation { .. }
+			Command::SubmitTurn { .. }
+			| Command::WithdrawTurn { .. }
+			| Command::CreateConversation { .. }
 			| Command::CreateRun { .. }
 			| Command::SetSetting { .. }
 			| Command::ClearSetting { .. }

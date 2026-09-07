@@ -32,7 +32,8 @@ impl Client {
 				))
 			}
 			QueryResponse::Status(status) => Ok(status),
-			other @ (QueryResponse::OrphanedExecutions(_)
+			other @ (QueryResponse::TurnQueue(_)
+			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
@@ -61,7 +62,8 @@ impl Client {
 	pub async fn conversations(&self) -> Result<ConversationList, ClientError> {
 		match self.query(QueryRequest::Conversations).await? {
 			QueryResponse::Conversations(list) => Ok(list),
-			other @ (QueryResponse::OrphanedExecutions(_)
+			other @ (QueryResponse::TurnQueue(_)
+			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
@@ -97,7 +99,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Conversations(list) => Ok(list),
-			other @ (QueryResponse::OrphanedExecutions(_)
+			other @ (QueryResponse::TurnQueue(_)
+			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
@@ -133,7 +136,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Conversation(snapshot) => Ok(*snapshot),
-			other @ (QueryResponse::OrphanedExecutions(_)
+			other @ (QueryResponse::TurnQueue(_)
+			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Events(_)
@@ -166,7 +170,8 @@ impl Client {
 	) -> Result<EventPage, ClientError> {
 		match self.query(QueryRequest::Events { after: sequence }).await? {
 			QueryResponse::Events(page) => Ok(page),
-			other @ (QueryResponse::OrphanedExecutions(_)
+			other @ (QueryResponse::TurnQueue(_)
+			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
@@ -202,7 +207,9 @@ impl Client {
 			.await?
 		{
 			CommandResponse::AuditEpochBegun { epoch } => Ok(epoch),
-			other @ (CommandResponse::ExecutionResolutionRecorded {
+			other @ (CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
+			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
 			| CommandResponse::ConversationCreated(_)
@@ -242,7 +249,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::SecurityAudit(page) => Ok(page),
-			other @ (QueryResponse::OrphanedExecutions(_)
+			other @ (QueryResponse::TurnQueue(_)
+			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
@@ -318,7 +326,9 @@ impl Client {
 			CommandResponse::ConversationCreated(conversation) => {
 				Ok(conversation)
 			}
-			other @ (CommandResponse::ExecutionResolutionRecorded {
+			other @ (CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
+			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
 			| CommandResponse::RunCreated(_)
@@ -361,7 +371,9 @@ impl Client {
 			.await?
 		{
 			CommandResponse::RunCreated(run) => Ok(run),
-			other @ (CommandResponse::ExecutionResolutionRecorded {
+			other @ (CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
+			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
 			| CommandResponse::ConversationCreated(_)
@@ -411,7 +423,9 @@ impl Client {
 			.await?
 		{
 			CommandResponse::RunTransitioned(run) => Ok(run),
-			other @ (CommandResponse::ExecutionResolutionRecorded {
+			other @ (CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
+			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
 			| CommandResponse::ConversationCreated(_)
@@ -453,7 +467,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Settings(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::OrphanedExecutions(_)
+			other @ (QueryResponse::TurnQueue(_)
+			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
@@ -496,7 +511,9 @@ impl Client {
 			.await?
 		{
 			CommandResponse::SettingSet { value, .. } => Ok(value),
-			other @ (CommandResponse::ExecutionResolutionRecorded {
+			other @ (CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
+			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
 			| CommandResponse::ConversationCreated(_)
@@ -541,7 +558,9 @@ impl Client {
 			.await?
 		{
 			CommandResponse::SettingCleared { .. } => Ok(()),
-			other @ (CommandResponse::ExecutionResolutionRecorded {
+			other @ (CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
+			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
 			| CommandResponse::ConversationCreated(_)
@@ -585,7 +604,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Capabilities(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::OrphanedExecutions(_)
+			other @ (QueryResponse::TurnQueue(_)
+			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
@@ -628,7 +648,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::AccountBindings(list) => Ok(list),
-			other @ (QueryResponse::OrphanedExecutions(_)
+			other @ (QueryResponse::TurnQueue(_)
+			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
@@ -682,7 +703,9 @@ impl Client {
 			.await?
 		{
 			CommandResponse::AccountBound(binding) => Ok(binding),
-			other @ (CommandResponse::ExecutionResolutionRecorded {
+			other @ (CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
+			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
 			| CommandResponse::ConversationCreated(_)
@@ -731,7 +754,9 @@ impl Client {
 				credential_reference,
 				..
 			} => Ok(credential_reference),
-			other @ (CommandResponse::ExecutionResolutionRecorded {
+			other @ (CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
+			| CommandResponse::ExecutionResolutionRecorded {
 				..
 			}
 			| CommandResponse::ConversationCreated(_)

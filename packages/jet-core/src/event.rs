@@ -216,6 +216,20 @@ pub struct EventPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum EventKind {
+	/// One bounded UTF-8 segment of admitted input; concatenate in Event order.
+	#[serde(rename = "turn.input")]
+	TurnInput {
+		/// Admission whose original input this segment belongs to.
+		turn_id: Uuid,
+		/// At most 8192 UTF-8 bytes, keeping escaped JSON below the store limit.
+		text: String,
+	},
+	/// An admission or subsequent observable queue outcome.
+	#[serde(rename = "turn.changed")]
+	TurnChanged {
+		/// Stable input identity, authenticated client and authoritative order.
+		turn: crate::Turn,
+	},
 	/// An active Run began working or waiting for a specific reason.
 	#[serde(rename = "run.activity_changed")]
 	RunActivityChanged {
@@ -469,7 +483,9 @@ impl EventKind {
 	pub fn encode(&self) -> Result<EventPayload, CoreError> {
 		match self {
 			Self::Unrecognized(payload) => Ok(payload.clone()),
-			Self::ConversationCreated { .. }
+			Self::TurnInput { .. }
+			| Self::TurnChanged { .. }
+			| Self::ConversationCreated { .. }
 			| Self::RunActivityChanged { .. }
 			| Self::RunProcessesChanged { .. }
 			| Self::RunOutput { .. }
