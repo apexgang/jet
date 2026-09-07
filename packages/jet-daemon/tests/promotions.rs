@@ -205,6 +205,7 @@ async fn a_preview_the_plane_cannot_give_is_refused_with_a_stable_error() {
 				workspace_id: workspace.workspace_id,
 				destination: PromotionDestination::LocalCheckout,
 			},
+			timeout_ms: None,
 		})
 		.await;
 	let ServerMessage::Error { error, .. } = connection.receive().await else {

@@ -1,4 +1,5 @@
 //! Public Run snapshots and paged Event assertions shared by conformance tests.
+#![allow(dead_code)]
 use crate::support;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};

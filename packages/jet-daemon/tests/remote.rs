@@ -134,6 +134,7 @@ async fn ssh_endpoint_access_does_not_expose_plane_state() {
 		.send(&jet_protocol::ClientMessage::Query {
 			id: 1,
 			query: jet_protocol::QueryRequest::Status,
+			timeout_ms: None,
 		})
 		.await;
 	assert!(

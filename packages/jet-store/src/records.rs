@@ -213,6 +213,9 @@ pub enum EffectKindRecord {
 	ResolveExecution,
 	/// Start one Run's managed processes.
 	StartRun,
+	/// Carry out one interactive control request against a managed Run
+	/// (ADR-0083).
+	ControlRun,
 	/// Apply one Workspace promotion to its destination (ADR-0025).
 	PromoteWorkspace,
 }
@@ -224,6 +227,7 @@ impl EffectKindRecord {
 			Self::CloseTerminal => "terminal.close",
 			Self::ResolveExecution => "execution.resolve",
 			Self::StartRun => "run.start",
+			Self::ControlRun => "run.control",
 			Self::PromoteWorkspace => "workspace.promote",
 		}
 	}
@@ -234,6 +238,7 @@ impl EffectKindRecord {
 			"terminal.close" => Some(Self::CloseTerminal),
 			"execution.resolve" => Some(Self::ResolveExecution),
 			"run.start" => Some(Self::StartRun),
+			"run.control" => Some(Self::ControlRun),
 			"workspace.promote" => Some(Self::PromoteWorkspace),
 			_ => None,
 		}

@@ -34,6 +34,8 @@ mod discovery;
 mod effect;
 mod error;
 mod event;
+mod execution_control;
+mod execution_control_effect;
 mod filesystem;
 mod fork;
 mod import;
@@ -70,6 +72,9 @@ mod run_state;
 mod turn;
 mod turn_dispatch;
 mod turn_queue;
+pub use execution_control::{
+	ExecutionSignal, RunControl, RunTermination, TerminationStage,
+};
 pub use orphan::{
 	ExecutionAction, ExecutionMetadata, ExecutionResolution, ExecutionRole,
 	OrphanedExecution, OrphanedExecutions,

@@ -1,5 +1,5 @@
 //! Managed Run snapshots and orthogonal active activity (ADR-0065).
-use crate::Run;
+use crate::{Run, RunTermination};
 use serde::{Deserialize, Serialize};
 
 /// Why an active Run is working or waiting.
@@ -58,4 +58,8 @@ pub struct RunExecution {
 	pub native_conversation: Option<String>,
 	/// Native exit status when the OS supplied one.
 	pub exit_code: Option<i32>,
+	/// How an interactive control request ended this execution. Absent
+	/// before protocol minor 19, and while no request has settled.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub termination: Option<RunTermination>,
 }

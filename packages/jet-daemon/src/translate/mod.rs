@@ -7,6 +7,7 @@ mod account;
 mod audit;
 mod capability;
 mod checkpoint;
+mod execution_control;
 mod import;
 mod pairing;
 mod project;
@@ -182,7 +183,7 @@ pub(crate) fn query_result(
 			wire::QueryResponse::OrphanedExecutions(run::orphans(page, minor))
 		}
 		QueryResult::RunExecution(execution) => {
-			wire::QueryResponse::RunExecution(run::execution(execution))
+			wire::QueryResponse::RunExecution(run::execution(execution, minor))
 		}
 		QueryResult::Status(status) => {
 			wire::QueryResponse::Status(plane_status(&status, minor))
@@ -287,6 +288,14 @@ pub(crate) fn command(
 			conversation_id: ConversationId(*conversation_id),
 			source: turn::source_from_wire(*source),
 			prompt: prompt.clone(),
+		},
+		wire::CommandRequest::InterruptTurn { run_id } => Command::ControlRun {
+			run_id: RunId(*run_id),
+			control: jet_core::RunControl::InterruptTurn,
+		},
+		wire::CommandRequest::StopRun { run_id } => Command::ControlRun {
+			run_id: RunId(*run_id),
+			control: jet_core::RunControl::StopRun,
 		},
 		wire::CommandRequest::StartRun {
 			conversation_id,
@@ -443,6 +452,13 @@ pub(crate) fn command_outcome(
 				action: run::action(request.action),
 			}
 		}
+		CommandOutcome::RunControlAccepted {
+			run: value,
+			control,
+		} => wire::CommandResponse::RunControlAccepted {
+			run: run(&value),
+			control: execution_control::control(control),
+		},
 		CommandOutcome::TurnWithdrawn(value) => {
 			wire::CommandResponse::TurnWithdrawn {
 				turn: turn::turn(value),

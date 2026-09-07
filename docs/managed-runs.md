@@ -44,6 +44,16 @@ Craft 1.1 adds the `runs` capability, `start` and `acknowledge` Commands, and `r
 
 `jetfueld run --config <owner-only config>` owns the native process, its standard input/output/error, and its terminal OS result. Helper messages are independently negotiated framed JSON on a private Unix socket; their Rust DTOs in `jet-protocol/src/helper.rs` define the language-neutral contract. Launch arguments are an array, initial input uses stdin, and the working root and accepted executable disclosures come from the host-written configuration. Native output remains opaque to the helper. Its disk spool retains at most 64 MiB of unacknowledged records and applies backpressure at the bound. A definite launch rejection produces a terminal `launch_failed` record and fails the Run without retaining admission exclusion. The helper exits after its terminal record is acknowledged; disconnecting its Craft leaves native work and source records intact.
 
+## Native input
+
+Helper 1.3 adds `input` and `close_input`. A `launch` declares whether its native input is `sealed` or `streaming`, and a launch that names no mode decodes as `sealed`: standard input closes after the initial write, which is what every Harness that reads to end of input already relied on.
+
+A `streaming` launch keeps that pipe open. The Craft writes to it with `input`, whose bytes stay opaque — the helper frames and interprets nothing — until `close_input`. Closing is the whole stop: no signal is delivered and no retained source is released, so a Harness that ends on end of input exits through the ordinary spool with its output intact. The open pipe belongs to the execution rather than to the connection that launched it, so a Craft that reconnects writes to the same Harness. Both Commands are refused below the negotiated minor and outside a streaming launch.
+
+Native input shares its connection with source records. One bounded reader task keeps that stream at its frame boundary instead of abandoning a frame mid-decode, and awaiting a write applies the Harness's own backpressure to the Craft without stalling acknowledgement.
+
+A Harness driven by a bidirectional native protocol needs this. `claude --print --input-format stream-json --output-format stream-json` stays alive while its standard input is open, takes each later turn there, and exits when it closes; Codex speaks its app-server protocol the same way. Issue [#90](https://github.com/apexgang/jet/issues/90) owns this contract; the bundled Crafts that use it are #33 and #34.
+
 ## Validation and scope
 
 `just test` builds the separately deployed helper before nextest. `jet-daemon/tests/runs.rs` exercises real daemon → Craft → helper → Harness processes in a temporary Git Workspace. It observes each active attention reason and distinct process identities, verifies failed Craft/Harness launches and nonzero native exits, checks prior-minor Event decoding, then verifies completion, exact Command replay, Event history, and the Workspace file after daemon restart. Core boundary tests cover Project admission, durable retries, rejection of client lifecycle changes, and failed capability revalidation before execution.

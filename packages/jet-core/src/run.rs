@@ -56,4 +56,7 @@ pub struct RunExecution {
 	pub native_conversation: Option<String>,
 	/// Native exit status when the OS supplied one.
 	pub exit_code: Option<i32>,
+	/// How the last interactive control request ended the work it targeted
+	/// (ADR-0083). Absent while no request has settled.
+	pub termination: Option<crate::RunTermination>,
 }

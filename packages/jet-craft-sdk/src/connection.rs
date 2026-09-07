@@ -164,6 +164,12 @@ impl<R: AsyncRead + Unpin> CraftReceiver<R> {
 				}
 				"turns"
 			}
+			CraftCommand::Interrupt { .. } => {
+				if self.ready.protocol.version.minor < 4 {
+					return Err(CraftError::InvalidMessage);
+				}
+				"turns"
+			}
 			CraftCommand::Turn { .. } => "turns",
 			CraftCommand::Action { .. } => "actions",
 			CraftCommand::Shutdown => return Ok(command),

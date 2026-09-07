@@ -107,13 +107,27 @@ pub(crate) fn spawn_monitor(
 	connection: Box<dyn crate::RunConnection>,
 	pending: Vec<Observation>,
 ) {
+	let connection: Arc<dyn crate::RunConnection> = Arc::from(connection);
 	core.run_recovery
 		.monitors
 		.lock()
 		.expect("monitor lock")
 		.insert(run_id);
+	core.run_recovery
+		.connections
+		.lock()
+		.expect("connection lock")
+		.insert(run_id, Arc::clone(&connection));
 	tokio::spawn(async move {
-		if monitor(&core, run_id, connection, pending).await.is_err() {
+		let outcome = monitor(&core, run_id, &*connection, pending).await;
+		// Control requests reach a Craft only while its connection is the
+		// one this monitor supervises.
+		core.run_recovery
+			.connections
+			.lock()
+			.expect("connection lock")
+			.remove(&run_id);
+		if outcome.is_err() {
 			let _gate = core.effect_reconciliation.lock().await;
 			let _ = core.observe_run(run_id, Observation::Disconnected).await;
 			if core.run_recovery.failed(run_id) {
@@ -138,7 +152,7 @@ pub(crate) fn spawn_monitor(
 async fn monitor(
 	core: &Core,
 	run_id: RunId,
-	connection: Box<dyn crate::RunConnection>,
+	connection: &dyn crate::RunConnection,
 	initial: Vec<Observation>,
 ) -> Result<(), CoreError> {
 	let mut wake = core.turn_wake.subscribe();
@@ -150,7 +164,7 @@ async fn monitor(
 	let mut events = 0;
 	let mut ended = false;
 	let mut deadline = None;
-	core.dispatch_turn(run_id, &*connection).await?;
+	core.dispatch_turn(run_id, connection).await?;
 	loop {
 		let observation = if let Some(observation) = initial.next() {
 			observation
@@ -160,7 +174,7 @@ async fn monitor(
 			loop {
 				tokio::select! {
 					result = &mut receive => break result?,
-					Ok(()) = wake.changed() => { core.dispatch_turn(run_id, &*connection).await?; }
+					Ok(()) = wake.changed() => { core.dispatch_turn(run_id, connection).await?; }
 					() = async { match deadline { Some(at) => tokio::time::sleep_until(at).await, None => std::future::pending().await } } => {
 						core.commit_run_source(run_id, std::mem::take(&mut pending), run_state::SourceBoundary::Pending).await?;
 						bytes = 0; events = 0; deadline = None;
@@ -190,7 +204,7 @@ async fn monitor(
 					connection.finish().await?;
 					return Ok(());
 				}
-				core.dispatch_turn(run_id, &*connection).await?;
+				core.dispatch_turn(run_id, connection).await?;
 			}
 			observation => {
 				ended |= matches!(

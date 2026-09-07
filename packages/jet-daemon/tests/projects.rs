@@ -119,6 +119,7 @@ async fn a_client_below_the_project_minor_is_refused() {
 		.send(&ClientMessage::Query {
 			id: 1,
 			query: QueryRequest::Projects,
+			timeout_ms: None,
 		})
 		.await;
 

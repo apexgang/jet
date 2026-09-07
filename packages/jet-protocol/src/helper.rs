@@ -59,6 +59,23 @@ pub struct HelperReady {
 	pub descriptor: HelperDescriptor,
 }
 
+/// Whether a launched Harness keeps reading after its initial input.
+#[derive(
+	Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeInputMode {
+	/// Close standard input once the initial input is written, so a Harness
+	/// that reads to end of input proceeds. Decoding a launch that names no
+	/// mode selects this, which is what every Craft had before Helper 1.3.
+	#[default]
+	Sealed,
+	/// Keep standard input open for later `Input` until `CloseInput`
+	/// (Helper 1.3). A Harness driven by a bidirectional native protocol
+	/// takes its later turns, approval answers, and cancellations there.
+	Streaming,
+}
+
 /// Craft requests at the generic helper boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -67,6 +84,16 @@ pub enum HelperCommand {
 	Terminate {
 		/// Identity the user inspected.
 		instance: Uuid,
+	},
+	/// Deliver one signal to the native process group without ending this
+	/// helper or releasing its retained source (Helper 1.2). The native
+	/// exit then reaches jetd through the ordinary spool, so partial
+	/// output survives the stop (ADR-0083).
+	Signal {
+		/// Identity the caller validated before asking.
+		instance: Uuid,
+		/// Which signal to deliver.
+		signal: NativeSignal,
 	},
 	/// Read-only handshake completed; leave execution and source untouched.
 	Inspect,
@@ -83,7 +110,21 @@ pub enum HelperCommand {
 		arguments: Vec<String>,
 		/// Initial native input written to standard input.
 		input: String,
+		/// Whether this Harness accepts later `Input` (Helper 1.3).
+		#[serde(default)]
+		input_mode: NativeInputMode,
 	},
+	/// Write more native input to a Harness launched as `Streaming`
+	/// (Helper 1.3). The bytes stay opaque to the helper, which neither
+	/// frames nor interprets them.
+	Input {
+		/// Native input written verbatim to standard input.
+		text: String,
+	},
+	/// Close a `Streaming` Harness's standard input (Helper 1.3). A Harness
+	/// that ends on end of input stops here. No signal is delivered and no
+	/// retained source is released, so its exit reaches the host as usual.
+	CloseInput,
 	/// Release source records only after jetd committed their semantics.
 	Acknowledge {
 		/// End offset of the durably processed spool record.
@@ -125,6 +166,19 @@ pub enum HelperEvent {
 	},
 }
 
+/// The escalation ladder jetd may ask a helper to deliver. Each step is an
+/// explicit request; the helper never escalates on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeSignal {
+	/// Interrupt, which a Harness may handle and shut down cleanly.
+	Interrupt,
+	/// Terminate, which it may still handle.
+	Terminate,
+	/// Kill, which it cannot.
+	Kill,
+}
+
 /// Native pipe identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -133,6 +187,16 @@ pub enum NativeStream {
 	Stdout,
 	/// Standard error.
 	Stderr,
+}
+
+/// Confirmation that the signal was delivered to the live native process
+/// group. Delivery is not an exit: the exit arrives as a source record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HelperSignalled {
+	/// The helper instance that delivered it.
+	pub instance: Uuid,
+	/// The signal it delivered.
+	pub signal: NativeSignal,
 }
 
 /// Confirmation sent only after the native child is proven stopped.

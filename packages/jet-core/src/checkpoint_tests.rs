@@ -612,6 +612,15 @@ impl RunConnection for Connection {
 			Ok(self.receiver.lock().await.recv().await.unwrap())
 		})
 	}
+	fn supports_native_cancellation(&self) -> bool {
+		false
+	}
+	fn interrupt(
+		&self,
+		_turn_id: uuid::Uuid,
+	) -> RunFuture<'_, Result<(), CoreError>> {
+		Box::pin(async { panic!("no cancellation in this fixture") })
+	}
 	fn acknowledge(
 		&self,
 		_offset: u64,

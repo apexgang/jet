@@ -28,6 +28,7 @@ pub(crate) fn invalidated_client(
 		| CommandOutcome::TurnWithdrawn(_)
 		| CommandOutcome::ConversationCreated(_)
 		| CommandOutcome::ExecutionResolutionRecorded(_)
+		| CommandOutcome::RunControlAccepted { .. }
 		| CommandOutcome::RunCreated(_)
 		| CommandOutcome::RunTransitioned(_)
 		| CommandOutcome::SettingSet { .. }

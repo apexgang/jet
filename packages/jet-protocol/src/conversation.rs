@@ -166,6 +166,18 @@ pub enum CommandRequest {
 		/// Explicit decision.
 		action: crate::ExecutionAction,
 	},
+	/// Ask the Harness to end the turn it is working on, leaving the Run
+	/// able to accept the next one. It is not a transport cancellation and
+	/// never withdraws queued input (ADR-0083, ADR-0095).
+	InterruptTurn {
+		/// The managed Run whose current turn ends.
+		run_id: Uuid,
+	},
+	/// End one managed Run, including the native processes it owns.
+	StopRun {
+		/// The managed Run to end.
+		run_id: Uuid,
+	},
 	/// Start a managed Run with an installed Craft and initial input.
 	StartRun {
 		/// Conversation whose working tree is used.
@@ -364,6 +376,14 @@ pub enum CommandResponse {
 	TurnAdmitted {
 		/// Plane-assigned input identity and sequence.
 		turn: crate::Turn,
+	},
+	/// The control request was durably accepted. Its outcome follows in
+	/// the Run's Events; acceptance alone never claims the work stopped.
+	RunControlAccepted {
+		/// The Run as it stands after accepting the request.
+		run: Run,
+		/// What was asked of it.
+		control: crate::RunControl,
 	},
 	/// The interactive decision was durably queued.
 	ExecutionResolutionRecorded {

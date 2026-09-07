@@ -114,7 +114,7 @@ async fn queued_schedule_starts_a_later_run_with_the_selected_craft() {
 		wire.send(&json!({"kind":"query","id":2,"query":{"type":"turn_queue","conversation_id":id}})).await;
 		assert_eq!(wire.receive::<Value>().await["result"]["turns"], json!([]));
 		let resume: Value = serde_json::from_slice(&std::fs::read(root.join("native-resume")).unwrap()).unwrap();
-		assert_eq!(resume, json!({"version":{"major":1,"minor":3},"native_conversation":"fake-native-1"}));
+		assert_eq!(resume, json!({"version":{"major":1,"minor":4},"native_conversation":"fake-native-1"}));
 	}).await.unwrap();
 }
 

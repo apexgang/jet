@@ -113,7 +113,9 @@ impl Core {
 				)
 				.await?,
 			)),
-			Command::CloseTerminal { .. } => Ok(Prepared::Nothing),
+			Command::CloseTerminal { .. } | Command::ControlRun { .. } => {
+				Ok(Prepared::Nothing)
+			}
 			Command::ResolveExecution(request) => {
 				self.prepare_execution_resolution(request).await?;
 				Ok(Prepared::Nothing)
