@@ -1,0 +1,21 @@
+# Accepted declaration for the bundled Claude Code Craft. An installation
+# compares this document with the one it accepted before sending a Command,
+# so the executable named here is exactly the one its helper will launch.
+id = "claude-code"
+harness = "claude-code"
+schema = { major = 1, minor = 0 }
+broker_permissions = []
+host_access = [
+	{ kind = "executable", name = "claude" },
+	{ kind = "network", destination = "api.anthropic.com" },
+]
+features = [
+	{ name = "turns", required = true },
+	{ name = "actions", required = true },
+	{ name = "resume" },
+]
+
+[protocol]
+family = "craft"
+versions = [{ major = 1, minor = 4 }]
+capabilities = ["runs", "resume", "actions"]

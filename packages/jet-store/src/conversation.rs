@@ -4,9 +4,10 @@ use uuid::Uuid;
 
 use crate::StoreError;
 use crate::records::{
-	ConversationOriginRecord, ConversationPageKey, ConversationPageStart,
-	ConversationRecord, NewConversation, RetentionPolicy, WorkingTreeRecord,
-	column_error, parse_optional_uuid, parse_uuid,
+	ConversationOriginColumns, ConversationOriginRecord, ConversationPageKey,
+	ConversationPageStart, ConversationRecord, NewConversation,
+	RetentionPolicy, WorkingTreeRecord, column_error, parse_optional_uuid,
+	parse_uuid,
 };
 use crate::transaction::{ReadTransaction, WriteTransaction};
 
@@ -21,6 +22,9 @@ struct Row {
 	working_tree: String,
 	project_id: Option<String>,
 	import_id: Option<String>,
+	fork_source_conversation_id: Option<String>,
+	fork_source_run_id: Option<String>,
+	fork_checkpoint_turn: Option<i64>,
 	created_at_unix_ms: i64,
 }
 
@@ -38,7 +42,9 @@ impl ReadTransaction {
 		let row = sqlx::query_as!(
 			Row,
 			r#"SELECT conversation_id AS "conversation_id!", retention,
-				working_tree, project_id, import_id, created_at_unix_ms
+				working_tree, project_id, import_id,
+				fork_source_conversation_id, fork_source_run_id,
+				fork_checkpoint_turn, created_at_unix_ms
 			 FROM conversations
 			 WHERE conversation_id = ?1"#,
 			conversation_id
@@ -59,7 +65,9 @@ impl ReadTransaction {
 		let rows = sqlx::query_as!(
 			Row,
 			r#"SELECT conversation_id AS "conversation_id!", retention,
-				working_tree, project_id, import_id, created_at_unix_ms
+				working_tree, project_id, import_id,
+				fork_source_conversation_id, fork_source_run_id,
+				fork_checkpoint_turn, created_at_unix_ms
 			 FROM conversations
 			 ORDER BY rowid"#
 		)
@@ -92,7 +100,9 @@ impl ReadTransaction {
 		let rows = sqlx::query!(
 			r#"SELECT rowid AS "rowid!",
 				conversation_id AS "conversation_id!", retention,
-				working_tree, project_id, import_id, created_at_unix_ms
+				working_tree, project_id, import_id,
+				fork_source_conversation_id, fork_source_run_id,
+				fork_checkpoint_turn, created_at_unix_ms
 			 FROM conversations
 			 WHERE rowid > ?1 ORDER BY rowid LIMIT ?2"#,
 			after,
@@ -111,6 +121,10 @@ impl ReadTransaction {
 						working_tree: row.working_tree,
 						project_id: row.project_id,
 						import_id: row.import_id,
+						fork_source_conversation_id: row
+							.fork_source_conversation_id,
+						fork_source_run_id: row.fork_source_run_id,
+						fork_checkpoint_turn: row.fork_checkpoint_turn,
 						created_at_unix_ms: row.created_at_unix_ms,
 					})?,
 				))
@@ -145,20 +159,33 @@ impl WriteTransaction {
 		let retention = record.retention.as_str();
 		let (working_tree, project_id) = record.working_tree.columns();
 		let project_id = project_id.map(|project_id| project_id.to_string());
-		let import_id = record
-			.origin
-			.column()
-			.map(|import_id| import_id.to_string());
+		let ConversationOriginColumns {
+			import_id,
+			fork_source_conversation_id,
+			fork_source_run_id,
+			fork_checkpoint_turn,
+		} = record.origin.columns();
+		let import_id = import_id.map(|id| id.to_string());
+		let fork_source_conversation_id =
+			fork_source_conversation_id.map(|id| id.to_string());
+		let fork_source_run_id = fork_source_run_id.map(|id| id.to_string());
+		// ASVS 1.2.4: provenance values remain bound parameters; clients never
+		// contribute SQL or column names.
 		sqlx::query!(
 			"INSERT INTO conversations
 				(conversation_id, retention, working_tree, project_id,
-				import_id, created_at_unix_ms)
-			 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+					import_id, fork_source_conversation_id,
+					fork_source_run_id, fork_checkpoint_turn,
+					created_at_unix_ms)
+			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
 			conversation_id,
 			retention,
 			working_tree,
 			project_id,
 			import_id,
+			fork_source_conversation_id,
+			fork_source_run_id,
+			fork_checkpoint_turn,
 			record.created_at_unix_ms
 		)
 		.execute(self.connection())
@@ -175,10 +202,21 @@ fn read_row(row: Row) -> Result<ConversationRecord, StoreError> {
 			&row.working_tree,
 			parse_optional_uuid("project_id", row.project_id.as_deref())?,
 		)?,
-		origin: ConversationOriginRecord::parse(parse_optional_uuid(
-			"import_id",
-			row.import_id.as_deref(),
-		)?),
+		origin: ConversationOriginRecord::parse(ConversationOriginColumns {
+			import_id: parse_optional_uuid(
+				"import_id",
+				row.import_id.as_deref(),
+			)?,
+			fork_source_conversation_id: parse_optional_uuid(
+				"fork_source_conversation_id",
+				row.fork_source_conversation_id.as_deref(),
+			)?,
+			fork_source_run_id: parse_optional_uuid(
+				"fork_source_run_id",
+				row.fork_source_run_id.as_deref(),
+			)?,
+			fork_checkpoint_turn: row.fork_checkpoint_turn,
+		})?,
 		created_at_unix_ms: row.created_at_unix_ms,
 	})
 }

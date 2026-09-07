@@ -77,6 +77,7 @@ async fn apply(
 		| CommandOutcome::TurnWithdrawn(_)
 		| CommandOutcome::ConversationCreated(_)
 		| CommandOutcome::ExecutionResolutionRecorded(_)
+		| CommandOutcome::RunControlAccepted { .. }
 		| CommandOutcome::RunCreated(_)
 		| CommandOutcome::RunTransitioned(_)
 		| CommandOutcome::SettingSet { .. }

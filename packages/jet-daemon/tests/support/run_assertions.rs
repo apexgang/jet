@@ -1,4 +1,5 @@
 //! Public Run snapshots and paged Event assertions shared by conformance tests.
+#![allow(dead_code)]
 use crate::support;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
@@ -26,6 +27,7 @@ pub async fn wait_for(
 	}
 }
 
+#[allow(dead_code)]
 pub async fn all_events(
 	client: &jet_client::Client,
 ) -> jet_protocol::EventPage {

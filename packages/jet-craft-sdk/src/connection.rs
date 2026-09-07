@@ -109,7 +109,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> CraftConnection<R, W> {
 		.map_err(|_| CraftError::Timeout)?
 	}
 
-	/// Host-supplied execution identity and explicit recovery context.
+	/// Host-supplied execution identity and explicit recovery or fork context.
 	pub fn hello(&self) -> &CraftHello {
 		&self.hello
 	}
@@ -160,6 +160,12 @@ impl<R: AsyncRead + Unpin> CraftReceiver<R> {
 			}
 			CraftCommand::Recover { .. } => {
 				if self.ready.protocol.version.minor < 2 {
+					return Err(CraftError::InvalidMessage);
+				}
+				"turns"
+			}
+			CraftCommand::Interrupt { .. } => {
+				if self.ready.protocol.version.minor < 4 {
 					return Err(CraftError::InvalidMessage);
 				}
 				"turns"
@@ -222,6 +228,9 @@ async fn handshake<R: AsyncRead + Unpin>(
 	let specification_protocol = schema
 		.negotiate(&hello.specification, Negotiation::NewExecution)
 		.map_err(|_| CraftError::Incompatible)?;
+	if hello.resume.is_some() && hello.fork.is_some() {
+		return Err(CraftError::Incompatible);
+	}
 	let mode = hello
 		.resume
 		.as_ref()
@@ -231,8 +240,13 @@ async fn handshake<R: AsyncRead + Unpin>(
 	// ASVS 2.3.1: a specification cannot make this SDK speak a new codec major.
 	let sdk = ProtocolOffer {
 		family: ProtocolFamily::Craft,
-		versions: vec![ProtocolVersion { major: 1, minor: 3 }],
-		capabilities: vec!["actions".into(), "resume".into(), "runs".into()],
+		versions: vec![ProtocolVersion { major: 1, minor: 4 }],
+		capabilities: vec![
+			"actions".into(),
+			"fork".into(),
+			"resume".into(),
+			"runs".into(),
+		],
 	};
 	let supported = sdk
 		.negotiate(&specification.protocol, mode)
@@ -252,6 +266,18 @@ async fn handshake<R: AsyncRead + Unpin>(
 	{
 		return Err(CraftError::Incompatible);
 	}
+	if let Some(fork) = &hello.fork
+		&& (protocol.version.minor < 4
+			|| fork.source_native_conversation.is_empty()
+			|| fork.source_native_conversation.len() > 4096
+			|| fork.checkpoint_turn == 0
+			|| !git_object(&fork.checkpoint_commit)
+			|| !git_object(&fork.checkpoint_tree)
+			|| !enabled_features.iter().any(|name| name == "fork")
+			|| !protocol.capabilities.iter().any(|name| name == "fork"))
+	{
+		return Err(CraftError::Incompatible);
+	}
 	Ok((
 		hello,
 		CraftReady {
@@ -261,6 +287,13 @@ async fn handshake<R: AsyncRead + Unpin>(
 			enabled_features,
 		},
 	))
+}
+
+fn git_object(value: &str) -> bool {
+	(40..=64).contains(&value.len())
+		&& value
+			.bytes()
+			.all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 async fn receive<R: AsyncRead + Unpin, T: DeserializeOwned>(
@@ -292,3 +325,7 @@ async fn send<W: AsyncWrite + Unpin, T: Serialize>(
 		.map_err(|_| CraftError::Timeout)?
 		.map_err(|_| CraftError::Disconnected)
 }
+
+#[cfg(test)]
+#[path = "connection_tests.rs"]
+mod tests;

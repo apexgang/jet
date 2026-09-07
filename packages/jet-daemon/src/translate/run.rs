@@ -2,7 +2,10 @@
 use jet_core as core;
 use jet_protocol as wire;
 
-pub(super) fn execution(value: core::RunExecution) -> wire::RunExecution {
+pub(super) fn execution(
+	value: core::RunExecution,
+	minor: u32,
+) -> wire::RunExecution {
 	wire::RunExecution {
 		cursor: value.cursor.0,
 		run: super::run(&value.run),
@@ -25,6 +28,10 @@ pub(super) fn execution(value: core::RunExecution) -> wire::RunExecution {
 			.collect(),
 		native_conversation: value.native_conversation,
 		exit_code: value.exit_code,
+		termination: value
+			.termination
+			.filter(|_| minor >= wire::EXECUTION_CONTROL_MINOR)
+			.map(super::execution_control::termination),
 	}
 }
 

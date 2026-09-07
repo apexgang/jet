@@ -31,6 +31,8 @@ pub(crate) enum Prepared {
 	/// The Project, resolved base, and captured seed a new Workspace
 	/// starts from.
 	Workspace(PreparedWorkspace),
+	/// An immutable checkpoint resolved to a separate Workspace.
+	Fork(Box<crate::fork::PreparedFork>),
 	/// A promotion whose binding still matches the repository.
 	Promotion(PreparedPromotion),
 	/// The identity an import names, as discovery reports it right now.
@@ -152,7 +154,9 @@ impl Core {
 				)
 				.await?,
 			)),
-			Command::CloseTerminal { .. } => Ok(Prepared::Nothing),
+			Command::CloseTerminal { .. } | Command::ControlRun { .. } => {
+				Ok(Prepared::Nothing)
+			}
 			Command::ResolveExecution(request) => {
 				self.prepare_execution_resolution(request).await?;
 				Ok(Prepared::Nothing)
@@ -185,6 +189,13 @@ impl Core {
 			} => Ok(Prepared::Workspace(
 				workspace::prepare(self, *project_id, base, seed).await?,
 			)),
+			Command::ForkConversation {
+				source_run_id,
+				checkpoint_turn,
+			} => Ok(Prepared::Fork(Box::new(
+				crate::fork::prepare(self, *source_run_id, *checkpoint_turn)
+					.await?,
+			))),
 			Command::PromoteWorkspace { binding } => Ok(Prepared::Promotion(
 				promotion_command::prepare(self, actor, binding).await?,
 			)),

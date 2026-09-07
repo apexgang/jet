@@ -23,6 +23,10 @@ use crate::setting::{SettingScope, SettingSelection, SettingSnapshot};
 /// Correlates a client request with its server reply.
 pub type RequestId = u64;
 
+/// Longest bound a client may put on one Query, in milliseconds. A request
+/// that asks for more is refused rather than silently shortened.
+pub const MAX_QUERY_TIMEOUT_MS: u32 = 60_000;
+
 /// Control message sent by a client.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -55,6 +59,12 @@ pub enum ClientMessage {
 		id: RequestId,
 		/// The Query to run.
 		query: QueryRequest,
+		/// How long the client is willing to wait, in milliseconds from
+		/// arrival, at most [`MAX_QUERY_TIMEOUT_MS`]. A Query is a
+		/// non-durable read, so abandoning it changes no Plane state
+		/// (ADR-0095). Absent before protocol minor 19.
+		#[serde(default, skip_serializing_if = "Option::is_none")]
+		timeout_ms: Option<u32>,
 	},
 	/// Execute a Command and return its durable outcome.
 	Command {

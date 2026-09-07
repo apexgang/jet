@@ -121,4 +121,13 @@ pub enum ConversationOrigin {
 		/// The import it continues.
 		import_id: Uuid,
 	},
+	/// Created from one immutable Change checkpoint.
+	Forked {
+		/// Conversation that owns the selected Run.
+		source_conversation_id: Uuid,
+		/// Run that owns the selected checkpoint.
+		source_run_id: Uuid,
+		/// One-based turn boundary selected from that Run.
+		checkpoint_turn: u32,
+	},
 }

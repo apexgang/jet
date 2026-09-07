@@ -487,6 +487,11 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::MANAGED_RUNS_MINOR,
 			feature: "managed Runs",
 		}),
+		CommandRequest::InterruptTurn { .. }
+		| CommandRequest::StopRun { .. } => Some(MinorRequirement {
+			minor: jet_protocol::EXECUTION_CONTROL_MINOR,
+			feature: "execution control",
+		}),
 		CommandRequest::SetSetting { .. }
 		| CommandRequest::ClearSetting { .. } => Some(MinorRequirement {
 			minor: jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR,
@@ -526,6 +531,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 				feature: "importing external Conversations",
 			})
 		}
+		CommandRequest::ForkConversation { .. } => Some(MinorRequirement {
+			minor: jet_protocol::CONVERSATION_FORKS_MINOR,
+			feature: "Conversation forks",
+		}),
 		CommandRequest::CreateConversation { working_tree, .. }
 			if working_tree.is_seeded() =>
 		{

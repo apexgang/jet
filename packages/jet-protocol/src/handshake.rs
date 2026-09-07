@@ -19,6 +19,11 @@ pub const PROTOCOL_MINOR: u32 = 19;
 /// Direct user edits and structured review submissions.
 pub const USER_INPUT_MINOR: u32 = 19;
 
+/// Conversation forks from immutable Change checkpoints.
+pub const CONVERSATION_FORKS_MINOR: u32 = 19;
+
+/// Interrupt turn, Stop Run, and bounded Query timeouts.
+pub const EXECUTION_CONTROL_MINOR: u32 = 19;
 /// Change checkpoints and evidence-backed diff Queries.
 pub const CHANGE_CHECKPOINTS_MINOR: u32 = 17;
 /// Durable Turn queue Commands and Queries.

@@ -243,6 +243,9 @@ pub enum EffectKindRecord {
 	ResolveExecution,
 	/// Start one Run's managed processes.
 	StartRun,
+	/// Carry out one interactive control request against a managed Run
+	/// (ADR-0083).
+	ControlRun,
 	/// Apply one Workspace promotion to its destination (ADR-0025).
 	PromoteWorkspace,
 }
@@ -254,6 +257,7 @@ impl EffectKindRecord {
 			Self::CloseTerminal => "terminal.close",
 			Self::ResolveExecution => "execution.resolve",
 			Self::StartRun => "run.start",
+			Self::ControlRun => "run.control",
 			Self::PromoteWorkspace => "workspace.promote",
 		}
 	}
@@ -264,6 +268,7 @@ impl EffectKindRecord {
 			"terminal.close" => Some(Self::CloseTerminal),
 			"execution.resolve" => Some(Self::ResolveExecution),
 			"run.start" => Some(Self::StartRun),
+			"run.control" => Some(Self::ControlRun),
 			"workspace.promote" => Some(Self::PromoteWorkspace),
 			_ => None,
 		}
@@ -437,7 +442,7 @@ impl WorkingTreeRecord {
 	}
 }
 
-/// Where a Conversation came from (ADR-0010).
+/// Where a Conversation came from (ADR-0010, ADR-0035).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConversationOriginRecord {
 	/// Created in Jet.
@@ -448,19 +453,102 @@ pub enum ConversationOriginRecord {
 		/// The import it continues.
 		import_id: Uuid,
 	},
+	/// Created from one immutable Change checkpoint.
+	Forked {
+		/// Conversation that owns the selected Run.
+		source_conversation_id: Uuid,
+		/// Run that owns the selected checkpoint.
+		source_run_id: Uuid,
+		/// One-based turn boundary selected from that Run.
+		checkpoint_turn: u32,
+	},
+}
+
+/// Storage columns whose valid combinations spell one Conversation origin.
+pub(crate) struct ConversationOriginColumns {
+	pub(crate) import_id: Option<Uuid>,
+	pub(crate) fork_source_conversation_id: Option<Uuid>,
+	pub(crate) fork_source_run_id: Option<Uuid>,
+	pub(crate) fork_checkpoint_turn: Option<i64>,
 }
 
 impl ConversationOriginRecord {
-	/// The import column, absent for a Conversation created in Jet.
-	pub(crate) fn column(self) -> Option<Uuid> {
+	/// Columns whose valid combinations spell one origin.
+	pub(crate) fn columns(self) -> ConversationOriginColumns {
 		match self {
-			Self::New => None,
-			Self::Imported { import_id } => Some(import_id),
+			Self::New => ConversationOriginColumns {
+				import_id: None,
+				fork_source_conversation_id: None,
+				fork_source_run_id: None,
+				fork_checkpoint_turn: None,
+			},
+			Self::Imported { import_id } => ConversationOriginColumns {
+				import_id: Some(import_id),
+				fork_source_conversation_id: None,
+				fork_source_run_id: None,
+				fork_checkpoint_turn: None,
+			},
+			Self::Forked {
+				source_conversation_id,
+				source_run_id,
+				checkpoint_turn,
+			} => ConversationOriginColumns {
+				import_id: None,
+				fork_source_conversation_id: Some(source_conversation_id),
+				fork_source_run_id: Some(source_run_id),
+				fork_checkpoint_turn: Some(i64::from(checkpoint_turn)),
+			},
 		}
 	}
 
-	pub(crate) fn parse(import_id: Option<Uuid>) -> Self {
-		import_id.map_or(Self::New, |import_id| Self::Imported { import_id })
+	pub(crate) fn parse(
+		columns: ConversationOriginColumns,
+	) -> Result<Self, StoreError> {
+		let ConversationOriginColumns {
+			import_id,
+			fork_source_conversation_id,
+			fork_source_run_id,
+			fork_checkpoint_turn,
+		} = columns;
+		match (
+			import_id,
+			fork_source_conversation_id,
+			fork_source_run_id,
+			fork_checkpoint_turn,
+		) {
+			(None, None, None, None) => Ok(Self::New),
+			(Some(import_id), None, None, None) => {
+				Ok(Self::Imported { import_id })
+			}
+			(
+				None,
+				Some(source_conversation_id),
+				Some(source_run_id),
+				Some(turn),
+			) => {
+				let checkpoint_turn = u32::try_from(turn).map_err(|_| {
+					column_error(
+						"fork_checkpoint_turn",
+						format!("invalid checkpoint turn {turn}"),
+					)
+				})?;
+				if checkpoint_turn == 0 {
+					return Err(column_error(
+						"fork_checkpoint_turn",
+						"a checkpoint turn is positive".into(),
+					));
+				}
+				Ok(Self::Forked {
+					source_conversation_id,
+					source_run_id,
+					checkpoint_turn,
+				})
+			}
+			combination => Err(column_error(
+				"conversation_origin",
+				format!("invalid origin columns {combination:?}"),
+			)),
+		}
 	}
 }
 

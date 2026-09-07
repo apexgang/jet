@@ -501,7 +501,7 @@
       "type": "object",
       "properties": {
         "name": {
-          "description": "Feature name; v1 understands turns, actions, and resume.",
+          "description": "Feature name; v1 understands turns, actions, resume, and fork.",
           "type": "string"
         },
         "required": {
@@ -552,6 +552,48 @@
         "after_mode"
       ]
     },
+    "CraftFork": {
+      "description": "Immutable source context for a new native Harness Conversation. Receiving\nthis handshake is not authority to perform the fork before `Start`.",
+      "type": "object",
+      "properties": {
+        "checkpoint_commit": {
+          "description": "Checked-out source commit retained by the checkpoint.",
+          "type": "string"
+        },
+        "checkpoint_tree": {
+          "description": "Exact working-tree object retained by the checkpoint.",
+          "type": "string"
+        },
+        "checkpoint_turn": {
+          "description": "One-based checkpoint boundary selected by the user.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "source_conversation_id": {
+          "description": "Jet Conversation that owns the selected Run.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "source_native_conversation": {
+          "description": "Native Harness Conversation that owns the selected source content.",
+          "type": "string"
+        },
+        "source_run_id": {
+          "description": "Jet Run that owns the selected checkpoint.",
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "source_native_conversation",
+        "source_conversation_id",
+        "source_run_id",
+        "checkpoint_turn",
+        "checkpoint_commit",
+        "checkpoint_tree"
+      ]
+    },
     "CraftHello": {
       "description": "First host control payload after the `jet-craft\\n` preface.",
       "type": "object",
@@ -560,6 +602,18 @@
           "description": "Stable identity persisted by the host before dispatching external work.",
           "type": "string",
           "format": "uuid"
+        },
+        "fork": {
+          "description": "Absent unless this new execution should fork an existing native\nConversation from the selected immutable checkpoint.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CraftFork"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "protocol": {
           "description": "Host Craft-protocol support, independent of its GUI/helper protocols.",

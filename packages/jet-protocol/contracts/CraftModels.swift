@@ -59,8 +59,18 @@ public struct CraftFileChange {
     public let `path`: String
 }
 
+public struct CraftFork {
+    public let `checkpoint_commit`: String
+    public let `checkpoint_tree`: String
+    public let `checkpoint_turn`: UInt32
+    public let `source_conversation_id`: String
+    public let `source_native_conversation`: String
+    public let `source_run_id`: String
+}
+
 public struct CraftHello {
     public let `execution_id`: String
+    public let `fork`: CraftFork?
     public let `protocol`: ProtocolOffer
     public let `resume`: CraftResume?
     public let `specification`: ProtocolOffer

@@ -9,19 +9,74 @@ use std::{os::unix::fs::PermissionsExt, path::Path};
 use tokio::net::{UnixListener, UnixStream};
 
 pub fn install(home: &Path) {
+	install_craft(home, CraftProfile::Standard, ForkCapture::Ignore);
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForkSupport {
+	Native,
+	Portable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForkCapture {
+	Record,
+	Ignore,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CraftProfile {
+	Standard,
+	NativeFork,
+	PortableFallback,
+}
+
+#[allow(dead_code)]
+pub fn install_with_fork(home: &Path, support: ForkSupport) {
+	let profile = match support {
+		ForkSupport::Native => CraftProfile::NativeFork,
+		ForkSupport::Portable => CraftProfile::PortableFallback,
+	};
+	install_craft(home, profile, ForkCapture::Record);
+}
+
+fn install_craft(home: &Path, profile: CraftProfile, capture: ForkCapture) {
 	std::fs::create_dir_all(home.join("crafts")).unwrap();
 	let executable = std::env::current_exe().unwrap();
 	let program = home.join("crafts/fake-craft");
+	let (minor, capabilities, features) = match profile {
+		CraftProfile::Standard => (
+			4,
+			json!(["runs", "resume"]),
+			json!([{"name":"turns"},{"name":"resume"}]),
+		),
+		CraftProfile::NativeFork => (
+			4,
+			json!(["runs", "resume", "fork"]),
+			json!([{"name":"turns"},{"name":"resume"},{"name":"fork"}]),
+		),
+		CraftProfile::PortableFallback => (
+			3,
+			json!(["runs", "resume"]),
+			json!([{"name":"turns"},{"name":"resume"}]),
+		),
+	};
 	let specification = json!({
 		"schema":{"major":1,"minor":0},"id":"fake","harness":"fake",
-		"protocol":{"family":"craft","versions":[{"major":1,"minor":3}],"capabilities":["runs","resume"]},
-		"features":[{"name":"turns"},{"name":"resume"}],"broker_permissions":[],
-		"host_access":[{"kind":"executable","name":executable},{"kind":"executable","name":"/missing-jet-test-harness"}]
+		"protocol":{"family":"craft","versions":[{"major":1,"minor":minor}],"capabilities":capabilities},
+		"features":features,"broker_permissions":[],
+		"host_access":[{"kind":"executable","name":executable},{"kind":"executable","name":"/bin/sh"},{"kind":"executable","name":"/missing-jet-test-harness"}]
 	});
 	let manifest = home.join("crafts/fake.json");
+	let capture = match capture {
+		ForkCapture::Record => "export JET_FAKE_CAPTURE_FORK=1\n",
+		ForkCapture::Ignore => "",
+	};
 	let script = format!(
-		"#!/bin/sh\nexport JET_FAKE_MANIFEST={}\nexport JET_CRAFT_SOCKET=\"$2\"\nexec {} --ignored --exact --nocapture fixture::fake_craft_process\n",
+		"#!/bin/sh\nexport JET_FAKE_MANIFEST={}\nexport JET_CRAFT_SOCKET=\"$2\"\n{}exec {} --ignored --exact --nocapture fixture::fake_craft_process\n",
 		quote(manifest.to_str().unwrap()),
+		capture,
 		quote(executable.to_str().unwrap())
 	);
 	std::fs::write(&program, &script).unwrap();
@@ -81,6 +136,46 @@ async fn fake_craft_process() {
 	}
 }
 
+/// A Harness that ignores every signal it is allowed to ignore, so a stop
+/// has to escalate all the way to kill. It keeps its file and its output.
+const DEAF_HARNESS: &str = r#"
+trap '' INT TERM
+printf 'Harness work\n' > result.txt
+printf '%s\n' '{"text":"Working before the stop"}'
+: > deaf-ready
+while true; do sleep 1; done
+"#;
+
+fn launch(text: &str, root: &Path) -> HelperCommand {
+	if text == "Fail native launch" {
+		return HelperCommand::Launch {
+			program: "/missing-jet-test-harness".into(),
+			arguments: vec![],
+			input: format!("{text}\n"),
+			input_mode: NativeInputMode::Sealed,
+		};
+	}
+	if root.join("deaf").exists() {
+		return HelperCommand::Launch {
+			program: "/bin/sh".into(),
+			arguments: vec!["-c".into(), DEAF_HARNESS.into()],
+			input: format!("{text}\n"),
+			input_mode: NativeInputMode::Sealed,
+		};
+	}
+	HelperCommand::Launch {
+		program: std::env::current_exe().unwrap().to_str().unwrap().into(),
+		arguments: vec![
+			"--ignored".into(),
+			"--exact".into(),
+			"--nocapture".into(),
+			"fixture::fake_harness_process".into(),
+		],
+		input: format!("{text}\n"),
+		input_mode: NativeInputMode::Sealed,
+	}
+}
+
 async fn execution(stream: UnixStream, specification: CraftSpecification) {
 	let (read, write) = stream.into_split();
 	let connection = CraftConnection::accept(read, write, specification)
@@ -89,6 +184,7 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 	let execution_id = connection.hello().execution_id;
 	let craft_minor = connection.negotiated().version.minor;
 	let resume = connection.hello().resume.clone();
+	let fork = connection.hello().fork.clone();
 	let (mut receiver, mut sender) = connection.split();
 	let (id, text, helper_socket, source_offset, checkpoint) =
 		match receiver.receive().await.unwrap() {
@@ -139,34 +235,32 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 			.exists();
 	let recovering = text.is_none();
 	if !recovering {
+		let root = Path::new(&ready.descriptor.config.working_directory);
 		std::fs::write(
-			Path::new(&ready.descriptor.config.working_directory)
-				.join("native-resume"),
+			root.join("native-resume"),
 			serde_json::to_string(&resume).unwrap(),
 		)
 		.unwrap();
+		if std::env::var_os("JET_FAKE_CAPTURE_FORK").is_some() {
+			std::fs::write(
+				root.join("native-fork"),
+				serde_json::to_string(&fork).unwrap(),
+			)
+			.unwrap();
+			std::fs::write(
+				root.join("initial-input"),
+				format!("{}\n", text.as_deref().unwrap()),
+			)
+			.unwrap();
+		}
 	}
 	writer
 		.write(&Frame::control(
 			encode_control(&if let Some(text) = text {
-				HelperCommand::Launch {
-					program: if text == "Fail native launch" {
-						"/missing-jet-test-harness".into()
-					} else {
-						std::env::current_exe()
-							.unwrap()
-							.to_str()
-							.unwrap()
-							.into()
-					},
-					arguments: vec![
-						"--ignored".into(),
-						"--exact".into(),
-						"--nocapture".into(),
-						"fixture::fake_harness_process".into(),
-					],
-					input: format!("{text}\n"),
-				}
+				launch(
+					&text,
+					Path::new(&ready.descriptor.config.working_directory),
+				)
 			} else {
 				HelperCommand::Recover { source_offset }
 			})
@@ -204,11 +298,22 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 			tokio::select! {
 				record = &mut incoming => break record,
 				command = requests.recv() => {
-					let Some(CraftCommand::Turn { id, text }) = command else { return; };
 					let root = Path::new(&ready.descriptor.config.working_directory);
-					assert!(root.join("queue").exists());
-					std::fs::write(root.join("turn-input.tmp"), json!({"id":id,"text":text}).to_string()).unwrap();
-					std::fs::rename(root.join("turn-input.tmp"), root.join("turn-input")).unwrap();
+					match command {
+						Some(CraftCommand::Turn { id, text }) => {
+							assert!(root.join("queue").exists());
+							std::fs::write(root.join("turn-input.tmp"), json!({"id":id,"text":text}).to_string()).unwrap();
+							std::fs::rename(root.join("turn-input.tmp"), root.join("turn-input")).unwrap();
+						}
+						// Native cancellation: the Harness is told to abandon
+						// this turn, and reports the boundary itself. The Run's
+						// own identity names the input it started with.
+						Some(CraftCommand::Interrupt { id: cancelled }) => {
+							let turn = if cancelled == id { "initial".to_string() } else { cancelled };
+							std::fs::write(root.join(format!("interrupted-{turn}")), "cancel").unwrap();
+						}
+						_ => return,
+					}
 				}
 			}
 		};
@@ -242,6 +347,14 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 					};
 					let native: serde_json::Value =
 						serde_json::from_str(native_event.get()).unwrap();
+					if native["interrupted_turn"].is_string() {
+						sender
+							.send(&CraftEvent::TurnEnded {
+								outcome: TurnOutcome::Interrupted,
+							})
+							.await
+							.unwrap();
+					}
 					if let Some(turn_id) = native["turn_id"].as_str() {
 						sender
 							.send(&CraftEvent::Completed {
@@ -402,7 +515,13 @@ fn fake_harness_process() {
 	if input.trim() == "Fail after spawn" {
 		std::process::exit(7);
 	}
-	assert_eq!(input.trim(), "Make a change");
+	assert!(
+		input.trim() == "Make a change"
+			|| input.trim() == "Continue from checkpoint"
+			|| (input.starts_with(
+				"<jet-fork-context version=\"1\" data-only=\"true\">\n"
+			) && input.trim().ends_with("Continue from checkpoint"))
+	);
 	if Path::new("queue").exists() {
 		return queue_fixture::harness();
 	}

@@ -34,7 +34,10 @@ mod discovery;
 mod effect;
 mod error;
 mod event;
+mod execution_control;
+mod execution_control_effect;
 mod filesystem;
+mod fork;
 mod import;
 mod lifecycle;
 mod orphan;
@@ -71,6 +74,9 @@ mod turn_dispatch;
 mod turn_queue;
 mod user_input;
 mod user_input_files;
+pub use execution_control::{
+	ExecutionSignal, RunControl, RunTermination, TerminationStage,
+};
 pub use orphan::{
 	ExecutionAction, ExecutionMetadata, ExecutionResolution, ExecutionRole,
 	OrphanedExecution, OrphanedExecutions,
@@ -99,7 +105,7 @@ pub use terminal::{
 };
 mod worktree;
 pub use run::{ManagedProcess, ManagedProcessRole, RunActivity, RunExecution};
-pub use run_command::LaunchPlan;
+pub use run_command::{ForkLaunchSource, LaunchFork, LaunchPlan};
 pub use run_craft::PinnedCraft;
 pub use run_host::{
 	RunConnection, RunFuture, RunHost, RunRecoveryCursor, RunRecoveryError,

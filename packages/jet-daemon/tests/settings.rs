@@ -148,6 +148,7 @@ async fn a_client_below_the_settings_minor_is_refused() {
 				scope: SettingScope::Plane,
 				selection: SettingSelection::All,
 			},
+			timeout_ms: None,
 		})
 		.await;
 

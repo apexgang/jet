@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT conversation_id AS \"conversation_id!\",\n\t\t\t\tcheckpoint_commit, checkpoint_tree, source_craft,\n\t\t\t\tsource_native_conversation, context\n\t\t\t FROM conversation_fork_launches WHERE conversation_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "conversation_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversation_fork_launches",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "name": "checkpoint_commit",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversation_fork_launches",
+            "name": "checkpoint_commit"
+          }
+        }
+      },
+      {
+        "name": "checkpoint_tree",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversation_fork_launches",
+            "name": "checkpoint_tree"
+          }
+        }
+      },
+      {
+        "name": "source_craft",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversation_fork_launches",
+            "name": "source_craft"
+          }
+        }
+      },
+      {
+        "name": "source_native_conversation",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversation_fork_launches",
+            "name": "source_native_conversation"
+          }
+        }
+      },
+      {
+        "name": "context",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversation_fork_launches",
+            "name": "context"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "2327527037e02138d39cfc87e0b16cc4d5a6b48dca2fca26f6ec1be06dcdd2ec"
+}

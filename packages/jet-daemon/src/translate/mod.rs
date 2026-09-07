@@ -7,6 +7,7 @@ mod account;
 mod audit;
 mod capability;
 mod checkpoint;
+mod execution_control;
 mod import;
 mod pairing;
 mod project;
@@ -27,14 +28,14 @@ use std::path::PathBuf;
 use jet_core::{
 	AccountBindingId, Actor, AuditSequence, AuthenticationString,
 	BaseSelection, ClientId, Command, CommandOutcome, ConflictState,
-	Conversation, ConversationId, ConversationList, ConversationSnapshot,
-	CoreError, ErrorCategory, Event, EventPage, EventPayload, EventSequence,
-	FileRevision, FileTarget, HarnessId, ImportId, NativeConversationId,
-	PairingOfferId, PairingSecret, PairingSignature, PathGrant, PlaneStatus,
-	ProjectId, ProviderId, Query, QueryResult, RecoveryAction, RelativePath,
-	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
-	SearchTerms, SeedSelection, WorkingTree, WorkingTreeRequest, Workspace,
-	WorkspaceBase, WorkspaceId,
+	Conversation, ConversationId, ConversationList, ConversationOrigin,
+	ConversationSnapshot, CoreError, ErrorCategory, Event, EventPage,
+	EventPayload, EventSequence, FileRevision, FileTarget, HarnessId, ImportId,
+	NativeConversationId, PairingOfferId, PairingSecret, PairingSignature,
+	PathGrant, PlaneStatus, ProjectId, ProviderId, Query, QueryResult,
+	RecoveryAction, RelativePath, RetentionPolicy, Revision, RevisionConflict,
+	Run, RunId, RunLifecycle, SearchTerms, SeedSelection, WorkingTree,
+	WorkingTreeRequest, Workspace, WorkspaceBase, WorkspaceId,
 };
 use jet_protocol as wire;
 
@@ -197,7 +198,7 @@ pub(crate) fn query_result(
 			wire::QueryResponse::OrphanedExecutions(run::orphans(page, minor))
 		}
 		QueryResult::RunExecution(execution) => {
-			wire::QueryResponse::RunExecution(run::execution(execution))
+			wire::QueryResponse::RunExecution(run::execution(execution, minor))
 		}
 		QueryResult::Status(status) => {
 			wire::QueryResponse::Status(plane_status(&status, minor))
@@ -330,6 +331,14 @@ pub(crate) fn command(
 			source: turn::source_from_wire(*source),
 			prompt: prompt.clone(),
 		},
+		wire::CommandRequest::InterruptTurn { run_id } => Command::ControlRun {
+			run_id: RunId(*run_id),
+			control: jet_core::RunControl::InterruptTurn,
+		},
+		wire::CommandRequest::StopRun { run_id } => Command::ControlRun {
+			run_id: RunId(*run_id),
+			control: jet_core::RunControl::StopRun,
+		},
 		wire::CommandRequest::StartRun {
 			conversation_id,
 			craft,
@@ -345,6 +354,13 @@ pub(crate) fn command(
 		} => Command::CreateConversation {
 			retention: retention_from_wire(*retention),
 			working_tree: working_tree_request(working_tree)?,
+		},
+		wire::CommandRequest::ForkConversation {
+			source_run_id,
+			checkpoint_turn,
+		} => Command::ForkConversation {
+			source_run_id: RunId(*source_run_id),
+			checkpoint_turn: *checkpoint_turn,
 		},
 		wire::CommandRequest::CreateRun { conversation_id } => {
 			Command::CreateRun {
@@ -485,6 +501,13 @@ pub(crate) fn command_outcome(
 				action: run::action(request.action),
 			}
 		}
+		CommandOutcome::RunControlAccepted {
+			run: value,
+			control,
+		} => wire::CommandResponse::RunControlAccepted {
+			run: run(&value),
+			control: execution_control::control(control),
+		},
 		CommandOutcome::TurnWithdrawn(value) => {
 			wire::CommandResponse::TurnWithdrawn {
 				turn: turn::turn(value),
@@ -648,8 +671,17 @@ fn conversation(conversation: &Conversation, minor: u32) -> wire::Conversation {
 			.then(|| working_tree(conversation.working_tree)),
 		// A client that negotiated an older minor does not know where a
 		// Conversation can come from, so it is not told (ADR-0019).
-		origin: (minor >= wire::IMPORTED_CONVERSATIONS_MINOR)
-			.then(|| import::origin(conversation.origin)),
+		origin: match conversation.origin {
+			ConversationOrigin::Forked { .. }
+				if minor < wire::CONVERSATION_FORKS_MINOR =>
+			{
+				None
+			}
+			_ if minor >= wire::IMPORTED_CONVERSATIONS_MINOR => {
+				Some(import::origin(conversation.origin))
+			}
+			_ => None,
+		},
 		created_at_unix_ms: unix_ms(conversation.created_at),
 	}
 }

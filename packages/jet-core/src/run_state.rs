@@ -24,6 +24,13 @@ pub(crate) struct State {
 	pub(crate) checkpoint: String,
 	#[serde(default)]
 	pub(crate) partial_source: SourcePrefix,
+	/// The admitted interactive control request, kept until the execution
+	/// settles it (ADR-0083).
+	#[serde(default)]
+	pub(crate) control: Option<crate::execution_control::ControlRequest>,
+	/// The recorded terminal outcome of that request.
+	#[serde(default)]
+	pub(crate) termination: Option<crate::RunTermination>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -65,7 +72,22 @@ pub(crate) async fn snapshot(
 		processes: state.processes,
 		native_conversation: state.native_conversation,
 		exit_code: state.exit_code,
+		termination: state.termination,
 	})
+}
+
+pub(crate) async fn save(
+	tx: &mut WriteTransaction,
+	run_id: RunId,
+	state: &State,
+) -> Result<(), CoreError> {
+	tx.update_run_execution(
+		run_id.0,
+		&serde_json::to_string(state)
+			.map_err(|e| CoreError::internal("run.encode", e.to_string()))?,
+	)
+	.await?;
+	Ok(())
 }
 
 /// Facts from the trusted Run Adapter, validated against the durable lifecycle.
@@ -257,6 +279,15 @@ async fn record(
 		Observation::Disconnected | Observation::Reconnected => {
 			Some(Settlement::OutcomeUnknown)
 		}
+		// A cancelled turn releases the queue: the Run itself is still
+		// alive and takes the next admitted input (ADR-0083).
+		Observation::TurnEnded(crate::TurnOutcome::Interrupted)
+			if state.control.is_some_and(|request| {
+				request.control == crate::RunControl::InterruptTurn
+			}) =>
+		{
+			Some(Settlement::Canceled)
+		}
 		Observation::Started { .. }
 		| Observation::FileChanged(_)
 		| Observation::TurnStarted
@@ -288,12 +319,7 @@ async fn record(
 	for event in events {
 		append(tx, &actor, &run.into(), event, now).await?;
 	}
-	tx.update_run_execution(
-		run_id.0,
-		&serde_json::to_string(&state)
-			.map_err(|e| CoreError::internal("run.encode", e.to_string()))?,
-	)
-	.await?;
+	save(tx, run_id, &state).await?;
 	Ok::<_, CoreError>(())
 }
 
@@ -311,6 +337,13 @@ pub(crate) async fn settle_start(
 	Ok(())
 }
 
+/// Whether the execution is still running. A Run being stopped keeps
+/// producing output until its native process actually ends, and none of it
+/// is discarded because a control request was admitted (ADR-0083).
+fn executing(lifecycle: RunLifecycle) -> bool {
+	matches!(lifecycle, RunLifecycle::Active | RunLifecycle::Stopping)
+}
+
 fn apply(
 	lifecycle: RunLifecycle,
 	state: &mut State,
@@ -319,10 +352,24 @@ fn apply(
 	let mut next = lifecycle;
 	let mut events = Vec::new();
 	match observation {
-		Observation::FileChanged(_)
-		| Observation::TurnStarted
-		| Observation::TurnEnded(_)
-			if lifecycle == RunLifecycle::Active => {}
+		Observation::TurnEnded(outcome) if executing(lifecycle) => {
+			// A Craft that cancelled the named turn natively answers the
+			// request without ending the Run.
+			if outcome == crate::TurnOutcome::Interrupted
+				&& let Some(request) = state.control
+				&& request.control == crate::RunControl::InterruptTurn
+			{
+				let termination = crate::RunTermination {
+					control: request.control,
+					stage: crate::TerminationStage::NativeCancellation,
+				};
+				state.control = None;
+				state.termination = Some(termination);
+				events.push(EventKind::RunTerminated { termination });
+			}
+		}
+		Observation::FileChanged(_) | Observation::TurnStarted
+			if executing(lifecycle) => {}
 		Observation::Completed(identity) => {
 			return apply(
 				lifecycle,
@@ -379,7 +426,7 @@ fn apply(
 			});
 			activity(state, Some(RunActivity::Working), &mut events);
 		}
-		Observation::Activity(reason) if lifecycle == RunLifecycle::Active => {
+		Observation::Activity(reason) if executing(lifecycle) => {
 			activity(state, Some(reason), &mut events)
 		}
 		Observation::Reconnected => {
@@ -390,7 +437,7 @@ fn apply(
 				});
 			}
 		}
-		Observation::Disconnected if lifecycle == RunLifecycle::Active => {
+		Observation::Disconnected if executing(lifecycle) => {
 			if !state.disconnected {
 				state.disconnected = true;
 				events.push(EventKind::RunActivityChanged {
@@ -404,7 +451,7 @@ fn apply(
 		Observation::Output {
 			native_json,
 			presentation_json,
-		} if lifecycle == RunLifecycle::Active
+		} if executing(lifecycle)
 			&& native_json.len()
 				+ presentation_json.iter().map(String::len).sum::<usize>()
 				<= 128 * 1024
@@ -419,7 +466,7 @@ fn apply(
 		| Observation::TurnCompleted {
 			native_conversation: identity,
 			..
-		} if lifecycle == RunLifecycle::Active
+		} if executing(lifecycle)
 			&& !identity.is_empty()
 			&& identity.len() <= 4096 =>
 		{
@@ -428,8 +475,12 @@ fn apply(
 				native_conversation: identity,
 			});
 		}
-		Observation::Ended(code) if lifecycle == RunLifecycle::Active => {
-			next = if code == Some(0) {
+		Observation::Ended(code) if executing(lifecycle) => {
+			// An admitted control request owns this end: the work stopped
+			// because it was asked to, whatever status the OS reported.
+			next = if state.control.is_some() {
+				RunLifecycle::Canceled
+			} else if code == Some(0) {
 				RunLifecycle::Completed
 			} else {
 				RunLifecycle::Failed
@@ -472,7 +523,7 @@ fn activity(
 	}
 }
 
-async fn append(
+pub(crate) async fn append(
 	tx: &mut WriteTransaction,
 	actor: &crate::EventActor,
 	run: &Run,

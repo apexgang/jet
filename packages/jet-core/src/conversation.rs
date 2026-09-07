@@ -41,7 +41,7 @@ pub struct RunId(pub Uuid);
 )]
 pub struct Revision(pub u64);
 
-/// Where a Conversation came from (ADR-0010).
+/// Where a Conversation came from (ADR-0010, ADR-0035).
 #[derive(
 	Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
 )]
@@ -56,6 +56,15 @@ pub enum ConversationOrigin {
 		/// The import it continues.
 		import_id: ImportId,
 	},
+	/// Created from one immutable Change checkpoint.
+	Forked {
+		/// Conversation that owns the selected Run.
+		source_conversation_id: ConversationId,
+		/// Run that owns the selected checkpoint.
+		source_run_id: RunId,
+		/// One-based turn boundary selected from that Run.
+		checkpoint_turn: u32,
+	},
 }
 
 impl ConversationOrigin {
@@ -67,6 +76,15 @@ impl ConversationOrigin {
 					import_id: import_id.0,
 				}
 			}
+			Self::Forked {
+				source_conversation_id,
+				source_run_id,
+				checkpoint_turn,
+			} => ConversationOriginRecord::Forked {
+				source_conversation_id: source_conversation_id.0,
+				source_run_id: source_run_id.0,
+				checkpoint_turn,
+			},
 		}
 	}
 }
@@ -80,6 +98,15 @@ impl From<ConversationOriginRecord> for ConversationOrigin {
 					import_id: ImportId(import_id),
 				}
 			}
+			ConversationOriginRecord::Forked {
+				source_conversation_id,
+				source_run_id,
+				checkpoint_turn,
+			} => Self::Forked {
+				source_conversation_id: ConversationId(source_conversation_id),
+				source_run_id: RunId(source_run_id),
+				checkpoint_turn,
+			},
 		}
 	}
 }

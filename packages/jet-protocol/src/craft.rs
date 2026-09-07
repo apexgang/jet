@@ -74,6 +74,13 @@ pub enum CraftCommand {
 		/// Harness input.
 		text: String,
 	},
+	/// Ask the Harness to cancel the identified turn without ending the
+	/// Run (Craft 1.4). A Craft that negotiated 1.4 must answer every
+	/// Interrupt with a `TurnEnded` boundary for that turn.
+	Interrupt {
+		/// Correlation identity of the turn to cancel.
+		id: String,
+	},
 	/// Route an authenticated user action to its native handler.
 	Action {
 		/// Correlation identity.

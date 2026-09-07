@@ -98,6 +98,12 @@ pub(crate) async fn run(
 	if let Err(error) = core.perform_runs().await {
 		eprintln!("jetd: cannot reconcile Run starts: {error}");
 	}
+	// An interrupted escalation is observed, never continued blindly: a
+	// signal already delivered may have ended work whose outcome is not yet
+	// visible (ADR-0083).
+	if let Err(error) = core.perform_run_controls().await {
+		eprintln!("jetd: cannot reconcile execution control: {error}");
+	}
 	if let Err(error) = core.recover_runs().await {
 		eprintln!("jetd: cannot recover executions: {error}");
 	}

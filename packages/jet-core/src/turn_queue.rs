@@ -377,6 +377,17 @@ impl Queue {
 				.iter()
 				.all(|entry| entry.turn.state == TurnState::Queued)
 	}
+	/// The input `run_id` is executing, if it holds a durable claim. An
+	/// interruption names that turn, so it can never reach later work.
+	pub(crate) fn active_turn(&self, run_id: crate::RunId) -> Option<Uuid> {
+		self.entries
+			.iter()
+			.find(|entry| {
+				entry.turn.state == TurnState::Active
+					&& entry.turn.run_id == Some(run_id)
+			})
+			.map(|entry| entry.turn.turn_id)
+	}
 	pub(crate) fn claim(&mut self, run_id: crate::RunId) -> Option<Entry> {
 		if !self.ready() {
 			return None;

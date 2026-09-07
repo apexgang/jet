@@ -292,6 +292,10 @@ _Avoid_: Scheduled task, retry policy, Handoff
 A new Conversation created from a selected Change checkpoint, using a separate Workspace and either a native Harness fork or a provenance-marked context package.
 _Avoid_: Handoff, duplicate Run, shared Workspace
 
+**Fork launch context**:
+Immutable, destination-owned provenance, Harness metadata, and bounded Conversation history captured through the selected Change checkpoint for the first managed execution of a Conversation fork.
+_Avoid_: Source snapshot, fork cache, shared history
+
 **Search index**:
 A Plane-local full-text index of human-visible Conversation content and metadata. GUI clients federate searches across connected Planes; v1 does not use embeddings or a central index.
 _Avoid_: Event journal, artifact store, cloud search

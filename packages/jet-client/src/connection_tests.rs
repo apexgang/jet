@@ -120,6 +120,7 @@ async fn a_current_client_switches_to_numbered_streams_after_the_handshake() {
 			jet_protocol::ClientMessage::Query {
 				id: 1,
 				query: QueryRequest::Status,
+				..
 			}
 		));
 		assert!(!stream_id.is_connection());
@@ -202,6 +203,7 @@ async fn concurrent_requests_are_demultiplexed_by_numbered_stream() {
 			let ClientMessage::Query {
 				id,
 				query: QueryRequest::Status,
+				..
 			} = decode_control(&payload).unwrap()
 			else {
 				panic!("expected a status Query");
@@ -301,6 +303,7 @@ async fn canceled_requests_remain_bounded_until_their_replies_arrive() {
 			let ClientMessage::Query {
 				id,
 				query: QueryRequest::Status,
+				..
 			} = decode_control(&payload).unwrap()
 			else {
 				panic!("expected a status Query");
@@ -326,6 +329,7 @@ async fn canceled_requests_remain_bounded_until_their_replies_arrive() {
 		let ClientMessage::Query {
 			id,
 			query: QueryRequest::Status,
+			..
 		} = decode_control(&payload).unwrap()
 		else {
 			panic!("expected a final status Query");

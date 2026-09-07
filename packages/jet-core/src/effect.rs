@@ -20,6 +20,11 @@ pub(crate) enum EffectKind {
 	StartRun {
 		run_id: RunId,
 	},
+	/// Carry out one admitted Interrupt turn or Stop Run request
+	/// (ADR-0083).
+	ControlRun {
+		run_id: RunId,
+	},
 	/// Apply one recorded Workspace promotion to its destination
 	/// (ADR-0025).
 	PromoteWorkspace {
@@ -201,6 +206,7 @@ async fn settle(
 		EffectKind::StartRun { run_id } => {
 			crate::run_state::settle_start(tx, run_id, state, now_unix_ms).await
 		}
+		EffectKind::ControlRun { .. } => Ok(()),
 		EffectKind::PromoteWorkspace { promotion_id } => {
 			promotion_effect::settle(tx, promotion_id, state, now_unix_ms).await
 		}
@@ -228,6 +234,14 @@ impl TryFrom<EffectRecord> for Effect {
 					CoreError::internal(
 						"effect.invalid",
 						"a run.start Effect has no Run identity",
+					)
+				})?),
+			},
+			EffectKindRecord::ControlRun => EffectKind::ControlRun {
+				run_id: RunId(record.run_id.ok_or_else(|| {
+					CoreError::internal(
+						"effect.invalid",
+						"a run.control Effect has no Run identity",
 					)
 				})?),
 			},

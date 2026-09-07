@@ -380,11 +380,13 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::BeginAuditEpoch
 		| Command::ApplyUserEdit { .. }
 		| Command::CreateConversation { .. }
+		| Command::ForkConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
 		| Command::SubmitTurn { .. }
 		| Command::SubmitReview { .. }
 		| Command::WithdrawTurn { .. }
+		| Command::ControlRun { .. }
 		| Command::PromoteWorkspace { .. }
 		| Command::ImportConversation { .. }
 		| Command::ResumeImportedConversation { .. }
@@ -427,11 +429,13 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::ConfirmPairing { .. }
 		| Command::CompletePairing { .. }
 		| Command::CreateConversation { .. }
+		| Command::ForkConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
 		| Command::SubmitTurn { .. }
 		| Command::SubmitReview { .. }
 		| Command::WithdrawTurn { .. }
+		| Command::ControlRun { .. }
 		| Command::ImportConversation { .. }
 		| Command::ResumeImportedConversation { .. }
 		| Command::TransitionRun { .. } => AuditSubject::Plane,

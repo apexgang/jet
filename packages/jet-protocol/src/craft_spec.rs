@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CraftFeature {
-	/// Feature name; v1 understands turns, actions, and resume.
+	/// Feature name; v1 understands turns, actions, resume, and fork.
 	pub name: String,
 	/// Whether installation must reject an unrecognized feature.
 	#[serde(default)]
@@ -100,7 +100,9 @@ impl CraftSpecification {
 			.negotiate(&self.protocol, Negotiation::NewExecution)?;
 		let mut enabled = Vec::new();
 		for feature in &self.features {
-			if ["turns", "actions", "resume"].contains(&feature.name.as_str()) {
+			if ["turns", "actions", "resume", "fork"]
+				.contains(&feature.name.as_str())
+			{
 				enabled.push(feature.name.clone());
 			} else if feature.required {
 				return Err(IncompatibleProtocol);
