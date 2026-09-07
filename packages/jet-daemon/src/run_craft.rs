@@ -103,6 +103,37 @@ pub(crate) async fn load(
 	Ok(pin)
 }
 
+/// A later Run retains its accepted artifact and protocol, with fresh boot evidence.
+pub(crate) async fn prepare_next_run(
+	mut plan: jet_core::LaunchPlan,
+) -> Result<jet_core::LaunchPlan, CoreError> {
+	let mut contract = Contract::of(&plan.craft)?;
+	if plan.native_conversation.is_some()
+		&& (!contract
+			.specification
+			.enabled_features()
+			.map_err(|_| unavailable())?
+			.iter()
+			.any(|feature| feature == "resume")
+			|| !contract
+				.specification
+				.protocol
+				.capabilities
+				.iter()
+				.any(|capability| capability == "resume"))
+	{
+		return Err(unavailable());
+	}
+	contract.boot_identity =
+		filesystem::blocking(jet_runtime::execution_boot_identity)
+			.await?
+			.map_err(|_| unavailable())?;
+	plan.craft.adapter_state =
+		serde_json::to_string(&contract).map_err(|_| unavailable())?;
+	plan.craft.verify().await?;
+	Ok(plan)
+}
+
 fn bounded_read(path: &Path, limit: u64) -> std::io::Result<Vec<u8>> {
 	let file = std::fs::File::open(path)?;
 	if !file.metadata()?.is_file() {

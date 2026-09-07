@@ -92,6 +92,13 @@ async fn managed_run_reports_attention_output_and_durable_completion() {
             let refused: Value = old.receive().await;
             assert_eq!((refused["kind"].clone(), refused["error"]["code"].clone()), (json!("error"), json!("protocol.unsupported_minor")));
         }
+        let mut queue_hello = support::hello(client_id);
+        queue_hello.minor = jet_protocol::TURN_QUEUE_MINOR;
+        let (mut queue_peer, _) = support::handshake_raw(&daemon, &queue_hello).await;
+        queue_peer.send(&json!({"kind":"query","id":7,"query":{"type":"turn_queue","conversation_id":conversation.conversation_id}})).await;
+        assert_eq!(queue_peer.receive::<Value>().await["kind"], "query_result");
+        queue_peer.send(&json!({"kind":"query","id":8,"query":{"type":"change_diff","run_id":run_id,"scope":{"kind":"turn","turn":1}}})).await;
+        assert_eq!(queue_peer.receive::<Value>().await["error"]["code"], "protocol.unsupported_minor");
         let raw_search = client.search("native_integer").await.unwrap();
         assert_eq!((raw_search.indexed_through, raw_search.hits), (journal.cursor, vec![]));
 

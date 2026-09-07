@@ -31,7 +31,7 @@ failures are reported rather than substituted with empty diffs or invented origi
 
 ## Queries
 
-Client protocol 1.16 adds `change_diff`, `next_change_diff`, and `change_artifact`. Older peers are
+Client protocol 1.17 adds `change_diff`, `next_change_diff`, and `change_artifact`. Older peers are
 refused these requests before execution. `jet-client` provides `change_diff`,
 `next_change_diff`, and `change_artifact` methods.
 
@@ -71,7 +71,11 @@ more than 256 receipts mark the turn evidence incomplete without blocking captur
 Aggregate scopes compose verified checkpoint transitions and inspect gaps between
 turns, preserving unknown origins through later changes and content reversions.
 
-The first turn is captured before `Start`. For subsequent turns, a Craft holds
+The first turn is captured before `Start`. Queued turns capture their next
+boundary in the same transaction that claims input, before native delivery.
+Matching Craft completion settles the queue and checkpoint together. A later
+Craft start notification preserves that earlier boundary. For autonomous turns,
+a Craft holds
 native input until the host acknowledges the source record containing
 `turn_started`. After `turn_ended`, it waits for that boundary's acknowledgement
 before admitting further work. Legacy `completed` closes an active turn; process

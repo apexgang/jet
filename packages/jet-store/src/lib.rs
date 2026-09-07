@@ -36,6 +36,7 @@ mod run_execution;
 mod search;
 mod setting;
 mod transaction;
+mod turn_queue;
 mod workspace;
 
 use std::path::{Path, PathBuf};

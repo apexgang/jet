@@ -17,8 +17,16 @@ impl Core {
 	/// Returns a store error if an Effect or its observation cannot be recorded.
 	pub async fn perform_runs(self: &Arc<Self>) -> Result<(), CoreError> {
 		self.perform_execution_resolutions().await?;
-		self.reconcile_effects(&mut Runs(self), EffectKindRecord::StartRun)
+		self.prepare_queued_runs().await?;
+		let outcomes = self
+			.reconcile_effects(&mut Runs(self), EffectKindRecord::StartRun)
 			.await?;
+		if outcomes
+			.iter()
+			.any(|effect| effect.state == crate::effect::EffectState::Failed)
+		{
+			self.run_work.notify_one();
+		}
 		Ok(())
 	}
 }
@@ -49,9 +57,7 @@ impl EffectAdapter for Runs<'_> {
 		if self.0.begin_run_changes(run_id, &plan).await.is_err() {
 			return EffectResult::Failed;
 		}
-		let mut connection = match host
-			.start(self.0.run_home(), run_id, plan)
-			.await
+		let connection = match host.start(self.0.run_home(), run_id, plan).await
 		{
 			Ok(connection) => connection,
 			Err(crate::RunStartError::NotStarted) => {
@@ -125,15 +131,17 @@ pub(crate) fn spawn_monitor(
 			.lock()
 			.expect("monitor lock")
 			.remove(&run_id);
+		core.run_work.notify_one();
 	});
 }
 
 async fn monitor(
 	core: &Core,
 	run_id: RunId,
-	mut connection: Box<dyn crate::RunConnection>,
+	connection: Box<dyn crate::RunConnection>,
 	initial: Vec<Observation>,
 ) -> Result<(), CoreError> {
+	let mut wake = core.turn_wake.subscribe();
 	let mut expected = core.source_prefix(run_id).await?;
 	let mut replayed = run_state::SourcePrefix::default();
 	let mut initial = initial.into_iter();
@@ -142,6 +150,7 @@ async fn monitor(
 	let mut events = 0;
 	let mut ended = false;
 	let mut deadline = None;
+	core.dispatch_turn(run_id, &*connection).await?;
 	loop {
 		let observation = if let Some(observation) = initial.next() {
 			observation
@@ -149,12 +158,10 @@ async fn monitor(
 			let receive = connection.receive();
 			tokio::pin!(receive);
 			loop {
-				let Some(at) = deadline else {
-					break receive.await?;
-				};
 				tokio::select! {
 					result = &mut receive => break result?,
-					() = tokio::time::sleep_until(at) => {
+					Ok(()) = wake.changed() => { core.dispatch_turn(run_id, &*connection).await?; }
+					() = async { match deadline { Some(at) => tokio::time::sleep_until(at).await, None => std::future::pending().await } } => {
 						core.commit_run_source(run_id, std::mem::take(&mut pending), run_state::SourceBoundary::Pending).await?;
 						bytes = 0; events = 0; deadline = None;
 					}
@@ -183,6 +190,7 @@ async fn monitor(
 					connection.finish().await?;
 					return Ok(());
 				}
+				core.dispatch_turn(run_id, &*connection).await?;
 			}
 			observation => {
 				ended |= matches!(
@@ -210,6 +218,10 @@ async fn monitor(
 								.sum::<usize>()
 					}
 					Observation::NativeConversation(value)
+					| Observation::TurnCompleted {
+						native_conversation: value,
+						..
+					}
 					| Observation::Completed(value) => value.len(),
 					Observation::FileChanged(value) => {
 						serde_json::to_vec(value)
@@ -262,6 +274,7 @@ fn event_count(observation: &Observation) -> usize {
 		| Observation::Activity(_)
 		| Observation::Output { .. }
 		| Observation::NativeConversation(_)
+		| Observation::TurnCompleted { .. }
 		| Observation::LaunchFailed
 		| Observation::Disconnected
 		| Observation::Reconnected => 1,

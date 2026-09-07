@@ -1,5 +1,6 @@
 //! Atomic projection and semantic Event updates for managed executions.
 use crate::event::EventSubject;
+use crate::turn_dispatch::Settlement;
 use crate::{
 	ConversationId, Core, CoreError, EventKind, EventSequence, ManagedProcess,
 	ManagedProcessRole, Run, RunActivity, RunExecution, RunId, RunLifecycle,
@@ -79,6 +80,13 @@ pub enum Observation {
 	TurnEnded(crate::TurnOutcome),
 	/// Legacy Craft Command completion, including native Conversation identity.
 	Completed(String),
+	/// Explicit completion of one admitted input, independent of Run activity.
+	TurnCompleted {
+		/// Correlation identity originally delivered to the pinned Craft.
+		turn_id: uuid::Uuid,
+		/// Harness-native Conversation identity for later continuation.
+		native_conversation: String,
+	},
 	/// The helper reported that it spawned a Harness.
 	Started {
 		/// Actual helper OS identity.
@@ -141,7 +149,7 @@ impl Core {
 		boundary: SourceBoundary,
 	) -> Result<(), CoreError> {
 		let now = self.now_unix_ms();
-		self.store.write(async |tx| {
+		let terminal = self.store.write(async |tx| {
             let execution = tx.run_execution(run_id.0).await?.ok_or_else(missing)?;
             let state: State = decode(&execution.state)?;
             if matches!(&boundary, SourceBoundary::Complete { offset, .. } if *offset <= state.source_offset) { return Err(invalid()); }
@@ -161,8 +169,13 @@ impl Core {
             let mut state: State = decode(&execution.state)?;
             state.partial_source = prefix;
             tx.update_run_execution(run_id.0, &serde_json::to_string(&state).map_err(|_| invalid())?).await?;
-            Ok(())
-        }).await
+            let terminal = tx.run(run_id.0).await?.ok_or_else(missing)?.lifecycle.is_terminal();
+            Ok::<_, CoreError>(terminal && state.partial_source.count == 0)
+        }).await?;
+		if terminal {
+			self.run_work.notify_one();
+		}
+		Ok(())
 	}
 	pub(crate) async fn observe_run(
 		&self,
@@ -170,6 +183,12 @@ impl Core {
 		observation: Observation,
 	) -> Result<(), CoreError> {
 		let now = self.now_unix_ms();
+		let terminal = matches!(
+			observation,
+			Observation::Lost
+				| Observation::LaunchFailed
+				| Observation::Ended(_)
+		);
 		self.store
 			.write(async |tx| {
 				crate::checkpoint_state::observe(
@@ -181,7 +200,11 @@ impl Core {
 				.await?;
 				record(tx, run_id, observation, now).await
 			})
-			.await
+			.await?;
+		if terminal {
+			self.run_work.notify_one();
+		}
+		Ok(())
 	}
 }
 
@@ -202,6 +225,7 @@ async fn record(
 		| Observation::TurnEnded(_)
 		| Observation::Completed(_)
 		| Observation::Activity(_)
+		| Observation::TurnCompleted { .. }
 		| Observation::Output { .. }
 		| Observation::NativeConversation(_) => crate::EventActor::Harness {
 			run_id,
@@ -218,7 +242,33 @@ async fn record(
 			authorized_by,
 		},
 	};
+	let settlement = match &observation {
+		Observation::TurnCompleted { turn_id, .. } => {
+			Some(Settlement::Completed { turn_id: *turn_id })
+		}
+		Observation::NativeConversation(_) | Observation::Completed(_) => {
+			Some(Settlement::Completed {
+				turn_id: plan.turn_id.unwrap_or(run_id.0),
+			})
+		}
+		Observation::Ended(_)
+		| Observation::LaunchFailed
+		| Observation::Lost => Some(Settlement::Failed),
+		Observation::Disconnected | Observation::Reconnected => {
+			Some(Settlement::OutcomeUnknown)
+		}
+		Observation::Started { .. }
+		| Observation::FileChanged(_)
+		| Observation::TurnStarted
+		| Observation::TurnEnded(_)
+		| Observation::Activity(_)
+		| Observation::Output { .. }
+		| Observation::Progress { .. } => None,
+	};
 	let (lifecycle, events) = apply(run.lifecycle, &mut state, observation)?;
+	if let Some(outcome) = settlement {
+		crate::turn_dispatch::settle(tx, run_id, outcome, now).await?;
+	}
 	if lifecycle != run.lifecycle {
 		tx.update_run_lifecycle(run_id.0, lifecycle, now).await?;
 		append(
@@ -281,6 +331,9 @@ fn apply(
 			);
 		}
 		Observation::Lost => {
+			// Proven process death makes the remaining source boundary unavailable.
+			// Committed semantic Events remain durable; no source is acknowledged.
+			state.partial_source = SourcePrefix::default();
 			if !lifecycle.is_terminal() {
 				next = RunLifecycle::Lost;
 				state.disconnected = false;
@@ -363,9 +416,12 @@ fn apply(
 			})
 		}
 		Observation::NativeConversation(identity)
-			if lifecycle == RunLifecycle::Active
-				&& !identity.is_empty()
-				&& identity.len() <= 4096 =>
+		| Observation::TurnCompleted {
+			native_conversation: identity,
+			..
+		} if lifecycle == RunLifecycle::Active
+			&& !identity.is_empty()
+			&& identity.len() <= 4096 =>
 		{
 			state.native_conversation = Some(identity.clone());
 			events.push(EventKind::RunNativeConversation {
@@ -395,6 +451,7 @@ fn apply(
 		| Observation::TurnStarted
 		| Observation::TurnEnded(_)
 		| Observation::Activity(_)
+		| Observation::TurnCompleted { .. }
 		| Observation::Output { .. }
 		| Observation::NativeConversation(_)
 		| Observation::Ended(_)

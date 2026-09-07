@@ -336,7 +336,7 @@ async fn crossing_the_size_limit_preserves_each_captured_side_and_same_boundary_
 	assert_eq!((same.total_files, same.files), (0, vec![]));
 	sender.send(RunObservation::TurnStarted).await.unwrap();
 	sender
-		.send(RunObservation::NativeConversation("second-turn".into()))
+		.send(RunObservation::Activity(RunActivity::WaitingForUser))
 		.await
 		.unwrap();
 	progress(&sender, 3).await;
@@ -345,8 +345,7 @@ async fn crossing_the_size_limit_preserves_each_captured_side_and_same_boundary_
 			if let QueryResult::RunExecution(state) = core
 				.query(&actor(), Query::RunExecution { run_id })
 				.await
-				.unwrap() && state.native_conversation.as_deref()
-				== Some("second-turn")
+				.unwrap() && state.activity == Some(RunActivity::WaitingForUser)
 			{
 				break;
 			}

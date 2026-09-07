@@ -291,8 +291,8 @@ pub(crate) async fn connect(
 	}
 	Ok(Box::new(RunConnection {
 		craft_minor: contract.craft_protocol.minor,
-		reader,
-		writer,
+		reader: tokio::sync::Mutex::new(reader),
+		writer: tokio::sync::Mutex::new(writer),
 		helper_pid: descriptor.pid,
 		run_id: id,
 	}))

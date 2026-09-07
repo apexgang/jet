@@ -1,4 +1,4 @@
-//! Checkpoint and patch reads for client protocol minor 16.
+//! Checkpoint and patch reads for client protocol minor 17.
 use crate::{Client, ClientError};
 use jet_protocol::{
 	ChangeArtifactChunk, ChangeDiff, DiffScope, QueryRequest, QueryResponse,
@@ -36,6 +36,7 @@ impl Client {
 		match self.query(query).await? {
 			QueryResponse::ChangeDiff(diff) => Ok(diff),
 			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::TurnQueue(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
@@ -74,6 +75,7 @@ impl Client {
 		{
 			QueryResponse::ChangeArtifact(chunk) => Ok(chunk),
 			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::TurnQueue(_)
 			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)

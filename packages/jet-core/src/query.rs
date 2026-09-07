@@ -47,6 +47,11 @@ pub enum Query {
 		/// Cursor supplied by the preceding diff page.
 		cursor: crate::PageCursor,
 	},
+	/// Authoritative input order and current execution state.
+	TurnQueue {
+		/// Conversation whose queue is read.
+		conversation_id: ConversationId,
+	},
 	/// Bounded read-only metadata for interactive recovery decisions.
 	OrphanedExecutions {
 		/// Continue after the previous page.
@@ -154,6 +159,8 @@ pub enum QueryResult {
 	ChangeArtifact(crate::ChangeArtifactChunk),
 	/// Immutable boundaries and their patch preview.
 	ChangeDiff(Box<crate::ChangeDiff>),
+	/// Bounded current Turn queue.
+	TurnQueue(crate::TurnQueue),
 	/// A bounded page of unsafe execution matches.
 	OrphanedExecutions(crate::OrphanedExecutions),
 	/// Lifecycle, activity, and Managed processes at one journal cursor.
@@ -228,6 +235,13 @@ impl Core {
 			Query::NextChangeDiff { cursor } => {
 				crate::checkpoint_query::next(self, cursor).await
 			}
+			Query::TurnQueue { conversation_id } => self
+				.store
+				.read(async |tx| {
+					crate::turn_queue::snapshot(tx, conversation_id).await
+				})
+				.await
+				.map(QueryResult::TurnQueue),
 			Query::OrphanedExecutions { after } => self
 				.orphaned_executions(after)
 				.await

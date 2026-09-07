@@ -1,4 +1,6 @@
 //! Controlled external peers for the real Run conformance boundary.
+#[path = "queue_fixture.rs"]
+mod queue_fixture;
 use jet_craft_sdk::CraftConnection;
 use jet_protocol::*;
 use serde_json::json;
@@ -12,8 +14,8 @@ pub fn install(home: &Path) {
 	let program = home.join("crafts/fake-craft");
 	let specification = json!({
 		"schema":{"major":1,"minor":0},"id":"fake","harness":"fake",
-		"protocol":{"family":"craft","versions":[{"major":1,"minor":3}],"capabilities":["runs"]},
-		"features":[{"name":"turns"}],"broker_permissions":[],
+		"protocol":{"family":"craft","versions":[{"major":1,"minor":3}],"capabilities":["runs","resume"]},
+		"features":[{"name":"turns"},{"name":"resume"}],"broker_permissions":[],
 		"host_access":[{"kind":"executable","name":executable},{"kind":"executable","name":"/missing-jet-test-harness"}]
 	});
 	let manifest = home.join("crafts/fake.json");
@@ -85,6 +87,8 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 		.await
 		.unwrap();
 	let execution_id = connection.hello().execution_id;
+	let craft_minor = connection.negotiated().version.minor;
+	let resume = connection.hello().resume.clone();
 	let (mut receiver, mut sender) = connection.split();
 	let (id, text, helper_socket, source_offset, checkpoint) =
 		match receiver.receive().await.unwrap() {
@@ -129,7 +133,19 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 		.await
 		.unwrap();
 	let ready: HelperReady = receive(&mut reader).await;
+	let queued_execution =
+		Path::new(&ready.descriptor.config.working_directory)
+			.join("queue")
+			.exists();
 	let recovering = text.is_none();
+	if !recovering {
+		std::fs::write(
+			Path::new(&ready.descriptor.config.working_directory)
+				.join("native-resume"),
+			serde_json::to_string(&resume).unwrap(),
+		)
+		.unwrap();
+	}
 	writer
 		.write(&Frame::control(
 			encode_control(&if let Some(text) = text {
@@ -172,8 +188,30 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 	} else {
 		serde_json::from_str(&checkpoint).unwrap()
 	};
+	// A bounded reader task keeps partial Craft frames alive across select!.
+	let (commands, mut requests) = tokio::sync::mpsc::channel(8);
+	tokio::spawn(async move {
+		while let Ok(command) = receiver.receive().await {
+			if commands.send(command).await.is_err() {
+				break;
+			}
+		}
+	});
 	loop {
-		let record: HelperRecord = receive(&mut reader).await;
+		let incoming = receive::<HelperRecord>(&mut reader);
+		tokio::pin!(incoming);
+		let record = loop {
+			tokio::select! {
+				record = &mut incoming => break record,
+				command = requests.recv() => {
+					let Some(CraftCommand::Turn { id, text }) = command else { return; };
+					let root = Path::new(&ready.descriptor.config.working_directory);
+					assert!(root.join("queue").exists());
+					std::fs::write(root.join("turn-input.tmp"), json!({"id":id,"text":text}).to_string()).unwrap();
+					std::fs::rename(root.join("turn-input.tmp"), root.join("turn-input")).unwrap();
+				}
+			}
+		};
 		let ended = matches!(
 			record.event,
 			HelperEvent::Exited { .. } | HelperEvent::LaunchFailed
@@ -204,6 +242,19 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 					};
 					let native: serde_json::Value =
 						serde_json::from_str(native_event.get()).unwrap();
+					if let Some(turn_id) = native["turn_id"].as_str() {
+						sender
+							.send(&CraftEvent::Completed {
+								id: if turn_id == "initial" {
+									id.clone()
+								} else {
+									turn_id.into()
+								},
+								native_conversation: "fake-native-1".into(),
+							})
+							.await
+							.unwrap();
+					}
 					sender
 						.send(&CraftEvent::Output {
 							native_event,
@@ -234,7 +285,9 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 							"injected crash inside dense source record after durable prefix"
 						);
 					}
-					if let Some(change) = native.get("file_change") {
+					if let Some(change) = native.get("file_change")
+						&& craft_minor >= 3
+					{
 						sender
 							.send(&CraftEvent::FileChanged {
 								change: serde_json::from_value(change.clone())
@@ -264,13 +317,15 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 				..
 			} => {}
 			HelperEvent::Exited { exit_code } => {
-				sender
-					.send(&CraftEvent::Completed {
-						id: id.clone(),
-						native_conversation: "fake-native-1".into(),
-					})
-					.await
-					.unwrap();
+				if !queued_execution {
+					sender
+						.send(&CraftEvent::Completed {
+							id: id.clone(),
+							native_conversation: "fake-native-1".into(),
+						})
+						.await
+						.unwrap();
+				}
 				sender
 					.send(&CraftEvent::RunEnded { exit_code })
 					.await
@@ -292,7 +347,7 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 			.await
 			.unwrap();
 		let CraftCommand::Acknowledge { source_offset } =
-			receiver.receive().await.unwrap()
+			requests.recv().await.unwrap()
 		else {
 			panic!("Ack")
 		};
@@ -324,7 +379,7 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 		}
 	}
 	assert!(matches!(
-		receiver.receive().await.unwrap(),
+		requests.recv().await.unwrap(),
 		CraftCommand::Shutdown
 	));
 }
@@ -348,6 +403,9 @@ fn fake_harness_process() {
 		std::process::exit(7);
 	}
 	assert_eq!(input.trim(), "Make a change");
+	if Path::new("queue").exists() {
+		return queue_fixture::harness();
+	}
 	let before = if Path::new("result.txt").exists() {
 		file_object("result.txt")
 	} else {

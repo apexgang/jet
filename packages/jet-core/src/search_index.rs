@@ -91,6 +91,8 @@ pub(crate) fn documents_of(event: &Event) -> Vec<NewSearchDocument> {
 		// user searches for.
 		EventKind::ChangeEvidenceRecorded { .. }
 		| EventKind::ChangeCheckpointRecorded { .. }
+		| EventKind::TurnInput { .. }
+		| EventKind::TurnChanged { .. }
 		| EventKind::ConversationCreated { .. }
 		| EventKind::ConversationImported { .. }
 		| EventKind::WorkspaceSeeded { .. }

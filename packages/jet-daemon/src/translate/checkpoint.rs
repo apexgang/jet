@@ -1,4 +1,4 @@
-//! Explicit domain-to-wire mapping for checkpoint protocol minor 16.
+//! Explicit domain-to-wire mapping for checkpoint protocol minor 17.
 use jet_core as core;
 use jet_protocol as wire;
 pub(super) fn scope(value: &wire::DiffScope) -> core::DiffScope {

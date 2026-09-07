@@ -81,7 +81,9 @@ pub(crate) async fn observe(
 		let mut state: State = run_state::decode(&execution.state)?;
 		let tracking = state.changes.as_mut().ok_or_else(missing)?;
 		if tracking.active.is_some() {
-			return Err(change_artifact::failed("a turn is already active"));
+			// The queue captures before delivery; a Craft may report that same
+			// start afterward. Keep the earlier durable boundary.
+			return Ok(());
 		}
 		let plan: crate::LaunchPlan = run_state::decode(&execution.plan)?;
 		tracking.active = Some(
@@ -96,7 +98,9 @@ pub(crate) async fn observe(
 		return save(tx, run_id, &state).await;
 	}
 	let outcome = match observation {
-		Observation::Completed(_) => TurnOutcome::Completed,
+		Observation::Completed(_)
+		| Observation::NativeConversation(_)
+		| Observation::TurnCompleted { .. } => TurnOutcome::Completed,
 		Observation::TurnEnded(outcome) => *outcome,
 		Observation::Ended(_) | Observation::Lost => TurnOutcome::Interrupted,
 		_ => return Ok(()),

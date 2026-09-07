@@ -547,6 +547,12 @@ async fn start(home: &Path) -> (Arc<Core>, mpsc::Sender<RunObservation>) {
 #[derive(Debug)]
 struct Host(Mutex<Option<mpsc::Receiver<RunObservation>>>);
 impl RunHost for Host {
+	fn prepare_next_run(
+		&self,
+		plan: LaunchPlan,
+	) -> RunFuture<'_, Result<LaunchPlan, CoreError>> {
+		Box::pin(async { Ok(plan) })
+	}
 	fn pin(
 		&self,
 		_home: std::path::PathBuf,
@@ -573,36 +579,46 @@ impl RunHost for Host {
 	) -> RunFuture<'_, Result<Box<dyn RunConnection>, RunStartError>> {
 		Box::pin(async {
 			Ok(Box::new(Connection {
-				receiver: self.0.lock().await.take().unwrap(),
-				started: false,
+				receiver: Mutex::new(self.0.lock().await.take().unwrap()),
+				started: std::sync::atomic::AtomicBool::new(false),
 			}) as Box<dyn RunConnection>)
 		})
 	}
 }
 struct Connection {
-	receiver: mpsc::Receiver<RunObservation>,
-	started: bool,
+	receiver: Mutex<mpsc::Receiver<RunObservation>>,
+	started: std::sync::atomic::AtomicBool,
 }
 impl RunConnection for Connection {
-	fn receive(&mut self) -> RunFuture<'_, Result<RunObservation, CoreError>> {
+	fn submit_turn(
+		&self,
+		_turn_id: uuid::Uuid,
+		_prompt: String,
+	) -> RunFuture<'_, Result<(), CoreError>> {
+		Box::pin(async { panic!("no input queued in this fixture") })
+	}
+	#[expect(
+		clippy::await_holding_invalid_type,
+		reason = "the shared fixture port has one serialized observation receiver"
+	)]
+	fn receive(&self) -> RunFuture<'_, Result<RunObservation, CoreError>> {
 		Box::pin(async move {
-			if !self.started {
-				self.started = true;
+			if !self.started.swap(true, std::sync::atomic::Ordering::SeqCst) {
 				return Ok(RunObservation::Started {
 					helper_pid: 100,
 					harness_pid: 101,
 				});
 			}
-			Ok(self.receiver.recv().await.unwrap())
+			Ok(self.receiver.lock().await.recv().await.unwrap())
 		})
 	}
 	fn acknowledge(
-		&mut self,
+		&self,
 		_offset: u64,
 	) -> RunFuture<'_, Result<(), CoreError>> {
 		Box::pin(async { Ok(()) })
 	}
-	fn finish(&mut self) -> RunFuture<'_, Result<(), CoreError>> {
+	fn finish(&self) -> RunFuture<'_, Result<(), CoreError>> {
 		Box::pin(async { Ok(()) })
 	}
 }

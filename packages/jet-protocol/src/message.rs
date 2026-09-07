@@ -114,6 +114,11 @@ pub enum QueryRequest {
 		/// Cursor supplied by the preceding diff page.
 		cursor: crate::PageCursor,
 	},
+	/// Current queue, with a position given by vector order.
+	TurnQueue {
+		/// Conversation whose queue is read.
+		conversation_id: Uuid,
+	},
 	/// Bounded Orphaned-execution metadata for interactive decisions.
 	OrphanedExecutions {
 		/// Continue after a previous page.
@@ -226,6 +231,8 @@ pub enum QueryResponse {
 	ChangeArtifact(crate::ChangeArtifactChunk),
 	/// Immutable boundaries and patch preview.
 	ChangeDiff(Box<crate::ChangeDiff>),
+	/// Fenced Turn queue snapshot.
+	TurnQueue(crate::TurnQueue),
 	/// Read-only recovery candidates.
 	OrphanedExecutions(crate::OrphanedExecutions),
 	/// Durable lifecycle, activity, and Managed processes of a Run.

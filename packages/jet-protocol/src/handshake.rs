@@ -14,10 +14,12 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 16;
+pub const PROTOCOL_MINOR: u32 = 17;
 
 /// Change checkpoints and evidence-backed diff Queries.
-pub const CHANGE_CHECKPOINTS_MINOR: u32 = 16;
+pub const CHANGE_CHECKPOINTS_MINOR: u32 = 17;
+/// Durable Turn queue Commands and Queries.
+pub const TURN_QUEUE_MINOR: u32 = 16;
 /// Minor introducing interactive Orphaned-execution recovery.
 pub const EXECUTION_RECOVERY_MINOR: u32 = 14;
 /// Minor that introduced managed Run admission and execution snapshots.

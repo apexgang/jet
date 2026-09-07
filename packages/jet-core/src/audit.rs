@@ -367,6 +367,8 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
+		| Command::SubmitTurn { .. }
+		| Command::WithdrawTurn { .. }
 		| Command::PromoteWorkspace { .. }
 		| Command::ImportConversation { .. }
 		| Command::ResumeImportedConversation { .. }
@@ -406,6 +408,8 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::CreateConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
+		| Command::SubmitTurn { .. }
+		| Command::WithdrawTurn { .. }
 		| Command::ImportConversation { .. }
 		| Command::ResumeImportedConversation { .. }
 		| Command::TransitionRun { .. } => AuditSubject::Plane,
