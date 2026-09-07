@@ -122,6 +122,15 @@ pub struct ConversationSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandRequest {
+	/// Resolve only the helper instance inspected by an interactive user.
+	ResolveExecution {
+		/// Selected execution.
+		execution_id: Uuid,
+		/// Expected instance; unavailable metadata permits only Leave.
+		instance: Option<Uuid>,
+		/// Explicit decision.
+		action: crate::ExecutionAction,
+	},
 	/// Start a managed Run with an installed Craft and initial input.
 	StartRun {
 		/// Conversation whose working tree is used.
@@ -277,6 +286,13 @@ pub enum CommandRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResponse {
+	/// The interactive decision was durably queued.
+	ExecutionResolutionRecorded {
+		/// Selected execution.
+		execution_id: Uuid,
+		/// Explicit decision.
+		action: crate::ExecutionAction,
+	},
 	/// The Conversation as created.
 	ConversationCreated(Conversation),
 	/// The Run as created.

@@ -12,7 +12,7 @@ pub fn install(home: &Path) {
 	let program = home.join("crafts/fake-craft");
 	let specification = json!({
 		"schema":{"major":1,"minor":0},"id":"fake","harness":"fake",
-		"protocol":{"family":"craft","versions":[{"major":1,"minor":1}],"capabilities":["runs"]},
+		"protocol":{"family":"craft","versions":[{"major":1,"minor":2}],"capabilities":["runs"]},
 		"features":[{"name":"turns"}],"broker_permissions":[],
 		"host_access":[{"kind":"executable","name":executable},{"kind":"executable","name":"/missing-jet-test-harness"}]
 	});
@@ -41,6 +41,17 @@ async fn fake_craft_process() {
 	.unwrap();
 	let specification: CraftSpecification =
 		serde_json::from_value(manifest["specification"].clone()).unwrap();
+	use std::io::Write;
+	let manifest_path = std::path::PathBuf::from(
+		std::env::var_os("JET_FAKE_MANIFEST").unwrap(),
+	);
+	let mut starts = std::fs::OpenOptions::new()
+		.create(true)
+		.append(true)
+		.open(manifest_path.with_extension("starts"))
+		.unwrap();
+	writeln!(starts, "{}", std::process::id()).unwrap();
+
 	let listener =
 		UnixListener::bind(std::env::var_os("JET_CRAFT_SOCKET").unwrap())
 			.unwrap();
@@ -75,14 +86,30 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 		.unwrap();
 	let execution_id = connection.hello().execution_id;
 	let (mut receiver, mut sender) = connection.split();
-	let CraftCommand::Start {
-		id,
-		text,
-		helper_socket,
-	} = receiver.receive().await.unwrap()
-	else {
-		panic!("Start")
-	};
+	let (id, text, helper_socket, source_offset, checkpoint) =
+		match receiver.receive().await.unwrap() {
+			CraftCommand::Start {
+				id,
+				text,
+				helper_socket,
+			} => (id, Some(text), helper_socket, 0, String::new()),
+			CraftCommand::Recover {
+				id,
+				helper_socket,
+				source_offset,
+				checkpoint,
+			} => {
+				let manifest = std::path::PathBuf::from(
+					std::env::var_os("JET_FAKE_MANIFEST").unwrap(),
+				);
+				assert!(
+					!manifest.with_extension("crash").exists(),
+					"injected recovery crash"
+				);
+				(id, None, helper_socket, source_offset, checkpoint)
+			}
+			_ => panic!("expected Start or Recover"),
+		};
 	let helper = UnixStream::connect(helper_socket).await.unwrap();
 	let (read, write) = helper.into_split();
 	let mut reader = FrameReader::new(read);
@@ -93,7 +120,7 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 				execution_id,
 				protocol: ProtocolOffer {
 					family: ProtocolFamily::Helper,
-					versions: vec![ProtocolVersion { major: 1, minor: 0 }],
+					versions: vec![ProtocolVersion { major: 1, minor: 1 }],
 					capabilities: vec![],
 				},
 			})
@@ -102,33 +129,56 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 		.await
 		.unwrap();
 	let ready: HelperReady = receive(&mut reader).await;
+	let recovering = text.is_none();
 	writer
 		.write(&Frame::control(
-			encode_control(&HelperCommand::Launch {
-				program: if text == "Fail native launch" {
-					"/missing-jet-test-harness".into()
-				} else {
-					std::env::current_exe().unwrap().to_str().unwrap().into()
-				},
-				arguments: vec![
-					"--ignored".into(),
-					"--exact".into(),
-					"--nocapture".into(),
-					"fixture::fake_harness_process".into(),
-				],
-				input: format!("{text}\n"),
+			encode_control(&if let Some(text) = text {
+				HelperCommand::Launch {
+					program: if text == "Fail native launch" {
+						"/missing-jet-test-harness".into()
+					} else {
+						std::env::current_exe()
+							.unwrap()
+							.to_str()
+							.unwrap()
+							.into()
+					},
+					arguments: vec![
+						"--ignored".into(),
+						"--exact".into(),
+						"--nocapture".into(),
+						"fixture::fake_harness_process".into(),
+					],
+					input: format!("{text}\n"),
+				}
+			} else {
+				HelperCommand::Recover { source_offset }
 			})
 			.unwrap(),
 		))
 		.await
 		.unwrap();
-	let mut pending = Vec::new();
+	if recovering {
+		sender
+			.send(&CraftEvent::RunRecovered {
+				helper_pid: ready.helper_pid,
+				source_offset,
+			})
+			.await
+			.unwrap();
+	}
+	let mut pending: Vec<u8> = if checkpoint.is_empty() {
+		vec![]
+	} else {
+		serde_json::from_str(&checkpoint).unwrap()
+	};
 	loop {
 		let record: HelperRecord = receive(&mut reader).await;
 		let ended = matches!(
 			record.event,
 			HelperEvent::Exited { .. } | HelperEvent::LaunchFailed
 		);
+		let mut interpreted = 0;
 		match record.event {
 			HelperEvent::LaunchFailed => {
 				sender.send(&CraftEvent::RunLaunchFailed).await.unwrap()
@@ -169,6 +219,21 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 						})
 						.await
 						.unwrap();
+					interpreted += 1;
+					let interrupted = std::path::PathBuf::from(
+						std::env::var_os("JET_FAKE_MANIFEST").unwrap(),
+					)
+					.with_extension("mid-batch");
+					if interpreted == 70 && interrupted.exists() {
+						std::fs::remove_file(interrupted).unwrap();
+						tokio::time::sleep(std::time::Duration::from_millis(
+							100,
+						))
+						.await;
+						panic!(
+							"injected crash inside dense source record after durable prefix"
+						);
+					}
 					if native["phase"] == "waiting" {
 						for activity in [
 							RunActivity::WaitingForUser,
@@ -203,9 +268,17 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 					.unwrap();
 			}
 		}
+		let stalled = std::path::PathBuf::from(
+			std::env::var_os("JET_FAKE_MANIFEST").unwrap(),
+		)
+		.with_extension("stall");
+		if stalled.exists() {
+			tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+		}
 		sender
 			.send(&CraftEvent::Progress {
 				source_offset: record.source_offset,
+				checkpoint: serde_json::to_string(&pending).unwrap(),
 			})
 			.await
 			.unwrap();
@@ -214,6 +287,14 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 		else {
 			panic!("Ack")
 		};
+		let dropped = std::path::PathBuf::from(
+			std::env::var_os("JET_FAKE_MANIFEST").unwrap(),
+		)
+		.with_extension("drop-ack");
+		if dropped.exists() {
+			std::fs::remove_file(dropped).unwrap();
+			panic!("injected loss after commit before helper acknowledgement");
+		}
 		writer
 			.write(&Frame::control(
 				encode_control(&HelperCommand::Acknowledge { source_offset })
@@ -221,6 +302,14 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 			))
 			.await
 			.unwrap();
+		if pending == b"{\"text\":\"par" {
+			std::fs::write(
+				Path::new(&ready.descriptor.config.working_directory)
+					.join("parser-acknowledged"),
+				"durable",
+			)
+			.unwrap();
+		}
 		if ended {
 			break;
 		}
@@ -251,14 +340,28 @@ fn fake_harness_process() {
 	}
 	assert_eq!(input.trim(), "Make a change");
 	std::fs::write("result.txt", "Harness work\n").unwrap();
+	if Path::new("dense").exists() {
+		let source = (0..100)
+			.map(|i| format!("{}\n", json!({"dense":i})))
+			.collect::<String>();
+		std::io::stdout().write_all(source.as_bytes()).unwrap();
+	}
 	for _ in 0..40 {
 		println!("{}", json!({"text":"x".repeat(8192)}));
 	}
 	println!("{{\"phase\":\"waiting\"}}");
 	std::io::stdout().flush().unwrap();
+	if Path::new("partial").exists() {
+		print!("{{\"text\":\"par");
+		std::io::stdout().flush().unwrap();
+	}
 	while !Path::new("continue").exists() {
 		std::thread::sleep(std::time::Duration::from_millis(10));
 	}
+	if Path::new("partial").exists() {
+		println!("tial\"}}");
+	}
+
 	println!(
 		"{{ \"text\": \"Finished\", \"native_integer\": 9007199254740993 }}"
 	);

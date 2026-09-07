@@ -21,6 +21,7 @@ mod error;
 mod event;
 mod filesystem;
 mod lifecycle;
+mod orphan;
 mod pagination;
 mod paired_client;
 mod pairing;
@@ -46,7 +47,12 @@ mod run_command;
 mod run_craft;
 mod run_effect;
 mod run_host;
+mod run_recovery;
 mod run_state;
+pub use orphan::{
+	ExecutionAction, ExecutionMetadata, ExecutionResolution, OrphanedExecution,
+	OrphanedExecutions,
+};
 mod search;
 mod search_index;
 mod security;
@@ -62,7 +68,10 @@ mod worktree;
 pub use run::{ManagedProcess, ManagedProcessRole, RunActivity, RunExecution};
 pub use run_command::LaunchPlan;
 pub use run_craft::PinnedCraft;
-pub use run_host::{RunConnection, RunFuture, RunHost, RunStartError};
+pub use run_host::{
+	RunConnection, RunFuture, RunHost, RunRecoveryCursor, RunRecoveryError,
+	RunStartError,
+};
 pub use run_state::Observation as RunObservation;
 
 #[cfg(test)]
@@ -217,6 +226,7 @@ impl Actor {
 #[derive(Debug)]
 pub struct Core {
 	run_host: Option<Arc<dyn run_host::RunHost>>,
+	run_recovery: run_recovery::Recovery,
 	// Serialize authority publication with Commands and fence concurrent reads.
 	remote_access: tokio::sync::Semaphore,
 	remote_sessions: remote::RemoteSessions,
@@ -294,6 +304,7 @@ impl Core {
 		);
 		let core = Self {
 			run_host: None,
+			run_recovery: run_recovery::Recovery::default(),
 			remote_access: tokio::sync::Semaphore::new(
 				remote::AUTHORITY_READERS as usize,
 			),

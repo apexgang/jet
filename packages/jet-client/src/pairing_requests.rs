@@ -27,7 +27,8 @@ impl Client {
 		self.require_minor(jet_protocol::PAIRING_MINOR)?;
 		match self.query(QueryRequest::Pairing).await? {
 			QueryResponse::Pairing(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::Status(_)
+			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
@@ -69,7 +70,10 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingGateSet { gate } => Ok(gate),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
@@ -115,7 +119,10 @@ impl Client {
 				pending,
 				disclosure,
 			} => Ok((pending, disclosure)),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
@@ -167,7 +174,10 @@ impl Client {
 			CommandResponse::PairingClaimed { pending, challenge } => {
 				Ok((pending, challenge))
 			}
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
@@ -217,7 +227,10 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingConfirmed { pending } => Ok(pending),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
@@ -263,7 +276,10 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingCompleted { client } => Ok(client),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
@@ -308,7 +324,10 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairedClientAccessSet { client } => Ok(client),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
@@ -351,7 +370,10 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairedClientRevoked { client_id } => Ok(client_id),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }

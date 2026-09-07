@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Immutable, host-written launch boundary for a Run-role helper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HelperConfig {
 	/// Authoritative Run identity.
 	pub execution_id: Uuid,
@@ -12,6 +12,31 @@ pub struct HelperConfig {
 	pub working_directory: String,
 	/// Executable disclosures from the accepted Craft specification.
 	pub executables: Vec<String>,
+	/// Registered Project root accepted by the host.
+	pub project_directory: String,
+	/// Exact Craft digest pinned for the Run.
+	pub craft_digest: String,
+}
+
+/// Atomic non-secret identity published by a Run-role helper (Helper 1.1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HelperDescriptor {
+	/// Atomically published source position; live handshakes refresh it.
+	pub replay: HelperReplay,
+	/// Execution role; this build supports only `run`.
+	pub role: String,
+	/// Host-provisioned execution boundaries.
+	pub config: HelperConfig,
+	/// Fresh instance identity, never reused by another helper.
+	pub instance: Uuid,
+	/// Helper PID.
+	pub pid: u32,
+	/// OS-observed process start and executable name.
+	pub process_start: String,
+	/// Deployed helper product version.
+	pub version: String,
+	/// SHA-256 of the helper executable at startup.
+	pub sha256: String,
 }
 
 /// Fresh helper connection handshake.
@@ -30,12 +55,26 @@ pub struct HelperReady {
 	pub version: ProtocolVersion,
 	/// The helper's OS process identity.
 	pub helper_pid: u32,
+	/// Live helper identity, checked against the owner-only descriptor.
+	pub descriptor: HelperDescriptor,
 }
 
 /// Craft requests at the generic helper boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HelperCommand {
+	/// Stop only this exact helper instance after interactive authorization.
+	Terminate {
+		/// Identity the user inspected.
+		instance: Uuid,
+	},
+	/// Read-only handshake completed; leave execution and source untouched.
+	Inspect,
+	/// Reattach after validating the source boundary; never launches a process.
+	Recover {
+		/// Source boundary committed by jetd.
+		source_offset: u64,
+	},
 	/// Start exactly one native Harness under the host's fixed working root.
 	Launch {
 		/// One accepted executable disclosure.
@@ -94,4 +133,22 @@ pub enum NativeStream {
 	Stdout,
 	/// Standard error.
 	Stderr,
+}
+
+/// Confirmation sent only after the native child is proven stopped.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HelperTerminated {
+	/// The helper instance that stopped its execution.
+	pub instance: Uuid,
+}
+
+/// Source boundaries retained by a helper. Only exact record boundaries resume.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HelperReplay {
+	/// Last released boundary.
+	pub acknowledged: u64,
+	/// End of the newest retained record.
+	pub produced: u64,
+	/// The first unacknowledged record, if any.
+	pub next_offset: Option<u64>,
 }

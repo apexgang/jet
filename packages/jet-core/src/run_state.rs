@@ -10,11 +10,38 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct State {
 	pub(crate) activity: Option<RunActivity>,
+	#[serde(default)]
+	pub(crate) disconnected: bool,
 	pub(crate) processes: Vec<ManagedProcess>,
 	pub(crate) native_conversation: Option<String>,
 	pub(crate) exit_code: Option<i32>,
 	#[serde(default)]
 	pub(crate) source_offset: u64,
+	#[serde(default)]
+	pub(crate) checkpoint: String,
+	#[serde(default)]
+	pub(crate) partial_source: SourcePrefix,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub(crate) struct SourcePrefix {
+	pub(crate) count: usize,
+	pub(crate) digest: String,
+}
+impl SourcePrefix {
+	pub(crate) fn include(
+		&mut self,
+		observation: &Observation,
+	) -> Result<(), CoreError> {
+		use sha2::{Digest, Sha256};
+		let bytes = serde_json::to_vec(observation).map_err(|_| invalid())?;
+		let mut hash = Sha256::new();
+		hash.update(self.digest.as_bytes());
+		hash.update(bytes);
+		self.digest = format!("{:x}", hash.finalize());
+		self.count += 1;
+		Ok(())
+	}
 }
 
 pub(crate) async fn snapshot(
@@ -27,7 +54,11 @@ pub(crate) async fn snapshot(
 	Ok(RunExecution {
 		cursor: EventSequence(tx.event_cursor().await?),
 		run: run.into(),
-		activity: state.activity,
+		activity: if state.disconnected {
+			Some(RunActivity::Reconnecting)
+		} else {
+			state.activity
+		},
 		processes: state.processes,
 		native_conversation: state.native_conversation,
 		exit_code: state.exit_code,
@@ -35,6 +66,7 @@ pub(crate) async fn snapshot(
 }
 
 /// Facts from the trusted Run Adapter, validated against the durable lifecycle.
+#[derive(Serialize)]
 pub enum Observation {
 	/// The helper reported that it spawned a Harness.
 	Started {
@@ -55,16 +87,71 @@ pub enum Observation {
 	/// Native identity for a later explicit resume.
 	NativeConversation(String),
 	/// End offset of source whose observations preceded this marker.
-	Progress(u64),
+	Progress {
+		/// End of the source batch.
+		offset: u64,
+		/// Adapter parser state at that boundary.
+		checkpoint: String,
+	},
 	/// Reaped native exit status, absent for signal termination.
 	Ended(Option<i32>),
 	/// Definite launch rejection with no surviving Harness.
 	LaunchFailed,
 	/// The supervising connection was lost.
 	Disconnected,
+	/// A validated Craft has reattached to the original helper.
+	Reconnected,
+	/// The previous execution is proven gone; later work requires a new Run.
+	Lost,
+}
+
+pub(crate) enum SourceBoundary {
+	Pending,
+	Complete { offset: u64, checkpoint: String },
 }
 
 impl Core {
+	pub(crate) async fn source_prefix(
+		&self,
+		run_id: RunId,
+	) -> Result<SourcePrefix, CoreError> {
+		self.store
+			.read(async |tx| {
+				let record =
+					tx.run_execution(run_id.0).await?.ok_or_else(missing)?;
+				Ok(decode::<State>(&record.state)?.partial_source)
+			})
+			.await
+	}
+	pub(crate) async fn commit_run_source(
+		&self,
+		run_id: RunId,
+		observations: Vec<Observation>,
+		boundary: SourceBoundary,
+	) -> Result<(), CoreError> {
+		let now = self.now_unix_ms();
+		self.store.write(async |tx| {
+            let execution = tx.run_execution(run_id.0).await?.ok_or_else(missing)?;
+            let state: State = decode(&execution.state)?;
+            if matches!(&boundary, SourceBoundary::Complete { offset, .. } if *offset <= state.source_offset) { return Err(invalid()); }
+            let mut prefix = state.partial_source;
+            for observation in observations {
+                prefix.include(&observation)?;
+                record(tx, run_id, observation, now).await?;
+            }
+            // ADR-0071: bounded groups commit with their replay prefix. Source
+            // remains retained until its final parser checkpoint commits.
+            if let SourceBoundary::Complete { offset, checkpoint } = boundary {
+                record(tx, run_id, Observation::Progress { offset, checkpoint }, now).await?;
+                prefix = SourcePrefix::default();
+            }
+            let execution = tx.run_execution(run_id.0).await?.ok_or_else(missing)?;
+            let mut state: State = decode(&execution.state)?;
+            state.partial_source = prefix;
+            tx.update_run_execution(run_id.0, &serde_json::to_string(&state).map_err(|_| invalid())?).await?;
+            Ok(())
+        }).await
+	}
 	pub(crate) async fn observe_run(
 		&self,
 		run_id: RunId,
@@ -96,9 +183,11 @@ async fn record(
 			authorized_by,
 		},
 		Observation::Started { .. }
-		| Observation::Progress(_)
+		| Observation::Progress { .. }
 		| Observation::Ended(_)
 		| Observation::LaunchFailed
+		| Observation::Lost
+		| Observation::Reconnected
 		| Observation::Disconnected => crate::EventActor::RunSupervisor {
 			run_id,
 			authorized_by,
@@ -155,11 +244,25 @@ fn apply(
 	let mut next = lifecycle;
 	let mut events = Vec::new();
 	match observation {
-		Observation::Progress(offset) => {
-			if offset <= state.source_offset {
+		Observation::Lost => {
+			if !lifecycle.is_terminal() {
+				next = RunLifecycle::Lost;
+				state.disconnected = false;
+				activity(state, None, &mut events);
+				for process in &mut state.processes {
+					process.running = false;
+				}
+				events.push(EventKind::RunProcessesChanged {
+					processes: state.processes.clone(),
+				});
+			}
+		}
+		Observation::Progress { offset, checkpoint } => {
+			if offset <= state.source_offset || checkpoint.len() > 65_536 {
 				return Err(invalid());
 			}
 			state.source_offset = offset;
+			state.checkpoint = checkpoint;
 		}
 		Observation::Started {
 			helper_pid,
@@ -190,8 +293,21 @@ fn apply(
 		Observation::Activity(reason) if lifecycle == RunLifecycle::Active => {
 			activity(state, Some(reason), &mut events)
 		}
+		Observation::Reconnected => {
+			if state.disconnected {
+				state.disconnected = false;
+				events.push(EventKind::RunActivityChanged {
+					activity: state.activity,
+				});
+			}
+		}
 		Observation::Disconnected if lifecycle == RunLifecycle::Active => {
-			activity(state, Some(RunActivity::Reconnecting), &mut events)
+			if !state.disconnected {
+				state.disconnected = true;
+				events.push(EventKind::RunActivityChanged {
+					activity: Some(RunActivity::Reconnecting),
+				});
+			}
 		}
 		Observation::Disconnected
 			if lifecycle == RunLifecycle::Starting

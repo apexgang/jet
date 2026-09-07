@@ -1,7 +1,10 @@
 //! Managed Run conformance through a real daemon, Craft, helper, and Harness.
+#[path = "support/run_assertions.rs"]
+mod assertions;
 #[path = "support/run_fixture.rs"]
 mod fixture;
 mod support;
+use assertions::{all_events, wait_for};
 
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
@@ -95,23 +98,6 @@ async fn managed_run_reports_attention_output_and_durable_completion() {
 	}).await.unwrap();
 }
 
-async fn wait_for(
-	wire: &mut support::RawConnection,
-	run_id: &str,
-	state: &str,
-) -> Value {
-	loop {
-		wire.send(&json!({"kind":"query","id":2,"query":{"type":"run_execution","run_id":run_id}})).await;
-		let response: Value = wire.receive().await;
-		assert_eq!(response["kind"], "query_result", "{response}");
-		let result = &response["result"];
-		if result["activity"] == state || result["run"]["lifecycle"] == state {
-			return result.clone();
-		}
-		tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-	}
-}
-
 #[tokio::test]
 async fn definite_launch_failures_finish_and_release_admission() {
 	tokio::time::timeout(std::time::Duration::from_secs(30), async {
@@ -144,7 +130,7 @@ async fn definite_launch_failures_finish_and_release_admission() {
                 } else { assert_eq!(failed["processes"], json!([])); }
                 if mode != "craft" {
                     let socket = home.join("runtime").join(Uuid::parse_str(run_id).unwrap().simple().to_string()).join("h.sock");
-                    while socket.exists() { tokio::time::sleep(std::time::Duration::from_millis(10)).await; }
+                    while socket.exists() || socket.with_file_name("jetfueld").exists() { tokio::time::sleep(std::time::Duration::from_millis(10)).await; }
                 }
             }
             assert!(!root.join("result.txt").exists());
@@ -156,24 +142,4 @@ async fn definite_launch_failures_finish_and_release_admission() {
 struct LegacyLifecycle {
 	from: jet_protocol::RunLifecycle,
 	to: jet_protocol::RunLifecycle,
-}
-
-async fn all_events(client: &jet_client::Client) -> jet_protocol::EventPage {
-	let mut events = Vec::new();
-	let mut after = 0;
-	loop {
-		let page = client.events_after(after).await.unwrap();
-		if let Some(event) = page.events.last() {
-			after = event.sequence;
-		} else {
-			assert_eq!(after, page.cursor, "page must make progress");
-		}
-		events.extend(page.events);
-		if after == page.cursor {
-			return jet_protocol::EventPage {
-				cursor: after,
-				events,
-			};
-		}
-	}
 }

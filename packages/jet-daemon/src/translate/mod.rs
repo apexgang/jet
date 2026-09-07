@@ -45,6 +45,11 @@ pub(crate) fn query(
 	minor: u32,
 ) -> Result<Query, CoreError> {
 	Ok(match request {
+		wire::QueryRequest::OrphanedExecutions { after } => {
+			Query::OrphanedExecutions {
+				after: after.map(RunId),
+			}
+		}
 		wire::QueryRequest::RunExecution { run_id } => Query::RunExecution {
 			run_id: RunId(*run_id),
 		},
@@ -117,6 +122,9 @@ pub(crate) fn query_result(
 	minor: u32,
 ) -> Result<wire::QueryResponse, CoreError> {
 	Ok(match result {
+		QueryResult::OrphanedExecutions(page) => {
+			wire::QueryResponse::OrphanedExecutions(run::orphans(page))
+		}
 		QueryResult::RunExecution(execution) => {
 			wire::QueryResponse::RunExecution(run::execution(execution))
 		}
@@ -182,6 +190,15 @@ pub(crate) fn command(
 	request: &wire::CommandRequest,
 ) -> Result<Command, CoreError> {
 	Ok(match request {
+		wire::CommandRequest::ResolveExecution {
+			execution_id,
+			instance,
+			action,
+		} => Command::ResolveExecution(jet_core::ExecutionResolution {
+			execution_id: RunId(*execution_id),
+			instance: *instance,
+			action: run::action_from_wire(*action),
+		}),
 		wire::CommandRequest::StartRun {
 			conversation_id,
 			craft,
@@ -303,6 +320,12 @@ pub(crate) fn command_outcome(
 	minor: u32,
 ) -> wire::CommandResponse {
 	match outcome {
+		CommandOutcome::ExecutionResolutionRecorded(request) => {
+			wire::CommandResponse::ExecutionResolutionRecorded {
+				execution_id: request.execution_id.0,
+				action: run::action(request.action),
+			}
+		}
 		CommandOutcome::ConversationCreated(created) => {
 			wire::CommandResponse::ConversationCreated(conversation(
 				&created, minor,

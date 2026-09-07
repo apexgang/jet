@@ -23,6 +23,71 @@ pub trait RunHost: std::fmt::Debug + Send + Sync {
 		run_id: RunId,
 		plan: LaunchPlan,
 	) -> RunFuture<'_, Result<Box<dyn RunConnection>, RunStartError>>;
+	/// Enumerates owner-provisioned helper identities without acknowledging source.
+	fn discover(
+		&self,
+		_home: PathBuf,
+	) -> RunFuture<'_, Result<Vec<RunId>, CoreError>> {
+		Box::pin(async { Ok(vec![]) })
+	}
+	/// Validates and reconnects an existing execution, never launching native work.
+	fn recover(
+		&self,
+		_home: PathBuf,
+		_run_id: RunId,
+		_plan: LaunchPlan,
+		_cursor: RunRecoveryCursor,
+	) -> RunFuture<'_, Result<Box<dyn RunConnection>, RunRecoveryError>> {
+		Box::pin(async { Err(RunRecoveryError::Unsafe) })
+	}
+
+	/// Probes process liveness without adopting or acknowledging an execution.
+	/// Only proven death returns Gone; ambiguous evidence remains Unsafe.
+	fn probe(
+		&self,
+		_home: PathBuf,
+		_id: RunId,
+		_accepted: Option<LaunchPlan>,
+		_helper_pid: Option<u32>,
+	) -> RunFuture<'_, Result<(), RunRecoveryError>> {
+		Box::pin(async { Err(RunRecoveryError::Unsafe) })
+	}
+	/// Read-only owner metadata; it does not authorize adoption or acknowledgement.
+	fn describe(
+		&self,
+		_home: PathBuf,
+		_id: RunId,
+	) -> RunFuture<'_, Result<crate::ExecutionMetadata, CoreError>> {
+		Box::pin(async {
+			Err(CoreError::conflict(
+				"execution.unavailable",
+				"execution metadata is unavailable",
+			))
+		})
+	}
+	/// Performs the adoption checks without connecting a Craft or releasing source.
+	fn validate_recovery(
+		&self,
+		_home: PathBuf,
+		_id: RunId,
+		_plan: LaunchPlan,
+		_cursor: RunRecoveryCursor,
+	) -> RunFuture<'_, Result<(), RunRecoveryError>> {
+		Box::pin(async { Err(RunRecoveryError::Unsafe) })
+	}
+	/// Terminates only the instance selected by an authenticated interactive user.
+	fn terminate(
+		&self,
+		_home: PathBuf,
+		_request: crate::ExecutionResolution,
+	) -> RunFuture<'_, Result<(), CoreError>> {
+		Box::pin(async {
+			Err(CoreError::conflict(
+				"execution.unavailable",
+				"execution control is unavailable",
+			))
+		})
+	}
 }
 /// Outcome at the external launch boundary.
 #[derive(Debug)]
@@ -43,4 +108,25 @@ pub trait RunConnection: Send {
 	) -> RunFuture<'_, Result<(), CoreError>>;
 	/// Closes the execution connection after its terminal source is committed.
 	fn finish(&mut self) -> RunFuture<'_, Result<(), CoreError>>;
+}
+
+/// Durable source and process evidence supplied to recovery by Core.
+#[derive(Debug, Clone)]
+pub struct RunRecoveryCursor {
+	/// Last committed source boundary.
+	pub offset: u64,
+	/// Parser state at that boundary.
+	pub checkpoint: String,
+	/// Previously recorded helper process, if startup reached that point.
+	pub helper_pid: Option<u32>,
+}
+/// A recovery refusal never authorizes another native launch.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RunRecoveryError {
+	/// The previous execution process is proven gone.
+	Gone,
+	/// Ownership, identity, state, roots, or offsets could not be validated.
+	Unsafe,
+	/// A validated execution's Craft cannot currently reconnect.
+	Unavailable,
 }

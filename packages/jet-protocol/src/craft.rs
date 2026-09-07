@@ -42,6 +42,17 @@ pub enum CraftAction {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CraftCommand {
+	/// Reconnect an existing helper without issuing native input (Craft 1.2).
+	Recover {
+		/// Original Run identity.
+		id: String,
+		/// Validated owner-only helper endpoint.
+		helper_socket: String,
+		/// Last atomically committed source boundary.
+		source_offset: u64,
+		/// Opaque parser state committed with that boundary.
+		checkpoint: String,
+	},
 	/// Start a Run through its host-provisioned helper (Craft 1.1, runs).
 	Start {
 		/// Initial Command identity.
@@ -94,9 +105,21 @@ pub enum CraftEvent {
 		/// Orthogonal to the Run lifecycle.
 		activity: crate::RunActivity,
 	},
-	/// End of a native source record; earlier Events must commit first.
+	/// End of a native source record; earlier Events and parser state commit atomically.
+	/// The host commits bounded groups with replay-prefix digests while keeping
+	/// this record retained, then acknowledges after its final checkpoint.
 	Progress {
 		/// End offset acknowledged through the Craft only after durable commit.
+		source_offset: u64,
+		/// Bounded parser state required to interpret the next source record.
+		#[serde(default)]
+		checkpoint: String,
+	},
+	/// Confirmed attachment to the retained helper at the requested source boundary (1.2).
+	RunRecovered {
+		/// OS identity of the validated helper.
+		helper_pid: u32,
+		/// Requested durable source boundary.
 		source_offset: u64,
 	},
 	/// The Harness ended, independently from a single turn's completion.
@@ -136,15 +159,30 @@ impl<'de> Deserialize<'de> for CraftEvent {
 			.map_err(serde::de::Error::custom)?;
 		match kind.kind.as_str() {
 			"run_launch_failed" | "run_started" | "activity" | "progress"
-			| "run_ended" => {
+			| "run_ended" | "run_recovered" => {
 				#[derive(Deserialize)]
 				#[serde(tag = "kind", rename_all = "snake_case")]
 				enum State {
 					RunLaunchFailed,
-					RunStarted { helper_pid: u32, harness_pid: u32 },
-					Activity { activity: crate::RunActivity },
-					Progress { source_offset: u64 },
-					RunEnded { exit_code: Option<i32> },
+					RunStarted {
+						helper_pid: u32,
+						harness_pid: u32,
+					},
+					Activity {
+						activity: crate::RunActivity,
+					},
+					Progress {
+						source_offset: u64,
+						#[serde(default)]
+						checkpoint: String,
+					},
+					RunRecovered {
+						helper_pid: u32,
+						source_offset: u64,
+					},
+					RunEnded {
+						exit_code: Option<i32>,
+					},
 				}
 				let state: State = crate::decode_control(raw.get().as_bytes())
 					.map_err(serde::de::Error::custom)?;
@@ -158,9 +196,20 @@ impl<'de> Deserialize<'de> for CraftEvent {
 						harness_pid,
 					},
 					State::Activity { activity } => Self::Activity { activity },
-					State::Progress { source_offset } => {
-						Self::Progress { source_offset }
-					}
+					State::Progress {
+						source_offset,
+						checkpoint,
+					} => Self::Progress {
+						source_offset,
+						checkpoint,
+					},
+					State::RunRecovered {
+						helper_pid,
+						source_offset,
+					} => Self::RunRecovered {
+						helper_pid,
+						source_offset,
+					},
 					State::RunEnded { exit_code } => {
 						Self::RunEnded { exit_code }
 					}

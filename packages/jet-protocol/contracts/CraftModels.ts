@@ -12,9 +12,9 @@ export type CraftAction = { action_id: string; input: unknown; kind: "invoke" } 
 
 export type CraftApprovalDecision = "allow_once" | "deny";
 
-export type CraftCommand = { helper_socket: string; id: string; kind: "start"; text: string } | { kind: "acknowledge"; source_offset: number } | { id: string; kind: "turn"; text: string } | { action: CraftAction; id: string; kind: "action" } | { kind: "shutdown" };
+export type CraftCommand = { checkpoint: string; helper_socket: string; id: string; kind: "recover"; source_offset: number } | { helper_socket: string; id: string; kind: "start"; text: string } | { kind: "acknowledge"; source_offset: number } | { id: string; kind: "turn"; text: string } | { action: CraftAction; id: string; kind: "action" } | { kind: "shutdown" };
 
-export type CraftEvent = { kind: "run_launch_failed" } | { harness_pid: number; helper_pid: number; kind: "run_started" } | { activity: RunActivity; kind: "activity" } | { kind: "progress"; source_offset: number } | { exit_code?: number | null; kind: "run_ended" } | { kind: "output"; native_event: RawJSON; presentation?: Array<PresentationBlock> } | { id: string; kind: "completed"; native_conversation: string };
+export type CraftEvent = { kind: "run_launch_failed" } | { harness_pid: number; helper_pid: number; kind: "run_started" } | { activity: RunActivity; kind: "activity" } | { checkpoint?: string; kind: "progress"; source_offset: number } | { helper_pid: number; kind: "run_recovered"; source_offset: number } | { exit_code?: number | null; kind: "run_ended" } | { kind: "output"; native_event: RawJSON; presentation?: Array<PresentationBlock> } | { id: string; kind: "completed"; native_conversation: string };
 
 export type CraftFeature = { name: string; required?: boolean };
 

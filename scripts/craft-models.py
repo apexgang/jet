@@ -61,7 +61,9 @@ def swift_type(item, name):
     if "enum" in item or kind == "object":
         swift_extra[name] = item
         return name
-    return {"string": "String", "integer": "UInt32", "number": "Double", "boolean": "Bool"}.get(kind, "Any")
+    if kind == "integer":
+        return {"uint32": "UInt32", "uint64": "UInt64", "int32": "Int32", "int64": "Int64"}.get(item.get("format"), "Int64")
+    return {"string": "String", "number": "Double", "boolean": "Bool"}.get(kind, "Any")
 
 
 def swift_declaration(name, item):

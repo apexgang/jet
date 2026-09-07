@@ -25,6 +25,7 @@ pub(crate) fn invalidated_client(
 			PairedClientAccess::Enabled => None,
 		},
 		CommandOutcome::ConversationCreated(_)
+		| CommandOutcome::ExecutionResolutionRecorded(_)
 		| CommandOutcome::RunCreated(_)
 		| CommandOutcome::RunTransitioned(_)
 		| CommandOutcome::SettingSet { .. }

@@ -167,6 +167,7 @@ async fn fake_execution(stream: UnixStream) {
 			}
 			CraftCommand::Shutdown => break,
 			CraftCommand::Start { .. }
+			| CraftCommand::Recover { .. }
 			| CraftCommand::Acknowledge { .. }
 			| CraftCommand::Turn { .. }
 			| CraftCommand::Action { .. } => {

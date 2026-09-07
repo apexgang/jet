@@ -5,11 +5,16 @@
 //! the per-Plane lifetime lock (ADR-0003), and the owner-only local IPC
 //! listener (ADR-0087).
 
+mod execution;
 mod home;
 mod ipc;
 mod lock;
 mod no_visa;
 
+pub use execution::{
+	execution_boot_identity, execution_digest, execution_process_identity,
+	read_execution_file, validate_execution_directory,
+};
 pub use home::JetHome;
 pub use ipc::{IpcError, LocalListener};
 pub use lock::{DaemonMetadata, InstallationChannel, LifetimeLock, LockError};

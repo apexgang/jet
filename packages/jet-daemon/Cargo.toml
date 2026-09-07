@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+rustix.workspace = true
 getrandom.workspace = true
 clap.workspace = true
 jet-core.workspace = true
@@ -25,7 +26,6 @@ sha2.workspace = true
 ed25519-dalek.workspace = true
 jet-client.workspace = true
 pretty_assertions.workspace = true
-rustix.workspace = true
 tempfile.workspace = true
 
 [lints]

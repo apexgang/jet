@@ -103,6 +103,8 @@ impl CommandEnvelope {
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
+	/// Resolve only the Orphaned execution instance inspected by the user.
+	ResolveExecution(crate::ExecutionResolution),
 	/// Start a managed Run with one installed Craft and its initial input.
 	StartRun {
 		/// The Conversation whose registered working tree is used.
@@ -283,6 +285,7 @@ impl Command {
 			| Self::CreateRun { .. }
 			| Self::SetSetting { .. }
 			| Self::ClearSetting { .. }
+			| Self::ResolveExecution(_)
 			| Self::TransitionRun { .. } => &[],
 		}
 	}
@@ -302,6 +305,8 @@ impl Command {
 /// The durable result of a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
+	/// The interactive resolution was durably queued.
+	ExecutionResolutionRecorded(crate::ExecutionResolution),
 	/// The Conversation as created.
 	ConversationCreated(Conversation),
 	/// The Run as created.
@@ -526,6 +531,7 @@ fn redacted_for_receipt(
 		}
 		Ok(
 			outcome @ (CommandOutcome::ConversationCreated(_)
+			| CommandOutcome::ExecutionResolutionRecorded(_)
 			| CommandOutcome::RunCreated(_)
 			| CommandOutcome::RunTransitioned(_)
 			| CommandOutcome::SettingSet { .. }
@@ -570,6 +576,10 @@ async fn execute_new(
 		workspace_home,
 	} = context;
 	match command {
+		Command::ResolveExecution(request) => {
+			crate::orphan::record(tx, actor, command_id, request, now_unix_ms)
+				.await
+		}
 		Command::StartRun {
 			conversation_id, ..
 		} => {

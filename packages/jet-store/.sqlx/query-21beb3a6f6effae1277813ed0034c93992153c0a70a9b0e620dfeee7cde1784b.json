@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT state FROM orphaned_executions WHERE execution_id > ?1 ORDER BY execution_id LIMIT 101",
+  "describe": {
+    "columns": [
+      {
+        "name": "state",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "orphaned_executions",
+            "name": "state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "21beb3a6f6effae1277813ed0034c93992153c0a70a9b0e620dfeee7cde1784b"
+}

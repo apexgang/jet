@@ -155,6 +155,12 @@ impl<R: AsyncRead + Unpin> CraftReceiver<R> {
 				}
 				"turns"
 			}
+			CraftCommand::Recover { .. } => {
+				if self.ready.protocol.version.minor < 2 {
+					return Err(CraftError::InvalidMessage);
+				}
+				"turns"
+			}
 			CraftCommand::Turn { .. } => "turns",
 			CraftCommand::Action { .. } => "actions",
 			CraftCommand::Shutdown => return Ok(command),
@@ -213,7 +219,7 @@ async fn handshake<R: AsyncRead + Unpin>(
 	// ASVS 2.3.1: a specification cannot make this SDK speak a new codec major.
 	let sdk = ProtocolOffer {
 		family: ProtocolFamily::Craft,
-		versions: vec![ProtocolVersion { major: 1, minor: 1 }],
+		versions: vec![ProtocolVersion { major: 1, minor: 2 }],
 		capabilities: vec!["actions".into(), "resume".into(), "runs".into()],
 	};
 	let supported = sdk

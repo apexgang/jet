@@ -32,7 +32,8 @@ impl Client {
 				))
 			}
 			QueryResponse::Status(status) => Ok(status),
-			other @ (QueryResponse::Conversations(_)
+			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
@@ -59,7 +60,8 @@ impl Client {
 	pub async fn conversations(&self) -> Result<ConversationList, ClientError> {
 		match self.query(QueryRequest::Conversations).await? {
 			QueryResponse::Conversations(list) => Ok(list),
-			other @ (QueryResponse::Status(_)
+			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
@@ -93,7 +95,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Conversations(list) => Ok(list),
-			other @ (QueryResponse::Status(_)
+			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
@@ -127,7 +130,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Conversation(snapshot) => Ok(*snapshot),
-			other @ (QueryResponse::Status(_)
+			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
@@ -158,7 +162,8 @@ impl Client {
 	) -> Result<EventPage, ClientError> {
 		match self.query(QueryRequest::Events { after: sequence }).await? {
 			QueryResponse::Events(page) => Ok(page),
-			other @ (QueryResponse::Status(_)
+			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Settings(_)
@@ -192,7 +197,10 @@ impl Client {
 			.await?
 		{
 			CommandResponse::AuditEpochBegun { epoch } => Ok(epoch),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
@@ -228,7 +236,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::SecurityAudit(page) => Ok(page),
-			other @ (QueryResponse::Status(_)
+			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
@@ -302,7 +311,10 @@ impl Client {
 			CommandResponse::ConversationCreated(conversation) => {
 				Ok(conversation)
 			}
-			other @ (CommandResponse::RunCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
@@ -341,7 +353,10 @@ impl Client {
 			.await?
 		{
 			CommandResponse::RunCreated(run) => Ok(run),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
@@ -387,7 +402,10 @@ impl Client {
 			.await?
 		{
 			CommandResponse::RunTransitioned(run) => Ok(run),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::SettingSet { .. }
 			| CommandResponse::SettingCleared { .. }
@@ -425,7 +443,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Settings(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::Status(_)
+			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
@@ -466,7 +485,10 @@ impl Client {
 			.await?
 		{
 			CommandResponse::SettingSet { value, .. } => Ok(value),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingCleared { .. }
@@ -507,7 +529,10 @@ impl Client {
 			.await?
 		{
 			CommandResponse::SettingCleared { .. } => Ok(()),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
@@ -547,7 +572,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Capabilities(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::Status(_)
+			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
@@ -588,7 +614,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::AccountBindings(list) => Ok(list),
-			other @ (QueryResponse::Status(_)
+			other @ (QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)
 			| QueryResponse::Events(_)
@@ -640,7 +667,10 @@ impl Client {
 			.await?
 		{
 			CommandResponse::AccountBound(binding) => Ok(binding),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }
@@ -685,7 +715,10 @@ impl Client {
 				credential_reference,
 				..
 			} => Ok(credential_reference),
-			other @ (CommandResponse::ConversationCreated(_)
+			other @ (CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
 			| CommandResponse::RunCreated(_)
 			| CommandResponse::RunTransitioned(_)
 			| CommandResponse::SettingSet { .. }

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT r.run_id AS \"run_id!\" FROM runs r JOIN run_executions e USING (run_id)\n\t\t\tWHERE r.lifecycle IN ('starting', 'active', 'stopping') AND r.run_id > ?1\n\t\t\tORDER BY r.run_id LIMIT 100",
+  "describe": {
+    "columns": [
+      {
+        "name": "run_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "run_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "81ceb13a333c26b6014258876d99d1a38293d985d7d5e624e0094ebc1cbc701c"
+}

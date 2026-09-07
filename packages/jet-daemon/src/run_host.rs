@@ -41,7 +41,7 @@ pub(crate) struct RunConnection {
 	pub(crate) reader: FrameReader<OwnedReadHalf>,
 	pub(crate) writer: FrameWriter<OwnedWriteHalf>,
 	pub(crate) helper_pid: u32,
-	run_id: RunId,
+	pub(crate) run_id: RunId,
 }
 impl jet_core::RunConnection for RunConnection {
 	fn receive(&mut self) -> RunFuture<'_, Result<RunObservation, CoreError>> {
@@ -61,6 +61,9 @@ impl jet_core::RunConnection for RunConnection {
 					}
 				}
 				CraftEvent::RunLaunchFailed => RunObservation::LaunchFailed,
+				CraftEvent::RunRecovered { .. } => {
+					return Err(failed("unexpected recovery handshake"));
+				}
 				CraftEvent::Activity { activity } => {
 					RunObservation::Activity(activity_from_wire(activity))
 				}
@@ -86,9 +89,13 @@ impl jet_core::RunConnection for RunConnection {
 				CraftEvent::RunEnded { exit_code } => {
 					RunObservation::Ended(exit_code)
 				}
-				CraftEvent::Progress { source_offset } => {
-					RunObservation::Progress(source_offset)
-				}
+				CraftEvent::Progress {
+					source_offset,
+					checkpoint,
+				} => RunObservation::Progress {
+					offset: source_offset,
+					checkpoint,
+				},
 			})
 		})
 	}
@@ -135,6 +142,71 @@ impl RunHost for CraftProcesses {
 			Ok(Box::new(connection) as Box<dyn jet_core::RunConnection>)
 		})
 	}
+	fn recover(
+		&self,
+		home: PathBuf,
+		run_id: RunId,
+		plan: LaunchPlan,
+		cursor: jet_core::RunRecoveryCursor,
+	) -> RunFuture<
+		'_,
+		Result<Box<dyn jet_core::RunConnection>, jet_core::RunRecoveryError>,
+	> {
+		Box::pin(crate::run_recovery::connect(
+			self, home, run_id, plan, cursor,
+		))
+	}
+	fn discover(
+		&self,
+		home: PathBuf,
+	) -> RunFuture<'_, Result<Vec<RunId>, CoreError>> {
+		Box::pin(crate::run_recovery::discover(home))
+	}
+
+	fn probe(
+		&self,
+		home: PathBuf,
+		id: RunId,
+		accepted: Option<LaunchPlan>,
+		helper_pid: Option<u32>,
+	) -> RunFuture<'_, Result<(), jet_core::RunRecoveryError>> {
+		Box::pin(async move {
+			if let Some(plan) = accepted {
+				crate::run_recovery::validate_boot(&plan).await?;
+			}
+			crate::run_recovery::identity(home, id, helper_pid)
+				.await
+				.map(|_| ())
+		})
+	}
+	fn describe(
+		&self,
+		home: PathBuf,
+		id: RunId,
+	) -> RunFuture<'_, Result<jet_core::ExecutionMetadata, CoreError>> {
+		Box::pin(crate::run_recovery::describe(home, id))
+	}
+	fn validate_recovery(
+		&self,
+		home: PathBuf,
+		id: RunId,
+		plan: LaunchPlan,
+		cursor: jet_core::RunRecoveryCursor,
+	) -> RunFuture<'_, Result<(), jet_core::RunRecoveryError>> {
+		Box::pin(async move {
+			crate::run_recovery::validate(home, id, &plan, &cursor)
+				.await
+				.map(|_| ())
+		})
+	}
+
+	fn terminate(
+		&self,
+		home: PathBuf,
+		request: jet_core::ExecutionResolution,
+	) -> RunFuture<'_, Result<(), CoreError>> {
+		Box::pin(crate::execution_termination::terminate(home, request))
+	}
 }
 pub(crate) async fn start(
 	processes: &CraftProcesses,
@@ -143,17 +215,48 @@ pub(crate) async fn start(
 	plan: &LaunchPlan,
 ) -> Result<(RunConnection, CraftCommand), CoreError> {
 	plan.revalidate().await?;
-	let contract = Contract::of(&plan.craft)?;
+	crate::run_recovery::validate_boot(plan)
+		.await
+		.map_err(|_| {
+			failed("execution was accepted under a different OS boot")
+		})?;
 	let runtime = home.join("runtime");
 	private_directory(runtime.clone()).await?;
-	let mut stream = processes.connect(&runtime, &plan.craft).await?;
+	let (reader, writer) =
+		craft_connection(processes, &runtime, run_id, plan).await?;
+	let (socket, helper_pid) = helper(&runtime, run_id, plan).await?;
+	let connection = RunConnection {
+		run_id,
+		reader,
+		writer,
+		helper_pid,
+	};
+	Ok((
+		connection,
+		CraftCommand::Start {
+			id: run_id.0.to_string(),
+			text: plan.prompt.clone(),
+			helper_socket: socket.to_string_lossy().into_owned(),
+		},
+	))
+}
+
+pub(crate) async fn craft_connection(
+	processes: &CraftProcesses,
+	runtime: &Path,
+	run_id: RunId,
+	plan: &LaunchPlan,
+) -> Result<(FrameReader<OwnedReadHalf>, FrameWriter<OwnedWriteHalf>), CoreError>
+{
+	let contract = Contract::of(&plan.craft)?;
+	let mut stream = processes.connect(runtime, &plan.craft).await?;
 	stream.write_all(b"jet-craft\n").await.map_err(failed)?;
 	let (read, write) = stream.into_split();
 	let mut reader = FrameReader::new(read);
 	let mut writer = FrameWriter::new(write);
 	let offer = ProtocolOffer {
 		family: ProtocolFamily::Craft,
-		versions: vec![ProtocolVersion { major: 1, minor: 1 }],
+		versions: vec![contract.craft_protocol],
 		capabilities: vec!["runs".into()],
 	};
 	let hello = CraftHello {
@@ -187,21 +290,7 @@ pub(crate) async fn start(
 	}
 	reader.enable_multiplexing();
 	writer.enable_multiplexing();
-	let (socket, helper_pid) = helper(&runtime, run_id, plan).await?;
-	let connection = RunConnection {
-		run_id,
-		reader,
-		writer,
-		helper_pid,
-	};
-	Ok((
-		connection,
-		CraftCommand::Start {
-			id: run_id.0.to_string(),
-			text: plan.prompt.clone(),
-			helper_socket: socket.to_string_lossy().into_owned(),
-		},
-	))
+	Ok((reader, writer))
 }
 
 impl CraftProcesses {
@@ -246,21 +335,7 @@ async fn helper(
 	plan: &LaunchPlan,
 ) -> Result<(PathBuf, u32), CoreError> {
 	let directory = runtime.join(run_id.0.simple().to_string());
-	let config = HelperConfig {
-		execution_id: run_id.0,
-		working_directory: plan.root.to_string_lossy().into_owned(),
-		executables: Contract::of(&plan.craft)?
-			.specification
-			.host_access
-			.iter()
-			.filter_map(|access| match access {
-				CraftHostAccess::Executable { name } => Some(name.clone()),
-				CraftHostAccess::Filesystem { .. }
-				| CraftHostAccess::Environment { .. }
-				| CraftHostAccess::Network { .. } => None,
-			})
-			.collect(),
-	};
+	let config = helper_config(run_id, plan)?;
 	let config_path = directory.join("config.json");
 	let path = config_path.clone();
 	filesystem::blocking(move || {
@@ -276,13 +351,22 @@ async fn helper(
 			&mut file,
 			&encode_control(&config).map_err(std::io::Error::other)?,
 		)?;
-		file.sync_all()
+		file.sync_all()?;
+		// ADR-0088: retain the accepted executable across installation updates.
+		let mut source = std::fs::File::open(
+			std::env::current_exe()?.with_file_name("jetfueld"),
+		)?;
+		let mut artifact = std::fs::OpenOptions::new()
+			.write(true)
+			.create_new(true)
+			.mode(0o700)
+			.open(directory.join("jetfueld"))?;
+		std::io::copy(&mut source, &mut artifact)?;
+		artifact.sync_all()
 	})
 	.await?
 	.map_err(failed)?;
-	let executable = std::env::current_exe()
-		.map_err(failed)?
-		.with_file_name("jetfueld");
+	let executable = config_path.with_file_name("jetfueld");
 	let child = Command::new(executable)
 		.arg("run")
 		.arg("--config")
@@ -300,6 +384,29 @@ async fn helper(
 	let socket = config_path.with_file_name("h.sock");
 	drop(connect(&socket).await?);
 	Ok((socket, pid))
+}
+
+pub(crate) fn helper_config(
+	run_id: RunId,
+	plan: &LaunchPlan,
+) -> Result<HelperConfig, CoreError> {
+	Ok(HelperConfig {
+		execution_id: run_id.0,
+		working_directory: plan.root.to_string_lossy().into_owned(),
+		executables: Contract::of(&plan.craft)?
+			.specification
+			.host_access
+			.iter()
+			.filter_map(|access| match access {
+				CraftHostAccess::Executable { name } => Some(name.clone()),
+				CraftHostAccess::Filesystem { .. }
+				| CraftHostAccess::Environment { .. }
+				| CraftHostAccess::Network { .. } => None,
+			})
+			.collect(),
+		project_directory: plan.project_root.to_string_lossy().into_owned(),
+		craft_digest: plan.craft.sha256.clone(),
+	})
 }
 
 async fn private_directory(path: PathBuf) -> Result<(), CoreError> {
@@ -333,7 +440,7 @@ async fn connect(path: &Path) -> Result<UnixStream, CoreError> {
 	.await
 	.map_err(failed)?
 }
-async fn receive<T: serde::de::DeserializeOwned>(
+pub(crate) async fn receive<T: serde::de::DeserializeOwned>(
 	reader: &mut FrameReader<OwnedReadHalf>,
 ) -> Result<T, CoreError> {
 	match reader.read().await.map_err(failed)? {
@@ -345,7 +452,7 @@ async fn receive<T: serde::de::DeserializeOwned>(
 		}
 	}
 }
-async fn send(
+pub(crate) async fn send(
 	writer: &mut FrameWriter<OwnedWriteHalf>,
 	value: &impl serde::Serialize,
 ) -> Result<(), CoreError> {

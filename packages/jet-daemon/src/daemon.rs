@@ -87,6 +87,18 @@ pub(crate) async fn run(
 	if let Err(error) = core.perform_runs().await {
 		eprintln!("jetd: cannot reconcile Run starts: {error}");
 	}
+	if let Err(error) = core.recover_runs().await {
+		eprintln!("jetd: cannot recover executions: {error}");
+	}
+	let recovery_core = Arc::clone(&core);
+	let recovery = tokio::spawn(async move {
+		loop {
+			tokio::time::sleep(Duration::from_secs(1)).await;
+			if let Err(error) = recovery_core.recover_runs().await {
+				eprintln!("jetd: cannot recover executions: {error}");
+			}
+		}
+	});
 	// ADR-0086: the Plane reports what it can do at startup, on the one
 	// line a launcher reads, and on demand afterwards.
 	let capabilities = crate::translate::capabilities(
@@ -102,6 +114,7 @@ pub(crate) async fn run(
 		})
 	);
 	let exit = serve(listener, &core).await;
+	recovery.abort();
 	close_store(&core).await;
 	drop(lock);
 	exit

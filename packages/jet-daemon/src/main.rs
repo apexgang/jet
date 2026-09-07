@@ -11,8 +11,10 @@ mod connection;
 mod connection_pairing;
 mod connection_session;
 mod daemon;
+mod execution_termination;
 mod run_craft;
 mod run_host;
+mod run_recovery;
 mod stdio;
 mod translate;
 

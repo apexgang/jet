@@ -18,12 +18,18 @@ impl From<std::io::Error> for LaunchError {
 	}
 }
 
+pub(crate) struct Control {
+	pub(crate) stop: tokio::sync::watch::Receiver<bool>,
+	pub(crate) stopped: tokio::sync::watch::Sender<bool>,
+}
+
 pub(crate) async fn launch(
 	config: &HelperConfig,
 	program: String,
 	arguments: Vec<String>,
 	input: String,
 	spool: Arc<Spool>,
+	mut control: Control,
 ) -> Result<(), LaunchError> {
 	if !config.executables.contains(&program)
 		|| arguments.len() > 256
@@ -44,6 +50,7 @@ pub(crate) async fn launch(
 		.stdin(Stdio::piped())
 		.stdout(Stdio::piped())
 		.stderr(Stdio::piped())
+		.process_group(0)
 		.kill_on_drop(false)
 		.spawn()?;
 	let harness_pid = child
@@ -59,28 +66,55 @@ pub(crate) async fn launch(
 	let stdout = child.stdout.take().expect("piped output");
 	let stderr = child.stderr.take().expect("piped errors");
 	tokio::spawn(async move {
-		let input_task =
+		let mut input_task =
 			tokio::spawn(
 				async move { stdin.write_all(input.as_bytes()).await },
 			);
-		let output_task = tokio::spawn(pump(
+		let mut output_task = tokio::spawn(pump(
 			stdout,
 			NativeStream::Stdout,
 			Arc::clone(&spool),
 		));
-		let error_task = tokio::spawn(pump(
+		let mut error_task = tokio::spawn(pump(
 			stderr,
 			NativeStream::Stderr,
 			Arc::clone(&spool),
 		));
-		let status = child.wait().await;
-		let _ = input_task.await; // A Harness may deliberately close its input.
-		let output = output_task.await;
-		let errors = error_task.await;
-		if !matches!(output, Ok(Ok(()))) || !matches!(errors, Ok(Ok(()))) {
+		let completed = async {
+			let status = child.wait().await;
+			let _ = (&mut input_task).await;
+			let output = (&mut output_task).await;
+			let errors = (&mut error_task).await;
+			if !matches!(output, Ok(Ok(()))) || !matches!(errors, Ok(Ok(()))) {
+				return None;
+			}
+			Some(status)
+		};
+		let stop = async {
+			if !*control.stop.borrow() {
+				let _ = control.stop.changed().await;
+			}
+		};
+		let status = tokio::select! {
+			status = completed => status,
+			_ = stop => {
+				// The helper signals only its unreaped child, in the process group
+				// it created. A descriptor-supplied PID can never choose this target.
+				if matches!(child.try_wait(), Ok(None)) {
+					let pid = rustix::process::Pid::from_raw(harness_pid as i32).expect("native PID");
+					if rustix::process::kill_process_group(pid, rustix::process::Signal::KILL).is_err() { return; }
+				}
+				if child.wait().await.is_err() { return; }
+				input_task.abort(); output_task.abort(); error_task.abort();
+				control.stopped.send_replace(true);
+				return;
+			}
+		};
+		let Some(status) = status else {
 			eprintln!("jetfueld: native output could not be retained");
 			return;
-		}
+		};
+		control.stopped.send_replace(true);
 		let exit_code = status.ok().and_then(|s| s.code());
 		if spool
 			.append(HelperEvent::Exited { exit_code })

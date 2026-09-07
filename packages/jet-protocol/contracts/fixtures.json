@@ -73,5 +73,30 @@
     "schema": "CraftEvent",
     "valid": true,
     "payload": "{\"kind\":\"output\",\"native_event\":{\"kind\":\"native\",\"kind\":\"future\"},\"presentation\":[{\"kind\":\"future_block\",\"text\":\"one\",\"text\":\"two\"}]}"
+  },
+  {
+    "schema": "CraftCommand",
+    "valid": true,
+    "payload": "{\"kind\": \"recover\", \"id\": \"run-1\", \"helper_socket\": \"/private/runtime/h.sock\", \"source_offset\": 4294967296, \"checkpoint\": \"[123,34]\"}"
+  },
+  {
+    "schema": "CraftEvent",
+    "valid": true,
+    "payload": "{\"kind\": \"run_recovered\", \"helper_pid\": 123, \"source_offset\": 4294967296}"
+  },
+  {
+    "schema": "CraftEvent",
+    "valid": true,
+    "payload": "{\"kind\": \"progress\", \"source_offset\": 4294967296, \"checkpoint\": \"[123,34]\"}"
+  },
+  {
+    "schema": "CraftEvent",
+    "valid": true,
+    "payload": "{\"kind\": \"progress\", \"source_offset\": 17}"
+  },
+  {
+    "schema": "CraftEvent",
+    "valid": false,
+    "payload": "{\"kind\": \"progress\", \"source_offset\": 17, \"checkpoint\": {}}"
   }
 ]

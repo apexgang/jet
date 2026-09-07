@@ -27,6 +27,11 @@ use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
+	/// Bounded read-only metadata for interactive recovery decisions.
+	OrphanedExecutions {
+		/// Continue after the previous page.
+		after: Option<crate::RunId>,
+	},
 	/// Read the durable execution projection of a managed Run.
 	RunExecution {
 		/// The Run to inspect.
@@ -122,6 +127,8 @@ pub enum Query {
 /// Snapshots returned by [`Core::query`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult {
+	/// A bounded page of unsafe execution matches.
+	OrphanedExecutions(crate::OrphanedExecutions),
 	/// Lifecycle, activity, and Managed processes at one journal cursor.
 	RunExecution(crate::RunExecution),
 	/// Snapshot of the daemon's Plane status.
@@ -175,6 +182,10 @@ impl Core {
 			.expect("authority gate never closes");
 		actor.authorize(&self.remote_sessions)?;
 		match query {
+			Query::OrphanedExecutions { after } => self
+				.orphaned_executions(after)
+				.await
+				.map(QueryResult::OrphanedExecutions),
 			Query::RunExecution { run_id } => self
 				.store
 				.read(async |tx| crate::run_state::snapshot(tx, run_id).await)
