@@ -16,14 +16,23 @@ async fn interrupting_a_turn_cancels_it_natively_and_keeps_the_run_working() {
 	tokio::time::timeout(Duration::from_secs(30), async {
 		let dir = tempfile::tempdir_in("/tmp").unwrap();
 		let home = dir.path().join("jet");
-		fixture::install(&home);
+		// Jet 1.19 and Craft 1.4 retain native turn interruption even though
+		// entity names and native titles require the following minors.
+		fixture::install_at_minor(&home, 4);
 		let daemon = start_jetd(&home).await;
 		let owner = Uuid::new_v4();
 		let client = connect(&daemon, owner).await;
 		let root = support::init_repository(&dir.path().join("repo"));
 		std::fs::write(root.join("queue"), "enabled").unwrap();
 		let id = local_conversation(&client, &root).await;
-		let mut wire = connect_raw(&daemon, owner).await;
+		let mut hello = support::hello(owner);
+		hello.minor = jet_protocol::EXECUTION_CONTROL_MINOR;
+		let (mut wire, welcome) = support::handshake_raw(&daemon, &hello).await;
+		assert!(matches!(
+			welcome,
+			jet_protocol::ServerHello::Welcome { minor, .. }
+				if minor == jet_protocol::EXECUTION_CONTROL_MINOR
+		));
 		let run_id = start_run(&mut wire, id).await;
 		wait_file(&root.join("current-turn"), "initial").await;
 
@@ -111,6 +120,15 @@ async fn stopping_a_run_escalates_to_kill_and_keeps_what_it_produced() {
 		// status of its own.
 		assert_eq!(execution["run"]["lifecycle"], "canceled");
 		assert_eq!(execution["exit_code"], Value::Null);
+		assert_eq!(
+			execution["processes"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.find(|process| process["role"] == "harness")
+				.unwrap()["label"],
+			"Stopping Harness"
+		);
 		assert!(
 			execution["processes"]
 				.as_array()

@@ -66,9 +66,11 @@ async fn a_conversation_is_queryable_before_any_run_and_retained_by_default() {
 			cursor: 1,
 			conversation: Conversation {
 				conversation_id: conversation.conversation_id,
+				revision: conversation.revision,
 				retention: RetentionPolicy::Retain,
 				working_tree: Some(WorkingTree::NoProject),
 				origin: Some(ConversationOrigin::New),
+				name: conversation.name.clone(),
 				created_at_unix_ms: conversation.created_at_unix_ms,
 			},
 			workspace: None,

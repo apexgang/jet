@@ -73,6 +73,8 @@ async fn apply(
 			})
 		}
 		CommandOutcome::UserEditApplied(_)
+		| CommandOutcome::ConversationNamed(_)
+		| CommandOutcome::RunNamed(_)
 		| CommandOutcome::TurnAdmitted(_)
 		| CommandOutcome::TurnWithdrawn(_)
 		| CommandOutcome::ConversationCreated(_)

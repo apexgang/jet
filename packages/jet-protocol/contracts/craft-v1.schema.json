@@ -226,6 +226,24 @@
           ]
         },
         {
+          "description": "Ask the Harness to cancel the identified turn without ending the\nRun (Craft 1.4). A Craft that negotiated 1.4 must answer every\nInterrupt with a `TurnEnded` boundary for that turn.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "description": "Correlation identity of the turn to cancel.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "interrupt"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        {
           "description": "Route an authenticated user action to its native handler.",
           "type": "object",
           "properties": {
@@ -313,6 +331,67 @@
           "required": [
             "kind",
             "change"
+          ]
+        },
+        {
+          "description": "Structured native title candidate for the owning Conversation (1.5).",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "conversation_title"
+            },
+            "title": {
+              "description": "Unescaped title text.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "title"
+          ]
+        },
+        {
+          "description": "Structured native title candidate for the current Run (1.5).",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "run_title"
+            },
+            "title": {
+              "description": "Unescaped title text.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "title"
+          ]
+        },
+        {
+          "description": "Terminal/native title for exactly one Managed process (1.5).",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "process_title"
+            },
+            "pid": {
+              "description": "OS process identity reported by `run_started`.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "title": {
+              "description": "Unescaped live label.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "pid",
+            "title"
           ]
         },
         {

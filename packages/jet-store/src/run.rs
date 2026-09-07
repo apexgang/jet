@@ -5,7 +5,8 @@ use uuid::Uuid;
 
 use crate::StoreError;
 use crate::records::{
-	NewRun, RunLifecycle, RunRecord, column_error, parse_uuid,
+	NameRecord, NameSourceRecord, NewRun, RunLifecycle, RunRecord,
+	column_error, parse_name, parse_uuid,
 };
 use crate::transaction::{ReadTransaction, WriteTransaction};
 
@@ -16,6 +17,8 @@ struct Row {
 	conversation_id: String,
 	revision: i64,
 	lifecycle: String,
+	name: Option<String>,
+	name_source: Option<String>,
 	created_at_unix_ms: i64,
 	ended_at_unix_ms: Option<i64>,
 }
@@ -34,7 +37,8 @@ impl ReadTransaction {
 		let row = sqlx::query_as!(
 			Row,
 			r#"SELECT run_id AS "run_id!", conversation_id, revision,
-				lifecycle, created_at_unix_ms, ended_at_unix_ms
+				lifecycle, name, name_source, created_at_unix_ms,
+				ended_at_unix_ms
 			 FROM runs
 			 WHERE run_id = ?1"#,
 			run_id
@@ -58,7 +62,8 @@ impl ReadTransaction {
 		let rows = sqlx::query_as!(
 			Row,
 			r#"SELECT run_id AS "run_id!", conversation_id, revision,
-				lifecycle, created_at_unix_ms, ended_at_unix_ms
+				lifecycle, name, name_source, created_at_unix_ms,
+				ended_at_unix_ms
 			 FROM runs
 			 WHERE conversation_id = ?1
 			 ORDER BY rowid"#,
@@ -88,8 +93,8 @@ impl ReadTransaction {
 		let rows = sqlx::query_as!(
 			Row,
 			r#"SELECT runs.run_id AS "run_id!", runs.conversation_id,
-				runs.revision, runs.lifecycle, runs.created_at_unix_ms,
-				runs.ended_at_unix_ms
+				runs.revision, runs.lifecycle, runs.name, runs.name_source,
+				runs.created_at_unix_ms, runs.ended_at_unix_ms
 			 FROM runs
 			 JOIN conversations USING (conversation_id)
 			 WHERE conversations.project_id = ?1
@@ -119,6 +124,7 @@ impl WriteTransaction {
 			conversation_id: run.conversation_id,
 			revision: 1,
 			lifecycle: RunLifecycle::Created,
+			name: fallback_name(run.run_id),
 			created_at_unix_ms: run.created_at_unix_ms,
 			ended_at_unix_ms: None,
 		};
@@ -126,20 +132,48 @@ impl WriteTransaction {
 		let conversation_id = record.conversation_id.to_string();
 		let revision = i64::try_from(record.revision).unwrap_or(i64::MAX);
 		let lifecycle = record.lifecycle.as_str();
+		let name_source = record.name.source.as_str();
 		sqlx::query!(
 			"INSERT INTO runs (run_id, conversation_id, revision, lifecycle,
-				created_at_unix_ms, ended_at_unix_ms)
-			 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+				name, name_source, created_at_unix_ms, ended_at_unix_ms)
+			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
 			run_id,
 			conversation_id,
 			revision,
 			lifecycle,
+			record.name.value,
+			name_source,
 			record.created_at_unix_ms,
 			record.ended_at_unix_ms
 		)
 		.execute(self.connection())
 		.await?;
 		Ok(record)
+	}
+
+	/// Replaces one Run's resolved name and advances its Revision.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the row cannot be written.
+	pub async fn update_run_name(
+		&mut self,
+		run_id: Uuid,
+		name: &NameRecord,
+	) -> Result<(), StoreError> {
+		let run_id = run_id.to_string();
+		let source = name.source.as_str();
+		// ASVS 1.2.4: display text remains a bound value, never SQL source.
+		sqlx::query!(
+			"UPDATE runs SET name = ?2, name_source = ?3,
+				revision = revision + 1 WHERE run_id = ?1",
+			run_id,
+			name.value,
+			source
+		)
+		.execute(self.connection())
+		.await?;
+		Ok(())
 	}
 
 	/// Moves `run_id` to `lifecycle`, stamping its end with `now_unix_ms` the
@@ -178,14 +212,27 @@ impl WriteTransaction {
 }
 
 fn read_row(row: Row) -> Result<RunRecord, StoreError> {
+	let run_id = parse_uuid("run_id", &row.run_id)?;
 	Ok(RunRecord {
-		run_id: parse_uuid("run_id", &row.run_id)?,
+		run_id,
 		conversation_id: parse_uuid("conversation_id", &row.conversation_id)?,
 		revision: parse_revision(row.revision)?,
 		lifecycle: parse_lifecycle(&row.lifecycle)?,
+		name: parse_name(
+			row.name,
+			row.name_source.as_deref(),
+			fallback_name(run_id),
+		)?,
 		created_at_unix_ms: row.created_at_unix_ms,
 		ended_at_unix_ms: row.ended_at_unix_ms,
 	})
+}
+
+fn fallback_name(id: Uuid) -> NameRecord {
+	NameRecord {
+		value: format!("Run {}", &id.simple().to_string()[..8]),
+		source: NameSourceRecord::Deterministic,
+	}
 }
 
 fn parse_lifecycle(text: &str) -> Result<RunLifecycle, StoreError> {

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE runs SET name = ?2, name_source = ?3,\n\t\t\t\trevision = revision + 1 WHERE run_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "e10e68b5cac50ac2d327ba9ecb82835f2fc4d006032711b4380a9366931f90a5"
+}

@@ -98,6 +98,8 @@ impl Client {
 				Ok(promotion)
 			}
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }

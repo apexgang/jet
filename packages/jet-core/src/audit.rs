@@ -379,6 +379,8 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		}
 		Command::BeginAuditEpoch
 		| Command::ApplyUserEdit { .. }
+		| Command::SetConversationName { .. }
+		| Command::SetRunName { .. }
 		| Command::CreateConversation { .. }
 		| Command::ForkConversation { .. }
 		| Command::CreateRun { .. }
@@ -428,6 +430,8 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::ClaimPairing { .. }
 		| Command::ConfirmPairing { .. }
 		| Command::CompletePairing { .. }
+		| Command::SetConversationName { .. }
+		| Command::SetRunName { .. }
 		| Command::CreateConversation { .. }
 		| Command::ForkConversation { .. }
 		| Command::CreateRun { .. }

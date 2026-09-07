@@ -568,18 +568,92 @@ pub struct NewConversation {
 }
 
 /// Current state of one Conversation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConversationRecord {
 	/// Globally unique identity.
 	pub conversation_id: Uuid,
+	/// Current version for conflict-sensitive Conversation Commands.
+	pub revision: u64,
 	/// Retention choice.
 	pub retention: RetentionPolicy,
 	/// Where the Conversation does its work.
 	pub working_tree: WorkingTreeRecord,
 	/// Where the Conversation came from.
 	pub origin: ConversationOriginRecord,
+	/// Resolved user-facing name and its authority.
+	pub name: NameRecord,
 	/// When the Conversation was recorded.
 	pub created_at_unix_ms: i64,
+}
+
+/// Authority that supplied a current Conversation or Run name (ADR-0044).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NameSourceRecord {
+	/// An interactive user's authoritative choice.
+	Manual,
+	/// A validated Utility-model result. Its full attribution belongs to the
+	/// Utility result record introduced with Utility execution (ADR-0099).
+	Utility,
+	/// A structured title supplied by the Harness through its Craft.
+	HarnessNative,
+	/// Stable local text used when no stronger source is available.
+	Deterministic,
+}
+
+impl NameSourceRecord {
+	/// Stable database spelling.
+	#[must_use]
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Manual => "manual",
+			Self::Utility => "utility",
+			Self::HarnessNative => "harness_native",
+			Self::Deterministic => "deterministic",
+		}
+	}
+
+	pub(crate) fn parse(value: &str) -> Option<Self> {
+		match value {
+			"manual" => Some(Self::Manual),
+			"utility" => Some(Self::Utility),
+			"harness_native" => Some(Self::HarnessNative),
+			"deterministic" => Some(Self::Deterministic),
+			_ => None,
+		}
+	}
+}
+
+/// Resolved, unescaped display text beside the source that supplied it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NameRecord {
+	/// Original validated text. Rendering contexts encode it at output time.
+	pub value: String,
+	/// Authority that supplied `value`.
+	pub source: NameSourceRecord,
+}
+
+pub(crate) fn parse_name(
+	value: Option<String>,
+	source: Option<&str>,
+	fallback: NameRecord,
+) -> Result<NameRecord, crate::StoreError> {
+	match (value, source) {
+		(Some(value), Some(source)) => Ok(NameRecord {
+			value,
+			source: NameSourceRecord::parse(source).ok_or_else(|| {
+				column_error(
+					"name_source",
+					format!("unknown name source {source:?}"),
+				)
+			})?,
+		}),
+		(None, None) => Ok(fallback),
+		_ => Err(column_error(
+			"name",
+			"name and name_source must either both be present or both be absent"
+				.into(),
+		)),
+	}
 }
 
 /// Opaque-to-callers key for continuing a Conversation keyset page.
@@ -607,7 +681,7 @@ pub struct NewRun {
 }
 
 /// Current state of one Run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunRecord {
 	/// Globally unique identity.
 	pub run_id: Uuid,
@@ -617,6 +691,8 @@ pub struct RunRecord {
 	pub revision: u64,
 	/// Current lifecycle state.
 	pub lifecycle: RunLifecycle,
+	/// Resolved user-facing name and its authority.
+	pub name: NameRecord,
 	/// When the Run was recorded.
 	pub created_at_unix_ms: i64,
 	/// When the Run reached a terminal state, if it has.

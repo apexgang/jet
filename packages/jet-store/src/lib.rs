@@ -87,10 +87,11 @@ pub use records::{
 	ActorRecord, CommandReceiptRecord, ConversationOriginRecord,
 	ConversationPageKey, ConversationPageStart, ConversationRecord,
 	EffectKindRecord, EffectRecord, EffectSafetyRecord, EffectStateRecord,
-	EventClass, EventRecord, NewCommandReceipt, NewConversation, NewEffect,
-	NewEvent, NewRun, NewUserEditIntent, RetentionPolicy, RunLifecycle,
-	RunRecord, SettingRecord, SettingScopeRecord, UserEditIntentRecord,
-	VerifiedSnapshotCoverage, WorkingTreeRecord,
+	EventClass, EventRecord, NameRecord, NameSourceRecord, NewCommandReceipt,
+	NewConversation, NewEffect, NewEvent, NewRun, NewUserEditIntent,
+	RetentionPolicy, RunLifecycle, RunRecord, SettingRecord,
+	SettingScopeRecord, UserEditIntentRecord, VerifiedSnapshotCoverage,
+	WorkingTreeRecord,
 };
 pub use run_execution::RunExecutionRecord;
 pub use search::{

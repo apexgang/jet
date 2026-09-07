@@ -14,7 +14,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 19;
+pub const PROTOCOL_MINOR: u32 = 20;
+
+/// Independent Conversation and Run names plus Managed-process labels.
+pub const NAMES_MINOR: u32 = 20;
 
 /// Direct user edits and structured review submissions.
 pub const USER_INPUT_MINOR: u32 = 19;

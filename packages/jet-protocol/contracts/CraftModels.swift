@@ -27,6 +27,7 @@ public enum CraftCommand {
     case `start`(CraftCommandStart)
     case `acknowledge`(CraftCommandAcknowledge)
     case `turn`(CraftCommandTurn)
+    case `interrupt`(CraftCommandInterrupt)
     case `action`(CraftCommandAction)
     case `shutdown`(CraftCommandShutdown)
 }
@@ -35,6 +36,9 @@ public enum CraftEvent {
     case `turn_started`(CraftEventTurnStarted)
     case `turn_ended`(CraftEventTurnEnded)
     case `file_changed`(CraftEventFileChanged)
+    case `conversation_title`(CraftEventConversationTitle)
+    case `run_title`(CraftEventRunTitle)
+    case `process_title`(CraftEventProcessTitle)
     case `run_launch_failed`(CraftEventRunLaunchFailed)
     case `run_started`(CraftEventRunStarted)
     case `activity`(CraftEventActivity)
@@ -186,6 +190,10 @@ public struct CraftCommandTurn {
     public let `text`: String
 }
 
+public struct CraftCommandInterrupt {
+    public let `id`: String
+}
+
 public struct CraftCommandAction {
     public let `action`: CraftAction
     public let `id`: String
@@ -205,6 +213,19 @@ public struct CraftEventTurnEnded {
 
 public struct CraftEventFileChanged {
     public let `change`: CraftFileChange
+}
+
+public struct CraftEventConversationTitle {
+    public let `title`: String
+}
+
+public struct CraftEventRunTitle {
+    public let `title`: String
+}
+
+public struct CraftEventProcessTitle {
+    public let `pid`: UInt32
+    public let `title`: String
 }
 
 public struct CraftEventRunLaunchFailed {

@@ -340,8 +340,8 @@ pub enum QueryResponse {
 /// equals `cursor`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventPage {
-	/// Newest Event sequence in the journal when the page was read, carried
-	/// as a decimal string (ADR-0089).
+	/// Newest Event sequence visible to this peer when the page was read,
+	/// carried as a decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
 	pub cursor: u64,
 	/// The Events strictly after the requested position, in sequence order.
@@ -431,6 +431,11 @@ pub enum RecoveryAction {
 		path: String,
 		/// Exact file state now authoritative.
 		current_revision: crate::FileRevision,
+	},
+	/// Refresh current Conversation state before preparing another Command.
+	RefreshConversation {
+		/// Conversation whose current state should be queried.
+		conversation_id: Uuid,
 	},
 	/// Refresh current Run state before preparing another Command.
 	RefreshRun {

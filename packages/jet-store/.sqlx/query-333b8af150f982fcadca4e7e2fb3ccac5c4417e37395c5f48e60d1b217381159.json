@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT runs.run_id AS \"run_id!\", runs.conversation_id,\n\t\t\t\truns.revision, runs.lifecycle, runs.created_at_unix_ms,\n\t\t\t\truns.ended_at_unix_ms\n\t\t\t FROM runs\n\t\t\t JOIN conversations USING (conversation_id)\n\t\t\t WHERE conversations.project_id = ?1\n\t\t\t   AND conversations.working_tree = 'local_checkout'\n\t\t\t ORDER BY runs.rowid",
+  "query": "SELECT run_id AS \"run_id!\", conversation_id, revision,\n\t\t\t\tlifecycle, name, name_source, created_at_unix_ms,\n\t\t\t\tended_at_unix_ms\n\t\t\t FROM runs\n\t\t\t WHERE conversation_id = ?1\n\t\t\t ORDER BY rowid",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,30 @@
         }
       },
       {
-        "name": "created_at_unix_ms",
+        "name": "name",
         "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "name_source",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "name_source"
+          }
+        }
+      },
+      {
+        "name": "created_at_unix_ms",
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -60,7 +82,7 @@
       },
       {
         "name": "ended_at_unix_ms",
-        "ordinal": 5,
+        "ordinal": 7,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -78,9 +100,11 @@
       false,
       false,
       false,
+      true,
+      true,
       false,
       true
     ]
   },
-  "hash": "e8e1463906435017ddd523e36ce37cb159c9e835822a560c88b9a06305d4c422"
+  "hash": "333b8af150f982fcadca4e7e2fb3ccac5c4417e37395c5f48e60d1b217381159"
 }

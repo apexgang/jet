@@ -173,9 +173,11 @@ fn conversation_commands_and_results_have_the_agreed_wire_shape() {
 		id: 2,
 		result: CommandResponse::ConversationCreated(Conversation {
 			conversation_id: Uuid::nil(),
+			revision: None,
 			retention: RetentionPolicy::Retain,
 			working_tree: None,
 			origin: None,
+			name: None,
 			created_at_unix_ms: 1_700_000_000_000,
 		}),
 	};
@@ -217,6 +219,7 @@ fn revision_preconditions_and_conflicts_have_the_agreed_wire_shape() {
 		conversation_id: Uuid::nil(),
 		revision: 3,
 		lifecycle: RunLifecycle::Active,
+		name: None,
 		created_at_unix_ms: 1,
 		ended_at_unix_ms: None,
 	};
@@ -308,9 +311,11 @@ fn conversation_snapshots_and_event_pages_have_the_agreed_wire_shape() {
 			cursor: 3,
 			conversation: Conversation {
 				conversation_id: Uuid::nil(),
+				revision: None,
 				retention: RetentionPolicy::ForgetAfterFinalRun,
 				working_tree: None,
 				origin: None,
+				name: None,
 				created_at_unix_ms: 1,
 			},
 			workspace: None,
@@ -319,6 +324,7 @@ fn conversation_snapshots_and_event_pages_have_the_agreed_wire_shape() {
 				conversation_id: Uuid::nil(),
 				revision: 4,
 				lifecycle: RunLifecycle::Completed,
+				name: None,
 				created_at_unix_ms: 2,
 				ended_at_unix_ms: Some(3),
 			}],

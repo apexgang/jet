@@ -221,7 +221,9 @@ impl Core {
 					| WorkingTreeRequest::LocalCheckout { .. } => Ok(Prepared::Nothing),
 				}
 			}
-			Command::SubmitTurn { .. }
+			Command::SetConversationName { .. }
+			| Command::SetRunName { .. }
+			| Command::SubmitTurn { .. }
 			| Command::SubmitReview { .. }
 			| Command::WithdrawTurn { .. }
 			| Command::CreateConversation { .. }

@@ -25,11 +25,13 @@ enum ForkCapture {
 	Ignore,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CraftProfile {
 	Standard,
 	NativeFork,
 	PortableFallback,
+	AtMinor(u32),
 }
 
 #[allow(dead_code)]
@@ -41,23 +43,37 @@ pub fn install_with_fork(home: &Path, support: ForkSupport) {
 	install_craft(home, profile, ForkCapture::Record);
 }
 
+#[allow(dead_code)]
+pub fn install_at_minor(home: &Path, craft_minor: u32) {
+	install_craft(
+		home,
+		CraftProfile::AtMinor(craft_minor),
+		ForkCapture::Ignore,
+	);
+}
+
 fn install_craft(home: &Path, profile: CraftProfile, capture: ForkCapture) {
 	std::fs::create_dir_all(home.join("crafts")).unwrap();
 	let executable = std::env::current_exe().unwrap();
 	let program = home.join("crafts/fake-craft");
 	let (minor, capabilities, features) = match profile {
 		CraftProfile::Standard => (
-			4,
+			5,
 			json!(["runs", "resume"]),
 			json!([{"name":"turns"},{"name":"resume"}]),
 		),
 		CraftProfile::NativeFork => (
-			4,
+			5,
 			json!(["runs", "resume", "fork"]),
 			json!([{"name":"turns"},{"name":"resume"},{"name":"fork"}]),
 		),
 		CraftProfile::PortableFallback => (
 			3,
+			json!(["runs", "resume"]),
+			json!([{"name":"turns"},{"name":"resume"}]),
+		),
+		CraftProfile::AtMinor(minor) => (
+			minor,
 			json!(["runs", "resume"]),
 			json!([{"name":"turns"},{"name":"resume"}]),
 		),
@@ -139,7 +155,7 @@ async fn fake_craft_process() {
 /// A Harness that ignores every signal it is allowed to ignore, so a stop
 /// has to escalate all the way to kill. It keeps its file and its output.
 const DEAF_HARNESS: &str = r#"
-trap '' INT TERM
+trap 'printf "%s\n" "{\"process_title\":\"Stopping Harness\",\"text\":\"Still stopping\"}"' INT TERM
 printf 'Harness work\n' > result.txt
 printf '%s\n' '{"text":"Working before the stop"}'
 : > deaf-ready
@@ -282,6 +298,7 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 	} else {
 		serde_json::from_str(&checkpoint).unwrap()
 	};
+	let mut harness_pid = None;
 	// A bounded reader task keeps partial Craft frames alive across select!.
 	let (commands, mut requests) = tokio::sync::mpsc::channel(8);
 	tokio::spawn(async move {
@@ -326,13 +343,18 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 			HelperEvent::LaunchFailed => {
 				sender.send(&CraftEvent::RunLaunchFailed).await.unwrap()
 			}
-			HelperEvent::Started { harness_pid } => sender
-				.send(&CraftEvent::RunStarted {
-					helper_pid: ready.helper_pid,
-					harness_pid,
-				})
-				.await
-				.unwrap(),
+			HelperEvent::Started {
+				harness_pid: started_pid,
+			} => {
+				harness_pid = Some(started_pid);
+				sender
+					.send(&CraftEvent::RunStarted {
+						helper_pid: ready.helper_pid,
+						harness_pid: started_pid,
+					})
+					.await
+					.unwrap();
+			}
 			HelperEvent::Output {
 				stream: NativeStream::Stdout,
 				bytes,
@@ -354,6 +376,35 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 							})
 							.await
 							.unwrap();
+					}
+					if craft_minor >= 5 {
+						if let Some(title) =
+							native["conversation_title"].as_str()
+						{
+							sender
+								.send(&CraftEvent::ConversationTitle {
+									title: title.into(),
+								})
+								.await
+								.unwrap();
+						}
+						if let Some(title) = native["run_title"].as_str() {
+							sender
+								.send(&CraftEvent::RunTitle {
+									title: title.into(),
+								})
+								.await
+								.unwrap();
+						}
+						if let Some(title) = native["process_title"].as_str() {
+							sender
+								.send(&CraftEvent::ProcessTitle {
+									pid: harness_pid.unwrap(),
+									title: title.into(),
+								})
+								.await
+								.unwrap();
+						}
 					}
 					if let Some(turn_id) = native["turn_id"].as_str() {
 						sender
@@ -537,6 +588,17 @@ fn fake_harness_process() {
 	};
 	std::fs::write("result.txt", "Harness work\n").unwrap();
 	let file_change = json!({"activity_id":"result-write", "path":"result.txt", "before_object":before, "after_object":file_object("result.txt"), "before_mode":before_mode, "after_mode":"100644"});
+	if Path::new("name-events").exists() {
+		println!(
+			"{}",
+			json!({
+				"conversation_title":"Harness Conversation",
+				"run_title":"Harness Run",
+				"process_title":"Harness Process",
+				"text":"Named"
+			})
+		);
+	}
 	if Path::new("dense").exists() {
 		let source = (0..100)
 			.map(|i| format!("{}\n", json!({"dense":i})))
@@ -557,6 +619,17 @@ fn fake_harness_process() {
 	}
 	if Path::new("partial").exists() {
 		println!("tial\"}}");
+	}
+	if Path::new("name-events").exists() {
+		println!(
+			"{}",
+			json!({
+				"conversation_title":"Late Harness Conversation",
+				"run_title":"Late Harness Run",
+				"process_title":"Late Harness Process",
+				"text":"Renamed"
+			})
+		);
 	}
 
 	println!(
