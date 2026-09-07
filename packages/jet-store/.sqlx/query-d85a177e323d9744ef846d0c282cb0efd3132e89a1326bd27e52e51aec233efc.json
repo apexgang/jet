@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT run_id AS \"run_id!\", COUNT(*) AS \"count!\" FROM events\n\t\t\t WHERE conversation_id = ?1\n\t\t\t\tAND run_id IS NOT NULL\n\t\t\t\tAND kind = 'change.checkpoint_recorded'\n\t\t\t\tAND sequence <= (\n\t\t\t\t\tSELECT sequence FROM events\n\t\t\t\t\tWHERE run_id = ?2\n\t\t\t\t\t\tAND kind = 'change.checkpoint_recorded'\n\t\t\t\t\t\tAND json_extract(payload, '$.turn') = ?3\n\t\t\t\t\tORDER BY sequence DESC LIMIT 1\n\t\t\t\t)\n\t\t\t GROUP BY run_id ORDER BY MAX(sequence) DESC LIMIT ?4",
+  "describe": {
+    "columns": [
+      {
+        "name": "run_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "name": "count!",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "d85a177e323d9744ef846d0c282cb0efd3132e89a1326bd27e52e51aec233efc"
+}

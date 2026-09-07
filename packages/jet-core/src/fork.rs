@@ -1,7 +1,7 @@
 //! Conversation forks from immutable Change checkpoints (ADR-0035).
 
 use std::{
-	collections::{BTreeMap, BTreeSet},
+	collections::BTreeMap,
 	path::PathBuf,
 };
 
@@ -14,7 +14,8 @@ use crate::command::CommandOutcome;
 use crate::{
 	Actor, ChangeCheckpoint, ConversationId, ConversationOrigin, Core,
 	CoreError, Event, EventKind, ForkLaunchSource, LaunchPlan, RunId,
-	WorkingTree, WorkspaceHome, run_state, tree_capture, workspace, worktree,
+	TurnState, WorkingTree, WorkspaceHome, run_state, tree_capture, workspace,
+	worktree,
 };
 
 const CONTEXT_ROLE_BYTES: usize = 12 * 1024;
@@ -273,10 +274,11 @@ fn capture_context(
 ) -> Result<ForkLaunchContext, CoreError> {
 	let ForkContextEvents {
 		events,
+		checkpoint_counts,
 		earlier_events_omitted,
 	} = context_events;
 	let mut input = BTreeMap::<uuid::Uuid, (u64, String)>::new();
-	let mut executed = BTreeSet::new();
+	let mut executed = BTreeMap::new();
 	let mut candidates = Vec::new();
 	let mut truncated = earlier_events_omitted;
 	for record in events {
@@ -288,8 +290,14 @@ fn capture_context(
 					.and_modify(|(_, input)| input.push_str(&text))
 					.or_insert((sequence, text));
 			}
-			EventKind::TurnChanged { turn } if turn.run_id.is_some() => {
-				executed.insert(turn.turn_id);
+			EventKind::TurnChanged { turn }
+				if turn.state == TurnState::Active
+					&& turn.run_id.is_some() =>
+			{
+				executed.entry(turn.turn_id).or_insert((
+					sequence,
+					turn.run_id.expect("guarded above").0,
+				));
 			}
 			EventKind::RunOutput {
 				native_json,
@@ -315,10 +323,27 @@ fn capture_context(
 			_ => continue,
 		}
 	}
-	for (turn_id, (sequence, input)) in input {
-		if !executed.contains(&turn_id) {
+	let mut remaining_checkpoints = checkpoint_counts;
+	let mut completed = BTreeMap::new();
+	let mut claims = executed
+		.iter()
+		.map(|(turn_id, (sequence, run_id))| (*sequence, *turn_id, *run_id))
+		.collect::<Vec<_>>();
+	claims.sort_by_key(|(sequence, _, _)| *sequence);
+	for (sequence, turn_id, run_id) in claims {
+		let Some(remaining) = remaining_checkpoints.get_mut(&run_id) else {
+			continue;
+		};
+		if *remaining == 0 {
 			continue;
 		}
+		*remaining -= 1;
+		completed.insert(turn_id, sequence);
+	}
+	for (turn_id, (_, input)) in input {
+		let Some(sequence) = completed.get(&turn_id).copied() else {
+			continue;
+		};
 		let (content, was_truncated) =
 			truncate_utf8(&input, CONTEXT_INPUT_BYTES);
 		truncated |= was_truncated;

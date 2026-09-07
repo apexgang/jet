@@ -1,6 +1,8 @@
 //! The append-only Event journal (ADR-0020, ADR-0096). Sequence numbers are
 //! total and monotonic within this Plane only (ADR-0069).
 
+use std::collections::BTreeMap;
+
 use crate::StoreError;
 use crate::records::{
 	ActorRecord, EventRecord, NewEvent, VerifiedSnapshotCoverage, column_error,
@@ -18,6 +20,8 @@ const FORK_CONTEXT_EVENT_LIMIT: usize = 256;
 pub struct ForkContextEvents {
 	/// Newest transcript Events through the selected checkpoint, in order.
 	pub events: Vec<EventRecord>,
+	/// Durable turn boundaries recorded per Run through the checkpoint.
+	pub checkpoint_counts: BTreeMap<uuid::Uuid, u32>,
 	/// Whether older matching Events were omitted by the fixed store bound.
 	pub earlier_events_omitted: bool,
 }
@@ -78,15 +82,53 @@ impl ReadTransaction {
 		)
 		.fetch_all(self.connection())
 		.await?;
-		let earlier_events_omitted = rows.len() > FORK_CONTEXT_EVENT_LIMIT;
+		let mut earlier_events_omitted =
+			rows.len() > FORK_CONTEXT_EVENT_LIMIT;
 		rows.truncate(FORK_CONTEXT_EVENT_LIMIT);
 		rows.reverse();
 		let events = rows
 			.into_iter()
 			.map(read_event_row)
 			.collect::<Result<_, _>>()?;
+		let mut checkpoint_rows = sqlx::query!(
+			r#"SELECT run_id AS "run_id!", COUNT(*) AS "count!" FROM events
+			 WHERE conversation_id = ?1
+				AND run_id IS NOT NULL
+				AND kind = 'change.checkpoint_recorded'
+				AND sequence <= (
+					SELECT sequence FROM events
+					WHERE run_id = ?2
+						AND kind = 'change.checkpoint_recorded'
+						AND json_extract(payload, '$.turn') = ?3
+					ORDER BY sequence DESC LIMIT 1
+				)
+			 GROUP BY run_id ORDER BY MAX(sequence) DESC LIMIT ?4"#,
+			conversation_id,
+			run_id,
+			checkpoint_turn,
+			limit,
+		)
+		.fetch_all(self.connection())
+		.await?;
+		earlier_events_omitted |=
+			checkpoint_rows.len() > FORK_CONTEXT_EVENT_LIMIT;
+		checkpoint_rows.truncate(FORK_CONTEXT_EVENT_LIMIT);
+		let checkpoint_counts = checkpoint_rows
+			.into_iter()
+			.map(|row| {
+				Ok::<_, StoreError>((
+					parse_uuid("run_id", &row.run_id)?,
+					u32::try_from(row.count).map_err(|_| {
+						StoreError::Integrity(
+							"checkpoint count is out of range".into(),
+						)
+					})?,
+				))
+			})
+			.collect::<Result<_, _>>()?;
 		Ok(ForkContextEvents {
 			events,
+			checkpoint_counts,
 			earlier_events_omitted,
 		})
 	}
