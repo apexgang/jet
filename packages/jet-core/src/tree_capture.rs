@@ -26,11 +26,12 @@ const ABSENT_MODE: &str = "000000";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Change {
 	pub(crate) path: String,
-	source_mode: String,
-	destination_mode: String,
+	pub(crate) source_mode: String,
+	pub(crate) source_object: String,
+	pub(crate) destination_mode: String,
 	/// The object the destination tree holds at the path, or all zeros
 	/// when it holds nothing.
-	destination_object: String,
+	pub(crate) destination_object: String,
 }
 
 impl Change {
@@ -144,7 +145,46 @@ impl<'a> ScratchIndex<'a> {
 		&self,
 		head: &str,
 	) -> Result<(String, Vec<Change>), CoreError> {
-		self.stage_everything().await?;
+		self.capture_excluding(head, &[]).await
+	}
+
+	/// Captures eligible content while restoring excluded paths to HEAD. The
+	/// caller retains separate metadata for paths whose content was omitted.
+	pub(crate) async fn capture_excluding(
+		&self,
+		head: &str,
+		excluded: &[&str],
+	) -> Result<(String, Vec<Change>), CoreError> {
+		if excluded.is_empty() {
+			self.stage_everything().await?;
+		} else {
+			for chunk in excluded.chunks(256) {
+				let mut args =
+					vec!["--literal-pathspecs", "reset", "--quiet", head, "--"];
+				args.extend_from_slice(chunk);
+				self.run(&args).await?;
+			}
+			let pathspec = self.index.with_extension("pathspec");
+			let mut paths = String::from(".\0");
+			for path in excluded {
+				paths.push_str(&format!(":(top,exclude,literal){path}\0"));
+			}
+			tokio::fs::write(&pathspec, paths)
+				.await
+				.map_err(|error| (self.failure)(error.to_string()))?;
+			let pathspec = pathspec
+				.to_str()
+				.ok_or_else(|| (self.failure)("invalid scratch path".into()))?;
+			self.run(&[
+				"add",
+				"--all",
+				"--no-warn-embedded-repo",
+				"--pathspec-file-nul",
+				"--pathspec-from-file",
+				pathspec,
+			])
+			.await?;
+		}
 		let tree = self.write_tree().await?;
 		let changed = diff_trees(self.root, head, &tree, self.failure).await?;
 		let nested: Vec<&str> = changed
@@ -208,6 +248,8 @@ pub(crate) async fn diff_trees(
 		root,
 		&[
 			"diff-tree",
+			"--no-renames",
+			"--no-abbrev",
 			"-r",
 			"-z",
 			"--end-of-options",
@@ -243,8 +285,12 @@ fn parse_changes(
 			)));
 		};
 		let mut fields = modes.split(' ');
-		let (Some(source), Some(destination), Some(_), Some(object)) =
-			(fields.next(), fields.next(), fields.next(), fields.next())
+		let (
+			Some(source),
+			Some(destination),
+			Some(source_object),
+			Some(object),
+		) = (fields.next(), fields.next(), fields.next(), fields.next())
 		else {
 			return Err(failure(format!(
 				"diff-tree answered with an unreadable record {record:?}"
@@ -253,6 +299,7 @@ fn parse_changes(
 		changes.push(Change {
 			path: path.to_owned(),
 			source_mode: source.to_owned(),
+			source_object: source_object.to_owned(),
 			destination_mode: destination.to_owned(),
 			destination_object: object.to_owned(),
 		});

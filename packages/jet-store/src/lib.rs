@@ -16,6 +16,7 @@ mod audit_head;
 mod audit_integrity;
 mod audit_read;
 mod audit_retention;
+mod checkpoint;
 mod command;
 mod conversation;
 mod effect;

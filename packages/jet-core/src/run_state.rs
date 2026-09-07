@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct State {
+	#[serde(default)]
+	pub(crate) changes: Option<crate::checkpoint_state::Tracking>,
 	pub(crate) activity: Option<RunActivity>,
 	#[serde(default)]
 	pub(crate) disconnected: bool,
@@ -69,6 +71,15 @@ pub(crate) async fn snapshot(
 /// Facts from the trusted Run Adapter, validated against the durable lifecycle.
 #[derive(Serialize)]
 pub enum Observation {
+	/// Native content receipt; the Run Adapter assigns Harness origin.
+	FileChanged(crate::ChangeEvidence),
+	/// The trusted Adapter has held a new turn's input pending durable capture.
+	/// It may release that input only after acknowledging this source boundary.
+	TurnStarted,
+	/// A turn ended while the Run may remain active.
+	TurnEnded(crate::TurnOutcome),
+	/// Legacy Craft Command completion, including native Conversation identity.
+	Completed(String),
 	/// Explicit completion of one admitted input, independent of Run activity.
 	TurnCompleted {
 		/// Correlation identity originally delivered to the pinned Craft.
@@ -145,6 +156,7 @@ impl Core {
             let mut prefix = state.partial_source;
             for observation in observations {
                 prefix.include(&observation)?;
+                crate::checkpoint_state::observe(self, tx, run_id, &observation).await?;
                 record(tx, run_id, observation, now).await?;
             }
             // ADR-0071: bounded groups commit with their replay prefix. Source
@@ -178,7 +190,16 @@ impl Core {
 				| Observation::Ended(_)
 		);
 		self.store
-			.write(async |tx| record(tx, run_id, observation, now).await)
+			.write(async |tx| {
+				crate::checkpoint_state::observe(
+					self,
+					tx,
+					run_id,
+					&observation,
+				)
+				.await?;
+				record(tx, run_id, observation, now).await
+			})
 			.await?;
 		if terminal {
 			self.run_work.notify_one();
@@ -199,7 +220,11 @@ async fn record(
 	let mut state: State = decode(&record.state)?;
 	let run = tx.run(run_id.0).await?.ok_or_else(missing)?;
 	let actor = match &observation {
-		Observation::Activity(_)
+		Observation::FileChanged(_)
+		| Observation::TurnStarted
+		| Observation::TurnEnded(_)
+		| Observation::Completed(_)
+		| Observation::Activity(_)
 		| Observation::TurnCompleted { .. }
 		| Observation::Output { .. }
 		| Observation::NativeConversation(_) => crate::EventActor::Harness {
@@ -221,9 +246,11 @@ async fn record(
 		Observation::TurnCompleted { turn_id, .. } => {
 			Some(Settlement::Completed { turn_id: *turn_id })
 		}
-		Observation::NativeConversation(_) => Some(Settlement::Completed {
-			turn_id: plan.turn_id.unwrap_or(run_id.0),
-		}),
+		Observation::NativeConversation(_) | Observation::Completed(_) => {
+			Some(Settlement::Completed {
+				turn_id: plan.turn_id.unwrap_or(run_id.0),
+			})
+		}
 		Observation::Ended(_)
 		| Observation::LaunchFailed
 		| Observation::Lost => Some(Settlement::Failed),
@@ -231,6 +258,9 @@ async fn record(
 			Some(Settlement::OutcomeUnknown)
 		}
 		Observation::Started { .. }
+		| Observation::FileChanged(_)
+		| Observation::TurnStarted
+		| Observation::TurnEnded(_)
 		| Observation::Activity(_)
 		| Observation::Output { .. }
 		| Observation::Progress { .. } => None,
@@ -289,6 +319,17 @@ fn apply(
 	let mut next = lifecycle;
 	let mut events = Vec::new();
 	match observation {
+		Observation::FileChanged(_)
+		| Observation::TurnStarted
+		| Observation::TurnEnded(_)
+			if lifecycle == RunLifecycle::Active => {}
+		Observation::Completed(identity) => {
+			return apply(
+				lifecycle,
+				state,
+				Observation::NativeConversation(identity),
+			);
+		}
 		Observation::Lost => {
 			// Proven process death makes the remaining source boundary unavailable.
 			// Committed semantic Events remain durable; no source is acknowledged.
@@ -406,6 +447,9 @@ fn apply(
 			next = RunLifecycle::Failed
 		}
 		Observation::Started { .. }
+		| Observation::FileChanged(_)
+		| Observation::TurnStarted
+		| Observation::TurnEnded(_)
 		| Observation::Activity(_)
 		| Observation::TurnCompleted { .. }
 		| Observation::Output { .. }

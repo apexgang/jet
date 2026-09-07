@@ -20,6 +20,8 @@ impl Client {
 		{
 			QueryResponse::TurnQueue(queue) => Ok(queue),
 			other @ (QueryResponse::Status(_)
+			| QueryResponse::ChangeArtifact(_)
+			| QueryResponse::ChangeDiff(_)
 			| QueryResponse::OrphanedExecutions(_)
 			| QueryResponse::Conversations(_)
 			| QueryResponse::Conversation(_)

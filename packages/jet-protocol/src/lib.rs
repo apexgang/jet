@@ -12,12 +12,19 @@
 mod account;
 mod artifact;
 mod audit;
+mod checkpoint;
+pub use checkpoint::{
+	ArtifactAvailability, ChangeArtifact, ChangeArtifactChunk, ChangeDiff,
+	ChangeOrigin, ChangeSnapshot, ChangedFile, DiffScope, TurnOutcome,
+};
 mod capability;
 mod compatibility;
 mod connection_auth;
 mod control;
 mod conversation;
 mod craft;
+mod craft_change;
+pub use craft_change::CraftFileChange;
 mod craft_handshake;
 mod craft_spec;
 mod decimal;
@@ -96,11 +103,12 @@ pub use frame::{
 	FrameWriter, MAX_CONTROL_FRAME, MAX_DATA_FRAME, StreamId,
 };
 pub use handshake::{
-	ACCOUNT_BINDINGS_MINOR, CODEC_JSON_V1, ClientHello,
-	EXECUTION_RECOVERY_MINOR, FENCED_READS_MINOR, IMPORTED_CONVERSATIONS_MINOR,
-	MANAGED_RUNS_MINOR, MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE,
-	PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR,
-	SEARCH_MINOR, SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
+	ACCOUNT_BINDINGS_MINOR, CHANGE_CHECKPOINTS_MINOR, CODEC_JSON_V1,
+	ClientHello, EXECUTION_RECOVERY_MINOR, FENCED_READS_MINOR,
+	IMPORTED_CONVERSATIONS_MINOR, MANAGED_RUNS_MINOR,
+	MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE, PROJECTS_MINOR,
+	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, SEARCH_MINOR,
+	SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
 	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, TURN_QUEUE_MINOR,
 	VersionRange, WORKSPACE_PROMOTION_MINOR, WORKSPACES_MINOR,
 };

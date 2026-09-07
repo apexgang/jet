@@ -54,6 +54,9 @@ impl EffectAdapter for Runs<'_> {
 		let Some(host) = &self.0.run_host else {
 			return EffectResult::Failed;
 		};
+		if self.0.begin_run_changes(run_id, &plan).await.is_err() {
+			return EffectResult::Failed;
+		}
 		let connection = match host.start(self.0.run_home(), run_id, plan).await
 		{
 			Ok(connection) => connection,
@@ -218,7 +221,13 @@ async fn monitor(
 					| Observation::TurnCompleted {
 						native_conversation: value,
 						..
-					} => value.len(),
+					}
+					| Observation::Completed(value) => value.len(),
+					Observation::FileChanged(value) => {
+						serde_json::to_vec(value)
+							.map_err(crate::change_artifact::failed)?
+							.len()
+					}
 					_ => 0,
 				};
 				let count = event_count(&observation);
@@ -258,7 +267,11 @@ fn event_count(observation: &Observation) -> usize {
 		| Observation::Ended(_)
 		| Observation::Lost => 3,
 		Observation::Progress { .. } => 0,
-		Observation::Activity(_)
+		Observation::FileChanged(_)
+		| Observation::TurnStarted
+		| Observation::TurnEnded(_)
+		| Observation::Completed(_)
+		| Observation::Activity(_)
 		| Observation::Output { .. }
 		| Observation::NativeConversation(_)
 		| Observation::TurnCompleted { .. }

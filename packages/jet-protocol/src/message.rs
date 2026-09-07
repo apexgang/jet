@@ -94,6 +94,26 @@ pub enum ServerMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryRequest {
+	/// Read a bounded chunk of a checkpoint patch Artifact.
+	ChangeArtifact {
+		/// Canonical SHA-256 content address.
+		sha256: String,
+		/// Byte offset in decimal-string form.
+		#[serde(with = "crate::decimal")]
+		offset: u64,
+	},
+	/// Compare observed Change checkpoints.
+	ChangeDiff {
+		/// Owning Run.
+		run_id: Uuid,
+		/// Boundaries to compare.
+		scope: crate::DiffScope,
+	},
+	/// Continue changed-file metadata at an opaque, expiring snapshot cursor.
+	NextChangeDiff {
+		/// Cursor supplied by the preceding diff page.
+		cursor: crate::PageCursor,
+	},
 	/// Current queue, with a position given by vector order.
 	TurnQueue {
 		/// Conversation whose queue is read.
@@ -207,6 +227,10 @@ pub enum QueryRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryResponse {
+	/// Bounded Artifact bytes.
+	ChangeArtifact(crate::ChangeArtifactChunk),
+	/// Immutable boundaries and patch preview.
+	ChangeDiff(Box<crate::ChangeDiff>),
 	/// Fenced Turn queue snapshot.
 	TurnQueue(crate::TurnQueue),
 	/// Read-only recovery candidates.

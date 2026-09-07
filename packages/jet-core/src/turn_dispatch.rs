@@ -39,10 +39,26 @@ impl Core {
 				{
 					return Ok(None);
 				}
+				if state
+					.changes
+					.as_ref()
+					.is_some_and(|changes| changes.active.is_some())
+				{
+					return Ok(None);
+				}
 				let id = ConversationId(run.conversation_id);
 				let mut queue = turn_queue::load(tx, id).await?;
 				let next = queue.claim(run_id);
 				if let Some(entry) = &next {
+					if state.changes.is_some() {
+						crate::checkpoint_state::observe(
+							self,
+							tx,
+							run_id,
+							&crate::run_state::Observation::TurnStarted,
+						)
+						.await?;
+					}
 					let actor = Actor::InteractiveClient {
 						client_id: entry.turn.client_id,
 					};

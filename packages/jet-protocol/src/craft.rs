@@ -91,6 +91,20 @@ pub enum CraftCommand {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CraftEvent {
+	/// Capture before a subsequent turn (1.3). Hold native input until the
+	/// host acknowledges this marker's source record. Initial Start is pre-captured.
+	TurnStarted,
+	/// Capture completed or interrupted work without ending the Run (1.3).
+	/// Do not begin another turn until this boundary is acknowledged.
+	TurnEnded {
+		/// Turn outcome.
+		outcome: crate::TurnOutcome,
+	},
+	/// Correlated native file operation and exact content evidence (1.3).
+	FileChanged {
+		/// Origin is assigned by the host, never the Craft.
+		change: crate::CraftFileChange,
+	},
 	/// The helper definitively failed to launch a native Harness.
 	RunLaunchFailed,
 	/// Native process identities supplied by the Run-role helper.
@@ -158,6 +172,27 @@ impl<'de> Deserialize<'de> for CraftEvent {
 		let kind: Kind = crate::decode_control(raw.get().as_bytes())
 			.map_err(serde::de::Error::custom)?;
 		match kind.kind.as_str() {
+			"turn_started" | "turn_ended" | "file_changed" => {
+				#[derive(Deserialize)]
+				#[serde(tag = "kind", rename_all = "snake_case")]
+				enum Change {
+					TurnStarted,
+					TurnEnded { outcome: crate::TurnOutcome },
+					FileChanged { change: crate::CraftFileChange },
+				}
+				let change: Change =
+					crate::decode_control(raw.get().as_bytes())
+						.map_err(serde::de::Error::custom)?;
+				Ok(match change {
+					Change::TurnStarted => Self::TurnStarted,
+					Change::TurnEnded { outcome } => {
+						Self::TurnEnded { outcome }
+					}
+					Change::FileChanged { change } => {
+						Self::FileChanged { change }
+					}
+				})
+			}
 			"run_launch_failed" | "run_started" | "activity" | "progress"
 			| "run_ended" | "run_recovered" => {
 				#[derive(Deserialize)]

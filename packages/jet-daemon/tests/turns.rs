@@ -40,11 +40,17 @@ async fn turns_execute_one_at_a_time_in_admission_order_across_restart() {
 		assert!(!root.join("delivered-turns").exists());
 		daemon.child.kill().await.unwrap();
 		let daemon = start_jetd(&home).await;
+		let checkpoint_client = connect(&daemon, owner).await;
+		let run_id = Uuid::parse_str(started["result"]["run_id"].as_str().unwrap()).unwrap();
 		let mut previous = "initial".to_string();
-		for turn in &expected {
+		for (index, turn) in expected.iter().enumerate() {
+			std::fs::write(root.join("README.md"), format!("Finished {previous}\n")).unwrap();
 			std::fs::write(root.join(format!("continue-{previous}")), "go").unwrap();
 			let next = turn["id"].as_str().unwrap();
 			wait_file(&root.join("current-turn"), next).await;
+			let diff = checkpoint_client.change_diff(run_id, jet_protocol::DiffScope::Turn { turn: index as u32 + 1 }).await.unwrap();
+			assert_eq!(diff.outcome, Some(jet_protocol::TurnOutcome::Completed));
+			assert!(diff.patch.contains(&format!("+Finished {previous}\n")), "{}", diff.patch);
 			previous = next.into();
 		}
 		let delivered: Vec<Value> = std::fs::read_to_string(root.join("delivered-turns")).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
@@ -64,6 +70,7 @@ async fn turns_execute_one_at_a_time_in_admission_order_across_restart() {
 			tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 		}
 		assert_eq!(std::fs::read_to_string(root.join("delivered-turns")).unwrap().lines().count(), expected.len());
+		assert!(client.change_diff(run_id, jet_protocol::DiffScope::Turn { turn: expected.len() as u32 + 1 }).await.is_err());
 		std::fs::remove_file(root.join("queue")).unwrap();
 	}).await.unwrap();
 }
@@ -107,7 +114,7 @@ async fn queued_schedule_starts_a_later_run_with_the_selected_craft() {
 		wire.send(&json!({"kind":"query","id":2,"query":{"type":"turn_queue","conversation_id":id}})).await;
 		assert_eq!(wire.receive::<Value>().await["result"]["turns"], json!([]));
 		let resume: Value = serde_json::from_slice(&std::fs::read(root.join("native-resume")).unwrap()).unwrap();
-		assert_eq!(resume, json!({"version":{"major":1,"minor":2},"native_conversation":"fake-native-1"}));
+		assert_eq!(resume, json!({"version":{"major":1,"minor":3},"native_conversation":"fake-native-1"}));
 	}).await.unwrap();
 }
 

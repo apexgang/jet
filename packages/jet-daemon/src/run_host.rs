@@ -38,6 +38,7 @@ struct CraftProcess {
 }
 
 pub(crate) struct RunConnection {
+	pub(crate) craft_minor: u32,
 	pub(crate) reader: Mutex<FrameReader<OwnedReadHalf>>,
 	pub(crate) writer: Mutex<FrameWriter<OwnedWriteHalf>>,
 	pub(crate) helper_pid: u32,
@@ -68,7 +69,40 @@ impl jet_core::RunConnection for RunConnection {
 		Box::pin(async move {
 			let event: CraftEvent =
 				receive(&mut *self.reader.lock().await).await?;
+			if self.craft_minor < 3
+				&& matches!(
+					&event,
+					CraftEvent::TurnStarted
+						| CraftEvent::TurnEnded { .. }
+						| CraftEvent::FileChanged { .. }
+				) {
+				return Err(failed("change evidence requires Craft 1.3"));
+			}
 			Ok(match event {
+				CraftEvent::TurnStarted => RunObservation::TurnStarted,
+				CraftEvent::TurnEnded { outcome } => {
+					RunObservation::TurnEnded(match outcome {
+						jet_protocol::TurnOutcome::Completed => {
+							jet_core::TurnOutcome::Completed
+						}
+						jet_protocol::TurnOutcome::Interrupted => {
+							jet_core::TurnOutcome::Interrupted
+						}
+					})
+				}
+				CraftEvent::FileChanged { change } => {
+					RunObservation::FileChanged(jet_core::ChangeEvidence {
+						activity_id: change.activity_id,
+						path: change.path,
+						before_object: change.before_object,
+						after_object: change.after_object,
+						before_mode: change.before_mode,
+						after_mode: change.after_mode,
+						origin: jet_core::ChangeOrigin::Harness {
+							run_id: self.run_id,
+						},
+					})
+				}
 				CraftEvent::RunStarted {
 					helper_pid,
 					harness_pid,
@@ -257,6 +291,7 @@ pub(crate) async fn start(
 		craft_connection(processes, &runtime, run_id, plan).await?;
 	let (socket, helper_pid) = helper(&runtime, run_id, plan).await?;
 	let connection = RunConnection {
+		craft_minor: Contract::of(&plan.craft)?.craft_protocol.minor,
 		run_id,
 		reader: Mutex::new(reader),
 		writer: Mutex::new(writer),
