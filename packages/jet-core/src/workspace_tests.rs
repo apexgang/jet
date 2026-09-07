@@ -106,7 +106,7 @@ async fn a_managed_conversation_receives_a_detached_workspace_of_its_own() {
 	let second_snapshot = snapshot(&core, second.conversation_id).await;
 	let journal = events(&core).await;
 
-	let workspaces_dir = dir.path().join("workspaces");
+	let workspaces_dir = dir.path().join("workspaces").canonicalize().unwrap();
 	let first_root = workspaces_dir.join(first.conversation_id.0.to_string());
 	let second_root = workspaces_dir.join(second.conversation_id.0.to_string());
 	let first_workspace = first_snapshot.workspace.clone().unwrap();

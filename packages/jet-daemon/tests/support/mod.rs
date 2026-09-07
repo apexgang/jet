@@ -119,6 +119,14 @@ pub struct RawConnection {
 }
 
 impl RawConnection {
+	pub async fn send_frame(&mut self, frame: Frame) {
+		self.writer.write(&frame).await.unwrap();
+	}
+
+	pub async fn receive_frame(&mut self) -> Frame {
+		self.reader.read().await.unwrap()
+	}
+
 	pub async fn send<T: serde::Serialize>(&mut self, message: &T) {
 		self.send_bytes(encode_control(message).unwrap()).await;
 	}
