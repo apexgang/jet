@@ -503,3 +503,10 @@ mod terminal_orphan;
 #[cfg(test)]
 #[path = "schedule_tests.rs"]
 mod schedule_tests;
+
+mod utility;
+pub use utility::{UtilityJob, UtilityOutcome, UtilityPurpose, UtilityRequest};
+
+mod utility_host;
+pub use utility::UtilityPolicy;
+pub use utility_host::{UtilityHost, UtilityInput, UtilityModel, UtilityReply};

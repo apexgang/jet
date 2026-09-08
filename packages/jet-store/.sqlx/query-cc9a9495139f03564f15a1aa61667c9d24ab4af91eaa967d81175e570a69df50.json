@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO utility_jobs (job_id, state) VALUES (?1, ?2) ON CONFLICT(job_id) DO UPDATE SET state = excluded.state",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "cc9a9495139f03564f15a1aa61667c9d24ab4af91eaa967d81175e570a69df50"
+}
