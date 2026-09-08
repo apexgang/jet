@@ -121,7 +121,6 @@ async fn a_repeated_measurement_replaces_rather_than_adds() {
 				measurements: 1,
 				estimated: 0,
 				interim: 0,
-				first_observed_at_unix_ms: NOW_UNIX_MS + 1,
 				last_observed_at_unix_ms: NOW_UNIX_MS + 1,
 			}]
 		)
@@ -164,7 +163,6 @@ async fn an_older_repeat_does_not_overwrite_a_newer_measurement() {
 				measurements: 1,
 				estimated: 0,
 				interim: 0,
-				first_observed_at_unix_ms: NOW_UNIX_MS + 10,
 				last_observed_at_unix_ms: NOW_UNIX_MS + 10,
 			}]
 		)
@@ -215,9 +213,61 @@ async fn a_cumulative_run_total_replaces_the_turns_it_covers() {
 			measurements: 1,
 			estimated: 0,
 			interim: 0,
-			first_observed_at_unix_ms: NOW_UNIX_MS + 2,
 			last_observed_at_unix_ms: NOW_UNIX_MS + 2,
 		}]
+	);
+}
+
+/// A Craft that restates one cumulative total per Model keeps one record
+/// per Model: the identity the Harness gave each measurement is what
+/// deduplicates them (ADR-0023).
+#[tokio::test]
+async fn cumulative_totals_of_two_models_are_two_measurements() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = open(&dir).await;
+	let (conversation_id, run_id) = conversation(&store).await;
+	let mut opus =
+		observation(conversation_id, run_id, "native:opus", tokens(10, 5));
+	opus.scope = UsageScopeRecord::Run;
+	let mut haiku =
+		observation(conversation_id, run_id, "native:haiku", tokens(4, 1));
+	haiku.scope = UsageScopeRecord::Run;
+	haiku.model = Some("claude-haiku-4-5".into());
+	let totals = store
+		.write(async |tx| {
+			tx.record_usage_observation(&observation(
+				conversation_id,
+				run_id,
+				"turn:1",
+				tokens(999, 999),
+			))
+			.await?;
+			tx.record_usage_observation(&opus).await?;
+			tx.record_usage_observation(&haiku).await?;
+			tx.usage_totals(UsageSelectionRecord::default()).await
+		})
+		.await
+		.unwrap();
+	assert_eq!(
+		totals,
+		vec![
+			UsageTotalRecord {
+				model: Some("claude-haiku-4-5".into()),
+				tokens: tokens(4, 1),
+				measurements: 1,
+				estimated: 0,
+				interim: 0,
+				last_observed_at_unix_ms: NOW_UNIX_MS,
+			},
+			UsageTotalRecord {
+				model: Some("claude-opus-5".into()),
+				tokens: tokens(10, 5),
+				measurements: 1,
+				estimated: 0,
+				interim: 0,
+				last_observed_at_unix_ms: NOW_UNIX_MS,
+			}
+		]
 	);
 }
 
@@ -255,7 +305,6 @@ async fn turns_are_summed_and_their_uncertainty_stays_visible() {
 			measurements: 2,
 			estimated: 1,
 			interim: 1,
-			first_observed_at_unix_ms: NOW_UNIX_MS,
 			last_observed_at_unix_ms: NOW_UNIX_MS + 5,
 		}]
 	);

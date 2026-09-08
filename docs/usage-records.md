@@ -37,16 +37,20 @@ One measurement is counted once. Within its Run a measurement is
 identified by the Harness's native usage identity where there is one and
 by the turn it covers otherwise, and repeating it **replaces** its record
 rather than adding to it. An older repeat of a measurement already stored
-changes nothing.
+changes nothing. A Craft names one measurement the same way every time it
+reports it; a Craft that reported one turn first without its native
+identity and then with it has described two measurements, and Jet has no
+way to know otherwise.
 
-A Craft may instead restate the Run's cumulative total. A Run that reports
-one contributes that freshest total and **not** its turns, which the total
-already covers; a Run that reports turns contributes their sum. The two
-are never added together.
+A Craft may instead restate the Run's cumulative total, one per Model
+where it breaks them down. A Run that reports these contributes them and
+**not** its turns, which they already cover; a Run that reports turns
+contributes their sum. The two are never added together.
 
 Quota windows are kept as snapshot history rather than as one mutable
 value. Reads select the freshest snapshot **per window**: a five-hour and
-a weekly limit are two windows, never one sum. An unchanged Provider
+a weekly limit are two windows, never one sum, and so are two windows one
+Provider spells the same way for two different Models. An unchanged Provider
 response inside 15 minutes is a heartbeat and stores no new row; the
 countdown to a window's reset is deliberately outside the change digest,
 because it moves on its own.
@@ -55,12 +59,19 @@ because it moves on its own.
 
 `usage` reports what the Plane can vouch for:
 
-- A window read more than 15 minutes ago — the interval an idle Plane
-  refreshes on (ADR-0045) — is **stale**: history, not a current reading.
+- A window whose Provider has not answered within 15 minutes — the
+  interval ADR-0045 bounds an idle refresh by — is **stale**: history, not
+  a current reading. Freshness follows the last time the Provider
+  answered, not the last time its answer changed, because an unchanged
+  answer is stored as a heartbeat and is still an answer.
+- A window whose own reset has passed is **stale** too. It describes a
+  window that has already rolled over.
 - A Provider that refused after a window was read is **unreachable**, with
   the reason the Craft gave. The last known fill is still shown, marked.
-- Estimated measurements and measurements that can still change stay
-  counted beside the total rather than folded into it.
+- How many contributing measurements Jet estimated, and how many can still
+  change, are reported beside the total and per Model. The total itself is
+  every deduplicated measurement; a client that wants only settled numbers
+  reads the counts to know how much of it is not.
 - A Conversation or Run answers with consumption alone. A quota window
   belongs to an Account binding, not to one Conversation.
 
@@ -88,9 +99,17 @@ no wire message carries a floating-point quota. A Craft reports the time
 **remaining** on a window rather than an instant, and the Plane converts
 it with its own clock.
 
-`CraftUsage::Unavailable` reports a Provider that would not answer at all.
+`CraftUsage::Unreachable` reports a Provider that would not answer at all.
 Neither bundled Craft sends it today; it exists for a Craft that asks a
 Provider directly, and the Query already reports what it records.
+
+**Jet does not poll a Provider.** ADR-0045's per-minute and fifteen-minute
+cadence describes polling that has no source in v1: what is recorded is
+what a Harness reported through its Craft while it was working. The
+fifteen-minute bound is used here for what it can honestly govern — how
+long an answer stands, and how often an unchanged one is stored again.
+A Craft-driven Provider poll, and the manual refresh it would need, land
+with the account panel.
 
 ## Boundaries
 

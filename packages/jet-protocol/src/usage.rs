@@ -128,6 +128,12 @@ pub struct QuotaWindow {
 	pub window: String,
 	/// What the window covers.
 	pub scope: QuotaScope,
+	/// The Conversation the response was observed in.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub conversation_id: Option<Uuid>,
+	/// The Run the response was observed in.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub run_id: Option<Uuid>,
 	/// How full the Provider said it was.
 	pub measure: QuotaMeasure,
 	/// How long the window lasts, where the Provider stated it.

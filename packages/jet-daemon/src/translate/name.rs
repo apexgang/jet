@@ -1,4 +1,5 @@
-//! Version-gated entity names and name Event pages (ADR-0044).
+//! Version-gated entity names, and the Event page every feature's
+//! minor gate is applied in (ADR-0044, ADR-0019).
 
 use jet_core::{CoreError, EventPage};
 use jet_protocol as wire;
@@ -28,15 +29,26 @@ pub(super) fn event_page(
 		events: page
 			.events
 			.iter()
-			.filter(|event| {
-				minor >= wire::NAMES_MINOR
-					|| !matches!(
-						&event.kind,
-						jet_core::EventKind::ConversationNameChanged { .. }
-							| jet_core::EventKind::RunNameChanged { .. }
-					)
-			})
+			.filter(|event| named(&event.kind, minor))
 			.map(|event| super::event(event, minor))
 			.collect::<Result<_, _>>()?,
 	})
+}
+
+/// Whether the negotiated minor names this kind of Event at all. An Event
+/// kind is not a field an older reader can skip, so one it never learned
+/// is left out of the page rather than sent for it to guess at
+/// (ADR-0019).
+pub(super) fn named(kind: &jet_core::EventKind, minor: u32) -> bool {
+	if matches!(
+		kind,
+		jet_core::EventKind::ConversationNameChanged { .. }
+			| jet_core::EventKind::RunNameChanged { .. }
+	) {
+		return minor >= wire::NAMES_MINOR;
+	}
+	if matches!(kind, jet_core::EventKind::UsageRecorded { .. }) {
+		return minor >= wire::USAGE_RECORDS_MINOR;
+	}
+	true
 }

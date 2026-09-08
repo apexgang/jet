@@ -188,7 +188,7 @@ public struct CraftSpecification {
 public enum CraftUsage {
     case `observed`(CraftUsageObserved)
     case `quota`(CraftUsageQuota)
-    case `unavailable`(CraftUsageUnavailable)
+    case `unreachable`(CraftUsageUnreachable)
 }
 
 public enum CraftUsageEstimation: String {
@@ -670,7 +670,7 @@ public struct CraftUsageQuota {
     public let `quota`: CraftQuotaWindow
 }
 
-public struct CraftUsageUnavailable {
+public struct CraftUsageUnreachable {
     public let `reason`: String
 }
 

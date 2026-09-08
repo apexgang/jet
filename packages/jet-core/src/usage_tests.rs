@@ -25,6 +25,10 @@ use crate::{
 /// rather than the machine's.
 const NOW: Duration = Duration::from_millis(1_700_000_000_000);
 
+/// A Run that selected no Account binding, which is what a Run started
+/// without one looks like to a Usage report.
+const UNBOUND: Option<AccountBindingId> = None;
+
 async fn start(dir: &tempfile::TempDir) -> (Core, Arc<ManualClock>) {
 	let clock = ManualClock::at(UNIX_EPOCH + NOW);
 	let core = start_core_with(
@@ -140,6 +144,10 @@ fn observed(turn: &str, tokens: UsageTokens) -> UsageReport {
 }
 
 fn window(used: u64) -> UsageReport {
+	window_resetting_in(used, 3_600)
+}
+
+fn window_resetting_in(used: u64, seconds: u64) -> UsageReport {
 	UsageReport::ProviderQuota(QuotaReport {
 		window: "five_hour".into(),
 		scope: QuotaScope::ProviderAccount,
@@ -149,7 +157,7 @@ fn window(used: u64) -> UsageReport {
 			limit: None,
 		},
 		window_seconds: Some(18_000),
-		resets_in_seconds: Some(3_600),
+		resets_in_seconds: Some(seconds),
 		estimation: UsageEstimation::Measured,
 		finality: UsageFinality::Interim,
 	})
@@ -171,10 +179,10 @@ async fn observed_consumption_is_recorded_once_per_measurement() {
 	let dir = tempfile::tempdir().unwrap();
 	let (core, _clock) = start(&dir).await;
 	let run = run(&core).await;
-	record(&core, &run, None, observed("turn-1", tokens(10, 5))).await;
-	record(&core, &run, None, observed("turn-2", tokens(4, 1))).await;
+	record(&core, &run, UNBOUND, observed("turn-1", tokens(10, 5))).await;
+	record(&core, &run, UNBOUND, observed("turn-2", tokens(4, 1))).await;
 	// The same turn reported again replaces what it already covers.
-	record(&core, &run, None, observed("turn-2", tokens(6, 2))).await;
+	record(&core, &run, UNBOUND, observed("turn-2", tokens(6, 2))).await;
 	let usage = usage(&core, UsageSelection::Run(run.run_id)).await;
 	assert_eq!(
 		(
@@ -258,6 +266,52 @@ async fn a_window_the_provider_has_not_confirmed_recently_is_stale() {
 	);
 }
 
+/// An unchanged answer is still an answer. A Provider that keeps saying
+/// the same thing leaves heartbeats rather than snapshots, and the window
+/// stays fresh because freshness follows the last answer rather than the
+/// last change (ADR-0045).
+#[tokio::test]
+async fn a_repeated_answer_keeps_its_window_fresh() {
+	let dir = tempfile::tempdir().unwrap();
+	let (core, clock) = start(&dir).await;
+	let run = run(&core).await;
+	let binding = bind(&core).await;
+	record(&core, &run, Some(binding), window(2_500)).await;
+	clock.advance(Duration::from_secs(14 * 60));
+	record(&core, &run, Some(binding), window(2_500)).await;
+	clock.advance(Duration::from_secs(2 * 60));
+	let usage = usage(&core, UsageSelection::Binding(binding)).await;
+	let window = usage.quota_windows.first().expect("one window");
+	assert_eq!(
+		(usage.quota_windows.len(), window.freshness.clone()),
+		(1, UsageFreshness::Fresh)
+	);
+}
+
+/// A window whose own reset has passed describes a window that has
+/// already rolled over, whatever the Provider last said about it.
+#[tokio::test]
+async fn a_window_past_its_reset_is_stale() {
+	let dir = tempfile::tempdir().unwrap();
+	let (core, clock) = start(&dir).await;
+	let run = run(&core).await;
+	let binding = bind(&core).await;
+	record(&core, &run, Some(binding), window_resetting_in(2_500, 60)).await;
+	// The Provider keeps answering, so the answer is recent. The window it
+	// answered about is not: its own minute is over.
+	clock.advance(Duration::from_secs(120));
+	record(&core, &run, Some(binding), window_resetting_in(2_500, 60)).await;
+	let usage = usage(&core, UsageSelection::Binding(binding)).await;
+	assert_eq!(
+		usage
+			.quota_windows
+			.into_iter()
+			.map(|window| window.freshness)
+			.collect::<Vec<_>>(),
+		vec![UsageFreshness::Stale]
+	);
+}
+
 /// A Provider that would not answer is reported as unreachable rather than
 /// as the window it last reported (ADR-0023).
 #[tokio::test]
@@ -297,7 +351,7 @@ async fn a_quota_window_without_an_account_binding_is_not_recorded() {
 	let dir = tempfile::tempdir().unwrap();
 	let (core, _clock) = start(&dir).await;
 	let run = run(&core).await;
-	record(&core, &run, None, window(2_500)).await;
+	record(&core, &run, UNBOUND, window(2_500)).await;
 	let usage = usage(&core, UsageSelection::Plane).await;
 	assert_eq!(
 		(usage.quota_windows, recorded(&core).await),
@@ -338,7 +392,7 @@ async fn the_journal_names_what_was_recorded_and_where_it_belongs() {
 	let run = run(&core).await;
 	let binding = bind(&core).await;
 	record(&core, &run, Some(binding), window(2_500)).await;
-	record(&core, &run, None, observed("turn-1", tokens(10, 5))).await;
+	record(&core, &run, UNBOUND, observed("turn-1", tokens(10, 5))).await;
 	assert_eq!(
 		recorded(&core).await,
 		vec![
@@ -373,7 +427,7 @@ async fn a_report_that_is_not_bounded_metadata_is_refused() {
 				tx,
 				&actor,
 				&run,
-				None,
+				UNBOUND,
 				observed(&"t".repeat(129), tokens(1, 1)),
 				now,
 			)

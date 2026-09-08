@@ -19,20 +19,17 @@ use uuid::Uuid;
 
 use crate::usage::{
 	MAX_REASON_TEXT, MAX_USAGE_TEXT, ModelId, ObservedUsage, QuotaMeasure,
-	QuotaReport, QuotaScope, QuotaUnit, UsageEstimation, UsageFinality,
-	UsageMeasurement, UsageReport, UsageSource, UsageTokens,
+	QuotaReport, QuotaScope, QuotaUnit, USAGE_REFRESH_MS, UsageEstimation,
+	UsageFinality, UsageMeasurement, UsageReport, UsageSource, UsageTokens,
 };
 use crate::{
 	AccountBindingId, CoreError, EventActor, EventKind, ProviderId, Run,
 };
 
-/// How long an unchanged Provider response stays one snapshot. Past it the
-/// next identical response is stored as a heartbeat, so a long-running
-/// window still leaves a trail without a row per poll (ADR-0045).
-const USAGE_HEARTBEAT_MS: i64 = 15 * 60 * 1000;
-
-/// The share unit's fixed limit: hundredths of a percent out of 10,000.
-const SHARE_LIMIT: u64 = 10_000;
+/// What a share is measured against: hundredths of a percent. The wire
+/// states the same bound beside its own unit, because a domain type never
+/// borrows a wire one (ADR-0049).
+const QUOTA_SHARE_LIMIT: u64 = 10_000;
 
 /// Records one Craft Usage report against its Run.
 ///
@@ -107,7 +104,11 @@ async fn observe(
 		}
 		UsageMeasurement::Run { native_usage_id } => {
 			require_native(native_usage_id.as_deref())?;
-			(UsageScopeRecord::Run, "run".to_owned(), native_usage_id)
+			let key = native_usage_id.as_ref().map_or_else(
+				|| "run".to_owned(),
+				|native| format!("native:{native}"),
+			);
+			(UsageScopeRecord::Run, key, native_usage_id)
 		}
 	};
 	let provider = provider_of(tx, binding).await?;
@@ -122,8 +123,8 @@ async fn observe(
 			provider: provider.map(|ProviderId(provider)| provider),
 			model: model.map(|ModelId(model)| model),
 			scope,
-			estimation: estimated(estimation),
-			finality: settled(finality),
+			estimation: estimation_record(estimation),
+			finality: finality_record(finality),
 			tokens: tokens.into(),
 			observed_at_unix_ms: now_unix_ms,
 		})
@@ -168,21 +169,22 @@ async fn window(
 	})
 	.await?;
 	let digest = content_digest(&provider, &report, measure);
+	let model = match &report.scope {
+		QuotaScope::ProviderAccount => None,
+		QuotaScope::Model(ModelId(model)) => Some(model.clone()),
+	};
 	if let Some(previous) = tx
-		.usage_quota_heartbeat(binding_id.0, &report.window)
+		.usage_quota_heartbeat(binding_id.0, &report.window, model.as_deref())
 		.await?
 		&& previous.digest == digest
-		&& now_unix_ms - previous.observed_at_unix_ms < USAGE_HEARTBEAT_MS
+		&& now_unix_ms.saturating_sub(previous.observed_at_unix_ms)
+			< USAGE_REFRESH_MS
 	{
 		return Ok(None);
 	}
-	let (scope, model) = match report.scope {
-		QuotaScope::ProviderAccount => {
-			(QuotaScopeRecord::ProviderAccount, None)
-		}
-		QuotaScope::Model(ModelId(model)) => {
-			(QuotaScopeRecord::Model, Some(model))
-		}
+	let scope = match report.scope {
+		QuotaScope::ProviderAccount => QuotaScopeRecord::ProviderAccount,
+		QuotaScope::Model(_) => QuotaScopeRecord::Model,
 	};
 	tx.record_usage_quota_snapshot(&UsageQuotaSnapshotRecord {
 		snapshot_id: Uuid::now_v7(),
@@ -202,8 +204,8 @@ async fn window(
 			.and_then(|seconds| seconds.checked_mul(1_000))
 			.and_then(|elapsed| i64::try_from(elapsed).ok())
 			.map(|elapsed| now_unix_ms.saturating_add(elapsed)),
-		estimation: estimated(report.estimation),
-		finality: settled(report.finality),
+		estimation: estimation_record(report.estimation),
+		finality: finality_record(report.finality),
 		observed_at_unix_ms: now_unix_ms,
 		digest,
 	})
@@ -293,17 +295,17 @@ fn require_measure(measure: QuotaMeasure) -> Result<QuotaMeasure, CoreError> {
 	if measure.unit != QuotaUnit::Share {
 		return Ok(measure);
 	}
-	if measure.used > SHARE_LIMIT {
+	if measure.used > QUOTA_SHARE_LIMIT {
 		return Err(CoreError::invalid_input(
 			"usage.share_unsupported",
 			format!(
-				"a reported share is between 0 and {SHARE_LIMIT} hundredths \
+				"a reported share is between 0 and {QUOTA_SHARE_LIMIT} hundredths \
 				 of a percent"
 			),
 		));
 	}
 	Ok(QuotaMeasure {
-		limit: Some(SHARE_LIMIT),
+		limit: Some(QUOTA_SHARE_LIMIT),
 		..measure
 	})
 }
@@ -341,14 +343,14 @@ fn require_text(
 	))
 }
 
-fn estimated(estimation: UsageEstimation) -> UsageEstimationRecord {
+fn estimation_record(estimation: UsageEstimation) -> UsageEstimationRecord {
 	match estimation {
 		UsageEstimation::Measured => UsageEstimationRecord::Measured,
 		UsageEstimation::Estimated => UsageEstimationRecord::Estimated,
 	}
 }
 
-fn settled(finality: UsageFinality) -> UsageFinalityRecord {
+fn finality_record(finality: UsageFinality) -> UsageFinalityRecord {
 	match finality {
 		UsageFinality::Interim => UsageFinalityRecord::Interim,
 		UsageFinality::Final => UsageFinalityRecord::Final,

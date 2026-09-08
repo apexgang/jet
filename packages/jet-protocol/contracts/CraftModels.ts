@@ -52,7 +52,7 @@ export type CraftResume = { native_conversation: string; version: ProtocolVersio
 
 export type CraftSpecification = { broker_permissions?: Array<BrokerPermission>; features?: Array<CraftFeature>; harness: string; host_access?: Array<CraftHostAccess>; id: string; protocol: ProtocolOffer; schema: ProtocolVersion };
 
-export type CraftUsage = { observed: CraftObservedUsage; source: "observed" } | { quota: CraftQuotaWindow; source: "quota" } | { reason: string; source: "unavailable" };
+export type CraftUsage = { observed: CraftObservedUsage; source: "observed" } | { quota: CraftQuotaWindow; source: "quota" } | { reason: string; source: "unreachable" };
 
 export type CraftUsageEstimation = "measured" | "estimated";
 

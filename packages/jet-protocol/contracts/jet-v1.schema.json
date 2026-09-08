@@ -7151,6 +7151,14 @@
           "type": "string",
           "format": "uuid"
         },
+        "conversation_id": {
+          "description": "The Conversation the response was observed in.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
         "estimation": {
           "description": "Whether the Provider measured it or Jet derived it.",
           "$ref": "#/$defs/UsageEstimation"
@@ -7183,6 +7191,14 @@
             "null"
           ],
           "format": "int64"
+        },
+        "run_id": {
+          "description": "The Run the response was observed in.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
         },
         "scope": {
           "description": "What the window covers.",

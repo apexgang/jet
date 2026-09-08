@@ -97,8 +97,6 @@ pub struct UsageTotalRecord {
 	pub estimated: u64,
 	/// How many of them can still change.
 	pub interim: u64,
-	/// When the oldest contributing measurement was observed.
-	pub first_observed_at_unix_ms: i64,
 	/// When the newest contributing measurement was observed.
 	pub last_observed_at_unix_ms: i64,
 }
@@ -159,9 +157,10 @@ impl UsageFinalityRecord {
 impl ReadTransaction {
 	/// Deduplicated consumption per Model for the selected rows.
 	///
-	/// A Run whose Craft reported a cumulative total contributes that one
-	/// freshest total; a Run whose Craft reported turns contributes its
-	/// turns. The two are never added to each other (ADR-0023).
+	/// Each measurement counts once: its own row is already the freshest
+	/// report of it. A Run whose Craft restated a cumulative total
+	/// contributes those totals and not the turns they already cover; a
+	/// Run whose Craft reported turns contributes its turns (ADR-0023).
 	///
 	/// # Errors
 	///
@@ -186,14 +185,10 @@ impl ReadTransaction {
 				 WHERE (?1 IS NULL OR o.conversation_id = ?1)
 				   AND (?2 IS NULL OR o.run_id = ?2)
 				   AND (?3 IS NULL OR o.binding_id = ?3)
-				   AND ((o.scope = 'run' AND o.rowid = (
-					     SELECT r.rowid FROM usage_observations r
-					      WHERE r.run_id = o.run_id AND r.scope = 'run'
-					      ORDER BY r.observed_at_unix_ms DESC, r.rowid DESC
-					      LIMIT 1))
-				     OR (o.scope = 'turn' AND NOT EXISTS (
+				   AND (o.scope = 'run'
+				     OR NOT EXISTS (
 					     SELECT 1 FROM usage_observations r
-					      WHERE r.run_id = o.run_id AND r.scope = 'run')))
+					      WHERE r.run_id = o.run_id AND r.scope = 'run'))
 			)
 			SELECT model,
 				CAST(SUM(input_tokens) AS INTEGER) AS "input!: i64",
@@ -204,7 +199,6 @@ impl ReadTransaction {
 				CAST(SUM(estimation = 'estimated') AS INTEGER)
 					AS "estimated!: i64",
 				CAST(SUM(finality = 'interim') AS INTEGER) AS "interim!: i64",
-				CAST(MIN(observed_at_unix_ms) AS INTEGER) AS "first!: i64",
 				CAST(MAX(observed_at_unix_ms) AS INTEGER) AS "last!: i64"
 			 FROM counted
 			 GROUP BY model
@@ -220,15 +214,20 @@ impl ReadTransaction {
 				Ok(UsageTotalRecord {
 					model: row.model,
 					tokens: UsageTokensRecord {
-						input: count("input_tokens", row.input)?,
-						cached_input: count("cached_input_tokens", row.cached)?,
-						output: count("output_tokens", row.output)?,
-						reasoning: count("reasoning_tokens", row.reasoning)?,
+						input: read_count("input_tokens", row.input)?,
+						cached_input: read_count(
+							"cached_input_tokens",
+							row.cached,
+						)?,
+						output: read_count("output_tokens", row.output)?,
+						reasoning: read_count(
+							"reasoning_tokens",
+							row.reasoning,
+						)?,
 					},
-					measurements: count("measurements", row.measurements)?,
-					estimated: count("estimation", row.estimated)?,
-					interim: count("finality", row.interim)?,
-					first_observed_at_unix_ms: row.first,
+					measurements: read_count("measurements", row.measurements)?,
+					estimated: read_count("estimation", row.estimated)?,
+					interim: read_count("finality", row.interim)?,
 					last_observed_at_unix_ms: row.last,
 				})
 			})
@@ -257,12 +256,14 @@ impl WriteTransaction {
 		let scope = observation.scope.as_str();
 		let estimation = observation.estimation.as_str();
 		let finality = observation.finality.as_str();
-		let input = stored("input_tokens", observation.tokens.input)?;
-		let cached =
-			stored("cached_input_tokens", observation.tokens.cached_input)?;
-		let output = stored("output_tokens", observation.tokens.output)?;
+		let input = stored_count("input_tokens", observation.tokens.input)?;
+		let cached = stored_count(
+			"cached_input_tokens",
+			observation.tokens.cached_input,
+		)?;
+		let output = stored_count("output_tokens", observation.tokens.output)?;
 		let reasoning =
-			stored("reasoning_tokens", observation.tokens.reasoning)?;
+			stored_count("reasoning_tokens", observation.tokens.reasoning)?;
 		let changed = sqlx::query!(
 			"INSERT INTO usage_observations
 				(observation_id, conversation_id, run_id, measurement,
@@ -324,13 +325,16 @@ pub(crate) fn finality(text: &str) -> Result<UsageFinalityRecord, StoreError> {
 	})
 }
 
-pub(crate) fn count(column: &str, value: i64) -> Result<u64, StoreError> {
+pub(crate) fn read_count(column: &str, value: i64) -> Result<u64, StoreError> {
 	u64::try_from(value).map_err(|_| {
 		column_error(column, "the stored count is negative".into())
 	})
 }
 
-pub(crate) fn stored(column: &str, value: u64) -> Result<i64, StoreError> {
+pub(crate) fn stored_count(
+	column: &str,
+	value: u64,
+) -> Result<i64, StoreError> {
 	i64::try_from(value).map_err(|_| {
 		column_error(column, "the reported count does not fit the store".into())
 	})

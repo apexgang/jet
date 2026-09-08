@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::records::{
 	column_error, parse_bytes, parse_optional_uuid, parse_uuid,
 };
-use crate::usage::{count, estimation, finality, stored};
+use crate::usage::{estimation, finality, read_count, stored_count};
 use crate::{
 	ReadTransaction, StoreError, UsageEstimationRecord, UsageFinalityRecord,
 	WriteTransaction,
@@ -194,9 +194,10 @@ impl ReadTransaction {
 				 SELECT t.rowid FROM usage_quota_snapshots t
 				  WHERE t.binding_id = s.binding_id
 				    AND t.window_id = s.window_id
+				    AND t.model IS s.model
 				  ORDER BY t.observed_at_unix_ms DESC, t.rowid DESC
 				  LIMIT 1)
-			 ORDER BY s.binding_id, s.window_id"#,
+			 ORDER BY s.binding_id, s.window_id, s.model"#,
 			binding_id
 		)
 		.fetch_all(self.connection())
@@ -233,14 +234,14 @@ impl ReadTransaction {
 							)
 						},
 					)?,
-					used: count("used", row.used)?,
+					used: read_count("used", row.used)?,
 					limit_amount: row
 						.limit_amount
-						.map(|value| count("limit_amount", value))
+						.map(|value| read_count("limit_amount", value))
 						.transpose()?,
 					window_seconds: row
 						.window_seconds
-						.map(|value| count("window_seconds", value))
+						.map(|value| read_count("window_seconds", value))
 						.transpose()?,
 					resets_at_unix_ms: row.resets_at_unix_ms,
 					estimation: estimation(&row.estimation)?,
@@ -252,7 +253,9 @@ impl ReadTransaction {
 			.collect()
 	}
 
-	/// The newest snapshot of one window, as deduplication reads it.
+	/// The newest snapshot of one window of one binding. A window the
+	/// Provider spells the same way for two Models is two windows, so
+	/// what it covers is part of reading it back.
 	///
 	/// # Errors
 	///
@@ -262,16 +265,18 @@ impl ReadTransaction {
 		&mut self,
 		binding_id: Uuid,
 		window_id: &str,
+		model: Option<&str>,
 	) -> Result<Option<UsageQuotaHeartbeatRecord>, StoreError> {
 		let binding_id = binding_id.to_string();
 		let row = sqlx::query!(
 			"SELECT digest, observed_at_unix_ms
 			 FROM usage_quota_snapshots
-			 WHERE binding_id = ?1 AND window_id = ?2
+			 WHERE binding_id = ?1 AND window_id = ?2 AND model IS ?3
 			 ORDER BY observed_at_unix_ms DESC, rowid DESC
 			 LIMIT 1",
 			binding_id,
-			window_id
+			window_id,
+			model
 		)
 		.fetch_optional(self.connection())
 		.await?;
@@ -335,14 +340,14 @@ impl WriteTransaction {
 		let run_id = snapshot.run_id.map(|id| id.to_string());
 		let scope = snapshot.scope.as_str();
 		let unit = snapshot.unit.as_str();
-		let used = stored("used", snapshot.used)?;
+		let used = stored_count("used", snapshot.used)?;
 		let limit_amount = snapshot
 			.limit_amount
-			.map(|value| stored("limit_amount", value))
+			.map(|value| stored_count("limit_amount", value))
 			.transpose()?;
 		let window_seconds = snapshot
 			.window_seconds
-			.map(|value| stored("window_seconds", value))
+			.map(|value| stored_count("window_seconds", value))
 			.transpose()?;
 		let estimation = snapshot.estimation.as_str();
 		let finality = snapshot.finality.as_str();

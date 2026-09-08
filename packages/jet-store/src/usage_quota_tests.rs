@@ -70,6 +70,35 @@ async fn each_quota_window_reports_its_own_freshest_snapshot() {
 	assert_eq!(windows, vec![newest, weekly]);
 }
 
+/// A Provider may spell one window's name the same way for two Models.
+/// They are two windows, and each keeps its own freshest snapshot
+/// (ADR-0023).
+#[tokio::test]
+async fn one_window_name_under_two_models_is_two_windows() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = open(&dir).await;
+	let binding_id = Uuid::now_v7();
+	let opus = UsageQuotaSnapshotRecord {
+		scope: QuotaScopeRecord::Model,
+		model: Some("claude-opus-5".into()),
+		..snapshot(binding_id, "five_hour", 1_500, NOW_UNIX_MS)
+	};
+	let haiku = UsageQuotaSnapshotRecord {
+		scope: QuotaScopeRecord::Model,
+		model: Some("claude-haiku-4-5".into()),
+		..snapshot(binding_id, "five_hour", 9_000, NOW_UNIX_MS + 1_000)
+	};
+	let windows = store
+		.write(async |tx| {
+			tx.record_usage_quota_snapshot(&opus).await?;
+			tx.record_usage_quota_snapshot(&haiku).await?;
+			tx.usage_quota_windows(Some(binding_id)).await
+		})
+		.await
+		.unwrap();
+	assert_eq!(windows, vec![haiku, opus]);
+}
+
 /// Deduplication reads the newest snapshot of one window alone.
 #[tokio::test]
 async fn a_window_heartbeat_reads_its_newest_snapshot() {
@@ -92,7 +121,8 @@ async fn a_window_heartbeat_reads_its_newest_snapshot() {
 				NOW_UNIX_MS + 1_000,
 			))
 			.await?;
-			tx.usage_quota_heartbeat(binding_id, "five_hour").await
+			tx.usage_quota_heartbeat(binding_id, "five_hour", None)
+				.await
 		})
 		.await
 		.unwrap();

@@ -32,7 +32,7 @@ pub use craft_lifecycle::CraftDisableMode;
 pub use craft_usage::{
 	CraftObservedUsage, CraftQuotaScope, CraftQuotaUnit, CraftQuotaWindow,
 	CraftUsage, CraftUsageEstimation, CraftUsageFinality,
-	CraftUsageMeasurement, CraftUsageTokens,
+	CraftUsageMeasurement, CraftUsageTokens, QUOTA_SHARE_LIMIT,
 };
 pub use handshake::CRAFT_LIFECYCLE_MINOR;
 mod craft_handshake;

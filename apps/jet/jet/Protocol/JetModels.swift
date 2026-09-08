@@ -927,6 +927,7 @@ public enum QuotaUnit: String {
 
 public struct QuotaWindow {
     public let `binding_id`: String
+    public let `conversation_id`: String?
     public let `estimation`: UsageEstimation
     public let `finality`: UsageFinality
     public let `freshness`: UsageFreshness
@@ -934,6 +935,7 @@ public struct QuotaWindow {
     public let `observed_at_unix_ms`: Int64
     public let `provider`: String
     public let `resets_at_unix_ms`: Int64?
+    public let `run_id`: String?
     public let `scope`: QuotaScope
     public let `window`: String
     public let `window_seconds`: UInt64?

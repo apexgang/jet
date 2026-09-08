@@ -44,6 +44,8 @@ fn window(window: QuotaWindow) -> wire::QuotaWindow {
 		provider: window.provider.0,
 		window: window.window,
 		scope: scope(window.scope),
+		conversation_id: window.conversation_id.map(|id| id.0),
+		run_id: window.run_id.map(|id| id.0),
 		measure: measure(window.measure),
 		window_seconds: window.window_seconds,
 		resets_at_unix_ms: window.resets_at.map(unix_ms),
@@ -182,7 +184,7 @@ pub(crate) fn report(usage: wire::CraftUsage) -> UsageReport {
 				finality: craft_finality(quota.finality),
 			})
 		}
-		wire::CraftUsage::Unavailable { reason } => {
+		wire::CraftUsage::Unreachable { reason } => {
 			UsageReport::ProviderUnreachable { reason }
 		}
 	}

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT s.snapshot_id AS \"snapshot_id!\", s.binding_id,\n\t\t\t\ts.provider, s.window_id, s.scope, s.model,\n\t\t\t\ts.conversation_id, s.run_id, s.unit, s.used, s.limit_amount,\n\t\t\t\ts.window_seconds, s.resets_at_unix_ms, s.estimation,\n\t\t\t\ts.finality, s.observed_at_unix_ms, s.digest\n\t\t\t FROM usage_quota_snapshots s\n\t\t\t WHERE (?1 IS NULL OR s.binding_id = ?1)\n\t\t\t   AND s.rowid = (\n\t\t\t\t SELECT t.rowid FROM usage_quota_snapshots t\n\t\t\t\t  WHERE t.binding_id = s.binding_id\n\t\t\t\t    AND t.window_id = s.window_id\n\t\t\t\t  ORDER BY t.observed_at_unix_ms DESC, t.rowid DESC\n\t\t\t\t  LIMIT 1)\n\t\t\t ORDER BY s.binding_id, s.window_id",
+  "query": "SELECT s.snapshot_id AS \"snapshot_id!\", s.binding_id,\n\t\t\t\ts.provider, s.window_id, s.scope, s.model,\n\t\t\t\ts.conversation_id, s.run_id, s.unit, s.used, s.limit_amount,\n\t\t\t\ts.window_seconds, s.resets_at_unix_ms, s.estimation,\n\t\t\t\ts.finality, s.observed_at_unix_ms, s.digest\n\t\t\t FROM usage_quota_snapshots s\n\t\t\t WHERE (?1 IS NULL OR s.binding_id = ?1)\n\t\t\t   AND s.rowid = (\n\t\t\t\t SELECT t.rowid FROM usage_quota_snapshots t\n\t\t\t\t  WHERE t.binding_id = s.binding_id\n\t\t\t\t    AND t.window_id = s.window_id\n\t\t\t\t    AND t.model IS s.model\n\t\t\t\t  ORDER BY t.observed_at_unix_ms DESC, t.rowid DESC\n\t\t\t\t  LIMIT 1)\n\t\t\t ORDER BY s.binding_id, s.window_id, s.model",
   "describe": {
     "columns": [
       {
@@ -214,5 +214,5 @@
       false
     ]
   },
-  "hash": "305cbd095f696c21ea8b352eef51e046cc6d1353e41c2ed2dcdc4a98470f8d08"
+  "hash": "22c253d71069170d2dba01f127a7a327e3e60348b2a16424b79bcf296b1a7af5"
 }

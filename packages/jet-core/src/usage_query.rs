@@ -14,12 +14,12 @@ use jet_store::{
 
 use crate::usage::{
 	ModelConsumption, ModelId, ObservedConsumption, PlaneUsage, QuotaMeasure,
-	QuotaScope, QuotaUnit, QuotaWindow, USAGE_FRESHNESS_MS, UsageEstimation,
+	QuotaScope, QuotaUnit, QuotaWindow, USAGE_REFRESH_MS, UsageEstimation,
 	UsageFinality, UsageFreshness, UsageSelection, UsageTokens,
 };
 use crate::{
-	AccountBindingId, Core, CoreError, EventSequence, PlaneId, ProviderId,
-	QueryResult, system_time,
+	AccountBindingId, ConversationId, Core, CoreError, EventSequence, PlaneId,
+	ProviderId, QueryResult, RunId, system_time,
 };
 
 /// Reads the selected Usage records with the journal position that fences
@@ -102,7 +102,7 @@ fn quota(
 		reach
 			.iter()
 			.find(|record| record.binding_id == snapshot.binding_id),
-		snapshot.observed_at_unix_ms,
+		&snapshot,
 		now_unix_ms,
 	);
 	QuotaWindow {
@@ -116,6 +116,8 @@ fn quota(
 			(QuotaScopeRecord::ProviderAccount, _)
 			| (QuotaScopeRecord::Model, None) => QuotaScope::ProviderAccount,
 		},
+		conversation_id: snapshot.conversation_id.map(ConversationId),
+		run_id: snapshot.run_id.map(RunId),
 		measure: QuotaMeasure {
 			unit: match snapshot.unit {
 				QuotaUnitRecord::Tokens => QuotaUnit::Tokens,
@@ -135,23 +137,45 @@ fn quota(
 	}
 }
 
-/// Whether a window still stands for what the Provider would say now. A
-/// Provider that refused after the window was read is reported as
-/// unreachable rather than as a current reading (ADR-0023).
+/// Whether a window still stands for what the Provider would say now.
+///
+/// Three things can make it not. A Provider that refused after the window
+/// was read is unreachable rather than current. A window whose own reset
+/// has passed describes a window that has already rolled over. And a
+/// Provider that has not answered within the interval an idle Plane
+/// refreshes on is history (ADR-0023, ADR-0045). Freshness follows the
+/// last time the Provider *answered*, not the last time its answer
+/// changed: an unchanged answer is stored as a heartbeat, and it is still
+/// an answer.
 fn freshness(
 	reach: Option<&UsageProviderReachRecord>,
-	observed_at_unix_ms: i64,
+	snapshot: &UsageQuotaSnapshotRecord,
 	now_unix_ms: i64,
 ) -> UsageFreshness {
-	if let Some(record) = reach
-		&& let ProviderReachRecord::Unreachable { reason } = &record.reach
-		&& record.observed_at_unix_ms >= observed_at_unix_ms
+	let answered_at = match reach {
+		Some(record) => match &record.reach {
+			ProviderReachRecord::Unreachable { reason }
+				if record.observed_at_unix_ms
+					>= snapshot.observed_at_unix_ms =>
+			{
+				return UsageFreshness::Unreachable {
+					reason: reason.clone(),
+				};
+			}
+			ProviderReachRecord::Unreachable { .. } => {
+				snapshot.observed_at_unix_ms
+			}
+			ProviderReachRecord::Reachable => {
+				snapshot.observed_at_unix_ms.max(record.observed_at_unix_ms)
+			}
+		},
+		None => snapshot.observed_at_unix_ms,
+	};
+	let rolled_over = snapshot
+		.resets_at_unix_ms
+		.is_some_and(|resets_at| resets_at <= now_unix_ms);
+	if rolled_over || now_unix_ms.saturating_sub(answered_at) > USAGE_REFRESH_MS
 	{
-		return UsageFreshness::Unreachable {
-			reason: reason.clone(),
-		};
-	}
-	if now_unix_ms.saturating_sub(observed_at_unix_ms) > USAGE_FRESHNESS_MS {
 		UsageFreshness::Stale
 	} else {
 		UsageFreshness::Fresh
@@ -163,21 +187,13 @@ fn freshness(
 fn consumption(totals: Vec<UsageTotalRecord>) -> ObservedConsumption {
 	let mut consumption = ObservedConsumption::default();
 	for total in totals {
-		consumption.tokens = UsageTokens {
-			input: consumption.tokens.input.saturating_add(total.tokens.input),
-			cached_input: consumption
-				.tokens
-				.cached_input
-				.saturating_add(total.tokens.cached_input),
-			output: consumption
-				.tokens
-				.output
-				.saturating_add(total.tokens.output),
-			reasoning: consumption
-				.tokens
-				.reasoning
-				.saturating_add(total.tokens.reasoning),
+		let tokens = UsageTokens {
+			input: total.tokens.input,
+			cached_input: total.tokens.cached_input,
+			output: total.tokens.output,
+			reasoning: total.tokens.reasoning,
 		};
+		consumption.tokens = consumption.tokens.saturating_add(tokens);
 		consumption.measurements =
 			consumption.measurements.saturating_add(total.measurements);
 		consumption.estimated =
@@ -188,12 +204,7 @@ fn consumption(totals: Vec<UsageTotalRecord>) -> ObservedConsumption {
 			.max(Some(system_time(total.last_observed_at_unix_ms)));
 		consumption.models.push(ModelConsumption {
 			model: total.model.map(ModelId),
-			tokens: UsageTokens {
-				input: total.tokens.input,
-				cached_input: total.tokens.cached_input,
-				output: total.tokens.output,
-				reasoning: total.tokens.reasoning,
-			},
+			tokens,
 			measurements: total.measurements,
 			estimated: total.estimated,
 			interim: total.interim,

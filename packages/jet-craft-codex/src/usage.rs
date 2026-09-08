@@ -5,13 +5,9 @@
 use jet_protocol::{
 	CraftObservedUsage, CraftQuotaScope, CraftQuotaUnit, CraftQuotaWindow,
 	CraftUsage, CraftUsageEstimation, CraftUsageFinality,
-	CraftUsageMeasurement, CraftUsageTokens,
+	CraftUsageMeasurement, CraftUsageTokens, QUOTA_SHARE_LIMIT,
 };
 use serde_json::Value;
-
-/// A share is hundredths of a percent, so a Provider percentage crosses
-/// the wire without a floating point.
-const SHARE_LIMIT: u64 = 10_000;
 
 /// What one `thread/tokenUsage/updated` notification says about `turn`.
 ///
@@ -64,7 +60,7 @@ fn window(name: &str, value: &Value) -> Option<CraftUsage> {
 			scope: CraftQuotaScope::ProviderAccount,
 			unit: CraftQuotaUnit::Share,
 			used: basis_points(used),
-			limit: Some(SHARE_LIMIT),
+			limit: Some(QUOTA_SHARE_LIMIT),
 			window_seconds: value
 				.get("windowMinutes")
 				.and_then(Value::as_u64)
@@ -104,7 +100,7 @@ fn text(value: &Value, pointer: &str) -> Option<String> {
 fn basis_points(percent: f64) -> u64 {
 	let hundredths = (percent * 100.0).round();
 	if hundredths.is_finite() && hundredths > 0.0 {
-		(hundredths as u64).min(SHARE_LIMIT)
+		(hundredths as u64).min(QUOTA_SHARE_LIMIT)
 	} else {
 		0
 	}

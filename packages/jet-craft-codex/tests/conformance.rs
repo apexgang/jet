@@ -152,36 +152,41 @@ async fn a_conversation_uses_codex_native_events_through_the_craft_contract() {
 		}));
 		// The turn's own counts are reported; the thread's cumulative total
 		// covers earlier Runs too and is deliberately left out (ADR-0023).
-		assert!(reported(&events).contains(&CraftUsage::Observed {
-			observed: CraftObservedUsage {
-				measurement: CraftUsageMeasurement::Turn {
-					turn: run.to_string(),
-					native_usage_id: Some("native-first".into()),
+		assert_eq!(
+			reported(&events),
+			vec![
+				CraftUsage::Observed {
+					observed: CraftObservedUsage {
+						measurement: CraftUsageMeasurement::Turn {
+							turn: run.to_string(),
+							native_usage_id: Some("native-first".into()),
+						},
+						model: Some("gpt-5.4-codex".into()),
+						estimation: CraftUsageEstimation::Measured,
+						finality: CraftUsageFinality::Interim,
+						tokens: CraftUsageTokens {
+							input: 8,
+							cached_input: 2,
+							output: 5,
+							reasoning: 1,
+						},
+					},
 				},
-				model: Some("gpt-5.4-codex".into()),
-				estimation: CraftUsageEstimation::Measured,
-				finality: CraftUsageFinality::Interim,
-				tokens: CraftUsageTokens {
-					input: 8,
-					cached_input: 2,
-					output: 5,
-					reasoning: 1,
-				},
-			},
-		}));
-		assert!(reported(&events).contains(&CraftUsage::Quota {
-			quota: CraftQuotaWindow {
-				window: "primary".into(),
-				scope: CraftQuotaScope::ProviderAccount,
-				unit: CraftQuotaUnit::Share,
-				used: 4_250,
-				limit: Some(10_000),
-				window_seconds: Some(18_000),
-				resets_in_seconds: Some(3_600),
-				estimation: CraftUsageEstimation::Measured,
-				finality: CraftUsageFinality::Interim,
-			},
-		}));
+				CraftUsage::Quota {
+					quota: CraftQuotaWindow {
+						window: "primary".into(),
+						scope: CraftQuotaScope::ProviderAccount,
+						unit: CraftQuotaUnit::Share,
+						used: 4_250,
+						limit: Some(10_000),
+						window_seconds: Some(18_000),
+						resets_in_seconds: Some(3_600),
+						estimation: CraftUsageEstimation::Measured,
+						finality: CraftUsageFinality::Interim,
+					},
+				}
+			]
+		);
 		assert_eq!(
 			presentations(&events),
 			vec![

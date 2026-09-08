@@ -104,6 +104,10 @@ pub enum CraftQuotaScope {
 	},
 }
 
+/// What a share is measured against: hundredths of a percent, so a filled
+/// fraction crosses the wire without a floating point.
+pub const QUOTA_SHARE_LIMIT: u64 = 10_000;
+
 /// The unit a Provider stated one window in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -169,7 +173,7 @@ pub enum CraftUsage {
 	},
 	/// A Provider that would not report its windows, so the host says so
 	/// rather than presenting the windows it last saw as current.
-	Unavailable {
+	Unreachable {
 		/// Bounded, non-secret text naming why, at most 256 characters.
 		reason: String,
 	},

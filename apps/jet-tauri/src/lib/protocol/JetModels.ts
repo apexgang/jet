@@ -242,7 +242,7 @@ export type QuotaScope = { covers: "provider_account" } | { covers: "model"; mod
 
 export type QuotaUnit = "tokens" | "requests" | "credits" | "share";
 
-export type QuotaWindow = { binding_id: string; estimation: UsageEstimation; finality: UsageFinality; freshness: UsageFreshness; measure: QuotaMeasure; observed_at_unix_ms: number; provider: string; resets_at_unix_ms?: number | null; scope: QuotaScope; window: string; window_seconds?: number | null };
+export type QuotaWindow = { binding_id: string; conversation_id?: string | null; estimation: UsageEstimation; finality: UsageFinality; freshness: UsageFreshness; measure: QuotaMeasure; observed_at_unix_ms: number; provider: string; resets_at_unix_ms?: number | null; run_id?: string | null; scope: QuotaScope; window: string; window_seconds?: number | null };
 
 export type RecoveryAction = { current_revision: FileRevision; path: string; target: FileTarget; type: "refresh_file" } | { conversation_id: string; type: "refresh_conversation" } | { run_id: string; type: "refresh_run" } | { after: string; type: "resume_events" };
 

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT digest, observed_at_unix_ms\n\t\t\t FROM usage_quota_snapshots\n\t\t\t WHERE binding_id = ?1 AND window_id = ?2\n\t\t\t ORDER BY observed_at_unix_ms DESC, rowid DESC\n\t\t\t LIMIT 1",
+  "query": "SELECT digest, observed_at_unix_ms\n\t\t\t FROM usage_quota_snapshots\n\t\t\t WHERE binding_id = ?1 AND window_id = ?2 AND model IS ?3\n\t\t\t ORDER BY observed_at_unix_ms DESC, rowid DESC\n\t\t\t LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -27,12 +27,12 @@
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 3
     },
     "nullable": [
       false,
       false
     ]
   },
-  "hash": "346a6bad647cfb2c31a88567436f36723332fac744905a8e601644ef93617624"
+  "hash": "cf34b412851fcd15d6485f036f5d55577cd74039dbb8b73663ac0dd624344df1"
 }

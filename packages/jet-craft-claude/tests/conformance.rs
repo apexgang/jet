@@ -191,38 +191,47 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 		// Consumption is reported per Model where the Harness breaks it
 		// down, under an identity that makes a repeat replace it rather
 		// than add to it (ADR-0023).
-		assert!(reported(&events).contains(&CraftUsage::Observed {
-			observed: CraftObservedUsage {
-				measurement: CraftUsageMeasurement::Turn {
-					turn: run.to_string(),
-					native_usage_id: Some(format!("{run}:claude-opus-5")),
+		assert_eq!(
+			reported(&events).first(),
+			Some(&CraftUsage::Observed {
+				observed: CraftObservedUsage {
+					measurement: CraftUsageMeasurement::Turn {
+						turn: run.to_string(),
+						native_usage_id: Some(format!("{run}:claude-opus-5")),
+					},
+					model: Some("claude-opus-5".into()),
+					estimation: CraftUsageEstimation::Measured,
+					finality: CraftUsageFinality::Final,
+					tokens: CraftUsageTokens {
+						input: 14,
+						cached_input: 6,
+						output: 90,
+						reasoning: 0,
+					},
 				},
-				model: Some("claude-opus-5".into()),
-				estimation: CraftUsageEstimation::Measured,
-				finality: CraftUsageFinality::Final,
-				tokens: CraftUsageTokens {
-					input: 14,
-					cached_input: 6,
-					output: 90,
-					reasoning: 0,
-				},
-			},
-		}));
+			})
+		);
 		// A rate-limit event states how full the unified window is, whether
 		// or not the Harness could still proceed under it.
-		assert!(reported(&events).contains(&CraftUsage::Quota {
-			quota: CraftQuotaWindow {
-				window: "unified".into(),
-				scope: CraftQuotaScope::ProviderAccount,
-				unit: CraftQuotaUnit::Share,
-				used: 10_000,
-				limit: Some(10_000),
-				window_seconds: None,
-				resets_in_seconds: None,
-				estimation: CraftUsageEstimation::Measured,
-				finality: CraftUsageFinality::Interim,
-			},
-		}));
+		assert_eq!(
+			reported(&events)
+				.into_iter()
+				.filter(|usage| matches!(usage, CraftUsage::Quota { .. }))
+				.collect::<Vec<_>>(),
+			vec![CraftUsage::Quota {
+				quota: CraftQuotaWindow {
+					window: "unified".into(),
+					scope: CraftQuotaScope::ProviderAccount,
+					unit: CraftQuotaUnit::Share,
+					used: 10_000,
+					limit: Some(10_000),
+					window_seconds: None,
+					resets_in_seconds: None,
+					estimation: CraftUsageEstimation::Measured,
+					finality: CraftUsageFinality::Interim,
+				},
+			}]
+		);
 		// The decision reached the Harness as its own answer, carrying the
 		// input it was shown rather than one this Craft edited.
 		assert_eq!(

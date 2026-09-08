@@ -21,10 +21,11 @@ use crate::{
 	AccountBindingId, ConversationId, EventSequence, PlaneId, ProviderId, RunId,
 };
 
-/// How long a Provider-reported window stands for what the Provider would
-/// say now. It is the interval an idle Plane refreshes on (ADR-0045):
-/// past it, the window is history rather than a current reading.
-pub(crate) const USAGE_FRESHNESS_MS: i64 = 15 * 60 * 1000;
+/// The interval ADR-0045 bounds an idle refresh by. A Provider that has
+/// not answered within it is no longer describing what it would say now,
+/// and an unchanged answer inside it is a heartbeat rather than another
+/// stored snapshot.
+pub(crate) const USAGE_REFRESH_MS: i64 = 15 * 60 * 1000;
 
 /// Longest Provider window name, Model name, or unavailability reason a
 /// record carries. Each is bounded metadata, not a payload.
@@ -84,6 +85,20 @@ pub struct UsageTokens {
 	pub output: u64,
 	/// Tokens spent on reasoning, where the Provider counts them apart.
 	pub reasoning: u64,
+}
+
+impl UsageTokens {
+	/// The two counts added together, saturating rather than wrapping: a
+	/// total no counter could reach is still not a wrong smaller one.
+	#[must_use]
+	pub fn saturating_add(self, other: Self) -> Self {
+		Self {
+			input: self.input.saturating_add(other.input),
+			cached_input: self.cached_input.saturating_add(other.cached_input),
+			output: self.output.saturating_add(other.output),
+			reasoning: self.reasoning.saturating_add(other.reasoning),
+		}
+	}
 }
 
 /// What one Jet-observed measurement covers, and what makes it one
@@ -223,6 +238,10 @@ pub struct QuotaWindow {
 	pub window: String,
 	/// What the window covers.
 	pub scope: QuotaScope,
+	/// The Conversation the response was observed in.
+	pub conversation_id: Option<ConversationId>,
+	/// The Run the response was observed in.
+	pub run_id: Option<RunId>,
 	/// How full the Provider said it was.
 	pub measure: QuotaMeasure,
 	/// How long the window lasts, where the Provider stated it.

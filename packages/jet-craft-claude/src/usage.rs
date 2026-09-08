@@ -7,13 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use jet_protocol::{
 	CraftObservedUsage, CraftQuotaScope, CraftQuotaUnit, CraftQuotaWindow,
 	CraftUsage, CraftUsageEstimation, CraftUsageFinality,
-	CraftUsageMeasurement, CraftUsageTokens,
+	CraftUsageMeasurement, CraftUsageTokens, QUOTA_SHARE_LIMIT,
 };
 use serde_json::Value;
-
-/// A share is hundredths of a percent, so a filled fraction crosses the
-/// wire without a floating point.
-const SHARE_LIMIT: u64 = 10_000;
 
 /// Claude Code reports one unified limit rather than a window per Model,
 /// and names it only by reporting it.
@@ -40,6 +36,17 @@ pub(crate) fn reports(
 	}
 }
 
+/// How one reported measurement is named: as one Model's share of the
+/// turn where the Harness broke its counts down, and as the turn's own
+/// total otherwise.
+#[derive(Default)]
+struct Named {
+	/// The Harness's own identity for the measurement.
+	native_usage_id: Option<String>,
+	/// The Model the counts belong to.
+	model: Option<String>,
+}
+
 /// The turn's totals, per Model where the Harness broke them down. The
 /// two are never both reported: one already covers the other.
 fn consumed(event: &Value, turn: &str) -> Vec<CraftUsage> {
@@ -52,32 +59,29 @@ fn consumed(event: &Value, turn: &str) -> Vec<CraftUsage> {
 				observed(
 					usage,
 					turn,
-					Some(format!("{turn}:{model}")),
-					Some(model.clone()),
+					Named {
+						native_usage_id: Some(format!("{turn}:{model}")),
+						model: Some(model.clone()),
+					},
 				)
 			})
 			.collect();
 	}
 	event
 		.get("usage")
-		.map(|usage| observed(usage, turn, None, None))
+		.map(|usage| observed(usage, turn, Named::default()))
 		.into_iter()
 		.collect()
 }
 
-fn observed(
-	usage: &Value,
-	turn: &str,
-	native_usage_id: Option<String>,
-	model: Option<String>,
-) -> CraftUsage {
+fn observed(usage: &Value, turn: &str, named: Named) -> CraftUsage {
 	CraftUsage::Observed {
 		observed: CraftObservedUsage {
 			measurement: CraftUsageMeasurement::Turn {
 				turn: turn.to_owned(),
-				native_usage_id,
+				native_usage_id: named.native_usage_id,
 			},
-			model,
+			model: named.model,
 			estimation: CraftUsageEstimation::Measured,
 			// A result event is the turn's own boundary, so its counts no
 			// longer move.
@@ -100,7 +104,7 @@ fn window(event: &Value, now: SystemTime) -> Option<CraftUsage> {
 			scope: CraftQuotaScope::ProviderAccount,
 			unit: CraftQuotaUnit::Share,
 			used: basis_points(used),
-			limit: Some(SHARE_LIMIT),
+			limit: Some(QUOTA_SHARE_LIMIT),
 			window_seconds: None,
 			resets_in_seconds: info
 				.get("resets_at")
@@ -154,7 +158,7 @@ fn count(usage: &Value, field: &str, camel: &str) -> u64 {
 fn basis_points(fraction: f64) -> u64 {
 	let hundredths = (fraction * 10_000.0).round();
 	if hundredths.is_finite() && hundredths > 0.0 {
-		(hundredths as u64).min(SHARE_LIMIT)
+		(hundredths as u64).min(QUOTA_SHARE_LIMIT)
 	} else {
 		0
 	}
