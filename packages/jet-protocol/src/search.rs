@@ -10,6 +10,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchField {
+	/// A Conversation or Run name.
+	Name,
 	/// A file path the Conversation touched: its Workspace root or a path
 	/// its promotion could not settle.
 	Path,

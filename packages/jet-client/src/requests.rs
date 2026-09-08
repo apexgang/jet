@@ -228,6 +228,8 @@ impl Client {
 		{
 			CommandResponse::AuditEpochBegun { epoch } => Ok(epoch),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -354,6 +356,8 @@ impl Client {
 				Ok(conversation)
 			}
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -402,6 +406,8 @@ impl Client {
 		{
 			CommandResponse::RunCreated(run) => Ok(run),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -457,6 +463,8 @@ impl Client {
 		{
 			CommandResponse::RunTransitioned(run) => Ok(run),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -552,6 +560,8 @@ impl Client {
 		{
 			CommandResponse::SettingSet { value, .. } => Ok(value),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -602,6 +612,8 @@ impl Client {
 		{
 			CommandResponse::SettingCleared { .. } => Ok(()),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -758,6 +770,8 @@ impl Client {
 		{
 			CommandResponse::AccountBound(binding) => Ok(binding),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -812,6 +826,8 @@ impl Client {
 				..
 			} => Ok(credential_reference),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }

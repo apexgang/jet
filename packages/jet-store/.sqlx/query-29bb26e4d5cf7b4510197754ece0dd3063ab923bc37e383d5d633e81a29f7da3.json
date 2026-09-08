@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE conversations SET name = ?2, name_source = ?3,\n\t\t\t\trevision = revision + 1\n\t\t\t WHERE conversation_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "29bb26e4d5cf7b4510197754ece0dd3063ab923bc37e383d5d633e81a29f7da3"
+}

@@ -60,6 +60,13 @@ pub enum RunLifecycle {
 pub struct Conversation {
 	/// Durable identity.
 	pub conversation_id: Uuid,
+	/// Current version for conflict-sensitive Commands. Absent before minor 20.
+	#[serde(
+		default,
+		skip_serializing_if = "Option::is_none",
+		with = "crate::decimal::optional"
+	)]
+	pub revision: Option<u64>,
 	/// Retention choice.
 	pub retention: RetentionPolicy,
 	/// Where it does its work. Absent before protocol minor 9.
@@ -68,6 +75,9 @@ pub struct Conversation {
 	/// Where it came from. Absent before protocol minor 13.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub origin: Option<ConversationOrigin>,
+	/// Resolved name and its authority. Absent before protocol minor 20.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub name: Option<crate::Name>,
 	/// When it was created, in signed Unix milliseconds.
 	pub created_at_unix_ms: i64,
 }
@@ -85,6 +95,9 @@ pub struct Run {
 	pub revision: u64,
 	/// Current lifecycle state.
 	pub lifecycle: RunLifecycle,
+	/// Resolved name and its authority. Absent before protocol minor 20.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub name: Option<crate::Name>,
 	/// When it was created, in signed Unix milliseconds.
 	pub created_at_unix_ms: i64,
 	/// When it reached a terminal state, if it has.
@@ -143,6 +156,26 @@ pub enum CommandRequest {
 		conversation_id: Uuid,
 		/// Structured comments, preserved together in submission order.
 		comments: Vec<crate::ReviewComment>,
+	},
+	/// Set the authoritative manual name of a Conversation.
+	SetConversationName {
+		/// Conversation to name.
+		conversation_id: Uuid,
+		/// Revision observed when the Command was prepared.
+		#[serde(with = "crate::decimal")]
+		expected_revision: u64,
+		/// Validated as 1 to 256 UTF-8 bytes by the trusted core.
+		name: String,
+	},
+	/// Set the authoritative manual name of a Run.
+	SetRunName {
+		/// Run to name.
+		run_id: Uuid,
+		/// Revision observed when the Command was prepared.
+		#[serde(with = "crate::decimal")]
+		expected_revision: u64,
+		/// Validated as 1 to 256 UTF-8 bytes by the trusted core.
+		name: String,
 	},
 	/// Open a PTY under a Workspace-owned helper.
 	OpenTerminal {
@@ -389,6 +422,10 @@ pub enum CommandResponse {
 		/// Exact resulting Git content and mode.
 		revision: crate::FileRevision,
 	},
+	/// A Conversation's manual name committed.
+	ConversationNamed(Conversation),
+	/// A Run's manual name committed.
+	RunNamed(Run),
 	/// Terminal admission or close was committed.
 	Terminal {
 		/// Current terminal state.
@@ -525,6 +562,11 @@ pub struct RevisionConflict {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConflictState {
+	/// The current Conversation.
+	Conversation {
+		/// Complete safe Conversation state.
+		conversation: Conversation,
+	},
 	/// The current Run.
 	Run {
 		/// Complete safe Run state.

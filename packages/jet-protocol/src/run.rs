@@ -38,6 +38,9 @@ pub struct ManagedProcess {
 	pub pid: u32,
 	/// Process responsibility.
 	pub role: ManagedProcessRole,
+	/// Live native title for this process alone, never an entity name (1.20).
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub label: Option<String>,
 	/// Whether this process is still participating in the Run.
 	pub running: bool,
 }

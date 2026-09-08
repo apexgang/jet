@@ -142,24 +142,8 @@ impl ReadTransaction {
 		cursor: u64,
 		limit: usize,
 	) -> Result<(u64, Vec<EventRecord>), StoreError> {
-		let (current_snapshot_revision, minimum_available_cursor) =
-			self.journal_position().await?;
-		if cursor < minimum_available_cursor {
-			return Err(StoreError::CursorExpired {
-				minimum_available_cursor,
-				current_snapshot_revision,
-			});
-		}
-		if cursor > current_snapshot_revision {
-			return Err(StoreError::CursorAhead {
-				current_snapshot_revision,
-			});
-		}
-		// ASVS 2.2.1/2.2.2: cap allocation-driving input again at the
-		// trusted store seam, even when the caller already applies a limit.
-		let limit = limit.min(EVENT_COMPACTION_BATCH_LIMIT);
-		let cursor = sequence_column(cursor)?;
-		let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+		let (current_snapshot_revision, cursor, limit) =
+			self.event_window(cursor, limit).await?;
 		let rows = sqlx::query_as!(
 			Row,
 			r#"SELECT sequence AS "sequence!", event_id, actor_kind, actor_id,
@@ -179,6 +163,79 @@ impl ReadTransaction {
 			.map(read_event_row)
 			.collect::<Result<_, _>>()?;
 		Ok((current_snapshot_revision, events))
+	}
+
+	/// Up to `limit` Events excluding name changes unknown before Jet 1.20.
+	/// Filtering precedes the SQL limit so hidden Events cannot starve a
+	/// legacy peer of later Events it can consume.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the rows cannot be read.
+	pub async fn legacy_events_after(
+		&mut self,
+		cursor: u64,
+		limit: usize,
+	) -> Result<(u64, Vec<EventRecord>), StoreError> {
+		let (_, cursor, limit) = self.event_window(cursor, limit).await?;
+		let visible_snapshot_revision = sqlx::query_scalar!(
+			r#"SELECT MAX(?1, COALESCE(MAX(sequence), 0)) AS "sequence!: i64"
+			 FROM events
+			 WHERE kind != 'conversation.name_changed'
+			   AND kind != 'run.name_changed'"#,
+			cursor,
+		)
+		.fetch_one(self.connection())
+		.await?;
+		let rows = sqlx::query_as!(
+			Row,
+			r#"SELECT sequence AS "sequence!", event_id, actor_kind, actor_id,
+				recorded_at_unix_ms, conversation_id, run_id, kind,
+				payload_version, payload
+			 FROM events
+			 WHERE sequence > ?1
+			   AND kind != 'conversation.name_changed'
+			   AND kind != 'run.name_changed'
+			 ORDER BY sequence
+			 LIMIT ?2"#,
+			cursor,
+			limit
+		)
+		.fetch_all(self.connection())
+		.await?;
+		let events = rows
+			.into_iter()
+			.map(read_event_row)
+			.collect::<Result<_, _>>()?;
+		Ok((parse_sequence(visible_snapshot_revision)?, events))
+	}
+
+	async fn event_window(
+		&mut self,
+		cursor: u64,
+		limit: usize,
+	) -> Result<(u64, i64, i64), StoreError> {
+		let (current_snapshot_revision, minimum_available_cursor) =
+			self.journal_position().await?;
+		if cursor < minimum_available_cursor {
+			return Err(StoreError::CursorExpired {
+				minimum_available_cursor,
+				current_snapshot_revision,
+			});
+		}
+		if cursor > current_snapshot_revision {
+			return Err(StoreError::CursorAhead {
+				current_snapshot_revision,
+			});
+		}
+		// ASVS 2.2.1/2.2.2: cap allocation-driving input again at the
+		// trusted store seam, even when the caller already applies a limit.
+		let limit = limit.min(EVENT_COMPACTION_BATCH_LIMIT);
+		Ok((
+			current_snapshot_revision,
+			sequence_column(cursor)?,
+			i64::try_from(limit).unwrap_or(i64::MAX),
+		))
 	}
 
 	/// The sequence of the newest Event, or zero before any Event exists.

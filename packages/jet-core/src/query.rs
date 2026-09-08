@@ -12,7 +12,7 @@ use crate::conversation::{
 	ConversationId, ConversationList, ConversationSnapshot, PageCursor,
 };
 use crate::error::CoreError;
-use crate::event::{EVENT_PAGE_LIMIT, Event, EventPage, EventSequence};
+use crate::event::{EventPage, EventSequence};
 use crate::import::{self, ExternalConversationList};
 use crate::pairing::{self, PairingSnapshot};
 use crate::project::{self, PathGrant, ProjectList, ProjectPreview};
@@ -116,6 +116,11 @@ pub enum Query {
 		/// The position to resume after; zero for the whole journal.
 		after: EventSequence,
 	},
+	/// Events visible to a peer predating independent entity names.
+	LegacyEvents {
+		/// The position to resume after; zero for the whole journal.
+		after: EventSequence,
+	},
 	/// The Plane's Pairing: whether it accepts new GUI clients (ADR-0017).
 	Pairing,
 	/// One page of the owner-only Security audit strictly after a position
@@ -156,6 +161,11 @@ pub enum Query {
 	/// content (ADR-0036). A GUI merges the answers of every Plane it is
 	/// connected to.
 	Search {
+		/// The terms every hit must contain.
+		terms: SearchTerms,
+	},
+	/// Search visible to a peer predating independent entity names.
+	LegacySearch {
 		/// The terms every hit must contain.
 		terms: SearchTerms,
 	},
@@ -354,28 +364,10 @@ impl Core {
 				settings(self, scope, selection).await
 			}
 			Query::Events { after } => {
-				self.store
-					.read(async |tx| {
-						let (cursor, events) =
-							tx.events_after(after.0, EVENT_PAGE_LIMIT).await?;
-						let mut bytes = 0;
-						let events = events.into_iter().take_while(|event| {
-							// Room for envelope/identities after jetd translates the page.
-							let size = event.payload.len() + 1024;
-							if bytes != 0 && bytes + size > 512 * 1024 {
-								return false;
-							}
-							bytes += size;
-							true
-						});
-						Ok(QueryResult::Events(EventPage {
-							cursor: EventSequence(cursor),
-							events: events
-								.map(Event::try_from)
-								.collect::<Result<_, _>>()?,
-						}))
-					})
-					.await
+				crate::event_query::events(self, after).await
+			}
+			Query::LegacyEvents { after } => {
+				crate::event_query::legacy_events(self, after).await
 			}
 			Query::Pairing => {
 				let now_unix_ms = self.now_unix_ms();
@@ -414,6 +406,9 @@ impl Core {
 				promotion::preview(self, actor, workspace_id, destination).await
 			}
 			Query::Search { terms } => search::query(self, &terms).await,
+			Query::LegacySearch { terms } => {
+				search::legacy_query(self, &terms).await
+			}
 			Query::ExternalConversations => {
 				import::external_conversations(self).await
 			}

@@ -84,6 +84,8 @@ impl Client {
 		{
 			CommandResponse::ConversationImported(imported) => Ok(imported),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -145,6 +147,8 @@ impl Client {
 				Ok(conversation)
 			}
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }

@@ -78,7 +78,25 @@ impl jet_core::RunConnection for RunConnection {
 				) {
 				return Err(failed("change evidence requires Craft 1.3"));
 			}
+			if self.craft_minor < 5
+				&& matches!(
+					&event,
+					CraftEvent::ConversationTitle { .. }
+						| CraftEvent::RunTitle { .. }
+						| CraftEvent::ProcessTitle { .. }
+				) {
+				return Err(failed("native titles require Craft 1.5"));
+			}
 			Ok(match event {
+				CraftEvent::ConversationTitle { title } => {
+					RunObservation::ConversationTitle(title)
+				}
+				CraftEvent::RunTitle { title } => {
+					RunObservation::RunTitle(title)
+				}
+				CraftEvent::ProcessTitle { pid, title } => {
+					RunObservation::ProcessTitle { pid, title }
+				}
 				CraftEvent::TurnStarted => RunObservation::TurnStarted,
 				CraftEvent::TurnEnded { outcome } => {
 					RunObservation::TurnEnded(match outcome {

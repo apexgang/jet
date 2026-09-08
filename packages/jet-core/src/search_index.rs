@@ -34,6 +34,21 @@ impl Core {
 			}
 		}
 	}
+
+	/// Finishes the independently watermarked historical name repair before a
+	/// name-aware Search claims a complete result. Startup and ordinary Commands
+	/// do only one batch; an explicit Search may drain the resumable backlog.
+	pub(crate) async fn index_search_names(&self) -> Result<(), CoreError> {
+		loop {
+			let read = self
+				.store
+				.write(async |tx| tx.reconcile_name_documents().await)
+				.await?;
+			if read < SEARCH_INDEX_BATCH_LIMIT {
+				return Ok(());
+			}
+		}
+	}
 }
 
 /// Indexes one batch and returns how many Events it read.
@@ -42,6 +57,10 @@ async fn index_batch(tx: &mut WriteTransaction) -> Result<usize, CoreError> {
 	let records = tx
 		.semantic_events_after(position, SEARCH_INDEX_BATCH_LIMIT)
 		.await?;
+	// Historical name repair is deliberately one bounded batch per indexing
+	// attempt. It must not make startup traverse an old Plane's whole journal;
+	// later Commands resume it, while a name-aware Search explicitly drains it.
+	tx.reconcile_name_documents().await?;
 	let Some(last) = records.last() else {
 		return Ok(0);
 	};
@@ -70,6 +89,16 @@ pub(crate) fn documents_of(event: &Event) -> Vec<NewSearchDocument> {
 		sequence: event.sequence,
 	};
 	match &event.kind {
+		EventKind::ConversationNameChanged { name }
+		| EventKind::RunNameChanged { name } => {
+			vec![documents.document(SearchField::Name, &name.value)]
+		}
+		EventKind::ConversationCreated {
+			name: Some(name), ..
+		}
+		| EventKind::RunCreated { name: Some(name) } => {
+			vec![documents.document(SearchField::Name, &name.value)]
+		}
 		EventKind::WorkspaceCreated { root, .. } => {
 			vec![documents.path(root)]
 		}
@@ -91,17 +120,17 @@ pub(crate) fn documents_of(event: &Event) -> Vec<NewSearchDocument> {
 		// user searches for.
 		EventKind::UserEditApplied { .. }
 		| EventKind::ReviewSubmitted { .. }
+		| EventKind::ConversationCreated { name: None, .. }
+		| EventKind::RunCreated { name: None }
 		| EventKind::ChangeEvidenceRecorded { .. }
 		| EventKind::ChangeCheckpointRecorded { .. }
 		| EventKind::TurnInput { .. }
 		| EventKind::TurnChanged { .. }
 		| EventKind::RunControlRequested { .. }
 		| EventKind::RunTerminated { .. }
-		| EventKind::ConversationCreated { .. }
 		| EventKind::ConversationImported { .. }
 		| EventKind::WorkspaceSeeded { .. }
 		| EventKind::WorkspacePromotionSettled { .. }
-		| EventKind::RunCreated {}
 		| EventKind::TerminalStateChanged { .. }
 		| EventKind::RunLifecycleChanged { .. }
         | EventKind::RunActivityChanged { .. }

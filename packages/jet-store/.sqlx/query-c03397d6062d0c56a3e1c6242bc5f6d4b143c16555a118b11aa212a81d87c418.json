@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE search_name_index_state\n\t\t\t SET reconciled_through_sequence = ?1 WHERE singleton = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "c03397d6062d0c56a3e1c6242bc5f6d4b143c16555a118b11aa212a81d87c418"
+}

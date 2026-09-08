@@ -208,6 +208,15 @@ impl<W: AsyncWrite + Unpin> CraftSender<W> {
 			) {
 			return Err(CraftError::InvalidMessage);
 		}
+		if self.minor < 5
+			&& matches!(
+				event,
+				CraftEvent::ConversationTitle { .. }
+					| CraftEvent::RunTitle { .. }
+					| CraftEvent::ProcessTitle { .. }
+			) {
+			return Err(CraftError::InvalidMessage);
+		}
 		send(&mut self.writer, event).await
 	}
 }
@@ -240,7 +249,7 @@ async fn handshake<R: AsyncRead + Unpin>(
 	// ASVS 2.3.1: a specification cannot make this SDK speak a new codec major.
 	let sdk = ProtocolOffer {
 		family: ProtocolFamily::Craft,
-		versions: vec![ProtocolVersion { major: 1, minor: 4 }],
+		versions: vec![ProtocolVersion { major: 1, minor: 5 }],
 		capabilities: vec![
 			"actions".into(),
 			"fork".into(),

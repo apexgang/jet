@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO search_name_documents (\n\t\t\t\tconversation_id, sequence, field, body\n\t\t\t)\n\t\t\tSELECT r.conversation_id, e.sequence, 'name', CASE e.kind\n\t\t\t\tWHEN 'run.name_changed' THEN\n\t\t\t\t\tjson_extract(e.payload, '$.name.value')\n\t\t\t\tELSE 'Run ' || substr(replace(r.run_id, '-', ''), 1, 8)\n\t\t\tEND\n\t\t\tFROM events AS e\n\t\t\tJOIN runs AS r\n\t\t\t\tON r.conversation_id = e.conversation_id\n\t\t\t\tAND r.run_id = e.run_id\n\t\t\tWHERE e.kind IN ('run.created', 'run.name_changed')\n\t\t\t\tAND e.sequence > ?1 AND e.sequence <= ?2\n\t\t\t\tAND NOT EXISTS (\n\t\t\t\tSELECT 1 FROM search_name_documents AS d\n\t\t\t\tWHERE d.conversation_id = r.conversation_id\n\t\t\t\t\tAND d.sequence = e.sequence\n\t\t\t\t\tAND d.field = 'name'\n\t\t\t)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "835ff4e6374e57566ac4a861465f82ae897c36899713b4555a4028c6e35390e7"
+}

@@ -4,9 +4,9 @@ use uuid::Uuid;
 use super::{
 	ActorRecord, CommandReceiptRecord, ConversationOriginRecord,
 	ConversationRecord, EVENT_COMPACTION_BATCH_LIMIT, EventClass, EventRecord,
-	NewCommandReceipt, NewConversation, NewEvent, NewRun, PlaneRecord,
-	RetentionPolicy, RunLifecycle, RunRecord, SettingRecord,
-	SettingScopeRecord, Store, StoreError, WorkingTreeRecord,
+	NameRecord, NameSourceRecord, NewCommandReceipt, NewConversation, NewEvent,
+	NewRun, PlaneRecord, RetentionPolicy, RunLifecycle, RunRecord,
+	SettingRecord, SettingScopeRecord, Store, StoreError, WorkingTreeRecord,
 	is_unavailable_code,
 };
 
@@ -194,9 +194,17 @@ async fn a_connection_left_mid_transaction_is_replaced_rather_than_reused() {
 		recorded,
 		ConversationRecord {
 			conversation_id,
+			revision: 1,
 			retention: RetentionPolicy::Retain,
 			working_tree: WorkingTreeRecord::NoProject,
 			origin: ConversationOriginRecord::New,
+			name: NameRecord {
+				value: format!(
+					"Conversation {}",
+					&conversation_id.simple().to_string()[..8]
+				),
+				source: NameSourceRecord::Deterministic,
+			},
 			created_at_unix_ms: NOW_UNIX_MS,
 		}
 	);
@@ -285,6 +293,98 @@ fn operational_event(
 		class: EventClass::Operational,
 		..conversation_event(conversation_id, "run.output_progressed")
 	}
+}
+
+#[tokio::test]
+async fn legacy_event_cursor_stops_before_trailing_name_changes() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = Store::open(&dir.path().join("plane.sqlite3"))
+		.await
+		.unwrap();
+	let conversation_id = Uuid::now_v7();
+	store
+		.write(async |tx| {
+			tx.append_event(conversation_event(conversation_id, "visible"))
+				.await?;
+			tx.append_event(conversation_event(
+				conversation_id,
+				"conversation.name_changed",
+			))
+			.await?;
+			tx.append_event(conversation_event(
+				conversation_id,
+				"run.name_changed",
+			))
+			.await?;
+			Ok::<_, StoreError>(())
+		})
+		.await
+		.unwrap();
+
+	let page = store
+		.read(async |tx| tx.legacy_events_after(0, 10).await)
+		.await
+		.unwrap();
+
+	assert_eq!(
+		(
+			page.0,
+			page.1
+				.into_iter()
+				.map(|event| event.sequence)
+				.collect::<Vec<_>>()
+		),
+		(1, vec![1])
+	);
+}
+
+#[tokio::test]
+async fn legacy_event_paging_filters_names_before_its_limit() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = Store::open(&dir.path().join("plane.sqlite3"))
+		.await
+		.unwrap();
+	let conversation_id = Uuid::now_v7();
+	for kind in [
+		"first",
+		"conversation.name_changed",
+		"second",
+		"third",
+		"run.name_changed",
+	] {
+		store
+			.write(async |tx| {
+				tx.append_event(conversation_event(conversation_id, kind))
+					.await?;
+				Ok::<_, StoreError>(())
+			})
+			.await
+			.unwrap();
+	}
+
+	let (first_cursor, first) = store
+		.read(async |tx| tx.legacy_events_after(0, 2).await)
+		.await
+		.unwrap();
+	let (last_cursor, last) = store
+		.read(async |tx| tx.legacy_events_after(3, 2).await)
+		.await
+		.unwrap();
+
+	assert_eq!(
+		(
+			first_cursor,
+			first
+				.into_iter()
+				.map(|event| event.sequence)
+				.collect::<Vec<_>>(),
+			last_cursor,
+			last.into_iter()
+				.map(|event| event.sequence)
+				.collect::<Vec<_>>(),
+		),
+		(4, vec![1, 3], 4, vec![4])
+	);
 }
 
 #[tokio::test]
@@ -567,9 +667,17 @@ async fn conversations_runs_and_events_survive_reopening_the_store() {
 		conversation,
 		ConversationRecord {
 			conversation_id,
+			revision: 1,
 			retention: RetentionPolicy::Retain,
 			working_tree: WorkingTreeRecord::NoProject,
 			origin: ConversationOriginRecord::New,
+			name: NameRecord {
+				value: format!(
+					"Conversation {}",
+					&conversation_id.simple().to_string()[..8]
+				),
+				source: NameSourceRecord::Deterministic,
+			},
 			created_at_unix_ms: NOW_UNIX_MS,
 		}
 	);
@@ -580,6 +688,10 @@ async fn conversations_runs_and_events_survive_reopening_the_store() {
 			conversation_id,
 			revision: 2,
 			lifecycle: RunLifecycle::Completed,
+			name: NameRecord {
+				value: format!("Run {}", &run_id.simple().to_string()[..8]),
+				source: NameSourceRecord::Deterministic,
+			},
 			created_at_unix_ms: NOW_UNIX_MS + 1,
 			ended_at_unix_ms: Some(NOW_UNIX_MS + 2),
 		}

@@ -91,6 +91,8 @@ impl Client {
 		{
 			CommandResponse::ProjectRegistered(project) => Ok(project),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }

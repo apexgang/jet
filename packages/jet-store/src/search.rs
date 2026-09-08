@@ -6,6 +6,8 @@
 
 use uuid::Uuid;
 
+use sqlx::SqliteConnection;
+
 use crate::StoreError;
 use crate::journal::{read_event_row, sequence_column};
 use crate::records::{EventRecord, column_error, parse_uuid};
@@ -52,10 +54,18 @@ const EXCERPT_TOKENS: i64 = 16;
 
 #[derive(sqlx::FromRow)]
 struct HitRow {
+	rowid: i64,
 	conversation_id: String,
 	sequence: i64,
 	field: String,
 	excerpt: String,
+	score: f64,
+}
+
+#[derive(Clone, Copy)]
+enum NameDocuments {
+	Include,
+	Exclude,
 }
 
 impl ReadTransaction {
@@ -123,34 +133,182 @@ impl ReadTransaction {
 		terms: &[String],
 		limit: usize,
 	) -> Result<Vec<SearchHitRecord>, StoreError> {
+		self.search_filtered(terms, limit, NameDocuments::Include)
+			.await
+	}
+
+	/// The same bounded search without name documents, for a peer whose
+	/// negotiated protocol predates independent entity names. The exclusion
+	/// happens before ranking and limiting so hidden matches cannot crowd out
+	/// fields that peer understands (ADR-0019).
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the index cannot be read.
+	pub async fn legacy_search(
+		&mut self,
+		terms: &[String],
+		limit: usize,
+	) -> Result<Vec<SearchHitRecord>, StoreError> {
+		self.search_filtered(terms, limit, NameDocuments::Exclude)
+			.await
+	}
+
+	async fn search_filtered(
+		&mut self,
+		terms: &[String],
+		limit: usize,
+		name_documents: NameDocuments,
+	) -> Result<Vec<SearchHitRecord>, StoreError> {
 		let Some(expression) = match_expression(terms) else {
 			return Ok(Vec::new());
 		};
-		let limit =
-			i64::try_from(limit.min(SEARCH_HIT_LIMIT)).unwrap_or(i64::MAX);
+		let bounded_limit = limit.min(SEARCH_HIT_LIMIT);
+		let sql_limit = i64::try_from(bounded_limit).unwrap_or(i64::MAX);
 		// The compile-time macro cannot describe a MATCH against an FTS5
 		// virtual table: sqlx 0.9.0 crashes while inferring its column types,
 		// so this one statement runs on the runtime API and names every
 		// column it reads. The table and the bound parameters are otherwise
 		// the same as the checked statements around it.
-		let rows: Vec<HitRow> = sqlx::query_as(
-			"SELECT conversation_id, sequence, field,
-				snippet(search_documents, 3, '', '', '…', ?2) AS excerpt
-			 FROM search_documents
-			 WHERE search_documents MATCH ?1
-			 ORDER BY rank, sequence DESC, rowid
-			 LIMIT ?3",
+		let mut rows = search_table(
+			self.connection(),
+			CONTENT_SEARCH,
+			&expression,
+			sql_limit,
 		)
-		.bind(expression)
-		.bind(EXCERPT_TOKENS)
-		.bind(limit)
-		.fetch_all(self.connection())
 		.await?;
+		if matches!(name_documents, NameDocuments::Include) {
+			rows.extend(
+				search_table(
+					self.connection(),
+					NAME_SEARCH,
+					&expression,
+					sql_limit,
+				)
+				.await?,
+			);
+		}
+		rows.sort_by(|left, right| {
+			left.score
+				.total_cmp(&right.score)
+				.then_with(|| right.sequence.cmp(&left.sequence))
+				.then_with(|| left.field.cmp(&right.field))
+				.then_with(|| left.rowid.cmp(&right.rowid))
+		});
+		rows.truncate(bounded_limit);
 		rows.into_iter().map(read_hit_row).collect()
 	}
 }
 
 impl WriteTransaction {
+	/// Rebuilds one bounded batch of name documents for retained Events that an
+	/// older release may have advanced the shared index past. This covers both
+	/// legacy creations and name changes that a rollback release could not
+	/// project. It is idempotent and advances its own watermark per batch.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the projection cannot be reconciled.
+	pub async fn reconcile_name_documents(
+		&mut self,
+	) -> Result<usize, StoreError> {
+		let reconciled_through = sqlx::query_scalar!(
+			"SELECT reconciled_through_sequence
+			 FROM search_name_index_state WHERE singleton = 1"
+		)
+		.fetch_one(self.connection())
+		.await?;
+		let indexed_through =
+			sequence_column(self.search_index_position().await?)?;
+		if reconciled_through >= indexed_through {
+			return Ok(0);
+		}
+		let limit = i64::try_from(SEARCH_INDEX_BATCH_LIMIT).unwrap_or(i64::MAX);
+		let sequences = sqlx::query_scalar!(
+			"SELECT sequence FROM events
+			 WHERE sequence > ?1 AND sequence <= ?2
+			 ORDER BY sequence LIMIT ?3",
+			reconciled_through,
+			indexed_through,
+			limit,
+		)
+		.fetch_all(self.connection())
+		.await?;
+		let traversed = sequences.len();
+		let batch_through = if traversed < SEARCH_INDEX_BATCH_LIMIT {
+			indexed_through
+		} else {
+			sequences.last().copied().unwrap_or(indexed_through)
+		};
+		// Current creation Events already have a document by the time this runs.
+		// A skipped name-change Event carries its own historical value; using the
+		// entity's latest row would collapse several rollback-era renames into
+		// duplicate, falsely referenced hits.
+		sqlx::query!(
+			"INSERT INTO search_name_documents (
+				conversation_id, sequence, field, body
+			)
+			SELECT c.conversation_id, e.sequence, 'name', CASE e.kind
+				WHEN 'conversation.name_changed' THEN
+					json_extract(e.payload, '$.name.value')
+				ELSE 'Conversation ' || substr(
+					replace(c.conversation_id, '-', ''), 1, 8
+				)
+			END
+			FROM events AS e
+			JOIN conversations AS c
+				ON c.conversation_id = e.conversation_id
+			WHERE e.kind IN (
+				'conversation.created', 'conversation.name_changed'
+			)
+				AND e.sequence > ?1 AND e.sequence <= ?2
+				AND NOT EXISTS (
+				SELECT 1 FROM search_name_documents AS d
+				WHERE d.conversation_id = c.conversation_id
+					AND d.sequence = e.sequence
+					AND d.field = 'name'
+			)",
+			reconciled_through,
+			batch_through,
+		)
+		.execute(self.connection())
+		.await?;
+		sqlx::query!(
+			"INSERT INTO search_name_documents (
+				conversation_id, sequence, field, body
+			)
+			SELECT r.conversation_id, e.sequence, 'name', CASE e.kind
+				WHEN 'run.name_changed' THEN
+					json_extract(e.payload, '$.name.value')
+				ELSE 'Run ' || substr(replace(r.run_id, '-', ''), 1, 8)
+			END
+			FROM events AS e
+			JOIN runs AS r
+				ON r.conversation_id = e.conversation_id
+				AND r.run_id = e.run_id
+			WHERE e.kind IN ('run.created', 'run.name_changed')
+				AND e.sequence > ?1 AND e.sequence <= ?2
+				AND NOT EXISTS (
+				SELECT 1 FROM search_name_documents AS d
+				WHERE d.conversation_id = r.conversation_id
+					AND d.sequence = e.sequence
+					AND d.field = 'name'
+			)",
+			reconciled_through,
+			batch_through,
+		)
+		.execute(self.connection())
+		.await?;
+		sqlx::query!(
+			"UPDATE search_name_index_state
+			 SET reconciled_through_sequence = ?1 WHERE singleton = 1",
+			batch_through,
+		)
+		.execute(self.connection())
+		.await?;
+		Ok(traversed)
+	}
+
 	/// Adds `documents` and records that the index now covers the journal
 	/// through `through_sequence`, in this one transaction. The position
 	/// moves forward only, and never past the journal.
@@ -183,17 +341,31 @@ impl WriteTransaction {
 			}
 			let conversation_id = document.conversation_id.to_string();
 			let sequence = sequence_column(document.sequence)?;
-			sqlx::query!(
-				"INSERT INTO search_documents (
-					conversation_id, sequence, field, body
-				) VALUES (?1, ?2, ?3, ?4)",
-				conversation_id,
-				sequence,
-				document.field,
-				document.body
-			)
-			.execute(self.connection())
-			.await?;
+			if document.field == "name" {
+				sqlx::query!(
+					"INSERT INTO search_name_documents (
+						conversation_id, sequence, field, body
+					) VALUES (?1, ?2, ?3, ?4)",
+					conversation_id,
+					sequence,
+					document.field,
+					document.body
+				)
+				.execute(self.connection())
+				.await?;
+			} else {
+				sqlx::query!(
+					"INSERT INTO search_documents (
+						conversation_id, sequence, field, body
+					) VALUES (?1, ?2, ?3, ?4)",
+					conversation_id,
+					sequence,
+					document.field,
+					document.body
+				)
+				.execute(self.connection())
+				.await?;
+			}
 		}
 		let through_sequence = sequence_column(through_sequence)?;
 		sqlx::query!(
@@ -218,14 +390,52 @@ impl WriteTransaction {
 		conversation_id: Uuid,
 	) -> Result<u64, StoreError> {
 		let conversation_id = conversation_id.to_string();
-		Ok(sqlx::query!(
+		let content = sqlx::query!(
 			"DELETE FROM search_documents WHERE conversation_id = ?1",
 			conversation_id
 		)
 		.execute(self.connection())
 		.await?
-		.rows_affected())
+		.rows_affected();
+		let names = sqlx::query!(
+			"DELETE FROM search_name_documents WHERE conversation_id = ?1",
+			conversation_id
+		)
+		.execute(self.connection())
+		.await?
+		.rows_affected();
+		Ok(content.saturating_add(names))
 	}
+}
+
+const CONTENT_SEARCH: &str = "SELECT rowid, conversation_id, sequence, field,
+	bm25(search_documents) AS score,
+	snippet(search_documents, 3, '', '', '…', ?2) AS excerpt
+	FROM search_documents
+	WHERE search_documents MATCH ?1
+	ORDER BY rank, sequence DESC, rowid
+	LIMIT ?3";
+
+const NAME_SEARCH: &str = "SELECT rowid, conversation_id, sequence, field,
+	bm25(search_name_documents) AS score,
+	snippet(search_name_documents, 3, '', '', '…', ?2) AS excerpt
+	FROM search_name_documents
+	WHERE search_name_documents MATCH ?1
+	ORDER BY rank, sequence DESC, rowid
+	LIMIT ?3";
+
+async fn search_table(
+	connection: &mut SqliteConnection,
+	query: &'static str,
+	expression: &str,
+	limit: i64,
+) -> Result<Vec<HitRow>, StoreError> {
+	Ok(sqlx::query_as(query)
+		.bind(expression)
+		.bind(EXCERPT_TOKENS)
+		.bind(limit)
+		.fetch_all(connection)
+		.await?)
 }
 
 /// Builds the FTS5 expression that matches every term as one quoted

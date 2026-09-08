@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sequence FROM events\n\t\t\t WHERE sequence > ?1 AND sequence <= ?2\n\t\t\t ORDER BY sequence LIMIT ?3",
+  "describe": {
+    "columns": [
+      {
+        "name": "sequence",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "sequence"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c3040f567a7a0e8dca67391023b3cfa8c17d989dd51f5d6a1869c58d5bf2d95c"
+}

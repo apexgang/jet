@@ -1,15 +1,19 @@
-use jet_store::Store;
+use jet_store::{
+	ConversationOriginRecord, NameRecord, NameSourceRecord, NewConversation,
+	NewRun, SEARCH_INDEX_BATCH_LIMIT, Store, WorkingTreeRecord,
+};
 use pretty_assertions::assert_eq;
+use uuid::Uuid;
 
 use crate::event::EventSubject;
 use crate::test_support::{
 	Diverged, actor, diverged, preview_promotion, request, start_core,
 };
 use crate::{
-	Command, CommandOutcome, Core, CoreError, CredentialSource, EventKind,
-	EventSequence, PairingGate, PairingMethod, PromotionDestination,
-	ProviderId, Query, QueryResult, SearchField, SearchHit, SearchResult,
-	SearchTerms,
+	Command, CommandOutcome, ConversationId, Core, CoreError, CredentialSource,
+	EventKind, EventSequence, Name, NameSource, PairingGate, PairingMethod,
+	PromotionDestination, ProviderId, Query, QueryResult, RetentionPolicy,
+	SearchField, SearchHit, SearchResult, SearchTerms, WorkingTree,
 };
 
 async fn search(core: &Core, text: &str) -> SearchResult {
@@ -218,6 +222,234 @@ async fn indexing_resumes_from_where_it_stopped() {
 				before.hits[0].clone(),
 			],
 		}
+	);
+}
+
+/// A rollback release can create a legacy Event after the names migration and
+/// advance the index beyond it. Startup reconciles the deterministic fallback
+/// even though ordinary Event indexing has no work left to read.
+#[tokio::test]
+async fn an_already_indexed_legacy_creation_gets_its_fallback_name() {
+	let dir = tempfile::tempdir().unwrap();
+	let path = dir.path().join("plane.sqlite3");
+	let conversation_id = ConversationId(
+		Uuid::parse_str("12345678-1234-5678-9234-567812345678").unwrap(),
+	);
+	let run_id = crate::RunId(
+		Uuid::parse_str("87654321-1234-5678-9234-567812345678").unwrap(),
+	);
+	let store = Store::open(&path).await.unwrap();
+	let (conversation_sequence, run_sequence) = store
+		.write(async |tx| {
+			tx.insert_conversation(NewConversation {
+				conversation_id: conversation_id.0,
+				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRecord::NoProject,
+				origin: ConversationOriginRecord::New,
+				created_at_unix_ms: 0,
+			})
+			.await?;
+			let event = EventKind::ConversationCreated {
+				name: None,
+				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTree::NoProject,
+				origin: crate::ConversationOrigin::New,
+			}
+			.to_record(
+				&actor(),
+				EventSubject::Conversation(conversation_id),
+				0,
+			)?;
+			let conversation_sequence = tx.append_event(event).await?.sequence;
+			tx.insert_run(NewRun {
+				run_id: run_id.0,
+				conversation_id: conversation_id.0,
+				created_at_unix_ms: 0,
+			})
+			.await?;
+			let event = EventKind::RunCreated { name: None }.to_record(
+				&actor(),
+				EventSubject::Run {
+					conversation_id,
+					run_id,
+				},
+				0,
+			)?;
+			let run_sequence = tx.append_event(event).await?.sequence;
+			tx.index_search_documents(Vec::new(), run_sequence).await?;
+			Ok::<_, CoreError>((
+				EventSequence(conversation_sequence),
+				EventSequence(run_sequence),
+			))
+		})
+		.await
+		.unwrap();
+	store.close().await;
+	drop(store);
+
+	let core = start_core(&path).await;
+	let conversation = search(&core, "Conversation 12345678").await;
+	let run = search(&core, "Run 87654321").await;
+
+	assert_eq!(
+		(conversation.hits, run.hits),
+		(
+			vec![SearchHit {
+				conversation_id,
+				sequence: conversation_sequence,
+				field: SearchField::Name,
+				excerpt: "Conversation 12345678".into(),
+			}],
+			vec![SearchHit {
+				conversation_id,
+				sequence: run_sequence,
+				field: SearchField::Name,
+				excerpt: "Run 87654321".into(),
+			}],
+		)
+	);
+}
+
+/// A rollback release can advance the shared index past name Events it does not
+/// understand. The next current release reconstructs each historical name from
+/// its Event without collapsing several renames into the entity's latest row.
+#[tokio::test]
+async fn name_changes_skipped_during_rollback_are_reconciled_on_upgrade() {
+	let dir = tempfile::tempdir().unwrap();
+	let path = dir.path().join("plane.sqlite3");
+	let conversation_id = ConversationId(Uuid::now_v7());
+	let run_id = crate::RunId(Uuid::now_v7());
+	let store = Store::open(&path).await.unwrap();
+	let (conversation_sequences, run_sequences) = store
+		.write(async |tx| {
+			tx.insert_conversation(NewConversation {
+				conversation_id: conversation_id.0,
+				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRecord::NoProject,
+				origin: ConversationOriginRecord::New,
+				created_at_unix_ms: 0,
+			})
+			.await?;
+			tx.insert_run(NewRun {
+				run_id: run_id.0,
+				conversation_id: conversation_id.0,
+				created_at_unix_ms: 0,
+			})
+			.await?;
+			for number in 0..SEARCH_INDEX_BATCH_LIMIT * 2 {
+				let event = EventKind::ConversationNameChanged {
+					name: Name {
+						value: format!("Historical filler {number}"),
+						source: NameSource::Manual,
+					},
+				}
+				.to_record(
+					&actor(),
+					EventSubject::Conversation(conversation_id),
+					0,
+				)?;
+				tx.append_event(event).await?;
+			}
+			let mut conversation_sequences = Vec::new();
+			for value in ["Conversation Alpha", "Conversation Beta"] {
+				tx.update_conversation_name(
+					conversation_id.0,
+					&NameRecord {
+						value: value.into(),
+						source: NameSourceRecord::Manual,
+					},
+				)
+				.await?;
+				let event = EventKind::ConversationNameChanged {
+					name: Name {
+						value: value.into(),
+						source: NameSource::Manual,
+					},
+				}
+				.to_record(
+					&actor(),
+					EventSubject::Conversation(conversation_id),
+					0,
+				)?;
+				conversation_sequences.push(EventSequence(
+					tx.append_event(event).await?.sequence,
+				));
+			}
+			let mut run_sequences = Vec::new();
+			for value in ["Run Alpha", "Run Beta"] {
+				tx.update_run_name(
+					run_id.0,
+					&NameRecord {
+						value: value.into(),
+						source: NameSourceRecord::Manual,
+					},
+				)
+				.await?;
+				let event = EventKind::RunNameChanged {
+					name: Name {
+						value: value.into(),
+						source: NameSource::Manual,
+					},
+				}
+				.to_record(
+					&actor(),
+					EventSubject::Run {
+						conversation_id,
+						run_id,
+					},
+					0,
+				)?;
+				run_sequences.push(EventSequence(
+					tx.append_event(event).await?.sequence,
+				));
+			}
+			// This is the rollback release advancing its old content index while
+			// remaining unaware of the separate name projection.
+			tx.index_search_documents(Vec::new(), run_sequences[1].0)
+				.await?;
+			Ok::<_, CoreError>((conversation_sequences, run_sequences))
+		})
+		.await
+		.unwrap();
+	store.close().await;
+	drop(store);
+
+	let core = start_core(&path).await;
+	let hits = [
+		search(&core, "Conversation Alpha").await.hits,
+		search(&core, "Conversation Beta").await.hits,
+		search(&core, "Run Alpha").await.hits,
+		search(&core, "Run Beta").await.hits,
+	];
+
+	assert_eq!(
+		hits,
+		[
+			vec![SearchHit {
+				conversation_id,
+				sequence: conversation_sequences[0],
+				field: SearchField::Name,
+				excerpt: "Conversation Alpha".into(),
+			}],
+			vec![SearchHit {
+				conversation_id,
+				sequence: conversation_sequences[1],
+				field: SearchField::Name,
+				excerpt: "Conversation Beta".into(),
+			}],
+			vec![SearchHit {
+				conversation_id,
+				sequence: run_sequences[0],
+				field: SearchField::Name,
+				excerpt: "Run Alpha".into(),
+			}],
+			vec![SearchHit {
+				conversation_id,
+				sequence: run_sequences[1],
+				field: SearchField::Name,
+				excerpt: "Run Beta".into(),
+			}],
+		]
 	);
 }
 

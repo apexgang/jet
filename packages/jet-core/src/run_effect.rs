@@ -232,11 +232,14 @@ async fn monitor(
 								.sum::<usize>()
 					}
 					Observation::NativeConversation(value)
+					| Observation::ConversationTitle(value)
+					| Observation::RunTitle(value)
 					| Observation::TurnCompleted {
 						native_conversation: value,
 						..
 					}
 					| Observation::Completed(value) => value.len(),
+					Observation::ProcessTitle { title, .. } => title.len(),
 					Observation::FileChanged(value) => {
 						serde_json::to_vec(value)
 							.map_err(crate::change_artifact::failed)?
@@ -288,6 +291,9 @@ fn event_count(observation: &Observation) -> usize {
 		| Observation::Activity(_)
 		| Observation::Output { .. }
 		| Observation::NativeConversation(_)
+		| Observation::ConversationTitle(_)
+		| Observation::RunTitle(_)
+		| Observation::ProcessTitle { .. }
 		| Observation::TurnCompleted { .. }
 		| Observation::LaunchFailed
 		| Observation::Disconnected

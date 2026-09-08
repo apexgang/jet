@@ -77,6 +77,8 @@ impl Client {
 		{
 			CommandResponse::PairingGateSet { gate } => Ok(gate),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -132,6 +134,8 @@ impl Client {
 				disclosure,
 			} => Ok((pending, disclosure)),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -193,6 +197,8 @@ impl Client {
 				Ok((pending, challenge))
 			}
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -252,6 +258,8 @@ impl Client {
 		{
 			CommandResponse::PairingConfirmed { pending } => Ok(pending),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -307,6 +315,8 @@ impl Client {
 		{
 			CommandResponse::PairingCompleted { client } => Ok(client),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -361,6 +371,8 @@ impl Client {
 		{
 			CommandResponse::PairedClientAccessSet { client } => Ok(client),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }
@@ -413,6 +425,8 @@ impl Client {
 		{
 			CommandResponse::PairedClientRevoked { client_id } => Ok(client_id),
 			other @ (CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }

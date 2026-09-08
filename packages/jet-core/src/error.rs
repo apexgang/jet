@@ -4,7 +4,10 @@ use jet_store::StoreError;
 use serde::{Deserialize, Serialize};
 
 use crate::capability::Capability;
-use crate::{EventSequence, FileRevision, FileTarget, Revision, Run, RunId};
+use crate::{
+	Conversation, ConversationId, EventSequence, FileRevision, FileTarget,
+	Revision, Run, RunId,
+};
 
 /// Stable metadata explaining how a client must restart a stale read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +43,11 @@ pub enum RecoveryAction {
 		/// Exact state now authoritative.
 		current_revision: FileRevision,
 	},
+	/// Refresh the current state of a Conversation before another Command.
+	RefreshConversation {
+		/// Conversation whose current state should be queried.
+		conversation_id: ConversationId,
+	},
 	/// Refresh the current state of a Run before preparing another Command.
 	RefreshRun {
 		/// Run whose current state should be queried.
@@ -53,7 +61,7 @@ pub enum RecoveryAction {
 }
 
 /// Structured current state returned for a stale Revision precondition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RevisionConflict {
 	/// Revision that is authoritative now.
 	pub current_revision: Revision,
@@ -62,8 +70,10 @@ pub struct RevisionConflict {
 }
 
 /// Safe resource state attached to a Revision conflict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConflictState {
+	/// The current Conversation.
+	Conversation(Conversation),
 	/// The current Run.
 	Run(Run),
 }
@@ -240,6 +250,11 @@ impl CoreError {
 		revision_conflict: RevisionConflict,
 	) -> Self {
 		let recovery_actions = match &revision_conflict.safe_state {
+			ConflictState::Conversation(conversation) => {
+				vec![RecoveryAction::RefreshConversation {
+					conversation_id: conversation.conversation_id,
+				}]
+			}
 			ConflictState::Run(run) => {
 				vec![RecoveryAction::RefreshRun { run_id: run.run_id }]
 			}

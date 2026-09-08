@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MAX(?1, COALESCE(MAX(sequence), 0)) AS \"sequence!: i64\"\n\t\t\t FROM events\n\t\t\t WHERE kind != 'conversation.name_changed'\n\t\t\t   AND kind != 'run.name_changed'",
+  "describe": {
+    "columns": [
+      {
+        "name": "sequence!: i64",
+        "ordinal": 0,
+        "type_info": "Null",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1561bb214ff65b6a797cbea0dff0c12e841bc594d18ddc67d1b985ede3d124f9"
+}

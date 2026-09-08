@@ -112,6 +112,23 @@ pub enum CraftEvent {
 		/// Origin is assigned by the host, never the Craft.
 		change: crate::CraftFileChange,
 	},
+	/// Structured native title candidate for the owning Conversation (1.5).
+	ConversationTitle {
+		/// Unescaped title text.
+		title: String,
+	},
+	/// Structured native title candidate for the current Run (1.5).
+	RunTitle {
+		/// Unescaped title text.
+		title: String,
+	},
+	/// Terminal/native title for exactly one Managed process (1.5).
+	ProcessTitle {
+		/// OS process identity reported by `run_started`.
+		pid: u32,
+		/// Unescaped live label.
+		title: String,
+	},
 	/// The helper definitively failed to launch a native Harness.
 	RunLaunchFailed,
 	/// Native process identities supplied by the Run-role helper.
@@ -179,6 +196,29 @@ impl<'de> Deserialize<'de> for CraftEvent {
 		let kind: Kind = crate::decode_control(raw.get().as_bytes())
 			.map_err(serde::de::Error::custom)?;
 		match kind.kind.as_str() {
+			"conversation_title" | "run_title" | "process_title" => {
+				#[derive(Deserialize)]
+				#[serde(tag = "kind")]
+				enum Title {
+					#[serde(rename = "conversation_title")]
+					Conversation { title: String },
+					#[serde(rename = "run_title")]
+					Run { title: String },
+					#[serde(rename = "process_title")]
+					Process { pid: u32, title: String },
+				}
+				let title: Title = crate::decode_control(raw.get().as_bytes())
+					.map_err(serde::de::Error::custom)?;
+				Ok(match title {
+					Title::Conversation { title } => {
+						Self::ConversationTitle { title }
+					}
+					Title::Run { title } => Self::RunTitle { title },
+					Title::Process { pid, title } => {
+						Self::ProcessTitle { pid, title }
+					}
+				})
+			}
 			"turn_started" | "turn_ended" | "file_changed" => {
 				#[derive(Deserialize)]
 				#[serde(tag = "kind", rename_all = "snake_case")]
