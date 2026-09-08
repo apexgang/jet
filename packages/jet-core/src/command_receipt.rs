@@ -15,6 +15,9 @@ const PREVIOUS_OUTCOME_VERSION: u32 = 1;
 /// Schedule results must be rejected safely by the previous name-aware release.
 const SCHEDULE_OUTCOME_VERSION: u32 = 3;
 
+/// Utility results must be rejected safely by the previous schedule-aware release.
+const UTILITY_OUTCOME_VERSION: u32 = 4;
+
 /// Uses the rollback release's encoding whenever that release can understand
 /// the result. Version 2 is reserved for name-only variants introduced here;
 /// additive fields on established structs remain valid v1 JSON because the
@@ -23,6 +26,7 @@ pub(crate) fn outcome_version(
 	result: &Result<CommandOutcome, CoreError>,
 ) -> u32 {
 	match result {
+		Ok(CommandOutcome::UtilityQueued { .. }) => UTILITY_OUTCOME_VERSION,
 		Ok(
 			CommandOutcome::ScheduleCreated(_)
 			| CommandOutcome::ScheduleCanceled { .. },
@@ -108,7 +112,9 @@ pub(crate) fn replay(
 		return Err(invalid_receipt("outcome"));
 	};
 	match outcome_version {
-		OUTCOME_VERSION | SCHEDULE_OUTCOME_VERSION => decode_result(&outcome),
+		OUTCOME_VERSION
+		| SCHEDULE_OUTCOME_VERSION
+		| UTILITY_OUTCOME_VERSION => decode_result(&outcome),
 		PREVIOUS_OUTCOME_VERSION => decode_previous_result(&outcome),
 		_ => Ok(Err(CoreError::incompatible(
 			"command.outcome_incompatible",

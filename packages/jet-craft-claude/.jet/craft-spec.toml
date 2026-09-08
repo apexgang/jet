@@ -7,9 +7,11 @@ schema = { major = 1, minor = 0 }
 broker_permissions = []
 host_access = [
 	{ kind = "executable", name = "claude" },
+	{ kind = "executable", name = "curl" },
 	{ kind = "network", destination = "api.anthropic.com" },
 ]
 features = [
+    { name = "utility" },
 	{ name = "turns", required = true },
 	{ name = "actions", required = true },
 	{ name = "resume" },

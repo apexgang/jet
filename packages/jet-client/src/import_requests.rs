@@ -30,7 +30,8 @@ impl Client {
 		self.require_minor(jet_protocol::IMPORTED_CONVERSATIONS_MINOR)?;
 		match self.query(QueryRequest::ExternalConversations).await? {
 			QueryResponse::ExternalConversations(list) => Ok(list),
-			other @ (QueryResponse::ScheduledTasks(_)
+			other @ (QueryResponse::Utility(_)
+			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -84,7 +85,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::ConversationImported(imported) => Ok(imported),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -149,7 +151,8 @@ impl Client {
 			CommandResponse::ConversationCreated(conversation) => {
 				Ok(conversation)
 			}
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)

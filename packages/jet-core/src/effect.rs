@@ -10,6 +10,7 @@ use crate::{CommandId, Core, CoreError, PromotionId, RunId, promotion_effect};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum EffectKind {
+	Utility,
 	StartTerminal {
 		terminal_id: crate::TerminalId,
 	},
@@ -189,6 +190,7 @@ async fn settle(
 	now_unix_ms: i64,
 ) -> Result<(), CoreError> {
 	match effect.kind {
+		EffectKind::Utility => Ok(()),
 		EffectKind::StartTerminal { terminal_id }
 		| EffectKind::CloseTerminal { terminal_id } => {
 			crate::terminal_effect::settle(
@@ -218,6 +220,7 @@ impl TryFrom<EffectRecord> for Effect {
 
 	fn try_from(record: EffectRecord) -> Result<Self, CoreError> {
 		let kind = match record.kind {
+			EffectKindRecord::Utility => EffectKind::Utility,
 			EffectKindRecord::StartTerminal => EffectKind::StartTerminal {
 				terminal_id: crate::TerminalId(
 					record.terminal_id.ok_or_else(crate::terminal::missing)?,

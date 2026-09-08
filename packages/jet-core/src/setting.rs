@@ -109,6 +109,14 @@ impl SettingScopeKind {
 /// A Setting this core understands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SettingKey {
+	/// Enable Utility Git text independently of automatic committing.
+	UtilityGitText,
+	/// Persist disclosure and consent for sending Conversation content to this exact Utility binding.
+	UtilityContentConsent,
+	/// The single Plane-wide Utility Account binding, empty to disable routing.
+	UtilityAccountBinding,
+	/// Enable natural-language Autodelete compilation.
+	UtilityAutodeleteCompilation,
 	/// Whether the Utility model names Conversations automatically.
 	UtilityAutomaticNaming,
 	/// Whether Jet commits Harness changes without being asked (ADR-0029).
@@ -150,7 +158,7 @@ struct Catalog {
 }
 
 /// Every Setting this core resolves, in the order a snapshot reports them.
-const CATALOG: [Catalog; 4] = [
+const CATALOG: [Catalog; 8] = [
 	Catalog {
 		key: SettingKey::UtilityAutomaticNaming,
 		spelling: "utility.automatic_naming",
@@ -182,6 +190,30 @@ const CATALOG: [Catalog; 4] = [
 		spelling: "security.audit_retention_days",
 		scopes: &[SettingScopeKind::Plane],
 		built_in: BuiltIn::Count(DEFAULT_AUDIT_RETENTION_DAYS),
+	},
+	Catalog {
+		key: SettingKey::UtilityGitText,
+		spelling: "utility.git_text",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Flag(false),
+	},
+	Catalog {
+		key: SettingKey::UtilityContentConsent,
+		spelling: "utility.content_consent",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Text(""),
+	},
+	Catalog {
+		key: SettingKey::UtilityAccountBinding,
+		spelling: "utility.account_binding",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Text(""),
+	},
+	Catalog {
+		key: SettingKey::UtilityAutodeleteCompilation,
+		spelling: "utility.autodelete_compilation",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Flag(false),
 	},
 ];
 
@@ -258,6 +290,18 @@ impl SettingKey {
 	/// Returns an `invalid_input` [`CoreError`] when the value has the wrong
 	/// shape or exceeds the bound on stored text.
 	fn require_value(self, value: &SettingValue) -> Result<(), CoreError> {
+		if matches!(
+			self,
+			Self::UtilityAccountBinding | Self::UtilityContentConsent
+		) && let SettingValue::Text(text) = value
+			&& !text.is_empty()
+			&& uuid::Uuid::parse_str(text).is_err()
+		{
+			return Err(CoreError::invalid_input(
+				"setting.binding_invalid",
+				"select an Account binding UUID, or empty text to clear it",
+			));
+		}
 		let expected = self.catalog().built_in.value();
 		if std::mem::discriminant(&expected) != std::mem::discriminant(value) {
 			return Err(CoreError::invalid_input(

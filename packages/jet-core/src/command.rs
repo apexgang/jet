@@ -113,6 +113,11 @@ impl CommandEnvelope {
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
+	/// Admit one bounded Utility request.
+	RequestUtility {
+		/// Purpose-specific input.
+		request: crate::UtilityRequest,
+	},
 	/// Attach a daily Scheduled task to a retained Conversation.
 	CreateSchedule {
 		/// Owning Conversation.
@@ -387,7 +392,8 @@ impl Command {
 	/// (ADR-0086).
 	pub(crate) fn required_capabilities(&self) -> &'static [Capability] {
 		match self {
-			Self::CreateSchedule { .. }
+			Self::RequestUtility { .. }
+			| Self::CreateSchedule { .. }
 			| Self::CancelSchedule { .. }
 			| Self::SetConversationName { .. }
 			| Self::SetRunName { .. }
@@ -455,6 +461,11 @@ impl Command {
 /// The durable result of a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
+	/// Durable Utility identity, resolved by a subsequent Query.
+	UtilityQueued {
+		/// Plane-assigned identity.
+		job_id: Uuid,
+	},
 	/// Enabled immutable schedule and its first persisted firing.
 	ScheduleCreated(crate::ScheduledTask),
 	/// Removed schedule identity.
@@ -699,6 +710,7 @@ impl Core {
 		// Command finishes what an interruption here leaves (ADR-0036).
 		self.turn_wake.send_replace(());
 		self.run_work.notify_one();
+		self.utility_wake.notify_one();
 		self.index_search().await?;
 		Ok(outcome)
 	}
@@ -721,7 +733,8 @@ fn redacted_for_receipt(
 			})
 		}
 		Ok(
-			outcome @ (CommandOutcome::UserEditApplied(_)
+			outcome @ (CommandOutcome::UtilityQueued { .. }
+			| CommandOutcome::UserEditApplied(_)
 			| CommandOutcome::ConversationNamed(_)
 			| CommandOutcome::RunNamed(_)
 			| CommandOutcome::TurnWithdrawn(_)
@@ -780,6 +793,9 @@ async fn execute_new(
 		workspace_home,
 	} = context;
 	match command {
+		Command::RequestUtility { request } => {
+			crate::utility_work::admit(tx, actor, command_id, request).await
+		}
 		Command::ApplyUserEdit { .. } => {
 			let Prepared::UserEdit(prepared) = prepared else {
 				return Err(CoreError::internal(

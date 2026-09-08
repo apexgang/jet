@@ -235,6 +235,8 @@ pub struct UserEditIntentRecord {
 /// Closed durable spelling of external work understood by this release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectKindRecord {
+	/// One bounded Utility inference request.
+	Utility,
 	/// Start a Workspace terminal.
 	StartTerminal,
 	/// Close a Workspace terminal.
@@ -253,6 +255,7 @@ pub enum EffectKindRecord {
 impl EffectKindRecord {
 	pub(crate) fn as_str(self) -> &'static str {
 		match self {
+			Self::Utility => "utility.infer",
 			Self::StartTerminal => "terminal.start",
 			Self::CloseTerminal => "terminal.close",
 			Self::ResolveExecution => "execution.resolve",
@@ -264,6 +267,7 @@ impl EffectKindRecord {
 
 	pub(crate) fn parse(text: &str) -> Option<Self> {
 		match text {
+			"utility.infer" => Some(Self::Utility),
 			"terminal.start" => Some(Self::StartTerminal),
 			"terminal.close" => Some(Self::CloseTerminal),
 			"execution.resolve" => Some(Self::ResolveExecution),

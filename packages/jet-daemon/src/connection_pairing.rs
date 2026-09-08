@@ -73,6 +73,7 @@ async fn apply(
 			})
 		}
 		CommandOutcome::UserEditApplied(_)
+		| CommandOutcome::UtilityQueued { .. }
 		| CommandOutcome::ScheduleCreated(_)
 		| CommandOutcome::ScheduleCanceled { .. }
 		| CommandOutcome::ConversationNamed(_)

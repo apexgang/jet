@@ -172,6 +172,56 @@
   {
     "schema": "ClientMessage",
     "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"00000000-0000-0000-0000-000000000038\",\"command\":{\"type\":\"request_utility\",\"request\":{\"purpose\":\"naming\",\"run_id\":\"00000000-0000-0000-0000-000000000038\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"00000000-0000-0000-0000-000000000038\",\"command\":{\"type\":\"request_utility\",\"request\":{\"purpose\":\"git_text\",\"run_id\":\"00000000-0000-0000-0000-000000000038\",\"turn\":1}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"00000000-0000-0000-0000-000000000038\",\"command\":{\"type\":\"request_utility\",\"request\":{\"purpose\":\"autodelete\",\"prompt\":\"Inactive for 90 days\"}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":1,\"result\":{\"type\":\"utility\",\"job_id\":\"00000000-0000-0000-0000-000000000038\",\"plane_id\":\"00000000-0000-0000-0000-000000000038\",\"purpose\":\"autodelete\",\"provider\":\"openai\",\"binding_id\":\"00000000-0000-0000-0000-000000000038\",\"model\":\"pinned-model\",\"policy\":{\"version\":1,\"enabled\":true,\"cross_provider_consent\":false},\"outcome\":{\"status\":\"pending\"}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":1,\"result\":{\"type\":\"utility\",\"job_id\":\"00000000-0000-0000-0000-000000000038\",\"plane_id\":\"00000000-0000-0000-0000-000000000038\",\"purpose\":\"autodelete\",\"provider\":\"openai\",\"binding_id\":\"00000000-0000-0000-0000-000000000038\",\"model\":\"pinned-model\",\"policy\":{\"version\":1,\"enabled\":true,\"cross_provider_consent\":false},\"outcome\":{\"status\":\"draft\",\"inactive_days\":90}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":1,\"result\":{\"type\":\"utility\",\"job_id\":\"00000000-0000-0000-0000-000000000038\",\"plane_id\":\"00000000-0000-0000-0000-000000000038\",\"purpose\":\"autodelete\",\"provider\":\"openai\",\"binding_id\":\"00000000-0000-0000-0000-000000000038\",\"model\":\"pinned-model\",\"policy\":{\"version\":1,\"enabled\":true,\"cross_provider_consent\":false},\"outcome\":{\"status\":\"text\",\"text\":\"Update README\",\"body\":\"\",\"fallback_reason\":null}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":1,\"result\":{\"type\":\"utility\",\"job_id\":\"00000000-0000-0000-0000-000000000038\",\"plane_id\":\"00000000-0000-0000-0000-000000000038\",\"purpose\":\"autodelete\",\"provider\":\"openai\",\"binding_id\":\"00000000-0000-0000-0000-000000000038\",\"model\":\"pinned-model\",\"policy\":{\"version\":1,\"enabled\":true,\"cross_provider_consent\":false},\"outcome\":{\"status\":\"refused\",\"reason\":\"utility.disabled\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":1,\"query\":{\"type\":\"utility\",\"job_id\":\"00000000-0000-0000-0000-000000000038\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":1,\"result\":{\"type\":\"utility_queued\",\"job_id\":\"00000000-0000-0000-0000-000000000038\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"00000000-0000-0000-0000-000000000038\",\"command\":{\"type\":\"request_utility\",\"request\":{\"purpose\":\"autodelete\",\"prompt\":\"90 days\",\"tools\":[]}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
     "payload": "{\"kind\":\"command\",\"id\":4,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"set_conversation_name\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"expected_revision\":\"7\",\"name\":\"Scheduled work\"}}"
   },
   {

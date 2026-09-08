@@ -253,6 +253,26 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 					SettingValue::Count(365),
 					SettingSource::BuiltIn
 				),
+				resolved(
+					SettingKey::UtilityGitText,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::UtilityContentConsent,
+					SettingValue::Text(String::new()),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::UtilityAccountBinding,
+					SettingValue::Text(String::new()),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::UtilityAutodeleteCompilation,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
 			],
 			vec![
 				resolved(
@@ -275,6 +295,26 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 				resolved(
 					SettingKey::SecurityAuditRetentionDays,
 					SettingValue::Count(365),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::UtilityGitText,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::UtilityContentConsent,
+					SettingValue::Text(String::new()),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::UtilityAccountBinding,
+					SettingValue::Text(String::new()),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::UtilityAutodeleteCompilation,
+					SettingValue::Flag(false),
 					SettingSource::BuiltIn
 				),
 			]

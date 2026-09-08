@@ -32,7 +32,8 @@ impl Client {
 				))
 			}
 			QueryResponse::Status(status) => Ok(status),
-			other @ (QueryResponse::ScheduledTasks(_)
+			other @ (QueryResponse::Utility(_)
+			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -67,7 +68,8 @@ impl Client {
 	pub async fn conversations(&self) -> Result<ConversationList, ClientError> {
 		match self.query(QueryRequest::Conversations).await? {
 			QueryResponse::Conversations(list) => Ok(list),
-			other @ (QueryResponse::ScheduledTasks(_)
+			other @ (QueryResponse::Utility(_)
+			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -109,7 +111,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Conversations(list) => Ok(list),
-			other @ (QueryResponse::ScheduledTasks(_)
+			other @ (QueryResponse::Utility(_)
+			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -151,7 +154,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Conversation(snapshot) => Ok(*snapshot),
-			other @ (QueryResponse::ScheduledTasks(_)
+			other @ (QueryResponse::Utility(_)
+			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -190,7 +194,8 @@ impl Client {
 	) -> Result<EventPage, ClientError> {
 		match self.query(QueryRequest::Events { after: sequence }).await? {
 			QueryResponse::Events(page) => Ok(page),
-			other @ (QueryResponse::ScheduledTasks(_)
+			other @ (QueryResponse::Utility(_)
+			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -232,7 +237,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::AuditEpochBegun { epoch } => Ok(epoch),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -281,7 +287,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::SecurityAudit(page) => Ok(page),
-			other @ (QueryResponse::ScheduledTasks(_)
+			other @ (QueryResponse::Utility(_)
+			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -363,7 +370,8 @@ impl Client {
 			CommandResponse::ConversationCreated(conversation) => {
 				Ok(conversation)
 			}
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -415,7 +423,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::RunCreated(run) => Ok(run),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -474,7 +483,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::RunTransitioned(run) => Ok(run),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -525,7 +535,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Settings(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::ScheduledTasks(_)
+			other @ (QueryResponse::Utility(_)
+			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -574,7 +585,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::SettingSet { value, .. } => Ok(value),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -628,7 +640,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::SettingCleared { .. } => Ok(()),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -681,7 +694,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Capabilities(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::ScheduledTasks(_)
+			other @ (QueryResponse::Utility(_)
+			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -730,7 +744,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::AccountBindings(list) => Ok(list),
-			other @ (QueryResponse::ScheduledTasks(_)
+			other @ (QueryResponse::Utility(_)
+			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -790,7 +805,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::AccountBound(binding) => Ok(binding),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -848,7 +864,8 @@ impl Client {
 				credential_reference,
 				..
 			} => Ok(credential_reference),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)

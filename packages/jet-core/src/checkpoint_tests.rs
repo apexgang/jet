@@ -1049,3 +1049,112 @@ impl RunConnection for Connection {
 
 #[path = "checkpoint_regression_tests.rs"]
 mod regression;
+
+#[tokio::test]
+async fn utility_git_text_uses_only_the_requested_checkpoint_and_plane_instructions()
+ {
+	use crate::utility_tests::{Inference, configured, generate, setting};
+	let dir = tempfile::tempdir().unwrap();
+	let (core, sender) = start(dir.path()).await;
+	let peer = Arc::new(Inference {
+		calls: std::sync::Mutex::default(),
+		output: r#"{"subject":"Update README","body":"Describe the change."}"#
+			.into(),
+	});
+	let core = Arc::new(
+		Arc::try_unwrap(core)
+			.unwrap()
+			.with_utility_host(peer.clone()),
+	);
+	let binding = configured(&core).await;
+	setting(
+		&core,
+		SettingKey::UtilityContentConsent,
+		SettingValue::Text(binding.binding_id.0.to_string()),
+	)
+	.await;
+	setting(
+		&core,
+		SettingKey::GitMessageInstructions,
+		SettingValue::Text("Use imperative subjects".into()),
+	)
+	.await;
+	let root = dir.path().join("repo");
+	let project_id = register_repository(&core, &root).await;
+	let CommandOutcome::ConversationCreated(conversation) = core
+		.execute(
+			&actor(),
+			request(Command::CreateConversation {
+				retention: RetentionPolicy::Retain,
+				working_tree: WorkingTreeRequest::LocalCheckout { project_id },
+			}),
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("Conversation")
+	};
+	let CommandOutcome::RunCreated(run) = core
+		.execute(
+			&actor(),
+			request(Command::StartRun {
+				conversation_id: conversation.conversation_id,
+				craft: "fake".into(),
+				prompt: "UNRELATED OPENING CONTENT".into(),
+			}),
+		)
+		.await
+		.unwrap()
+	else {
+		panic!("Run")
+	};
+	core.perform_runs().await.unwrap();
+	wait_for(&core, run.run_id, RunLifecycle::Active).await;
+	std::fs::write(root.join("README.md"), "Turn one\n").unwrap();
+	sender
+		.send(RunObservation::Completed("native-1".into()))
+		.await
+		.unwrap();
+	sender.send(RunObservation::Ended(Some(0))).await.unwrap();
+	sender
+		.send(RunObservation::Progress {
+			offset: 2,
+			checkpoint: String::new(),
+		})
+		.await
+		.unwrap();
+	wait_for(&core, run.run_id, RunLifecycle::Completed).await;
+	let input = UtilityRequest::GitText {
+		run_id: run.run_id,
+		turn: 1,
+	};
+	let disabled = generate(&core, input.clone()).await;
+	assert_eq!(
+		disabled.outcome,
+		UtilityOutcome::Text {
+			text: "Update Run changes (turn 1)".into(),
+			body: String::new(),
+			fallback_reason: Some("utility.disabled".into())
+		}
+	);
+	assert!(peer.calls.lock().unwrap().is_empty());
+	setting(&core, SettingKey::UtilityGitText, SettingValue::Flag(true)).await;
+	let diff = wait_diff(&core, run.run_id, DiffScope::Turn { turn: 1 }).await;
+	std::fs::write(root.join("README.md"), "UNRELATED LIVE EDIT\n").unwrap();
+	let job = generate(&core, input).await;
+	assert_eq!(
+		job.outcome,
+		UtilityOutcome::Text {
+			text: "Update README".into(),
+			body: "Describe the change.".into(),
+			fallback_reason: None
+		}
+	);
+	assert_eq!(
+		*peer.calls.lock().unwrap(),
+		vec![UtilityInput::GitText {
+			patch: diff.patch,
+			instructions: "Use imperative subjects".into()
+		}]
+	);
+}

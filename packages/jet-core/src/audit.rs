@@ -57,6 +57,8 @@ pub struct AuditRecordId(pub Uuid);
 /// what happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditDecision {
+	/// The owner changed Utility routing or purpose permissions.
+	UtilityPolicyChanged,
 	/// A terminal open was admitted.
 	TerminalOpened,
 	/// A terminal close was admitted.
@@ -229,6 +231,7 @@ impl AuditDecision {
 			Self::ExecutionResolutionRequested => {
 				"execution.resolution_requested"
 			}
+			Self::UtilityPolicyChanged => "policy.utility_changed",
 			Self::TerminalOpened => "terminal.opened",
 			Self::TerminalClosed => "terminal.closed",
 			Self::TerminalInput => "terminal.input",
@@ -265,7 +268,7 @@ impl AuditDecision {
 		match self {
 			Self::ExecutionResolutionRequested => AuditRisk::Destructive,
 			Self::TerminalOpened | Self::TerminalClosed | Self::TerminalInput | Self::ConnectionAuthenticated => AuditRisk::Routine,
-			Self::AccountBound
+			Self::UtilityPolicyChanged | Self::AccountBound
 			| Self::AccountUnbound
 			| Self::GitAutomationEnabled
 			// Unpinning a policy hands the choice back to the scope above,
@@ -385,6 +388,7 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		| Command::ForkConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
+		| Command::RequestUtility { .. }
 		| Command::CreateSchedule { .. }
 		| Command::CancelSchedule { .. }
 		| Command::SubmitTurn { .. }
@@ -438,6 +442,7 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::ForkConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
+		| Command::RequestUtility { .. }
 		| Command::CreateSchedule { .. }
 		| Command::CancelSchedule { .. }
 		| Command::SubmitTurn { .. }
@@ -501,6 +506,13 @@ pub(crate) fn stored_setting(
 	value: &SettingValue,
 ) -> Option<AuditDecision> {
 	match (key, value) {
+		(
+			SettingKey::UtilityGitText
+			| SettingKey::UtilityContentConsent
+			| SettingKey::UtilityAccountBinding
+			| SettingKey::UtilityAutodeleteCompilation,
+			_,
+		) => Some(AuditDecision::UtilityPolicyChanged),
 		(SettingKey::GitAutoCommit, SettingValue::Flag(true)) => {
 			Some(AuditDecision::GitAutomationEnabled)
 		}
@@ -526,6 +538,12 @@ pub(crate) fn stored_setting(
 /// What one scope giving up its own value for `key` decides.
 pub(crate) fn cleared_setting(key: SettingKey) -> Option<AuditDecision> {
 	match key {
+		SettingKey::UtilityGitText
+		| SettingKey::UtilityContentConsent
+		| SettingKey::UtilityAccountBinding
+		| SettingKey::UtilityAutodeleteCompilation => {
+			Some(AuditDecision::UtilityPolicyChanged)
+		}
 		SettingKey::GitAutoCommit => Some(AuditDecision::GitAutomationCleared),
 		SettingKey::SecurityAuditRetentionDays => {
 			Some(AuditDecision::AuditRetentionCleared)

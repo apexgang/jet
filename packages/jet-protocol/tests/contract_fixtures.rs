@@ -28,6 +28,18 @@ fn shared_craft_contract_fixtures_match_the_wire_decoder() {
 	accepts_exactly(
 		include_str!("../contracts/craft-fixtures.json"),
 		|schema, payload| match schema {
+			"CraftUtilityModel" => {
+				decode_control::<jet_protocol::CraftUtilityModel>(payload)
+					.is_ok()
+			}
+			"CraftUtilityRequest" => {
+				decode_control::<jet_protocol::CraftUtilityRequest>(payload)
+					.is_ok()
+			}
+			"CraftUtilityReply" => {
+				decode_control::<jet_protocol::CraftUtilityReply>(payload)
+					.is_ok()
+			}
 			"CraftCommand" => decode_control::<CraftCommand>(payload).is_ok(),
 			"CraftEvent" => decode_control::<CraftEvent>(payload).is_ok(),
 			"ProtocolOffer" => decode_control::<ProtocolOffer>(payload).is_ok(),

@@ -18,6 +18,7 @@ mod run_host;
 mod run_recovery;
 mod stdio;
 mod translate;
+mod utility_host;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

@@ -24,7 +24,7 @@ type Writer = FrameWriter<OwnedWriteHalf>;
 async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 	tokio::time::timeout(Duration::from_secs(180), async {
 		let (root, run, harness) = workspace();
-		let mut helper = start_helper(&root, run, &harness);
+		let mut helper = start_helper(&root, run, &harness).await;
 		let (craft_socket, mut craft) = start_craft(&root, &harness);
 		let (mut reader, mut writer, ready) =
 			accept_craft(&craft_socket, run).await;
@@ -337,7 +337,7 @@ fn workspace() -> (PathBuf, Uuid, PathBuf) {
 	(root, Uuid::new_v4(), harness)
 }
 
-fn start_helper(
+async fn start_helper(
 	root: &Path,
 	run: Uuid,
 	harness: &Path,
@@ -358,7 +358,7 @@ fn start_helper(
 		.unwrap();
 	std::io::Write::write_all(&mut file, &encode_control(&config).unwrap())
 		.unwrap();
-	tokio::process::Command::new(
+	let mut child = tokio::process::Command::new(
 		PathBuf::from(env!("CARGO_BIN_EXE_jet-craft-claude"))
 			.with_file_name("jetfueld"),
 	)
@@ -366,7 +366,19 @@ fn start_helper(
 	.arg(path)
 	.kill_on_drop(true)
 	.spawn()
-	.unwrap()
+	.unwrap();
+	tokio::time::timeout(Duration::from_secs(10), async {
+		while !root.join("h.sock").exists() {
+			assert!(
+				child.try_wait().unwrap().is_none(),
+				"helper exited before binding its socket"
+			);
+			tokio::time::sleep(Duration::from_millis(10)).await;
+		}
+	})
+	.await
+	.expect("the helper serves its private socket");
+	child
 }
 
 /// Install the Craft the way a Plane owner would: the executable beside the

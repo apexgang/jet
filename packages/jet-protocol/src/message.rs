@@ -141,6 +141,11 @@ pub enum ServerMessage {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryRequest {
+	/// Read a durable Utility result.
+	Utility {
+		/// Plane-assigned job identity.
+		job_id: Uuid,
+	},
 	/// Enabled schedules in one Conversation.
 	ScheduledTasks {
 		/// Owning Conversation.
@@ -295,6 +300,8 @@ pub enum QueryRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryResponse {
+	/// Attributed Utility result, with no execution authority.
+	Utility(crate::UtilityJob),
 	/// Fenced schedule snapshot.
 	ScheduledTasks(crate::ScheduledTasks),
 	/// Bounded editable content and its exact file Revision.

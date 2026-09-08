@@ -19,7 +19,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::TurnQueue(queue) => Ok(queue),
-			other @ (QueryResponse::ScheduledTasks(_)
+			other @ (QueryResponse::Utility(_)
+			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::Status(_)

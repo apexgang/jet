@@ -151,6 +151,11 @@ pub struct ConversationSnapshot {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandRequest {
+	/// Admit one bounded Utility request.
+	RequestUtility {
+		/// Purpose-specific input references.
+		request: crate::UtilityRequest,
+	},
 	/// Attach a daily Scheduled task to a retained Conversation.
 	CreateSchedule {
 		/// Owning Conversation.
@@ -447,6 +452,11 @@ pub enum CommandRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResponse {
+	/// Durable Utility admission; query for its result.
+	UtilityQueued {
+		/// Plane-assigned job identity.
+		job_id: Uuid,
+	},
 	/// Enabled daily schedule.
 	ScheduleCreated {
 		/// Enabled schedule and next firing.

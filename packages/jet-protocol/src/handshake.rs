@@ -14,8 +14,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 21;
+pub const PROTOCOL_MINOR: u32 = 22;
 
+/// Bounded Utility inference and its Plane policy.
+pub const UTILITY_MINOR: u32 = 22;
 /// Durable Conversation schedules and scheduled Event origins.
 pub const SCHEDULES_MINOR: u32 = 21;
 /// Independent Conversation and Run names plus Managed-process labels.

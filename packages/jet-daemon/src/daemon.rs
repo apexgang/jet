@@ -73,6 +73,9 @@ pub(crate) async fn run(
 				core.with_run_host(Arc::new(
 					crate::run_host::CraftProcesses::default(),
 				))
+				.with_utility_host(Arc::new(crate::utility_host::Utilities {
+					home: home.root().to_path_buf(),
+				}))
 				.with_terminal_host(Arc::new(crate::terminal_host::Terminals)),
 			),
 			Err(error) => {
@@ -111,6 +114,18 @@ pub(crate) async fn run(
 	if let Err(error) = core.recover_runs().await {
 		eprintln!("jetd: cannot recover executions: {error}");
 	}
+	let utility_core = Arc::clone(&core);
+	let utility_work = tokio::spawn(async move {
+		loop {
+			if let Err(error) = utility_core.perform_utilities().await {
+				eprintln!("jetd: cannot settle Utility work: {error}");
+			}
+			tokio::select! {
+				() = utility_core.wait_for_utility_work() => {},
+				() = tokio::time::sleep(Duration::from_secs(5)) => {},
+			}
+		}
+	});
 	let recovery_core = Arc::clone(&core);
 	let work_core = Arc::clone(&core);
 	let run_work = tokio::spawn(async move {
@@ -152,6 +167,8 @@ pub(crate) async fn run(
 	let exit = serve(listener, &core).await;
 	recovery.abort();
 	run_work.abort();
+	utility_work.abort();
+	let _ = utility_work.await;
 	close_store(&core).await;
 	drop(lock);
 	exit

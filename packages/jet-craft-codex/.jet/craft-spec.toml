@@ -7,10 +7,12 @@ schema = { major = 1, minor = 0 }
 broker_permissions = []
 host_access = [
 	{ kind = "executable", name = "codex" },
+	{ kind = "executable", name = "curl" },
 	{ kind = "network", destination = "api.openai.com" },
 	{ kind = "network", destination = "chatgpt.com" },
 ]
 features = [
+    { name = "utility" },
 	{ name = "turns", required = true },
 	{ name = "actions", required = true },
 ]

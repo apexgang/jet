@@ -385,6 +385,10 @@ struct MinorRequirement {
 
 fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 	match query {
+		QueryRequest::Utility { .. } => Some(MinorRequirement {
+			minor: jet_protocol::UTILITY_MINOR,
+			feature: "Utility work",
+		}),
 		QueryRequest::ScheduledTasks { .. } => Some(MinorRequirement {
 			minor: jet_protocol::SCHEDULES_MINOR,
 			feature: "Scheduled tasks",
@@ -418,6 +422,20 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 		QueryRequest::NextConversations { .. } => Some(MinorRequirement {
 			minor: jet_protocol::FENCED_READS_MINOR,
 			feature: "Conversation pagination",
+		}),
+		QueryRequest::Settings {
+			selection:
+				jet_protocol::SettingSelection::Key {
+					key:
+						jet_protocol::SettingKey::UtilityAccountBinding
+						| jet_protocol::SettingKey::UtilityContentConsent
+						| jet_protocol::SettingKey::UtilityAutodeleteCompilation
+						| jet_protocol::SettingKey::UtilityGitText,
+				},
+			..
+		} => Some(MinorRequirement {
+			minor: jet_protocol::UTILITY_MINOR,
+			feature: "Utility policy",
 		}),
 		QueryRequest::Settings { .. } => Some(MinorRequirement {
 			minor: jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR,
@@ -472,6 +490,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 
 fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 	match command {
+		CommandRequest::RequestUtility { .. } => Some(MinorRequirement {
+			minor: jet_protocol::UTILITY_MINOR,
+			feature: "Utility work",
+		}),
 		CommandRequest::CreateSchedule { .. }
 		| CommandRequest::CancelSchedule { .. } => Some(MinorRequirement {
 			minor: jet_protocol::SCHEDULES_MINOR,
@@ -509,6 +531,25 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		| CommandRequest::StopRun { .. } => Some(MinorRequirement {
 			minor: jet_protocol::EXECUTION_CONTROL_MINOR,
 			feature: "execution control",
+		}),
+		CommandRequest::SetSetting {
+			key:
+				jet_protocol::SettingKey::UtilityAccountBinding
+				| jet_protocol::SettingKey::UtilityContentConsent
+				| jet_protocol::SettingKey::UtilityAutodeleteCompilation
+				| jet_protocol::SettingKey::UtilityGitText,
+			..
+		}
+		| CommandRequest::ClearSetting {
+			key:
+				jet_protocol::SettingKey::UtilityAccountBinding
+				| jet_protocol::SettingKey::UtilityContentConsent
+				| jet_protocol::SettingKey::UtilityAutodeleteCompilation
+				| jet_protocol::SettingKey::UtilityGitText,
+			..
+		} => Some(MinorRequirement {
+			minor: jet_protocol::UTILITY_MINOR,
+			feature: "Utility policy",
 		}),
 		CommandRequest::SetSetting { .. }
 		| CommandRequest::ClearSetting { .. } => Some(MinorRequirement {
