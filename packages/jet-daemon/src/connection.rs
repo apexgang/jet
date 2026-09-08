@@ -605,6 +605,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 				feature: "importing external Conversations",
 			})
 		}
+		CommandRequest::HandoffConversation(_) => Some(MinorRequirement {
+			minor: jet_protocol::HANDOFFS_MINOR,
+			feature: "cross-Harness Handoff",
+		}),
 		CommandRequest::ForkConversation { .. } => Some(MinorRequirement {
 			minor: jet_protocol::CONVERSATION_FORKS_MINOR,
 			feature: "Conversation forks",

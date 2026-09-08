@@ -236,8 +236,9 @@ pub enum Command {
 		/// Where it does its work.
 		working_tree: WorkingTreeRequest,
 	},
-	/// Create a new Conversation and separate Workspace from one immutable
-	/// Change checkpoint (ADR-0035).
+	/// Continue through another Harness with a new Conversation and Workspace.
+	HandoffConversation(crate::HandoffRequest),
+	/// Fork from an immutable checkpoint rather than a current Handoff package.
 	ForkConversation {
 		/// Run that owns the selected checkpoint.
 		source_run_id: RunId,
@@ -421,6 +422,7 @@ impl Command {
 				..
 			}
 			| Self::ForkConversation { .. }
+			| Self::HandoffConversation(_)
 			| Self::ResumeImportedConversation {
 				working_tree: WorkingTreeRequest::Workspace { .. },
 				..
@@ -1061,6 +1063,23 @@ async fn execute_new(
 				.await
 			}
 		},
+		Command::HandoffConversation(_) => {
+			let Prepared::Handoff(prepared) = prepared else {
+				return Err(CoreError::internal(
+					"handoff.unprepared",
+					"Handoff was not prepared",
+				));
+			};
+			crate::handoff::create(
+				tx,
+				actor,
+				command_id,
+				*prepared,
+				workspace_home,
+				now_unix_ms,
+			)
+			.await
+		}
 		Command::ForkConversation { .. } => {
 			let Prepared::Fork(prepared) = prepared else {
 				return Err(CoreError::internal(

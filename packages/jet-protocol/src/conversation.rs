@@ -293,8 +293,9 @@ pub enum CommandRequest {
 		)]
 		working_tree: WorkingTreeRequest,
 	},
-	/// Create a new Conversation and separate Workspace from one immutable
-	/// Change checkpoint.
+	/// Continue through another Harness with a new Conversation and Workspace.
+	HandoffConversation(crate::HandoffRequest),
+	/// Fork from an immutable checkpoint rather than a current Handoff package.
 	ForkConversation {
 		/// Run that owns the selected checkpoint.
 		source_run_id: Uuid,

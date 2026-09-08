@@ -9,7 +9,7 @@ use std::{os::unix::fs::PermissionsExt, path::Path};
 use tokio::net::{UnixListener, UnixStream};
 
 pub fn install(home: &Path) {
-	install_craft(home, CraftProfile::Standard, ForkCapture::Ignore);
+	install_craft(home, CraftProfile::Standard, ForkCapture::Ignore, "fake");
 }
 
 #[allow(dead_code)]
@@ -40,7 +40,7 @@ pub fn install_with_fork(home: &Path, support: ForkSupport) {
 		ForkSupport::Native => CraftProfile::NativeFork,
 		ForkSupport::Portable => CraftProfile::PortableFallback,
 	};
-	install_craft(home, profile, ForkCapture::Record);
+	install_craft(home, profile, ForkCapture::Record, "fake");
 }
 
 #[allow(dead_code)]
@@ -49,13 +49,29 @@ pub fn install_at_minor(home: &Path, craft_minor: u32) {
 		home,
 		CraftProfile::AtMinor(craft_minor),
 		ForkCapture::Ignore,
+		"fake",
 	);
 }
 
-fn install_craft(home: &Path, profile: CraftProfile, capture: ForkCapture) {
+#[allow(dead_code)]
+pub fn install_handoff_target(home: &Path) {
+	install_craft(
+		home,
+		CraftProfile::NativeFork,
+		ForkCapture::Record,
+		"target",
+	);
+}
+
+fn install_craft(
+	home: &Path,
+	profile: CraftProfile,
+	capture: ForkCapture,
+	identity: &str,
+) {
 	std::fs::create_dir_all(home.join("crafts")).unwrap();
 	let executable = std::env::current_exe().unwrap();
-	let program = home.join("crafts/fake-craft");
+	let program = home.join(format!("crafts/{identity}-craft"));
 	let (minor, capabilities, features) = match profile {
 		CraftProfile::Standard => (
 			5,
@@ -79,12 +95,12 @@ fn install_craft(home: &Path, profile: CraftProfile, capture: ForkCapture) {
 		),
 	};
 	let specification = json!({
-		"schema":{"major":1,"minor":0},"id":"fake","harness":"fake",
+		"schema":{"major":1,"minor":0},"id":identity,"harness":identity,
 		"protocol":{"family":"craft","versions":[{"major":1,"minor":minor}],"capabilities":capabilities},
 		"features":features,"broker_permissions":[],
 		"host_access":[{"kind":"executable","name":executable},{"kind":"executable","name":"/bin/sh"},{"kind":"executable","name":"/missing-jet-test-harness"}]
 	});
-	let manifest = home.join("crafts/fake.json");
+	let manifest = home.join(format!("crafts/{identity}.json"));
 	let capture = match capture {
 		ForkCapture::Record => "export JET_FAKE_CAPTURE_FORK=1\n",
 		ForkCapture::Ignore => "",
@@ -567,7 +583,8 @@ fn fake_harness_process() {
 		std::process::exit(7);
 	}
 	assert!(
-		input.trim() == "Make a change"
+		input.starts_with("<jet-handoff-context")
+			|| input.trim() == "Make a change"
 			|| input.trim() == "Continue from checkpoint"
 			|| (input.starts_with(
 				"<jet-fork-context version=\"1\" data-only=\"true\">\n"

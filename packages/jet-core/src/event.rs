@@ -382,6 +382,12 @@ pub enum EventKind {
 		/// Identity for a later explicit resume.
 		native_conversation: String,
 	},
+	/// A new destination admitted its first Run from an explicit Handoff.
+	#[serde(rename = "conversation.handoff_created")]
+	HandoffCreated {
+		/// Core-observed source and destination identities and captured objects.
+		provenance: crate::HandoffProvenance,
+	},
 	/// A Conversation came into existence.
 	#[serde(rename = "conversation.created")]
 	ConversationCreated {
@@ -627,6 +633,7 @@ impl EventKind {
 			| Self::ChangeCheckpointRecorded { .. }
 			| Self::TurnInput { .. }
 			| Self::TurnChanged { .. }
+			| Self::HandoffCreated { .. }
 			| Self::ConversationCreated { .. }
 			| Self::TerminalStateChanged { .. }
 			| Self::RunControlRequested { .. }

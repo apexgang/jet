@@ -409,6 +409,7 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		| Command::SetRunName { .. }
 		| Command::CreateConversation { .. }
 		| Command::ForkConversation { .. }
+		| Command::HandoffConversation(_)
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
 		| Command::RequestUtility { .. }
@@ -466,6 +467,7 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::SetRunName { .. }
 		| Command::CreateConversation { .. }
 		| Command::ForkConversation { .. }
+		| Command::HandoffConversation(_)
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
 		| Command::RequestUtility { .. }

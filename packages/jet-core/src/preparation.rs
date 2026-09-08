@@ -35,6 +35,8 @@ pub(crate) enum Prepared {
 	Workspace(PreparedWorkspace),
 	/// An immutable checkpoint resolved to a separate Workspace.
 	Fork(Box<crate::fork::PreparedFork>),
+	/// An explicit package and independently pinned destination launch.
+	Handoff(Box<crate::handoff::PreparedHandoff>),
 	/// A promotion whose binding still matches the repository.
 	Promotion(PreparedPromotion),
 	/// The identity an import names, as discovery reports it right now.
@@ -199,6 +201,9 @@ impl Core {
 				..
 			} => Ok(Prepared::Workspace(
 				workspace::prepare(self, *project_id, base, seed).await?,
+			)),
+			Command::HandoffConversation(request) => Ok(Prepared::Handoff(
+				Box::new(crate::handoff::prepare(self, actor, request).await?),
 			)),
 			Command::ForkConversation {
 				source_run_id,

@@ -33,7 +33,10 @@ mod event;
 mod execution_control;
 mod execution_recovery;
 mod frame;
+mod handoff;
 mod handshake;
+pub use handoff::HandoffRequest;
+pub use handshake::HANDOFFS_MINOR;
 mod helper;
 pub use execution_control::{RunControl, RunTermination, TerminationStage};
 pub use execution_recovery::{

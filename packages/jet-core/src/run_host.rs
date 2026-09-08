@@ -16,6 +16,14 @@ pub trait RunHost: std::fmt::Debug + Send + Sync {
 		home: PathBuf,
 		id: String,
 	) -> RunFuture<'_, Result<PinnedCraft, CoreError>>;
+	/// Reads the Harness identity from an accepted Craft contract. Hosts that
+	/// cannot interpret it must refuse cross-Harness continuation.
+	fn harness(&self, _craft: &PinnedCraft) -> Result<String, CoreError> {
+		Err(CoreError::conflict(
+			"handoff.unsupported",
+			"this Run host cannot validate Handoffs",
+		))
+	}
 	/// Refreshes metadata for a new Run without selecting a different artifact.
 	fn prepare_next_run(
 		&self,

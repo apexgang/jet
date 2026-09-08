@@ -212,6 +212,7 @@ public enum CommandRequest {
     case `stop_run`(CommandRequestStopRun)
     case `start_run`(CommandRequestStartRun)
     case `create_conversation`(CommandRequestCreateConversation)
+    case `handoff_conversation`(CommandRequestHandoffConversation)
     case `fork_conversation`(CommandRequestForkConversation)
     case `create_run`(CommandRequestCreateRun)
     case `set_setting`(CommandRequestSetSetting)
@@ -524,6 +525,14 @@ public enum FileTarget {
 public struct GitLink {
     public let `commit`: String
     public let `path`: String
+}
+
+public struct HandoffRequest {
+    public let `craft`: String
+    public let `files`: [String]
+    public let `plan`: String
+    public let `source_run_id`: String
+    public let `summary`: String
 }
 
 public struct ImportedConversation {
@@ -1344,6 +1353,14 @@ public struct CommandRequestStartRun {
 public struct CommandRequestCreateConversation {
     public let `retention`: RetentionPolicy?
     public let `working_tree`: WorkingTreeRequest?
+}
+
+public struct CommandRequestHandoffConversation {
+    public let `craft`: String
+    public let `files`: [String]
+    public let `plan`: String
+    public let `source_run_id`: String
+    public let `summary`: String
 }
 
 public struct CommandRequestForkConversation {

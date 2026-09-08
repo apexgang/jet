@@ -174,7 +174,7 @@ pub(crate) async fn prepare(
 	)
 	.await?;
 	let changed_paths = u32::try_from(changes.len()).unwrap_or(u32::MAX);
-	let workspace = workspace::from_checkpoint(
+	let workspace = workspace::from_snapshot(
 		project_id,
 		project_root,
 		checkpoint.after.commit.clone(),

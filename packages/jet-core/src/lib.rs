@@ -45,6 +45,8 @@ mod execution_control;
 mod execution_control_effect;
 mod filesystem;
 mod fork;
+mod handoff;
+pub use handoff::{HandoffProvenance, HandoffRequest};
 mod import;
 mod lifecycle;
 mod name;
