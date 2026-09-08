@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT state FROM scheduled_tasks WHERE next_due_unix_ms <= ?1 AND schedule_id > ?2 ORDER BY schedule_id LIMIT 100",
+  "describe": {
+    "columns": [
+      {
+        "name": "state",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "scheduled_tasks",
+            "name": "state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "96219597e19a0e741e09371edc55afdfdebee77f130e51a0a1e206f883410dcf"
+}

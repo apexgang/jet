@@ -125,7 +125,7 @@ pub(crate) fn documents_of(event: &Event) -> Vec<NewSearchDocument> {
 		| EventKind::ChangeEvidenceRecorded { .. }
 		| EventKind::ChangeCheckpointRecorded { .. }
 		| EventKind::TurnInput { .. }
-		| EventKind::TurnChanged { .. }
+		| EventKind::ScheduleCreated { .. } | EventKind::ScheduleCanceled { .. } | EventKind::ScheduleFired { .. } | EventKind::TurnChanged { .. }
 		| EventKind::RunControlRequested { .. }
 		| EventKind::RunTerminated { .. }
 		| EventKind::ConversationImported { .. }

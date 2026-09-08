@@ -28,3 +28,7 @@ schema = ["dep:schemars"]
 [[example]]
 name = "craft-schema"
 required-features = ["schema"]
+
+[[example]]
+name = "jet-schema"
+required-features = ["schema"]

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM scheduled_tasks WHERE schedule_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "66cf079df2dadf7e5fa49588536578c05ac89d5e8816edbd0befd7e3686df946"
+}

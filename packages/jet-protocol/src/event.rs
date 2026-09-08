@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 /// Who caused an Event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Actor {
 	/// An interactive GUI client.
@@ -18,8 +19,14 @@ pub enum Actor {
 
 /// Responsible execution origin, when legacy client authorization is insufficient.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventOrigin {
+	/// Input originated from a durable Scheduled task.
+	ScheduledTask {
+		/// Responsible schedule.
+		schedule_id: Uuid,
+	},
 	/// Semantic observations from the pinned Harness.
 	Harness {
 		/// Owning Run identity.
@@ -34,10 +41,12 @@ pub enum EventOrigin {
 
 /// One journal entry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Event {
 	/// Plane-local monotonic position, carried as a decimal string
 	/// (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub sequence: u64,
 	/// Durable identity.
 	pub event_id: Uuid,

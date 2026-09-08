@@ -23,6 +23,7 @@ pub enum RunActivity {
 
 /// The role of a process owned by a Run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ManagedProcessRole {
 	/// Generic per-Run supervisor.
@@ -33,6 +34,7 @@ pub enum ManagedProcessRole {
 
 /// Observable process identity; distinct from a Conversation or Run identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ManagedProcess {
 	/// OS process identifier, meaningful only on the Home Plane.
 	pub pid: u32,
@@ -47,9 +49,11 @@ pub struct ManagedProcess {
 
 /// Durable execution projection, fenced with the Event journal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RunExecution {
 	/// Snapshot cursor.
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// Authoritative lifecycle and revision.
 	pub run: Run,

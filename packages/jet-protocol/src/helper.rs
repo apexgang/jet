@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 /// Immutable, host-written launch boundary for a Run-role helper.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HelperConfig {
 	/// Authoritative Run identity.
 	pub execution_id: Uuid,
@@ -20,6 +21,7 @@ pub struct HelperConfig {
 
 /// Atomic non-secret identity published by a Run-role helper (Helper 1.1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HelperDescriptor {
 	/// Atomically published source position; live handshakes refresh it.
 	pub replay: HelperReplay,
@@ -41,6 +43,7 @@ pub struct HelperDescriptor {
 
 /// Fresh helper connection handshake.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HelperHello {
 	/// The Run this connection belongs to.
 	pub execution_id: Uuid,
@@ -50,6 +53,7 @@ pub struct HelperHello {
 
 /// Version selected before accepting native work.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HelperReady {
 	/// Negotiated helper version.
 	pub version: ProtocolVersion,
@@ -63,6 +67,7 @@ pub struct HelperReady {
 #[derive(
 	Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum NativeInputMode {
 	/// Close standard input once the initial input is written, so a Harness
@@ -78,6 +83,7 @@ pub enum NativeInputMode {
 
 /// Craft requests at the generic helper boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HelperCommand {
 	/// Stop only this exact helper instance after interactive authorization.
@@ -134,6 +140,7 @@ pub enum HelperCommand {
 
 /// Native source record. The offset measures the end of its spool record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HelperRecord {
 	/// Monotonically increasing source offset.
 	pub source_offset: u64,
@@ -143,6 +150,7 @@ pub struct HelperRecord {
 
 /// Native process facts, independent from Craft interpretation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HelperEvent {
 	/// The OS definitively rejected launch; no Harness remains alive.
@@ -169,6 +177,7 @@ pub enum HelperEvent {
 /// The escalation ladder jetd may ask a helper to deliver. Each step is an
 /// explicit request; the helper never escalates on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum NativeSignal {
 	/// Interrupt, which a Harness may handle and shut down cleanly.
@@ -181,6 +190,7 @@ pub enum NativeSignal {
 
 /// Native pipe identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum NativeStream {
 	/// Standard output.
@@ -192,6 +202,7 @@ pub enum NativeStream {
 /// Confirmation that the signal was delivered to the live native process
 /// group. Delivery is not an exit: the exit arrives as a source record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HelperSignalled {
 	/// The helper instance that delivered it.
 	pub instance: Uuid,
@@ -201,6 +212,7 @@ pub struct HelperSignalled {
 
 /// Confirmation sent only after the native child is proven stopped.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HelperTerminated {
 	/// The helper instance that stopped its execution.
 	pub instance: Uuid,
@@ -208,6 +220,7 @@ pub struct HelperTerminated {
 
 /// Source boundaries retained by a helper. Only exact record boundaries resume.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HelperReplay {
 	/// Last released boundary.
 	pub acknowledged: u64,

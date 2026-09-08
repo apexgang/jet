@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 /// What kind of human-visible content a hit matched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum SearchField {
 	/// A Conversation or Run name.
@@ -21,6 +22,7 @@ pub enum SearchField {
 
 /// One ranked match, with the stable reference a client follows to it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SearchHit {
 	/// The Conversation the content belongs to.
 	pub conversation_id: Uuid,
@@ -28,6 +30,7 @@ pub struct SearchHit {
 	/// (ADR-0089). A client reads it from the journal or scrolls the
 	/// Conversation to it.
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub sequence: u64,
 	/// What kind of content matched.
 	pub field: SearchField,
@@ -38,15 +41,18 @@ pub struct SearchHit {
 /// One bounded page of hits, best match first, fenced by the journal
 /// position it was read at (ADR-0092).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SearchResult {
 	/// Newest Event sequence visible when the index was read, carried as a
 	/// decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// The journal position the index had been derived through, carried
 	/// as a decimal string. It equals `cursor` unless indexing was
 	/// interrupted since the last Command.
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub indexed_through: u64,
 	/// At most 64 hits, best match first.
 	pub hits: Vec<SearchHit>,

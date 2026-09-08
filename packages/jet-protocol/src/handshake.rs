@@ -14,8 +14,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 20;
+pub const PROTOCOL_MINOR: u32 = 21;
 
+/// Durable Conversation schedules and scheduled Event origins.
+pub const SCHEDULES_MINOR: u32 = 21;
 /// Independent Conversation and Run names plus Managed-process labels.
 pub const NAMES_MINOR: u32 = 20;
 
@@ -76,6 +78,7 @@ pub const CODEC_JSON_V1: &str = "json-v1";
 
 /// Inclusive range of protocol majors a client can speak.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct VersionRange {
 	/// Lowest supported major.
 	pub min: u32,
@@ -93,6 +96,7 @@ impl VersionRange {
 
 /// First control frame from a client, sent right after the preface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ClientHello {
 	/// Protocol majors the client can speak.
 	pub protocol: VersionRange,
@@ -114,12 +118,14 @@ pub struct ClientHello {
 
 /// Server reply to a [`ClientHello`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ServerHello {
 	/// Remote endpoint access is established; Jet authorization is still pending.
 	Challenge {
 		/// A fresh 256-bit nonce, used once on this connection.
 		#[serde(with = "crate::hex")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Hex<32>"))]
 		nonce: [u8; 32],
 	},
 	/// The connection is authenticated and negotiated.

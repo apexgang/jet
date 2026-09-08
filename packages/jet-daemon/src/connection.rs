@@ -385,6 +385,10 @@ struct MinorRequirement {
 
 fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 	match query {
+		QueryRequest::ScheduledTasks { .. } => Some(MinorRequirement {
+			minor: jet_protocol::SCHEDULES_MINOR,
+			feature: "Scheduled tasks",
+		}),
 		QueryRequest::EditableFile { .. } => Some(MinorRequirement {
 			minor: jet_protocol::USER_INPUT_MINOR,
 			feature: "direct user edits",
@@ -468,6 +472,11 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 
 fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 	match command {
+		CommandRequest::CreateSchedule { .. }
+		| CommandRequest::CancelSchedule { .. } => Some(MinorRequirement {
+			minor: jet_protocol::SCHEDULES_MINOR,
+			feature: "Scheduled tasks",
+		}),
 		CommandRequest::ApplyUserEdit { .. }
 		| CommandRequest::SubmitReview { .. } => Some(MinorRequirement {
 			minor: jet_protocol::USER_INPUT_MINOR,

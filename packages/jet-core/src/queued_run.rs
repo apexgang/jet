@@ -47,7 +47,7 @@ impl Core {
 		};
 		let Some(accepted) = self
 			.store
-			.read(async |tx| continuation(tx, id).await)
+			.read(async |tx| continuation(tx, id, self.now_unix_ms()).await)
 			.await?
 		else {
 			return Ok(());
@@ -73,7 +73,9 @@ impl Core {
 		};
 		self.store
 			.write(async |tx| {
-				if continuation(tx, id).await?.as_ref() != Some(&accepted) {
+				if continuation(tx, id, self.now_unix_ms()).await?.as_ref()
+					!= Some(&accepted)
+				{
 					return Ok(());
 				}
 				prepare(tx, id, plan, self.now_unix_ms()).await
@@ -85,8 +87,10 @@ impl Core {
 async fn continuation(
 	tx: &mut ReadTransaction,
 	id: ConversationId,
+	now: i64,
 ) -> Result<Option<Continuation>, CoreError> {
-	if !turn_queue::load(tx, id).await?.ready() {
+	let queue = turn_queue::load(tx, id).await?;
+	if !crate::schedule_work::can_dispatch(tx, id, &queue, now).await? {
 		return Ok(None);
 	}
 	let runs = tx.runs(id.0).await?;

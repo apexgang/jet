@@ -7,6 +7,7 @@ use uuid::Uuid;
 #[derive(
 	Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum TurnSource {
 	/// User input is never replaced.
@@ -19,6 +20,7 @@ pub enum TurnSource {
 }
 /// A Turn's execution or final admission outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum TurnState {
 	/// Waiting in authoritative sequence order.
@@ -41,11 +43,13 @@ pub enum TurnState {
 }
 /// One durable input identity; the queue order is its sequence, never wall time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Turn {
 	/// Plane-assigned identity, also used for Craft correlation.
 	pub turn_id: Uuid,
 	/// Monotonic within this Conversation, including replaced entries.
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub sequence: u64,
 	/// Authenticated client that authorized this input.
 	pub client_id: Uuid,
@@ -58,9 +62,11 @@ pub struct Turn {
 }
 /// A bounded queue snapshot. Vector order is queue position, active input first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TurnQueue {
 	/// Event cursor from the same read transaction.
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// At most 128 entries; prompts remain in the admission Events.
 	pub turns: Vec<Turn>,

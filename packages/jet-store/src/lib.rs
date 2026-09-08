@@ -34,6 +34,7 @@ mod promotion;
 mod records;
 mod run;
 mod run_execution;
+mod schedule;
 mod search;
 mod setting;
 mod terminal;

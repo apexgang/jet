@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Which snapshot a Capability Query answers with. A Plane is observed at
 /// startup and whenever a caller asks for a new look, never on a timer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CapabilityObservation {
 	/// The snapshot the Plane observed most recently.
@@ -15,6 +16,7 @@ pub enum CapabilityObservation {
 
 /// A point-in-time report of what a Plane can do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CapabilitySnapshot {
 	/// When the Plane was observed, in signed Unix milliseconds.
 	pub observed_at_unix_ms: i64,
@@ -36,6 +38,7 @@ pub struct CapabilitySnapshot {
 
 /// The operating system and processor a Plane runs on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Platform {
 	/// Operating system name, such as `linux` or `macos`.
 	pub operating_system: String,
@@ -45,6 +48,7 @@ pub struct Platform {
 
 /// A command-line tool the core invokes but never bundles or installs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ExternalTool {
 	/// Git, which every Workspace and Change checkpoint rests on.
@@ -62,6 +66,7 @@ pub enum ExternalTool {
 
 /// Whether one external tool answered, and with which version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ExternalToolStatus {
 	/// The tool that was looked for.
 	pub tool: ExternalTool,
@@ -71,6 +76,7 @@ pub struct ExternalToolStatus {
 
 /// The result of looking for one external tool.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolAvailability {
 	/// The tool answered with the version line it reports.
@@ -84,6 +90,7 @@ pub enum ToolAvailability {
 
 /// The platform facility that resolves Credential references.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CredentialStoreKind {
 	/// The macOS Keychain.
@@ -96,6 +103,7 @@ pub enum CredentialStoreKind {
 /// will answer. Jet never falls back to plaintext, so each of these is
 /// reported rather than worked around.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum CredentialStoreStatus {
 	/// The store is present and can be asked for credentials.
@@ -119,6 +127,7 @@ pub enum CredentialStoreStatus {
 
 /// One Craft installed on the Plane and the Harnesses it adapts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct InstalledCraft {
 	/// The Craft's identity.
 	pub craft_id: String,
@@ -130,6 +139,7 @@ pub struct InstalledCraft {
 
 /// Something a Plane cannot do in its current state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "condition", rename_all = "snake_case")]
 pub enum DegradedCondition {
 	/// An external tool ordinary work needs is not installed.

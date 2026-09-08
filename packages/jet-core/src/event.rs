@@ -70,6 +70,13 @@ pub(crate) enum EventSubject {
 /// Responsible origin of a journal Event. This grants no Command authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventActor {
+	/// A Scheduled task admitted or settled deterministic input.
+	ScheduledTask {
+		/// Responsible schedule.
+		schedule_id: Uuid,
+		/// Client that enabled it.
+		authorized_by: ClientId,
+	},
 	/// An interactive client caused a committed change.
 	InteractiveClient {
 		/// Durable installation identity.
@@ -110,6 +117,20 @@ impl EventActor {
 				"invalid Run attribution",
 			)
 		};
+		if origin.get("type").and_then(serde_json::Value::as_str)
+			== Some("scheduled_task")
+		{
+			let schedule_id = origin
+				.get("schedule_id")
+				.and_then(serde_json::Value::as_str)
+				.ok_or_else(invalid)?
+				.parse()
+				.map_err(|_| invalid())?;
+			return Ok(Self::ScheduledTask {
+				schedule_id,
+				authorized_by,
+			});
+		}
 		let run_id: Uuid = origin
 			.get("run_id")
 			.and_then(serde_json::Value::as_str)
@@ -136,6 +157,15 @@ impl EventActor {
 	) -> (jet_store::ActorRecord, Option<serde_json::Value>) {
 		let (client_id, origin) = match self {
 			Self::InteractiveClient { client_id } => (*client_id, None),
+			Self::ScheduledTask {
+				schedule_id,
+				authorized_by,
+			} => (
+				*authorized_by,
+				Some(
+					serde_json::json!({"type":"scheduled_task", "schedule_id": schedule_id}),
+				),
+			),
 			Self::Harness {
 				run_id,
 				authorized_by,
@@ -216,6 +246,28 @@ pub struct EventPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum EventKind {
+	/// A daily schedule was attached to this Conversation.
+	#[serde(rename = "schedule.created")]
+	ScheduleCreated {
+		/// Enabled schedule and next firing.
+		task: crate::ScheduledTask,
+	},
+	/// Future firings were canceled.
+	#[serde(rename = "schedule.canceled")]
+	ScheduleCanceled {
+		/// Immutable schedule identity.
+		schedule_id: Uuid,
+	},
+	/// Each elapsed occurrence retains its selection and admission outcome.
+	#[serde(rename = "schedule.fired")]
+	ScheduleFired {
+		/// Responsible schedule.
+		schedule_id: Uuid,
+		/// Persisted intended instant and identity.
+		firing: crate::ScheduleFiring,
+		/// Admission outcome. Later execution outcomes use the same Turn identity.
+		outcome: crate::ScheduleFiringOutcome,
+	},
 	/// An authenticated direct edit changed one file through a registered root.
 	#[serde(rename = "user_edit.applied")]
 	UserEditApplied {
@@ -564,7 +616,10 @@ impl EventKind {
 	pub fn encode(&self) -> Result<EventPayload, CoreError> {
 		match self {
 			Self::Unrecognized(payload) => Ok(payload.clone()),
-			Self::UserEditApplied { .. }
+			Self::ScheduleCreated { .. }
+			| Self::ScheduleCanceled { .. }
+			| Self::ScheduleFired { .. }
+			| Self::UserEditApplied { .. }
 			| Self::ReviewSubmitted { .. }
 			| Self::ConversationNameChanged { .. }
 			| Self::RunNameChanged { .. }

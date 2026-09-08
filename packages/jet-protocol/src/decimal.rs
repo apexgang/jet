@@ -9,6 +9,10 @@
 use serde::de::{Error, Unexpected};
 use serde::{Deserialize, Deserializer, Serializer};
 
+/// The only spelling a reader accepts, and the one the schema publishes.
+#[cfg(feature = "schema")]
+pub(crate) const PATTERN: &str = "^(0|[1-9][0-9]*)$";
+
 #[expect(
 	clippy::trivially_copy_pass_by_ref,
 	reason = "serde's serialize_with contract passes the field by reference"
@@ -39,6 +43,26 @@ fn parse(text: &str) -> Option<u64> {
 	canonical.then(|| text.parse().ok()).flatten()
 }
 
+/// Schema stand-in for a sequence field. `serde(with)` is invisible to
+/// schemars, which would otherwise publish the `u64` this codec hides.
+#[cfg(feature = "schema")]
+pub(crate) struct Decimal;
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for Decimal {
+	fn schema_name() -> std::borrow::Cow<'static, str> {
+		"Decimal".into()
+	}
+
+	fn inline_schema() -> bool {
+		true
+	}
+
+	fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+		schemars::json_schema!({"type": "string", "pattern": PATTERN})
+	}
+}
+
 pub(crate) mod optional {
 	use serde::{Deserialize, Deserializer, Serializer};
 
@@ -64,5 +88,27 @@ pub(crate) mod optional {
 				&"a canonical decimal string",
 			)
 		})
+	}
+
+	/// Schema stand-in for a field this codec may leave absent.
+	#[cfg(feature = "schema")]
+	pub(crate) struct OptionalDecimal;
+
+	#[cfg(feature = "schema")]
+	impl schemars::JsonSchema for OptionalDecimal {
+		fn schema_name() -> std::borrow::Cow<'static, str> {
+			"OptionalDecimal".into()
+		}
+
+		fn inline_schema() -> bool {
+			true
+		}
+
+		fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+			schemars::json_schema!({
+				"type": ["string", "null"],
+				"pattern": super::PATTERN,
+			})
+		}
 	}
 }

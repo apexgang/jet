@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 /// Where a promotion applies a Workspace's changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PromotionDestination {
 	/// The Project's own Local checkout. The changes arrive staged in its
@@ -26,6 +27,7 @@ pub enum PromotionDestination {
 /// at, and the client it was shown to. The Plane refuses a promotion when
 /// any of it has changed since.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PromotionBinding {
 	/// The Workspace being promoted.
 	pub workspace_id: Uuid,
@@ -54,10 +56,12 @@ pub struct PromotionBinding {
 
 /// What promoting a Workspace would do, shown before it is done.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PromotionPreview {
 	/// Newest Event sequence visible when the Workspace was read, carried
 	/// as a decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// What the promotion is bound to, risk included.
 	pub binding: PromotionBinding,
@@ -69,6 +73,7 @@ pub struct PromotionPreview {
 
 /// One path a promotion changes in the destination.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PromotedChange {
 	/// The path, as Git spells it.
 	pub path: String,
@@ -78,6 +83,7 @@ pub struct PromotedChange {
 
 /// What a promotion does to one path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ChangeKind {
 	/// The destination gains the path.
@@ -90,6 +96,7 @@ pub enum ChangeKind {
 
 /// One path a promotion cannot settle without a person.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PromotionConflict {
 	/// The path, as Git spells it.
 	pub path: String,
@@ -99,6 +106,7 @@ pub struct PromotionConflict {
 
 /// Why a path cannot be promoted as it stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ConflictKind {
 	/// The Workspace and the destination both changed the path since the
@@ -114,6 +122,7 @@ pub enum ConflictKind {
 
 /// Where a promotion stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum PromotionState {
 	/// Recorded, with the Effect that applies it not yet settled.
@@ -136,6 +145,7 @@ pub enum PromotionState {
 /// One recorded promotion of a Workspace: what the user confirmed and
 /// where it stands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WorkspacePromotion {
 	/// Durable identity.
 	pub promotion_id: Uuid,

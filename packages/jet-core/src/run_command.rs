@@ -314,7 +314,9 @@ pub(crate) async fn record(
 		crate::turn_queue::Admission::Prompt(plan.prompt.clone()),
 	)
 	.await?;
-	if !queue.ready() {
+	if !crate::schedule_work::can_dispatch(tx, conversation_id, &queue, now)
+		.await?
+	{
 		return Err(CoreError::conflict(
 			"turn.unresolved",
 			"an earlier turn still owns execution",

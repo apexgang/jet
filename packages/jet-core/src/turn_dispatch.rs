@@ -48,6 +48,16 @@ impl Core {
 				}
 				let id = ConversationId(run.conversation_id);
 				let mut queue = turn_queue::load(tx, id).await?;
+				if !crate::schedule_work::can_dispatch(
+					tx,
+					id,
+					&queue,
+					self.now_unix_ms(),
+				)
+				.await?
+				{
+					return Ok(None);
+				}
 				let next = queue.claim(run_id);
 				if let Some(entry) = &next {
 					if state.changes.is_some() {

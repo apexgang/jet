@@ -36,7 +36,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::ProjectPreview(preview) => Ok(preview),
-			other @ (QueryResponse::EditableFile(_)
+			other @ (QueryResponse::ScheduledTasks(_)
+			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)
@@ -90,7 +91,9 @@ impl Client {
 			.await?
 		{
 			CommandResponse::ProjectRegistered(project) => Ok(project),
-			other @ (CommandResponse::UserEditApplied { .. }
+			other @ (CommandResponse::ScheduleCreated { .. }
+			| CommandResponse::ScheduleCanceled { .. }
+			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
 			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
@@ -146,7 +149,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::ProjectEntry(entry) => Ok(entry),
-			other @ (QueryResponse::EditableFile(_)
+			other @ (QueryResponse::ScheduledTasks(_)
+			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)
@@ -181,7 +185,8 @@ impl Client {
 		self.require_minor(jet_protocol::PROJECTS_MINOR)?;
 		match self.query(QueryRequest::Projects).await? {
 			QueryResponse::Projects(list) => Ok(list),
-			other @ (QueryResponse::EditableFile(_)
+			other @ (QueryResponse::ScheduledTasks(_)
+			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
 			| QueryResponse::OrphanedExecutions(_)

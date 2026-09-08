@@ -28,6 +28,11 @@ use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
+	/// Enabled schedules in one Conversation.
+	ScheduledTasks {
+		/// Owning Conversation.
+		conversation_id: crate::ConversationId,
+	},
 	/// Read bounded UTF-8 content through a registered root.
 	EditableFile {
 		/// Registered Project or Workspace root.
@@ -177,6 +182,8 @@ pub enum Query {
 /// Snapshots returned by [`Core::query`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult {
+	/// Fenced schedule snapshot.
+	ScheduledTasks(crate::ScheduledTasks),
 	/// Bounded editable content and its exact file Revision.
 	EditableFile(crate::EditableFile),
 	/// Workspace terminal lifecycle snapshots.
@@ -289,6 +296,13 @@ impl Core {
 			Query::NextChangeDiff { cursor } => {
 				crate::checkpoint_query::next(self, cursor).await
 			}
+			Query::ScheduledTasks { conversation_id } => self
+				.store
+				.read(async |tx| {
+					crate::schedule::snapshot(tx, conversation_id).await
+				})
+				.await
+				.map(QueryResult::ScheduledTasks),
 			Query::TurnQueue { conversation_id } => self
 				.store
 				.read(async |tx| {

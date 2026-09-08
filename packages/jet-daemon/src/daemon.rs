@@ -94,6 +94,10 @@ pub(crate) async fn run(
 	if let Err(error) = core.perform_terminals().await {
 		eprintln!("jetd: cannot recover terminals: {error}");
 	}
+	// Coalesce offline firings before any pending input can start a Run.
+	if let Err(error) = core.perform_schedules().await {
+		eprintln!("jetd: cannot recover schedules: {error}");
+	}
 	// Settle durable Run admission before serving new Commands.
 	if let Err(error) = core.perform_runs().await {
 		eprintln!("jetd: cannot reconcile Run starts: {error}");
@@ -120,6 +124,9 @@ pub(crate) async fn run(
 	let recovery = tokio::spawn(async move {
 		loop {
 			tokio::time::sleep(Duration::from_secs(1)).await;
+			if let Err(error) = recovery_core.perform_schedules().await {
+				eprintln!("jetd: cannot advance schedules: {error}");
+			}
 			if let Err(error) = recovery_core.perform_terminals().await {
 				eprintln!("jetd: cannot recover terminals: {error}");
 			}

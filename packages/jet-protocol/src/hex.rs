@@ -55,3 +55,26 @@ fn nibble(character: u8) -> Option<u8> {
 		_ => None,
 	}
 }
+
+/// Schema stand-in for `N` bytes as hexadecimal. `serde(with)` is
+/// invisible to schemars, which would otherwise publish a byte array.
+#[cfg(feature = "schema")]
+pub(crate) struct Hex<const N: usize>;
+
+#[cfg(feature = "schema")]
+impl<const N: usize> schemars::JsonSchema for Hex<N> {
+	fn schema_name() -> std::borrow::Cow<'static, str> {
+		format!("Hex{N}").into()
+	}
+
+	fn inline_schema() -> bool {
+		true
+	}
+
+	fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+		schemars::json_schema!({
+			"type": "string",
+			"pattern": format!("^[0-9a-f]{{{}}}$", N * 2),
+		})
+	}
+}

@@ -29,6 +29,7 @@ pub const MAX_QUERY_TIMEOUT_MS: u32 = 60_000;
 
 /// Control message sent by a client.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ClientMessage {
 	/// Bind this numbered stream to a terminal. Disconnecting leaves it alive.
@@ -39,9 +40,11 @@ pub enum ClientMessage {
 		terminal_id: Uuid,
 		/// First desired output byte.
 		#[serde(with = "crate::decimal")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		after: u64,
 		/// Initial output byte credit; further credit uses StreamControl.
 		#[serde(with = "crate::decimal")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		credit: u64,
 	},
 	/// Resize the terminal attached to this stream.
@@ -97,6 +100,7 @@ pub fn raw_command(frame: &[u8]) -> Result<Box<RawValue>, ControlError> {
 
 /// Control message sent by `jetd`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ServerMessage {
 	/// The numbered stream now accepts terminal input and receives output.
@@ -134,8 +138,14 @@ pub enum ServerMessage {
 
 /// Queries a client may run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryRequest {
+	/// Enabled schedules in one Conversation.
+	ScheduledTasks {
+		/// Owning Conversation.
+		conversation_id: Uuid,
+	},
 	/// Read bounded UTF-8 file content through a registered root.
 	EditableFile {
 		/// Registered Project or Workspace root.
@@ -154,6 +164,7 @@ pub enum QueryRequest {
 		sha256: String,
 		/// Byte offset in decimal-string form.
 		#[serde(with = "crate::decimal")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		offset: u64,
 	},
 	/// Compare observed Change checkpoints.
@@ -222,6 +233,7 @@ pub enum QueryRequest {
 		/// The sequence to resume after, carried as a decimal string
 		/// (ADR-0089); `"0"` for the whole journal.
 		#[serde(with = "crate::decimal")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		after: u64,
 	},
 	/// The Plane's Pairing: whether it accepts new GUI clients.
@@ -231,6 +243,7 @@ pub enum QueryRequest {
 		/// The position to resume after, carried as a decimal string
 		/// (ADR-0089); `"0"` for the whole audit.
 		#[serde(with = "crate::decimal")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		after: u64,
 	},
 	/// Every registered Project on the Plane.
@@ -279,14 +292,18 @@ pub enum QueryRequest {
 
 /// Query snapshots.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryResponse {
+	/// Fenced schedule snapshot.
+	ScheduledTasks(crate::ScheduledTasks),
 	/// Bounded editable content and its exact file Revision.
 	EditableFile(crate::EditableFile),
 	/// Terminal lifecycle snapshots, separate from Runs.
 	WorkspaceTerminals {
 		/// Snapshot Event cursor.
 		#[serde(with = "crate::decimal")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		cursor: u64,
 		/// Retained Workspace terminals.
 		terminals: Vec<crate::WorkspaceTerminal>,
@@ -339,10 +356,12 @@ pub enum QueryResponse {
 /// at (ADR-0092). The page is the last one when its final Event's sequence
 /// equals `cursor`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EventPage {
 	/// Newest Event sequence visible to this peer when the page was read,
 	/// carried as a decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// The Events strictly after the requested position, in sequence order.
 	pub events: Vec<Event>,
@@ -350,6 +369,7 @@ pub struct EventPage {
 
 /// Wire form of the Plane status snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PlaneStatus {
 	/// Newest Event sequence visible when the status was read, carried as a
 	/// decimal string (ADR-0089). Absent only on negotiated minor zero.
@@ -358,6 +378,7 @@ pub struct PlaneStatus {
 		skip_serializing_if = "Option::is_none",
 		with = "crate::decimal::optional"
 	)]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::OptionalDecimal"))]
 	pub cursor: Option<u64>,
 	/// Durable identity of the Plane, created when its store was created.
 	pub plane_id: Uuid,
@@ -375,6 +396,7 @@ pub struct PlaneStatus {
 
 /// Stable error categories exposed to clients (ADR-0068).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCategory {
 	/// The request was malformed or violated a precondition.
@@ -399,6 +421,7 @@ pub enum ErrorCategory {
 
 /// Stable error body carried by every failed reply.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WireError {
 	/// Category the client may branch on.
 	pub category: ErrorCategory,
@@ -421,6 +444,7 @@ pub struct WireError {
 
 /// Structured action a client may take to recover from an error.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RecoveryAction {
 	/// Refresh a file before preparing another direct edit.
@@ -446,33 +470,39 @@ pub enum RecoveryAction {
 	ResumeEvents {
 		/// Last Event cursor the disconnected client received completely.
 		#[serde(with = "crate::decimal")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		after: u64,
 	},
 }
 
 /// Stable metadata explaining why a snapshot must be restarted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum RestartMetadata {
 	/// Required Event replay is no longer retained.
 	CursorExpired {
 		/// Oldest cursor from which continuous replay remains possible.
 		#[serde(with = "crate::decimal")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		minimum_available_cursor: u64,
 		/// Current Event high-water cursor for a replacement snapshot.
 		#[serde(with = "crate::decimal")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		current_snapshot_revision: u64,
 	},
 	/// The supplied Event cursor belongs to a later or different Plane.
 	CursorAhead {
 		/// Current Event high-water cursor for the replacement snapshot.
 		#[serde(with = "crate::decimal")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		current_snapshot_revision: u64,
 	},
 	/// A later page no longer belongs to the current projection state.
 	PaginationStale {
 		/// Current Event high-water cursor for the replacement first page.
 		#[serde(with = "crate::decimal")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		current_snapshot_revision: u64,
 	},
 }

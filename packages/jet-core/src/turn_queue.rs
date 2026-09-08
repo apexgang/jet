@@ -14,6 +14,8 @@ pub(crate) struct Queue {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Entry {
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub(crate) schedule: Option<crate::schedule_work::ScheduleInput>,
 	pub(crate) turn: Turn,
 	pub(crate) prompt: String,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
@@ -22,6 +24,10 @@ pub(crate) struct Entry {
 }
 
 pub(crate) enum Admission {
+	Scheduled {
+		prompt: String,
+		schedule: crate::schedule_work::ScheduleInput,
+	},
 	Prompt(String),
 	Review {
 		prompt: String,
@@ -30,10 +36,19 @@ pub(crate) enum Admission {
 }
 
 impl Admission {
-	fn into_parts(self) -> (String, Option<Vec<crate::ReviewComment>>) {
+	fn into_parts(
+		self,
+	) -> (
+		String,
+		Option<Vec<crate::ReviewComment>>,
+		Option<crate::schedule_work::ScheduleInput>,
+	) {
 		match self {
-			Self::Prompt(prompt) => (prompt, None),
-			Self::Review { prompt, comments } => (prompt, Some(comments)),
+			Self::Scheduled { prompt, schedule } => {
+				(prompt, None, Some(schedule))
+			}
+			Self::Prompt(prompt) => (prompt, None, None),
+			Self::Review { prompt, comments } => (prompt, Some(comments), None),
 		}
 	}
 }
@@ -104,6 +119,19 @@ pub(crate) async fn changed(
 			client_id: actor.client_id(),
 		},
 	};
+	let origin = if matches!(
+		entry.turn.state,
+		TurnState::Queued | TurnState::Superseded
+	) {
+		entry.schedule.as_ref().map_or(origin, |input| {
+			crate::EventActor::ScheduledTask {
+				schedule_id: input.schedule_id,
+				authorized_by: entry.turn.client_id,
+			}
+		})
+	} else {
+		origin
+	};
 	let subject = entry.turn.run_id.map_or(
 		crate::event::EventSubject::Conversation(id),
 		|run_id| crate::event::EventSubject::Run {
@@ -115,7 +143,7 @@ pub(crate) async fn changed(
 		EventKind::TurnChanged {
 			turn: entry.turn.clone(),
 		}
-		.to_record_as(origin, subject, now)?,
+		.to_record_as(origin.clone(), subject, now)?,
 	)
 	.await?;
 	if entry.turn.state == TurnState::Queued {
@@ -140,7 +168,7 @@ pub(crate) async fn changed(
 					turn_id: entry.turn.turn_id,
 					text: chunk.into(),
 				}
-				.to_record(actor, subject, now)?,
+				.to_record_as(origin.clone(), subject, now)?,
 			)
 			.await?;
 			text = remaining;
@@ -258,7 +286,7 @@ pub(crate) async fn prepare(
 	source: TurnSource,
 	admission: Admission,
 ) -> Result<(Queue, Vec<Entry>), CoreError> {
-	let (prompt, review) = admission.into_parts();
+	let (prompt, review, schedule) = admission.into_parts();
 	// ASVS 2.2.1, 2.3.3, 2.3.4: bounds, sequences and replacements share
 	// the receipt's write transaction, so a refusal cannot consume user work.
 	if prompt.is_empty() || prompt.len() > 65_536 {
@@ -301,9 +329,13 @@ pub(crate) async fn prepare(
 			"the Conversation sequence is exhausted",
 		)
 	})?;
+	let turn_id = schedule
+		.as_ref()
+		.map_or_else(Uuid::now_v7, |input| input.firing.firing_id);
 	let entry = Entry {
+		schedule,
 		turn: Turn {
-			turn_id: Uuid::now_v7(),
+			turn_id,
 			sequence: queue.sequence,
 			client_id: actor.client_id(),
 			source,

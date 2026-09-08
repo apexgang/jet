@@ -8,6 +8,7 @@ use crate::promotion::WorkspacePromotion;
 
 /// Where a Conversation does its work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkingTree {
 	/// In no Project. Nothing on disk belongs to the Conversation.
@@ -32,6 +33,7 @@ pub enum WorkingTree {
 /// for no Project, which is what every request before protocol minor 9
 /// asked for.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkingTreeRequest {
 	/// No Project yet.
@@ -74,6 +76,7 @@ impl WorkingTreeRequest {
 
 /// Which Local-checkout changes a new Workspace starts with.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SeedSelection {
 	/// No changes: the Workspace starts at its base alone.
@@ -101,6 +104,7 @@ impl SeedSelection {
 
 /// What a Workspace was seeded with from its Project's Local checkout.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WorkspaceSeed {
 	/// The Git tree object the changes were captured as, as Git spells it.
 	pub tree: String,
@@ -112,6 +116,7 @@ pub struct WorkspaceSeed {
 /// resolves it to one commit when the Workspace is created and never
 /// again.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BaseSelection {
 	/// Whatever the Project's Local checkout has checked out.
@@ -126,6 +131,7 @@ pub enum BaseSelection {
 
 /// The immutable base of a Workspace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WorkspaceBase {
 	/// The base as the user selected it.
 	pub selection: BaseSelection,
@@ -136,6 +142,7 @@ pub struct WorkspaceBase {
 
 /// One managed Workspace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Workspace {
 	/// Durable identity.
 	pub workspace_id: Uuid,

@@ -15,6 +15,7 @@ use crate::event::Actor;
 /// A process outside the Plane's management that holds an external
 /// Conversation live, and what the Plane can do about it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExternalProcess {
 	/// No live process was observed. The identity can be continued only by
@@ -39,6 +40,7 @@ pub enum ExternalProcess {
 /// Where an external Conversation did its work, as it relates to the
 /// Plane's Projects.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExternalOrigin {
 	/// Inside a registered Project, which a Resume may select directly.
@@ -61,6 +63,7 @@ pub enum ExternalOrigin {
 /// One Harness-native Conversation the Plane can see outside its
 /// management.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ExternalConversation {
 	/// The Harness whose identity it is, such as `codex`.
 	pub harness: String,
@@ -77,6 +80,7 @@ pub struct ExternalConversation {
 
 /// One Imported conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ImportedConversation {
 	/// Durable identity.
 	pub import_id: Uuid,
@@ -99,10 +103,12 @@ pub struct ImportedConversation {
 /// The external Conversations the Plane can see and the imports it holds,
 /// fenced by the journal position the imports were read at.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ExternalConversationList {
 	/// Newest Event sequence visible when the imports were read, carried as
 	/// a decimal string (ADR-0089).
 	#[serde(with = "crate::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// Every identity the Plane can see right now.
 	pub discovered: Vec<ExternalConversation>,
@@ -112,6 +118,7 @@ pub struct ExternalConversationList {
 
 /// Where a Conversation came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ConversationOrigin {
 	/// Created in Jet.

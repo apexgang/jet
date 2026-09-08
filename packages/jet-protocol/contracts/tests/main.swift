@@ -6,18 +6,28 @@ let root = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWi
 let definitions = root["$defs"] as! [String: Any]
 func resolve(_ schema: Any) -> [String: Any] {
     guard let node = schema as? [String: Any] else { return [:] }
-    if let ref = node["$ref"] as? String { return resolve(definitions[String(ref.split(separator: "/").last!)]!) }
+    if let ref = node["$ref"] as? String {
+        let base = resolve(definitions[String(ref.split(separator: "/").last!)]!)
+        var merged = base.merging(node) { _, own in own }
+        merged.removeValue(forKey: "$ref")
+        merged["properties"] = (base["properties"] as? [String: Any] ?? [:]).merging(node["properties"] as? [String: Any] ?? [:]) { _, own in own }
+        merged["required"] = (base["required"] as? [String] ?? []) + (node["required"] as? [String] ?? [])
+        return merged
+    }
     return node
 }
-func properties(_ schema: Any, kind: String? = nil) -> [String: Any] {
+// Branches are tagged by whichever property carries a constant: "kind" on
+// Craft messages, "type" on an Actor, "breach" on an audit finding.
+func properties(_ schema: Any, tags: [String: String] = [:]) -> [String: Any] {
     let node = resolve(schema)
     var fields = node["properties"] as? [String: Any] ?? [:]
-    if let kind, let tag = fields["kind"] as? [String: Any] {
-        if let constant = tag["const"] as? String, constant != kind { return [:] }
-        if let not = tag["not"] as? [String: Any], let excluded = not["enum"] as? [String], excluded.contains(kind) { return [:] }
+    for (field, constraint) in fields {
+        guard let tag = tags[field], let constraint = constraint as? [String: Any] else { continue }
+        if let constant = constraint["const"] as? String, constant != tag { return [:] }
+        if let not = constraint["not"] as? [String: Any], let excluded = not["enum"] as? [String], excluded.contains(tag) { return [:] }
     }
     for branch in (node["oneOf"] ?? node["anyOf"]) as? [Any] ?? [] {
-        fields.merge(properties(branch, kind: kind)) { _, new in new }
+        fields.merge(properties(branch, tags: tags)) { _, new in new }
     }
     return fields
 }
@@ -28,24 +38,24 @@ func uniqueFields(_ source: String, _ schema: Any) -> Bool {
     let ns = source as NSString
     let tokens = regex.matches(in: source, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range) }
     var index = 0, valid = true
-    func objectKind() -> String? {
-        var depth = 0, kind: String?
+    func objectTags() -> [String: String] {
+        var depth = 0, tags: [String: String] = [:]
         for cursor in index..<tokens.count {
             let token = tokens[cursor]
             if token == "{" || token == "[" { depth += 1 }
             else if token == "}" || token == "]" { if depth == 0 { break }; depth -= 1 }
             else if depth == 0 && token.hasPrefix("\"") && cursor + 2 < tokens.count && tokens[cursor + 1] == ":" && tokens[cursor + 2].hasPrefix("\"") {
                 let key = try! JSONSerialization.jsonObject(with: Data(token.utf8), options: [.fragmentsAllowed]) as! String
-                if key == "kind" { kind = try! JSONSerialization.jsonObject(with: Data(tokens[cursor + 2].utf8), options: [.fragmentsAllowed]) as? String }
+                tags[key] = try! JSONSerialization.jsonObject(with: Data(tokens[cursor + 2].utf8), options: [.fragmentsAllowed]) as? String
             }
         }
-        return kind
+        return tags
     }
     func visit(_ s: Any) {
         guard index < tokens.count else { valid = false; return }
         let token = tokens[index]; index += 1
         if token == "{" {
-            let fields = properties(s, kind: objectKind())
+            let fields = properties(s, tags: objectTags())
             var seen = Set<String>()
             while index < tokens.count && tokens[index] != "}" {
                 let key = try! JSONSerialization.jsonObject(with: Data(tokens[index].utf8), options: [.fragmentsAllowed]) as! String
@@ -72,7 +82,7 @@ func uniqueFields(_ source: String, _ schema: Any) -> Bool {
 func matches(_ schema: Any, _ value: Any) -> Bool {
     if let allowed = schema as? Bool { return allowed }
     let s = schema as! [String: Any]
-    if let ref = s["$ref"] as? String { return matches(definitions[String(ref.split(separator: "/").last!)]!, value) }
+    if let ref = s["$ref"] as? String, !matches(definitions[String(ref.split(separator: "/").last!)]!, value) { return false }
     if let not = s["not"], matches(not, value) { return false }
     if let any = s["anyOf"] as? [Any], !any.contains(where: { matches($0, value) }) { return false }
     if let one = s["oneOf"] as? [Any], one.filter({ matches($0, value) }).count != 1 { return false }
@@ -82,6 +92,11 @@ func matches(_ schema: Any, _ value: Any) -> Bool {
     let type = s["type"] as? String
     if type == "null" { return value is NSNull }
     if type == "string" && !(value is String) { return false }
+    if let pattern = s["pattern"] as? String, let text = value as? String {
+        let regex = try! NSRegularExpression(pattern: pattern)
+        let range = NSRange(location: 0, length: (text as NSString).length)
+        if regex.firstMatch(in: text, range: range) == nil { return false }
+    }
     let number = value as? NSNumber
     let boolean = number.map { CFGetTypeID($0) == CFBooleanGetTypeID() } ?? false
     if type == "boolean" && !boolean { return false }
@@ -99,6 +114,8 @@ func matches(_ schema: Any, _ value: Any) -> Bool {
     if type == "object" {
         guard let object = value as? [String: Any] else { return false }
         if let required = s["required"] as? [String], !required.allSatisfy({ object[$0] != nil }) { return false }
+        let declared = s["properties"] as? [String: Any] ?? [:]
+        if s["additionalProperties"] as? Bool == false, object.keys.contains(where: { declared[$0] == nil }) { return false }
         return (s["properties"] as? [String: Any] ?? [:]).allSatisfy { key, part in object[key].map { matches(part, $0) } ?? true }
     }
     return true
@@ -112,4 +129,5 @@ for fixture in fixtures {
     let view = try JSONSerialization.jsonObject(with: Data(source.utf8))
     precondition((unique && matches(schema, view)) == (fixture["valid"] as! Bool), source)
 }
-print("Swift: \(fixtures.count) shared Craft fixtures passed")
+let contract = URL(fileURLWithPath: CommandLine.arguments[1]).lastPathComponent
+print("Swift: \(fixtures.count) shared fixtures passed against \(contract)")
