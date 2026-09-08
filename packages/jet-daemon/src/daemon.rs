@@ -28,6 +28,7 @@ const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) async fn run(
 	home: JetHome,
 	channel: InstallationChannel,
+	identity: Option<crate::installation_identity::Identity>,
 ) -> ExitCode {
 	if let Err(error) = home.prepare() {
 		eprintln!(
@@ -70,9 +71,12 @@ pub(crate) async fn run(
 	let core =
 		match Core::start(store, WorkspaceHome(home.workspaces_dir())).await {
 			Ok(core) => Arc::new(
-				core.with_run_host(Arc::new(
-					crate::run_host::CraftProcesses::default(),
-				))
+				core.with_remote_worker(
+					std::env::current_exe().expect("jetd executable path"),
+				)
+				.with_run_host(Arc::new(crate::run_host::CraftProcesses::new(
+					identity,
+				)))
 				.with_utility_host(Arc::new(crate::utility_host::Utilities {
 					home: home.root().to_path_buf(),
 				}))

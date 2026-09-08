@@ -10,6 +10,14 @@ pub type RunFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Host-specific Craft validation and native transport, supplied by jetd.
 pub trait RunHost: std::fmt::Debug + Send + Sync {
+	/// Checks the accepted Craft and installed desktop identity before admitting
+	/// an origin Run. Unsupported hosts fail closed.
+	fn validate_no_visa(&self, _plan: &LaunchPlan) -> Result<(), CoreError> {
+		Err(CoreError::conflict(
+			"no_visa.unavailable",
+			"this Run host does not provide No-Visa tools",
+		))
+	}
 	/// Identifies the Provider whose native authentication this accepted
 	/// Harness uses. Unknown mappings must be refused, never guessed from a
 	/// client label or executable name.

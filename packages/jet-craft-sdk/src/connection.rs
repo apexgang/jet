@@ -145,6 +145,13 @@ impl<R: AsyncRead + Unpin> CraftReceiver<R> {
 	pub async fn receive(&mut self) -> Result<CraftCommand, CraftError> {
 		let command = receive(&mut self.reader).await?;
 		let feature = match &command {
+			CraftCommand::ConfigureRemoteTools { .. }
+			| CraftCommand::RemoteToolResult { .. } => {
+				if self.ready.protocol.version.minor < 6 {
+					return Err(CraftError::InvalidMessage);
+				}
+				"remote_tools"
+			}
 			CraftCommand::Start { .. } | CraftCommand::Acknowledge { .. } => {
 				if self.ready.protocol.version.minor < 1
 					|| !self
@@ -199,6 +206,9 @@ impl<W: AsyncWrite + Unpin> CraftSender<W> {
 	/// # Errors
 	/// Rejects oversized or malformed output and closes on a slow/disconnected peer.
 	pub async fn send(&mut self, event: &CraftEvent) -> Result<(), CraftError> {
+		if self.minor < 6 && matches!(event, CraftEvent::RemoteTool { .. }) {
+			return Err(CraftError::InvalidMessage);
+		}
 		if self.minor < 3
 			&& matches!(
 				event,
@@ -249,7 +259,7 @@ async fn handshake<R: AsyncRead + Unpin>(
 	// ASVS 2.3.1: a specification cannot make this SDK speak a new codec major.
 	let sdk = ProtocolOffer {
 		family: ProtocolFamily::Craft,
-		versions: vec![ProtocolVersion { major: 1, minor: 5 }],
+		versions: vec![ProtocolVersion { major: 1, minor: 6 }],
 		capabilities: vec![
 			"actions".into(),
 			"fork".into(),

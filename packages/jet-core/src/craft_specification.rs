@@ -149,7 +149,7 @@ pub(crate) fn enabled_features(
 	}
 	let mut enabled = Vec::new();
 	for feature in &specification.features {
-		if ["turns", "actions", "resume", "fork"]
+		if ["turns", "actions", "resume", "fork", "remote_tools"]
 			.contains(&feature.name.as_str())
 		{
 			enabled.push(feature.name.clone());

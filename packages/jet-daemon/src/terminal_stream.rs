@@ -113,7 +113,9 @@ impl Terminals {
 				};
 				(id, result)
 			}
-			ClientMessage::Command { .. } | ClientMessage::Query { .. } => {
+			ClientMessage::Command { .. }
+			| ClientMessage::Query { .. }
+			| ClientMessage::RemoteTool { .. } => {
 				return None;
 			}
 		};

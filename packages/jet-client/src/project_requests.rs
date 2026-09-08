@@ -36,7 +36,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::ProjectPreview(preview) => Ok(preview),
-			other @ (QueryResponse::Utility(_)
+			other @ (QueryResponse::RemoteToolReview(_)
+			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
@@ -93,7 +94,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::ProjectRegistered(project) => Ok(project),
-			other @ (CommandResponse::UtilityQueued { .. }
+			other @ (CommandResponse::RemoteToolReviewed { .. }
+			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -153,7 +155,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::ProjectEntry(entry) => Ok(entry),
-			other @ (QueryResponse::Utility(_)
+			other @ (QueryResponse::RemoteToolReview(_)
+			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
@@ -191,7 +194,8 @@ impl Client {
 		self.require_minor(jet_protocol::PROJECTS_MINOR)?;
 		match self.query(QueryRequest::Projects).await? {
 			QueryResponse::Projects(list) => Ok(list),
-			other @ (QueryResponse::Utility(_)
+			other @ (QueryResponse::RemoteToolReview(_)
+			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)

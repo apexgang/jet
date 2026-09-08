@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE remote_operations SET state = 'denied', request = NULL WHERE client_id = ?1 AND state IN ('pending', 'approved')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "2120a041fbde569e8dbcbbc8b3738f8c90762ef75a540d95cdabc2028beca48f"
+}

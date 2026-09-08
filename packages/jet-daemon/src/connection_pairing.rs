@@ -72,7 +72,8 @@ async fn apply(
 				client: crate::translate::paired_client(client),
 			})
 		}
-		CommandOutcome::UserEditApplied(_)
+		CommandOutcome::RemoteToolReviewed { .. }
+		| CommandOutcome::UserEditApplied(_)
 		| CommandOutcome::UtilityQueued { .. }
 		| CommandOutcome::CraftInstallationQueued { .. }
 		| CommandOutcome::ScheduleCreated(_)

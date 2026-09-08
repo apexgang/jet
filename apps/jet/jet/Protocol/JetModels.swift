@@ -183,6 +183,7 @@ public struct ClientHello {
 }
 
 public enum ClientMessage {
+    case `remote_tool`(ClientMessageRemoteTool)
     case `attach_terminal`(ClientMessageAttachTerminal)
     case `resize_terminal`(ClientMessageResizeTerminal)
     case `query`(ClientMessageQuery)
@@ -195,6 +196,7 @@ public struct ClientPublicKey {
 }
 
 public enum CommandRequest {
+    case `review_remote_tool`(CommandRequestReviewRemoteTool)
     case `request_utility`(CommandRequestRequestUtility)
     case `install_craft`(CommandRequestInstallCraft)
     case `create_schedule`(CommandRequestCreateSchedule)
@@ -211,6 +213,7 @@ public enum CommandRequest {
     case `interrupt_turn`(CommandRequestInterruptTurn)
     case `stop_run`(CommandRequestStopRun)
     case `start_visa_run`(CommandRequestStartVisaRun)
+    case `start_no_visa_run`(CommandRequestStartNoVisaRun)
     case `start_run`(CommandRequestStartRun)
     case `create_conversation`(CommandRequestCreateConversation)
     case `handoff_conversation`(CommandRequestHandoffConversation)
@@ -236,6 +239,7 @@ public enum CommandRequest {
 }
 
 public enum CommandResponse {
+    case `remote_tool_reviewed`(CommandResponseRemoteToolReviewed)
     case `utility_queued`(CommandResponseUtilityQueued)
     case `craft_installation_queued`(CommandResponseCraftInstallationQueued)
     case `schedule_created`(CommandResponseScheduleCreated)
@@ -576,6 +580,27 @@ public enum NameSource: String {
     case `deterministic` = "deterministic"
 }
 
+public struct NoVisaDestination {
+    public let `plane_id`: String
+    public let `ssh_endpoint`: String
+    public let `workspace_id`: String
+}
+
+public struct NoVisaOrigin {
+    public let `conversation_id`: String
+    public let `plane_id`: String
+    public let `run_id`: String
+}
+
+public struct NoVisaSelection {
+    public let `account_binding_id`: String
+    public let `conversation_id`: String
+    public let `destinations`: [NoVisaDestination]
+    public let `jet_equivalent`: [String]
+    public let `native_unavailable`: [String]
+    public let `origin_plane_id`: String
+}
+
 public struct OrphanedExecution {
     public let `execution_id`: String
     public let `metadata`: ExecutionMetadata?
@@ -733,6 +758,7 @@ public enum PromotionState: String {
 }
 
 public enum QueryRequest {
+    case `remote_tool_review`(QueryRequestRemoteToolReview)
     case `utility`(QueryRequestUtility)
     case `discover_craft`(QueryRequestDiscoverCraft)
     case `scheduled_tasks`(QueryRequestScheduledTasks)
@@ -763,6 +789,7 @@ public enum QueryRequest {
 }
 
 public enum QueryResponse {
+    case `remote_tool_review`(QueryResponseRemoteToolReview)
     case `utility`(QueryResponseUtility)
     case `craft_installation_preview`(QueryResponseCraftInstallationPreview)
     case `scheduled_tasks`(QueryResponseScheduledTasks)
@@ -806,6 +833,16 @@ public enum Registrability {
     case `inside_working_tree`(RegistrabilityInsideWorkingTree)
 }
 
+public struct RemoteEnvironment {
+    public let `name`: String
+    public let `value`: String?
+}
+
+public enum RemoteGitOperation: String {
+    case `status` = "status"
+    case `diff` = "diff"
+}
+
 public enum RemotePairingRequest {
     case `claim`(RemotePairingRequestClaim)
     case `complete`(RemotePairingRequestComplete)
@@ -815,6 +852,36 @@ public enum RemotePairingResponse {
     case `claimed`(RemotePairingResponseClaimed)
     case `completed`(RemotePairingResponseCompleted)
     case `rejected`(RemotePairingResponseRejected)
+}
+
+public enum RemoteToolAction {
+    case `terminal`(RemoteToolActionTerminal)
+    case `process`(RemoteToolActionProcess)
+    case `git`(RemoteToolActionGit)
+    case `shell`(RemoteToolActionShell)
+    case `write_file`(RemoteToolActionWriteFile)
+    case `read_file`(RemoteToolActionReadFile)
+}
+
+public enum RemoteToolDecision: String {
+    case `allow_once` = "allow_once"
+    case `deny` = "deny"
+}
+
+public struct RemoteToolRequest {
+    public let `action`: RemoteToolAction
+    public let `destination_plane_id`: String
+    public let `operation_id`: String
+    public let `origin`: NoVisaOrigin
+    public let `permissions`: [BrokerPermission]
+    public let `workspace_id`: String
+}
+
+public enum RemoteToolResult {
+    case `approval_required`(RemoteToolResultApprovalRequired)
+    case `process`(RemoteToolResultProcess)
+    case `written`(RemoteToolResultWritten)
+    case `file`(RemoteToolResultFile)
 }
 
 public struct Repository {
@@ -881,6 +948,7 @@ public struct RunExecution {
     public let `cursor`: String
     public let `exit_code`: Int32?
     public let `native_conversation`: String?
+    public let `no_visa`: NoVisaSelection?
     public let `processes`: [ManagedProcess]
     public let `run`: Run
     public let `termination`: RunTermination?
@@ -966,6 +1034,7 @@ public enum ServerHello {
 }
 
 public enum ServerMessage {
+    case `remote_tool_result`(ServerMessageRemoteToolResult)
     case `terminal_attached`(ServerMessageTerminalAttached)
     case `terminal_resized`(ServerMessageTerminalResized)
     case `query_result`(ServerMessageQueryResult)
@@ -1248,6 +1317,11 @@ public struct ChangeOriginExternalOrUnknown {
 
 }
 
+public struct ClientMessageRemoteTool {
+    public let `id`: UInt64
+    public let `request`: RemoteToolRequest
+}
+
 public struct ClientMessageAttachTerminal {
     public let `after`: String
     public let `credit`: String
@@ -1271,6 +1345,12 @@ public struct ClientMessageCommand {
     public let `command`: CommandRequest
     public let `command_id`: String
     public let `id`: UInt64
+}
+
+public struct CommandRequestReviewRemoteTool {
+    public let `client_id`: String
+    public let `decision`: RemoteToolDecision
+    public let `operation_id`: String
 }
 
 public struct CommandRequestRequestUtility {
@@ -1356,6 +1436,15 @@ public struct CommandRequestStartVisaRun {
     public let `conversation_id`: String
     public let `craft`: String
     public let `destination_plane_id`: String
+    public let `prompt`: String
+}
+
+public struct CommandRequestStartNoVisaRun {
+    public let `account_binding_id`: String
+    public let `conversation_id`: String
+    public let `craft`: String
+    public let `destinations`: [NoVisaDestination]
+    public let `origin_plane_id`: String
     public let `prompt`: String
 }
 
@@ -1468,6 +1557,10 @@ public struct CommandRequestResumeImportedConversation {
     public let `import_id`: String
     public let `retention`: RetentionPolicy?
     public let `working_tree`: WorkingTreeRequest
+}
+
+public struct CommandResponseRemoteToolReviewed {
+    public let `operation_id`: String
 }
 
 public struct CommandResponseUtilityQueued {
@@ -1904,6 +1997,11 @@ public struct PromotionDestinationBranch {
     public let `name`: String
 }
 
+public struct QueryRequestRemoteToolReview {
+    public let `client_id`: String
+    public let `operation_id`: String
+}
+
 public struct QueryRequestUtility {
     public let `job_id`: String
 }
@@ -2019,6 +2117,15 @@ public struct QueryRequestExternalConversations {
 
 }
 
+public struct QueryResponseRemoteToolReview {
+    public let `action`: RemoteToolAction
+    public let `destination_plane_id`: String
+    public let `operation_id`: String
+    public let `origin`: NoVisaOrigin
+    public let `permissions`: [BrokerPermission]
+    public let `workspace_id`: String
+}
+
 public struct QueryResponseUtility {
     public let `binding_id`: String?
     public let `job_id`: String
@@ -2094,6 +2201,7 @@ public struct QueryResponseRunExecution {
     public let `cursor`: String
     public let `exit_code`: Int32?
     public let `native_conversation`: String?
+    public let `no_visa`: NoVisaSelection?
     public let `processes`: [ManagedProcess]
     public let `run`: Run
     public let `termination`: RunTermination?
@@ -2264,6 +2372,56 @@ public struct RemotePairingResponseRejected {
     public let `error`: WireError
 }
 
+public struct RemoteToolActionTerminal {
+    public let `columns`: Int64
+    public let `directory`: String
+    public let `input`: String
+    public let `rows`: Int64
+}
+
+public struct RemoteToolActionProcess {
+    public let `arguments`: [String]
+    public let `directory`: String
+    public let `environment`: [RemoteEnvironment]
+}
+
+public struct RemoteToolActionGit {
+    public let `operation`: RemoteGitOperation
+}
+
+public struct RemoteToolActionShell {
+    public let `directory`: String
+    public let `environment`: [RemoteEnvironment]
+    public let `script`: String
+}
+
+public struct RemoteToolActionWriteFile {
+    public let `content`: String
+    public let `path`: String
+}
+
+public struct RemoteToolActionReadFile {
+    public let `path`: String
+}
+
+public struct RemoteToolResultApprovalRequired {
+    public let `operation_id`: String
+}
+
+public struct RemoteToolResultProcess {
+    public let `exit_code`: Int32?
+    public let `stderr`: String
+    public let `stdout`: String
+}
+
+public struct RemoteToolResultWritten {
+
+}
+
+public struct RemoteToolResultFile {
+    public let `content`: String
+}
+
 public struct RestartMetadataCursorExpired {
     public let `current_snapshot_revision`: String
     public let `minimum_available_cursor`: String
@@ -2315,6 +2473,11 @@ public struct ServerHelloWelcome {
 
 public struct ServerHelloRejected {
     public let `error`: WireError
+}
+
+public struct ServerMessageRemoteToolResult {
+    public let `id`: UInt64
+    public let `result`: RemoteToolResult
 }
 
 public struct ServerMessageTerminalAttached {

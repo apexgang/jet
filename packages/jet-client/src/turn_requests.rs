@@ -19,7 +19,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::TurnQueue(queue) => Ok(queue),
-			other @ (QueryResponse::Utility(_)
+			other @ (QueryResponse::RemoteToolReview(_)
+			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)

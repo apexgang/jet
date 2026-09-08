@@ -28,6 +28,13 @@ use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
+	/// Inspect the exact remote action awaiting a destination review.
+	RemoteToolReview {
+		/// Paired installation that submitted it.
+		client_id: crate::ClientId,
+		/// Remote operation identity.
+		operation_id: uuid::Uuid,
+	},
 	/// Read the durable result of one Utility request.
 	Utility {
 		/// Plane-assigned identity.
@@ -192,6 +199,8 @@ pub enum Query {
 /// Snapshots returned by [`Core::query`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult {
+	/// Exact remote action awaiting a destination review.
+	RemoteToolReview(crate::RemoteToolRequest),
 	/// Durable Utility result.
 	Utility(crate::UtilityJob),
 	/// Verified proposal that performs no installation by itself.
@@ -270,6 +279,22 @@ impl Core {
 			.expect("authority gate never closes");
 		actor.authorize(&self.remote_sessions)?;
 		match query {
+			Query::RemoteToolReview {
+				client_id,
+				operation_id,
+			} => self
+				.store
+				.read(async |tx| {
+					crate::remote_review::pending(
+						tx,
+						client_id,
+						operation_id,
+						self.now_unix_ms(),
+					)
+					.await
+				})
+				.await
+				.map(QueryResult::RemoteToolReview),
 			Query::DiscoverCraft { source } => {
 				crate::craft_installation::discover(self, source)
 					.await

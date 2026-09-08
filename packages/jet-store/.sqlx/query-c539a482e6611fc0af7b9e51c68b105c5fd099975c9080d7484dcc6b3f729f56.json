@@ -1,0 +1,146 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT client_id, operation_id, request_digest, recorded_at_unix_ms, origin_plane_id, origin_conversation_id, origin_run_id, workspace_id, request, state, result FROM remote_operations WHERE client_id = ?1 AND operation_id = ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "client_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "remote_operations",
+            "name": "client_id"
+          }
+        }
+      },
+      {
+        "name": "operation_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "remote_operations",
+            "name": "operation_id"
+          }
+        }
+      },
+      {
+        "name": "request_digest",
+        "ordinal": 2,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "remote_operations",
+            "name": "request_digest"
+          }
+        }
+      },
+      {
+        "name": "recorded_at_unix_ms",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "remote_operations",
+            "name": "recorded_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "origin_plane_id",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "remote_operations",
+            "name": "origin_plane_id"
+          }
+        }
+      },
+      {
+        "name": "origin_conversation_id",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "remote_operations",
+            "name": "origin_conversation_id"
+          }
+        }
+      },
+      {
+        "name": "origin_run_id",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "remote_operations",
+            "name": "origin_run_id"
+          }
+        }
+      },
+      {
+        "name": "workspace_id",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "remote_operations",
+            "name": "workspace_id"
+          }
+        }
+      },
+      {
+        "name": "request",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "remote_operations",
+            "name": "request"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "remote_operations",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "name": "result",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "remote_operations",
+            "name": "result"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "c539a482e6611fc0af7b9e51c68b105c5fd099975c9080d7484dcc6b3f729f56"
+}

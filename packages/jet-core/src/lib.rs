@@ -9,6 +9,17 @@
 //! translates at the transport seam.
 
 mod account;
+mod remote_review;
+mod remote_tool;
+mod remote_tool_types;
+mod remote_work;
+pub use remote_tool_types::{
+	NoVisaOrigin, RemoteEnvironment, RemoteGitOperation, RemoteToolAction,
+	RemoteToolDecision, RemoteToolRequest, RemoteToolResult,
+};
+pub use remote_work::RemoteWork;
+mod no_visa_run;
+pub use no_visa_run::{NoVisaDestination, NoVisaRunRequest, NoVisaSelection};
 mod visa;
 pub use visa::{VisaRunRequest, VisaSelection};
 mod audit;
@@ -300,6 +311,8 @@ impl Actor {
 /// One running core bound to one Plane store.
 #[derive(Debug)]
 pub struct Core {
+	remote_worker: Option<std::path::PathBuf>,
+	remote_tool_slots: tokio::sync::Semaphore,
 	utility_host: Option<Arc<dyn UtilityHost>>,
 	utility_work: tokio::sync::Mutex<()>,
 	run_work: tokio::sync::Notify,
@@ -417,6 +430,8 @@ impl Core {
 		let capabilities =
 			CapabilitySnapshot::from_observation(observed, started_at);
 		let core = Self {
+			remote_worker: None,
+			remote_tool_slots: tokio::sync::Semaphore::new(32),
 			utility_host: None,
 			utility_work: tokio::sync::Mutex::new(()),
 			run_work: tokio::sync::Notify::new(),

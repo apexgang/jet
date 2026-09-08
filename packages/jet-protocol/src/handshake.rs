@@ -14,7 +14,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 25;
+pub const PROTOCOL_MINOR: u32 = 26;
+
+/// Paired No-Visa Run and remote operation support.
+pub const NO_VISA_MINOR: u32 = 26;
 
 /// Explicit Visa destination and Plane-local Account-binding selection.
 pub const VISA_RUNS_MINOR: u32 = 25;

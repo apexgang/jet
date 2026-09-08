@@ -32,6 +32,13 @@ pub const MAX_QUERY_TIMEOUT_MS: u32 = 60_000;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ClientMessage {
+	/// One bounded operation from an authenticated Home daemon.
+	RemoteTool {
+		/// Request correlation.
+		id: RequestId,
+		/// Destination Workspace, origin, and declared permissions.
+		request: crate::RemoteToolRequest,
+	},
 	/// Bind this numbered stream to a terminal. Disconnecting leaves it alive.
 	AttachTerminal {
 		/// Request correlation.
@@ -103,6 +110,13 @@ pub fn raw_command(frame: &[u8]) -> Result<Box<RawValue>, ControlError> {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ServerMessage {
+	/// Outcome of one No-Visa operation.
+	RemoteToolResult {
+		/// Request correlation.
+		id: RequestId,
+		/// Bounded destination result.
+		result: crate::RemoteToolResult,
+	},
 	/// The numbered stream now accepts terminal input and receives output.
 	TerminalAttached {
 		/// Request correlation.
@@ -141,6 +155,13 @@ pub enum ServerMessage {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryRequest {
+	/// Inspect the exact remote action awaiting a destination review.
+	RemoteToolReview {
+		/// Paired installation that submitted it.
+		client_id: Uuid,
+		/// Remote operation identity.
+		operation_id: uuid::Uuid,
+	},
 	/// Read a durable Utility result.
 	Utility {
 		/// Plane-assigned job identity.
@@ -305,6 +326,8 @@ pub enum QueryRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryResponse {
+	/// Exact remote action awaiting a destination review.
+	RemoteToolReview(crate::RemoteToolRequest),
 	/// Attributed Utility result, with no execution authority.
 	Utility(crate::UtilityJob),
 	/// Verified immutable Craft installation proposal.

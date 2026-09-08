@@ -42,6 +42,18 @@ pub enum CraftAction {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CraftCommand {
+	/// Pinned remote destinations and honest capability report (Craft 1.6).
+	ConfigureRemoteTools {
+		/// Origin and authorized destinations.
+		selection: crate::NoVisaSelection,
+	},
+	/// Reply to one remote call, without disrupting other destination work (1.6).
+	RemoteToolResult {
+		/// Original operation identity.
+		operation_id: uuid::Uuid,
+		/// Destination result or stable refusal.
+		outcome: crate::RemoteToolOutcome,
+	},
 	/// Reconnect an existing helper without issuing native input (Craft 1.2).
 	Recover {
 		/// Original Run identity.
@@ -98,6 +110,11 @@ pub enum CraftCommand {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CraftEvent {
+	/// Request a Jet remote tool; the host supplies Actor and permissions (1.6).
+	RemoteTool {
+		/// Closed, destination-scoped request.
+		call: crate::CraftRemoteTool,
+	},
 	/// Capture before a subsequent turn (1.3). Hold native input until the
 	/// host acknowledges this marker's source record. Initial Start is pre-captured.
 	TurnStarted,
@@ -196,6 +213,19 @@ impl<'de> Deserialize<'de> for CraftEvent {
 		let kind: Kind = crate::decode_control(raw.get().as_bytes())
 			.map_err(serde::de::Error::custom)?;
 		match kind.kind.as_str() {
+			"remote_tool" => {
+				#[derive(Deserialize)]
+				#[serde(deny_unknown_fields)]
+				struct Request {
+					kind: String,
+					call: crate::CraftRemoteTool,
+				}
+				let request: Request =
+					crate::decode_control(raw.get().as_bytes())
+						.map_err(serde::de::Error::custom)?;
+				let _ = request.kind;
+				Ok(Self::RemoteTool { call: request.call })
+			}
 			"conversation_title" | "run_title" | "process_title" => {
 				#[derive(Deserialize)]
 				#[serde(tag = "kind")]

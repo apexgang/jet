@@ -47,36 +47,48 @@ pub(crate) async fn execution(
 		}
 	});
 
-	let mut turn = Turn::default();
-	let (helper_socket, initial) =
-		match requests.recv().await.ok_or(CraftError::Disconnected)? {
-			CraftCommand::Start {
-				id,
-				text,
-				helper_socket,
-			} => {
-				turn.id = id;
-				(helper_socket, Initial::Launch(text))
-			}
-			CraftCommand::Recover {
-				id,
-				helper_socket,
-				source_offset,
-				checkpoint,
-			} => {
-				turn.id = id;
-				let restored: Checkpoint =
-					serde_json::from_str(&checkpoint).unwrap_or_default();
-				turn.pending = restored.pending;
-				turn.asking = restored.asking;
-				(helper_socket, Initial::Recover(source_offset))
-			}
-			CraftCommand::Turn { .. }
-			| CraftCommand::Interrupt { .. }
-			| CraftCommand::Action { .. }
-			| CraftCommand::Acknowledge { .. }
-			| CraftCommand::Shutdown => return Err(CraftError::InvalidMessage),
-		};
+	let first = requests.recv().await.ok_or(CraftError::Disconnected)?;
+	let (remote, first) = match first {
+		CraftCommand::ConfigureRemoteTools { selection } => (
+			Some(crate::remote_tools::RemoteTools::new(selection)),
+			requests.recv().await.ok_or(CraftError::Disconnected)?,
+		),
+		other => (None, other),
+	};
+	let mut turn = Turn {
+		remote,
+		..Turn::default()
+	};
+	let (helper_socket, initial) = match first {
+		CraftCommand::Start {
+			id,
+			text,
+			helper_socket,
+		} => {
+			turn.id = id;
+			(helper_socket, Initial::Launch(text))
+		}
+		CraftCommand::Recover {
+			id,
+			helper_socket,
+			source_offset,
+			checkpoint,
+		} => {
+			turn.id = id;
+			let restored: Checkpoint =
+				serde_json::from_str(&checkpoint).unwrap_or_default();
+			turn.pending = restored.pending;
+			turn.asking = restored.asking;
+			(helper_socket, Initial::Recover(source_offset))
+		}
+		CraftCommand::Turn { .. }
+		| CraftCommand::Interrupt { .. }
+		| CraftCommand::Action { .. }
+		| CraftCommand::Acknowledge { .. }
+		| CraftCommand::ConfigureRemoteTools { .. }
+		| CraftCommand::RemoteToolResult { .. }
+		| CraftCommand::Shutdown => return Err(CraftError::InvalidMessage),
+	};
 
 	let helper = UnixStream::connect(&helper_socket)
 		.await
@@ -172,6 +184,19 @@ pub(crate) async fn execution(
 			minor,
 		)
 		.await?;
+		while turn
+			.remote
+			.as_ref()
+			.is_some_and(crate::remote_tools::RemoteTools::pending)
+		{
+			let command =
+				requests.recv().await.ok_or(CraftError::Disconnected)?;
+			if request(command, &mut turn, &mut sender, &mut writer, minor)
+				.await? == Flow::Release
+			{
+				return Ok(());
+			}
+		}
 		// Every semantic Event for this source record has been sent, so the
 		// host may now durably commit them together with the cursor.
 		sender
@@ -226,6 +251,7 @@ struct Checkpoint {
 /// The turn currently in flight and the parser state behind it.
 #[derive(Default)]
 struct Turn {
+	remote: Option<crate::remote_tools::RemoteTools>,
 	/// Correlation identity the next native completion answers.
 	id: String,
 	/// Whether this turn arrived as its own Command rather than with the Run.
@@ -258,6 +284,7 @@ async fn request(
 				cancelling: false,
 				pending: std::mem::take(&mut turn.pending),
 				asking: turn.asking.take(),
+				remote: turn.remote.take(),
 			};
 			input(writer, harness::user_message(&text)).await?;
 			Ok(Flow::Continue)
@@ -271,6 +298,21 @@ async fn request(
 		}
 		// Releasing the connection closes the Harness's input, which is how
 		// this Harness ends: no signal, and its output stays retained.
+		CraftCommand::ConfigureRemoteTools { .. } => {
+			Err(CraftError::InvalidMessage)
+		}
+		CraftCommand::RemoteToolResult {
+			operation_id,
+			outcome,
+		} => {
+			let reply = turn
+				.remote
+				.as_mut()
+				.ok_or(CraftError::InvalidMessage)?
+				.reply(operation_id, outcome)?;
+			input(writer, reply).await?;
+			Ok(Flow::Continue)
+		}
 		CraftCommand::Shutdown => {
 			ask(writer, &HelperCommand::CloseInput).await?;
 			Ok(Flow::Release)
@@ -377,6 +419,20 @@ async fn line_observed(
 		.await?;
 	// A message for this Craft's own MCP server is answered here, except
 	// the one that asks permission: the Harness waits for Jet on that.
+	if let Some(observed) = turn
+		.remote
+		.as_mut()
+		.and_then(|remote| remote.observe(&value))
+	{
+		return match observed {
+			crate::remote_tools::Observed::Reply(reply) => {
+				input(writer, reply).await
+			}
+			crate::remote_tools::Observed::Call(call) => {
+				sender.send(&CraftEvent::RemoteTool { call }).await
+			}
+		};
+	}
 	match approval::served(&value) {
 		approval::Served::Reply(reply) => return input(writer, reply).await,
 		approval::Served::Asking(request) => {

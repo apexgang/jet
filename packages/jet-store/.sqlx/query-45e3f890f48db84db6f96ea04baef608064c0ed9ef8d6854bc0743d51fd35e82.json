@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE remote_operations SET state = 'finished', result = ?3, request = NULL WHERE client_id = ?1 AND operation_id = ?2 AND state = 'running'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "45e3f890f48db84db6f96ea04baef608064c0ed9ef8d6854bc0743d51fd35e82"
+}

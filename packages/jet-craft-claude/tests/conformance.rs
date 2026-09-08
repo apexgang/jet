@@ -394,6 +394,13 @@ fn start_craft(
 		"id = \"claude-code\"\nharness = \"claude-code\"\nschema = {{ major = 1, minor = 0 }}\nbroker_permissions = []\nhost_access = [{{ kind = \"executable\", name = {:?} }}]\nfeatures = [{{ name = \"turns\", required = true }}, {{ name = \"actions\", required = true }}]\n\n[protocol]\nfamily = \"craft\"\nversions = [{{ major = 1, minor = 4 }}]\ncapabilities = [\"runs\", \"actions\"]\n",
 		harness.to_str().unwrap()
 	);
+	let declaration = declaration
+		.replace(
+			"broker_permissions = []",
+			"broker_permissions = [\"remote_tools\"]",
+		)
+		.replace("features = [", "features = [{ name = \"remote_tools\" }, ")
+		.replace("minor = 4", "minor = 6");
 	std::fs::write(
 		installed.with_file_name(".jet").join("craft-spec.toml"),
 		declaration,
@@ -413,6 +420,13 @@ async fn accept_craft(
 	socket: &Path,
 	run: Uuid,
 ) -> (Reader, Writer, CraftReady) {
+	accept_craft_at_minor(socket, run, 4).await
+}
+async fn accept_craft_at_minor(
+	socket: &Path,
+	run: Uuid,
+	minor: u32,
+) -> (Reader, Writer, CraftReady) {
 	let mut stream = loop {
 		match UnixStream::connect(socket).await {
 			Ok(stream) => break stream,
@@ -424,7 +438,7 @@ async fn accept_craft(
 	let mut reader = FrameReader::new(read);
 	let mut writer = FrameWriter::new(write);
 	let hello = json!({
-		"protocol": {"family": "craft", "versions": [{"major": 1, "minor": 4}], "capabilities": ["runs", "actions"]},
+		"protocol": {"family": "craft", "versions": [{"major": 1, "minor": minor}], "capabilities": ["runs", "actions"]},
 		"specification": {"family": "specification", "versions": [{"major": 1, "minor": 0}]},
 		"execution_id": run,
 		"resume": Value::Null,
@@ -534,6 +548,34 @@ fn claude_double() {
 			"claude_code_version": "2.1.263", "session_id": session,
 		}));
 		emit(&serde_json::from_str::<Value>(&assistant(&session)).unwrap());
+		if text == "remote" {
+			let tools = ask(
+				&mut input,
+				"remote-list",
+				json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}),
+			);
+			assert!(
+				tools["tools"]
+					.as_array()
+					.unwrap()
+					.iter()
+					.any(|t| t["name"] == "remote")
+			);
+			let call: Value = serde_json::from_slice(
+				&std::fs::read("remote-call.json").unwrap(),
+			)
+			.unwrap();
+			let result = ask(
+				&mut input,
+				"remote-call",
+				json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"remote","arguments":call}}),
+			);
+			std::fs::write(
+				"remote-result.json",
+				serde_json::to_vec(&result).unwrap(),
+			)
+			.unwrap();
+		}
 		if text == "second" {
 			emit(&json!({
 				"type": "rate_limit_event", "session_id": session,
@@ -632,4 +674,41 @@ fn result(session: &str) -> String {
 		"usage": {"input_tokens": 10, "output_tokens": 90},
 	})
 	.to_string()
+}
+
+#[tokio::test]
+async fn native_mcp_call_waits_for_the_jet_remote_result_before_acknowledging_source()
+ {
+	tokio::time::timeout(Duration::from_secs(20), async {
+        let (root, run, harness) = workspace();
+        let mut helper = start_helper(&root, run, &harness).await;
+        let (socket, mut craft) = start_craft(&root, &harness);
+        let (mut reader, mut writer, ready) = accept_craft_at_minor(&socket, run, 6).await;
+        assert_eq!(ready.protocol.version, ProtocolVersion { major: 1, minor: 6 });
+        let plane = Uuid::new_v4(); let workspace = Uuid::new_v4(); let operation = Uuid::new_v4();
+        let call = json!({"operation_id":operation,"destination_plane_id":plane,"workspace_id":workspace,"action":{"type":"read_file","path":"README.md"}});
+        std::fs::write(root.join("remote-call.json"), serde_json::to_vec(&call).unwrap()).unwrap();
+        command(&mut writer, &json!({"kind":"configure_remote_tools","selection":{
+            "origin_plane_id":Uuid::new_v4(),"conversation_id":Uuid::new_v4(),"account_binding_id":Uuid::new_v4(),
+            "destinations":[{"plane_id":plane,"workspace_id":workspace,"ssh_endpoint":"paired"}],"jet_equivalent":["files"],"native_unavailable":["sandbox_internals"]
+        }})).await;
+        command(&mut writer, &json!({"kind":"start","id":run,"text":"remote","helper_socket":root.join("h.sock")})).await;
+        let mut forwarded = false;
+        loop {
+            match event(&mut reader).await {
+                CraftEvent::RemoteTool { call:actual } => {
+                    assert_eq!(serde_json::to_value(actual).unwrap(), call);
+                    forwarded = true;
+                    command(&mut writer, &json!({"kind":"remote_tool_result","operation_id":operation,"outcome":{"type":"completed","result":{"type":"file","content":"destination evidence"}}})).await;
+                },
+                CraftEvent::Progress { source_offset, .. } => command(&mut writer, &json!({"kind":"acknowledge","source_offset":source_offset})).await,
+                CraftEvent::Completed { .. } => break,
+                _ => {},
+            }
+        }
+        assert!(forwarded);
+        let result:Value = serde_json::from_slice(&std::fs::read(root.join("remote-result.json")).unwrap()).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(result["content"][0]["text"].as_str().unwrap()).unwrap(), json!({"type":"completed","result":{"type":"file","content":"destination evidence"}}));
+        craft.kill().await.unwrap(); helper.kill().await.unwrap(); std::fs::remove_dir_all(root).unwrap();
+    }).await.unwrap();
 }

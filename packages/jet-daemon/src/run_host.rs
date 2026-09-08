@@ -30,7 +30,17 @@ use uuid::Uuid;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Debug, Default)]
-pub(crate) struct CraftProcesses(Mutex<HashMap<String, CraftProcess>>);
+pub(crate) struct CraftProcesses(
+	Mutex<HashMap<String, CraftProcess>>,
+	pub(crate) Option<crate::installation_identity::Identity>,
+);
+impl CraftProcesses {
+	pub(crate) fn new(
+		identity: Option<crate::installation_identity::Identity>,
+	) -> Self {
+		Self(Mutex::new(HashMap::new()), identity)
+	}
+}
 #[derive(Debug)]
 struct CraftProcess {
 	child: Child,
@@ -38,6 +48,7 @@ struct CraftProcess {
 }
 
 pub(crate) struct RunConnection {
+	pub(crate) broker: Option<crate::no_visa_broker::Broker>,
 	pub(crate) craft_minor: u32,
 	pub(crate) reader: Mutex<FrameReader<OwnedReadHalf>>,
 	pub(crate) writer: Mutex<FrameWriter<OwnedWriteHalf>>,
@@ -67,8 +78,26 @@ impl jet_core::RunConnection for RunConnection {
 	}
 	fn receive(&self) -> RunFuture<'_, Result<RunObservation, CoreError>> {
 		Box::pin(async move {
-			let event: CraftEvent =
-				receive(&mut *self.reader.lock().await).await?;
+			let event: CraftEvent = loop {
+				let event = receive(&mut *self.reader.lock().await).await?;
+				if let CraftEvent::RemoteTool { call } = event {
+					let broker = self.broker.as_ref().ok_or_else(|| {
+						failed("remote tools were not admitted for this Run")
+					})?;
+					let operation_id = call.operation_id;
+					let outcome = broker.call(call).await;
+					send(
+						&mut *self.writer.lock().await,
+						&CraftCommand::RemoteToolResult {
+							operation_id,
+							outcome,
+						},
+					)
+					.await?;
+				} else {
+					break event;
+				}
+			};
 			if self.craft_minor < 3
 				&& matches!(
 					&event,
@@ -88,6 +117,7 @@ impl jet_core::RunConnection for RunConnection {
 				return Err(failed("native titles require Craft 1.5"));
 			}
 			Ok(match event {
+				CraftEvent::RemoteTool { .. } => unreachable!("handled above"),
 				CraftEvent::ConversationTitle { title } => {
 					RunObservation::ConversationTitle(title)
 				}
@@ -212,6 +242,10 @@ impl jet_core::RunConnection for RunConnection {
 	}
 }
 impl RunHost for CraftProcesses {
+	fn validate_no_visa(&self, plan: &LaunchPlan) -> Result<(), CoreError> {
+		crate::no_visa_broker::Broker::prepare(self, plan, RunId(Uuid::nil()))
+			.map(|_| ())
+	}
 	fn native_provider(
 		&self,
 		craft: &PinnedCraft,
@@ -356,6 +390,9 @@ pub(crate) async fn start(
 	.await?;
 	let (socket, helper_pid) = helper(&runtime, run_id, plan).await?;
 	let connection = RunConnection {
+		broker: crate::no_visa_broker::Broker::prepare(
+			processes, plan, run_id,
+		)?,
 		craft_minor: Contract::of(&plan.craft)?.craft_protocol.minor,
 		run_id,
 		reader: Mutex::new(reader),
@@ -386,6 +423,8 @@ pub(crate) async fn craft_connection(
 	mode: ConnectionMode,
 ) -> Result<(FrameReader<OwnedReadHalf>, FrameWriter<OwnedWriteHalf>), CoreError>
 {
+	let broker =
+		crate::no_visa_broker::Broker::prepare(processes, plan, run_id)?;
 	let contract = Contract::of(&plan.craft)?;
 	let mut stream = processes.connect(runtime, &plan.craft).await?;
 	stream.write_all(b"jet-craft\n").await.map_err(failed)?;
@@ -463,6 +502,15 @@ pub(crate) async fn craft_connection(
 	}
 	reader.enable_multiplexing();
 	writer.enable_multiplexing();
+	if let Some(broker) = broker {
+		send(
+			&mut writer,
+			&CraftCommand::ConfigureRemoteTools {
+				selection: selection_for_craft(&broker),
+			},
+		)
+		.await?;
+	}
 	Ok((reader, writer))
 }
 
@@ -680,4 +728,10 @@ pub(crate) mod filesystem {
 			.await
 			.map_err(super::failed)
 	}
+}
+
+fn selection_for_craft(
+	broker: &crate::no_visa_broker::Broker,
+) -> jet_protocol::NoVisaSelection {
+	broker.selection()
 }

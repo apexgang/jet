@@ -13,6 +13,7 @@ async fn a_changed_boot_proves_loss_even_when_the_previous_pid_is_live() {
 	let current = jet_runtime::execution_boot_identity().unwrap();
 	let plan = |boot: &str| LaunchPlan {
 		visa: None,
+		no_visa: None,
 		turn_id: None,
 		native_conversation: None,
 		fork: None,

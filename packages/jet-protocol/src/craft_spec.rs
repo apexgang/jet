@@ -100,8 +100,15 @@ impl CraftSpecification {
 			.negotiate(&self.protocol, Negotiation::NewExecution)?;
 		let mut enabled = Vec::new();
 		for feature in &self.features {
-			if ["turns", "actions", "resume", "fork", "utility"]
-				.contains(&feature.name.as_str())
+			if [
+				"turns",
+				"actions",
+				"resume",
+				"fork",
+				"remote_tools",
+				"utility",
+			]
+			.contains(&feature.name.as_str())
 			{
 				enabled.push(feature.name.clone());
 			} else if feature.required {

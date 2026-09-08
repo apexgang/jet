@@ -170,6 +170,8 @@ async fn fake_execution(stream: UnixStream) {
 			}
 			CraftCommand::Shutdown => break,
 			CraftCommand::Start { .. }
+			| CraftCommand::ConfigureRemoteTools { .. }
+			| CraftCommand::RemoteToolResult { .. }
 			| CraftCommand::Recover { .. }
 			| CraftCommand::Acknowledge { .. }
 			| CraftCommand::Turn { .. }

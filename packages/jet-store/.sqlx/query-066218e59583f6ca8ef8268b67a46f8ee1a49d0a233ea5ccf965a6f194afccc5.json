@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO remote_operations (client_id, operation_id, request_digest, recorded_at_unix_ms, request, state, result, origin_plane_id, origin_conversation_id, origin_run_id, workspace_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "066218e59583f6ca8ef8268b67a46f8ee1a49d0a233ea5ccf965a6f194afccc5"
+}

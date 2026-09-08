@@ -27,7 +27,8 @@ impl Client {
 		self.require_minor(jet_protocol::PAIRING_MINOR)?;
 		match self.query(QueryRequest::Pairing).await? {
 			QueryResponse::Pairing(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::Utility(_)
+			other @ (QueryResponse::RemoteToolReview(_)
+			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
@@ -79,7 +80,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingGateSet { gate } => Ok(gate),
-			other @ (CommandResponse::UtilityQueued { .. }
+			other @ (CommandResponse::RemoteToolReviewed { .. }
+			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -140,7 +142,8 @@ impl Client {
 				pending,
 				disclosure,
 			} => Ok((pending, disclosure)),
-			other @ (CommandResponse::UtilityQueued { .. }
+			other @ (CommandResponse::RemoteToolReviewed { .. }
+			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -207,7 +210,8 @@ impl Client {
 			CommandResponse::PairingClaimed { pending, challenge } => {
 				Ok((pending, challenge))
 			}
-			other @ (CommandResponse::UtilityQueued { .. }
+			other @ (CommandResponse::RemoteToolReviewed { .. }
+			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -272,7 +276,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingConfirmed { pending } => Ok(pending),
-			other @ (CommandResponse::UtilityQueued { .. }
+			other @ (CommandResponse::RemoteToolReviewed { .. }
+			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -333,7 +338,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingCompleted { client } => Ok(client),
-			other @ (CommandResponse::UtilityQueued { .. }
+			other @ (CommandResponse::RemoteToolReviewed { .. }
+			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -393,7 +399,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairedClientAccessSet { client } => Ok(client),
-			other @ (CommandResponse::UtilityQueued { .. }
+			other @ (CommandResponse::RemoteToolReviewed { .. }
+			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -451,7 +458,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairedClientRevoked { client_id } => Ok(client_id),
-			other @ (CommandResponse::UtilityQueued { .. }
+			other @ (CommandResponse::RemoteToolReviewed { .. }
+			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }

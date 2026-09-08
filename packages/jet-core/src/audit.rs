@@ -57,6 +57,8 @@ pub struct AuditRecordId(pub Uuid);
 /// what happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditDecision {
+	/// A user reviewed an exact remote action.
+	RemoteToolReviewed,
 	/// The owner changed Utility routing or purpose permissions.
 	UtilityPolicyChanged,
 	/// A terminal open was admitted.
@@ -238,6 +240,7 @@ impl AuditDecision {
 	#[must_use]
 	pub fn as_str(self) -> &'static str {
 		match self {
+			Self::RemoteToolReviewed => "remote.reviewed",
 			Self::ExecutionResolutionRequested => {
 				"execution.resolution_requested"
 			}
@@ -280,7 +283,8 @@ impl AuditDecision {
 	/// one a later release would assign.
 	fn risk(self) -> AuditRisk {
 		match self {
-			Self::ExecutionResolutionRequested => AuditRisk::Destructive,
+			Self::RemoteToolReviewed => AuditRisk::Elevated,
+            Self::ExecutionResolutionRequested => AuditRisk::Destructive,
 			Self::TerminalOpened | Self::TerminalClosed | Self::TerminalInput | Self::ConnectionAuthenticated => AuditRisk::Routine,
 			Self::UtilityPolicyChanged | Self::AccountBound
 			| Self::AccountUnbound
@@ -375,6 +379,9 @@ impl AuditSubject {
 /// guards can never drift apart.
 pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 	match command {
+		Command::ReviewRemoteTool { .. } => {
+			Some(AuditDecision::RemoteToolReviewed)
+		}
 		Command::InstallCraft { .. } => {
 			Some(AuditDecision::CraftInstallationApproved)
 		}
@@ -413,6 +420,7 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
 		| Command::StartVisaRun(_)
+		| Command::StartNoVisaRun(_)
 		| Command::RequestUtility { .. }
 		| Command::CreateSchedule { .. }
 		| Command::CancelSchedule { .. }
@@ -435,6 +443,7 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 /// that exists.
 fn refused_subject(command: &Command) -> AuditSubject {
 	match command {
+		Command::ReviewRemoteTool { .. } => AuditSubject::Plane,
 		Command::InstallCraft { confirmation } => {
 			AuditSubject::Craft(refused_craft_identity(confirmation))
 		}
@@ -472,6 +481,7 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
 		| Command::StartVisaRun(_)
+		| Command::StartNoVisaRun(_)
 		| Command::RequestUtility { .. }
 		| Command::CreateSchedule { .. }
 		| Command::CancelSchedule { .. }

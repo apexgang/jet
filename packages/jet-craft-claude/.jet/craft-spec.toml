@@ -4,13 +4,14 @@
 id = "claude-code"
 harness = "claude-code"
 schema = { major = 1, minor = 0 }
-broker_permissions = []
+broker_permissions = ["remote_tools"]
 host_access = [
 	{ kind = "executable", name = "claude" },
 	{ kind = "executable", name = "curl" },
 	{ kind = "network", destination = "api.anthropic.com" },
 ]
 features = [
+    { name = "remote_tools" },
     { name = "utility" },
 	{ name = "turns", required = true },
 	{ name = "actions", required = true },
@@ -19,5 +20,5 @@ features = [
 
 [protocol]
 family = "craft"
-versions = [{ major = 1, minor = 4 }]
+versions = [{ major = 1, minor = 6 }]
 capabilities = ["runs", "resume", "actions"]

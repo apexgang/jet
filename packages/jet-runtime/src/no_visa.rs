@@ -7,7 +7,7 @@ use rustix::process::{
 use std::future::Future;
 use std::process::ExitStatus;
 use std::time::Duration;
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -15,6 +15,8 @@ use tokio::time::timeout;
 /// running until completion or revocation; it never detaches the process.
 #[derive(Debug)]
 pub struct NoVisaOperation {
+	stop: Option<tokio::sync::oneshot::Sender<()>>,
+	stderr: Option<ChildStderr>,
 	task: JoinHandle<std::io::Result<ExitStatus>>,
 	stdout: Option<ChildStdout>,
 	stdin: Option<ChildStdin>,
@@ -35,6 +37,8 @@ impl NoVisaOperation {
 		)?;
 		let mut child = command.process_group(0).kill_on_drop(true).spawn()?;
 		let stdout = child.stdout.take();
+		let stderr = child.stderr.take();
+		let (stop, mut stopped) = tokio::sync::oneshot::channel();
 		let stdin = child.stdin.take();
 		let group = Pid::from_raw(
 			i32::try_from(child.id().expect("new child has a pid"))
@@ -44,7 +48,7 @@ impl NoVisaOperation {
 		let task = tokio::spawn(async move {
 			tokio::select! {
 				biased;
-				() = revoked => {
+				() = async { tokio::select! { () = revoked => {}, Ok(()) = &mut stopped => {} } } => {
 					// A failed graceful signal must still reach forced cleanup.
 					// In particular, Darwin can report EPERM for exited groups.
 					let _ = process.signal(Signal::TERM);
@@ -80,10 +84,23 @@ impl NoVisaOperation {
 			Ok(status)
 		});
 		Ok(Self {
+			stop: Some(stop),
+			stderr,
 			task,
 			stdout,
 			stdin,
 		})
+	}
+
+	/// Requests a bounded graceful stop without revoking the connection.
+	pub fn stop(&mut self) {
+		if let Some(stop) = self.stop.take() {
+			let _ = stop.send(());
+		}
+	}
+	/// Takes the stderr pipe when the launch requested piped stderr.
+	pub fn take_stderr(&mut self) -> Option<ChildStderr> {
+		self.stderr.take()
 	}
 
 	/// Takes the input pipe when the launch requested piped stdin.

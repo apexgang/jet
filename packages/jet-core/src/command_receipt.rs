@@ -19,6 +19,8 @@ const SCHEDULE_OUTCOME_VERSION: u32 = 3;
 const UTILITY_OUTCOME_VERSION: u32 = 4;
 /// Craft installation receipts are unknown to every previous release.
 const CRAFT_INSTALLATION_OUTCOME_VERSION: u32 = 5;
+/// Exact remote action reviews require a new receipt vocabulary.
+const REMOTE_REVIEW_OUTCOME_VERSION: u32 = 6;
 
 /// Uses the rollback release's encoding whenever that release can understand
 /// the result. Version 2 is reserved for name-only variants introduced here;
@@ -28,6 +30,9 @@ pub(crate) fn outcome_version(
 	result: &Result<CommandOutcome, CoreError>,
 ) -> u32 {
 	match result {
+		Ok(CommandOutcome::RemoteToolReviewed { .. }) => {
+			REMOTE_REVIEW_OUTCOME_VERSION
+		}
 		Ok(CommandOutcome::UtilityQueued { .. }) => UTILITY_OUTCOME_VERSION,
 		Ok(CommandOutcome::CraftInstallationQueued { .. }) => {
 			CRAFT_INSTALLATION_OUTCOME_VERSION
@@ -120,7 +125,8 @@ pub(crate) fn replay(
 		OUTCOME_VERSION
 		| SCHEDULE_OUTCOME_VERSION
 		| UTILITY_OUTCOME_VERSION
-		| CRAFT_INSTALLATION_OUTCOME_VERSION => decode_result(&outcome),
+		| CRAFT_INSTALLATION_OUTCOME_VERSION
+		| REMOTE_REVIEW_OUTCOME_VERSION => decode_result(&outcome),
 		PREVIOUS_OUTCOME_VERSION => decode_previous_result(&outcome),
 		_ => Ok(Err(CoreError::incompatible(
 			"command.outcome_incompatible",

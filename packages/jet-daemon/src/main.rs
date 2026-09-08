@@ -13,6 +13,9 @@ mod connection_session;
 mod daemon;
 mod execution_signal;
 mod execution_termination;
+mod installation_identity;
+mod no_visa_broker;
+mod remote_tool;
 mod run_craft;
 mod run_host;
 mod run_recovery;
@@ -37,6 +40,9 @@ struct Cli {
 /// an authenticated state change.
 #[derive(clap::Subcommand)]
 enum Subcommand {
+	/// Execute one private, preauthorized bounded operation on standard I/O.
+	#[command(hide = true)]
+	RemoteWorker,
 	/// Bridge SSH standard I/O to the running Plane's restricted handshake.
 	Connect {
 		/// Use standard input/output for the Jet protocol.
@@ -54,6 +60,12 @@ enum Subcommand {
 		/// How this daemon was installed and is managed.
 		#[arg(long, value_enum, default_value_t = Channel::Development)]
 		channel: Channel,
+		/// Platform credential signing helper owned by the desktop installation.
+		#[arg(long, requires = "identity_client_id")]
+		identity_signer: Option<PathBuf>,
+		/// Installation identity whose private key stays in platform storage.
+		#[arg(long, requires = "identity_signer")]
+		identity_client_id: Option<uuid::Uuid>,
 	},
 }
 
@@ -78,6 +90,7 @@ impl From<Channel> for InstallationChannel {
 async fn main() -> ExitCode {
 	let Cli { subcommand } = Cli::parse();
 	match subcommand {
+		Subcommand::RemoteWorker => remote_tool::worker().await,
 		Subcommand::Connect { home, .. } => {
 			let Some(home) =
 				home.map(JetHome::at).or_else(JetHome::for_current_user)
@@ -95,14 +108,29 @@ async fn main() -> ExitCode {
 			// This relay owns no state and has already flushed protocol output.
 			std::process::exit(code)
 		}
-		Subcommand::Serve { home, channel } => {
+		Subcommand::Serve {
+			home,
+			channel,
+			identity_signer,
+			identity_client_id,
+		} => {
 			let Some(home) =
 				home.map(JetHome::at).or_else(JetHome::for_current_user)
 			else {
 				eprintln!("jetd: no --home given and HOME is not set");
 				return ExitCode::from(1);
 			};
-			daemon::run(home, channel.into()).await
+			daemon::run(
+				home,
+				channel.into(),
+				identity_signer.zip(identity_client_id).map(
+					|(executable, client_id)| installation_identity::Identity {
+						executable,
+						client_id,
+					},
+				),
+			)
+			.await
 		}
 	}
 }

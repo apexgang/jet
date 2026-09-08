@@ -42,7 +42,8 @@ ADR-0104 pins v1 parity to explicitly tested releases. This Craft is tested agai
 | Stop Run | Jet-equivalent | Signal escalation through the helper (ADR-0083) |
 | File change evidence | Jet-equivalent | The Harness reports no object identities; Workspace comparison covers checkpoints |
 | Approval requests | Native | The Harness's own permission tool, answered by Jet |
-| Harness extensions | Unavailable | Skills, MCP servers, and hooks are #37 |
+| No-Visa remote tools | Jet-equivalent | Craft 1.6 exposes `mcp__jet__remote` only for an admitted No-Visa Run |
+| Harness extensions | Unavailable | General skills, MCP servers, and hooks are #37 |
 
 ## Approvals
 
@@ -59,3 +60,24 @@ What does not work, so it is not tried again: `--permission-prompts host` alone 
 `just test -p jet-craft-claude` drives real processes: a host, this Craft, a real `jetfueld`, and a Harness speaking the native protocol. It runs a Conversation of five turns over one process — one that only ends because it was cancelled natively, and one that cannot proceed until an approval is answered — and asserts the launch flags, the pinned Conversation identity every completion carries, the turn outcomes, the activity sequence, that an assistant event's exact bytes and its three views both arrive, and that the decision reached the Harness with the input it was shown.
 
 The permission contract itself was verified against Claude Code 2.1.263 directly: registering the server, answering `initialize` and `tools/list`, and allowing one `tools/call` let a real Harness complete a write it would otherwise have been refused.
+
+## No-Visa tools
+
+An accepted Craft 1.6 installation declares `remote_tools`. For a No-Visa Run,
+the origin sends the immutable destination selection before Start or Recover.
+Only then does this Craft add `remote` to its existing `jet` MCP server. Its
+input schema is generated from `CraftRemoteTool`; native input cannot supply
+an originating Actor, accepted permissions, or SSH endpoint.
+
+The Craft forwards the operation identity unchanged and delivers Jet's result
+as the native MCP response. It holds the corresponding helper source record
+until that response has been handled. A restart therefore replays the same
+operation identity, allowing the destination's durable receipt to prevent a
+second mutation. A pending destination approval is returned as such; the Craft
+does not approve or automatically retry it. Native control messages and remote
+results remain subject to the usual source and framing bounds.
+
+The conformance suite covers the remote call and response using the real Craft
+and helper with a native protocol Harness double. Native remote checkpoints,
+extensions, discovery, and sandbox internals remain unavailable as described
+in [No-Visa execution](no-visa-execution.md).

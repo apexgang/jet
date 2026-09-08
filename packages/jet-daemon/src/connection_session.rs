@@ -306,6 +306,9 @@ async fn reply_to(
 	message: ClientMessage,
 ) -> ServerMessage {
 	match message {
+		ClientMessage::RemoteTool { id, request } => {
+			crate::remote_tool::answer(core, actor, minor, id, request).await
+		}
 		ClientMessage::AttachTerminal { id, .. }
 		| ClientMessage::ResizeTerminal { id, .. } => ServerMessage::Error {
 			id: Some(id),

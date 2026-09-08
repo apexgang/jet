@@ -151,6 +151,15 @@ pub struct ConversationSnapshot {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandRequest {
+	/// Reviews one immutable No-Visa action captured by the destination.
+	ReviewRemoteTool {
+		/// Paired installation that submitted the action.
+		client_id: Uuid,
+		/// Captured remote operation identity.
+		operation_id: Uuid,
+		/// Applies only to this exact stored action.
+		decision: crate::RemoteToolDecision,
+	},
 	/// Admit one bounded Utility request.
 	RequestUtility {
 		/// Purpose-specific input references.
@@ -272,6 +281,8 @@ pub enum CommandRequest {
 	},
 	/// Start native execution on the selected Conversation Home Plane (1.25).
 	StartVisaRun(crate::VisaRunRequest),
+	/// Desktop-only origin execution through paired remote tools (1.26).
+	StartNoVisaRun(crate::NoVisaRunRequest),
 	/// Start a managed Run with an installed Craft and initial input.
 	StartRun {
 		/// Conversation whose working tree is used.
@@ -460,6 +471,11 @@ pub enum CommandRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResponse {
+	/// The exact-action destination decision was recorded.
+	RemoteToolReviewed {
+		/// Reviewed operation identity.
+		operation_id: Uuid,
+	},
 	/// Durable Utility admission; query for its result.
 	UtilityQueued {
 		/// Plane-assigned job identity.

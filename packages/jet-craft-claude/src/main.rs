@@ -10,6 +10,7 @@ mod execution;
 mod harness;
 mod native;
 mod presentation;
+mod remote_tools;
 mod specification;
 
 use clap::Parser;

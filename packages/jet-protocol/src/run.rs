@@ -51,6 +51,9 @@ pub struct ManagedProcess {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RunExecution {
+	/// Explicit No-Visa execution selection, absent for Visa Runs.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub no_visa: Option<crate::NoVisaSelection>,
 	/// Explicit Visa selection; absent on legacy Runs and before minor 25.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub visa: Option<crate::VisaSelection>,

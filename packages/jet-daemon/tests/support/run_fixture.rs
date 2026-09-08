@@ -218,30 +218,36 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 	let resume = connection.hello().resume.clone();
 	let fork = connection.hello().fork.clone();
 	let (mut receiver, mut sender) = connection.split();
-	let (id, text, helper_socket, source_offset, checkpoint) =
-		match receiver.receive().await.unwrap() {
-			CraftCommand::Start {
-				id,
-				text,
-				helper_socket,
-			} => (id, Some(text), helper_socket, 0, String::new()),
-			CraftCommand::Recover {
-				id,
-				helper_socket,
-				source_offset,
-				checkpoint,
-			} => {
-				let manifest = std::path::PathBuf::from(
-					std::env::var_os("JET_FAKE_MANIFEST").unwrap(),
-				);
-				assert!(
-					!manifest.with_extension("crash").exists(),
-					"injected recovery crash"
-				);
-				(id, None, helper_socket, source_offset, checkpoint)
-			}
-			_ => panic!("expected Start or Recover"),
+	let first = receiver.receive().await.unwrap();
+	let (remote_selection, first) =
+		if let CraftCommand::ConfigureRemoteTools { selection } = first {
+			(Some(selection), receiver.receive().await.unwrap())
+		} else {
+			(None, first)
 		};
+	let (id, text, helper_socket, source_offset, checkpoint) = match first {
+		CraftCommand::Start {
+			id,
+			text,
+			helper_socket,
+		} => (id, Some(text), helper_socket, 0, String::new()),
+		CraftCommand::Recover {
+			id,
+			helper_socket,
+			source_offset,
+			checkpoint,
+		} => {
+			let manifest = std::path::PathBuf::from(
+				std::env::var_os("JET_FAKE_MANIFEST").unwrap(),
+			);
+			assert!(
+				!manifest.with_extension("crash").exists(),
+				"injected recovery crash"
+			);
+			(id, None, helper_socket, source_offset, checkpoint)
+		}
+		_ => panic!("expected Start or Recover"),
+	};
 	let helper = UnixStream::connect(helper_socket).await.unwrap();
 	let (read, write) = helper.into_split();
 	let mut reader = FrameReader::new(read);
@@ -300,6 +306,47 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 		))
 		.await
 		.unwrap();
+	if let Some(selection) = remote_selection {
+		let destination = &selection.destinations[0];
+		let mut results = vec![];
+		let mut targets = vec![
+			(destination.plane_id, uuid::Uuid::new_v4()),
+			(destination.plane_id, destination.workspace_id),
+		];
+		if let Some(unavailable) = selection.destinations.get(1) {
+			targets.insert(0, (unavailable.plane_id, unavailable.workspace_id));
+		}
+		for (plane_id, workspace_id) in targets {
+			let operation_id = uuid::Uuid::now_v7();
+			sender
+				.send(&CraftEvent::RemoteTool {
+					call: CraftRemoteTool {
+						operation_id,
+						destination_plane_id: plane_id,
+						workspace_id,
+						action: RemoteToolAction::WriteFile {
+							path: "from-origin.txt".into(),
+							content:
+								"origin Harness requested destination work"
+									.into(),
+						},
+					},
+				})
+				.await
+				.unwrap();
+			let result = receiver.receive().await.unwrap();
+			assert!(
+				matches!(&result, CraftCommand::RemoteToolResult { operation_id:id, .. } if *id == operation_id)
+			);
+			results.push(result);
+		}
+		std::fs::write(
+			Path::new(&ready.descriptor.config.working_directory)
+				.join("remote-results"),
+			serde_json::to_vec(&results).unwrap(),
+		)
+		.unwrap();
+	}
 	if recovering {
 		sender
 			.send(&CraftEvent::RunRecovered {
