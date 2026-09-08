@@ -1,7 +1,10 @@
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
-use super::{NewSearchDocument, SEARCH_DOCUMENT_BODY_LIMIT, SearchHitRecord};
+use super::{
+	NewSearchDocument, SEARCH_DOCUMENT_BODY_LIMIT, SEARCH_HIT_LIMIT,
+	SEARCH_INDEX_BATCH_LIMIT, SearchHitRecord,
+};
 use crate::{
 	ActorRecord, ConversationOriginRecord, EventClass, NewConversation,
 	NewEvent, RetentionPolicy, Store, StoreError, VerifiedSnapshotCoverage,
@@ -29,6 +32,13 @@ fn event(conversation_id: Uuid, class: EventClass) -> NewEvent {
 		payload_version: 1,
 		payload: "{}".into(),
 		class,
+	}
+}
+
+fn conversation_event(conversation_id: Uuid, kind: &str) -> NewEvent {
+	NewEvent {
+		kind: kind.into(),
+		..event(conversation_id, EventClass::Semantic)
 	}
 }
 
@@ -77,6 +87,19 @@ fn document(
 		conversation_id,
 		sequence,
 		field: "path".into(),
+		body: body.into(),
+	}
+}
+
+fn name_document(
+	conversation_id: Uuid,
+	sequence: u64,
+	body: &str,
+) -> NewSearchDocument {
+	NewSearchDocument {
+		conversation_id,
+		sequence,
+		field: "name".into(),
 		body: body.into(),
 	}
 }
@@ -155,6 +178,155 @@ async fn hits_are_ranked_bounded_and_reference_their_event() {
 	);
 	assert_eq!(bounded, all[..1].to_vec());
 	assert_eq!(position(&store).await, third_sequence);
+}
+
+/// A client predating names must not let highly-ranked name matches consume
+/// the bounded result before an older field is considered.
+#[tokio::test]
+async fn legacy_search_excludes_names_before_ranking_and_limiting() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = open(&dir).await;
+	let conversation_id = conversation(&store).await;
+	let path_sequence =
+		append(&store, conversation_id, EventClass::Semantic).await;
+	let mut documents =
+		vec![document(conversation_id, path_sequence, "needle")];
+	let mut through_sequence = path_sequence;
+	for _ in 0..SEARCH_HIT_LIMIT {
+		through_sequence =
+			append(&store, conversation_id, EventClass::Semantic).await;
+		documents.push(name_document(
+			conversation_id,
+			through_sequence,
+			"needle",
+		));
+	}
+	index(&store, documents, through_sequence).await.unwrap();
+
+	let terms = vec!["needle".to_owned()];
+	let (current, legacy, names_in_rollback_table) = store
+		.read(async |tx| {
+			Ok::<_, StoreError>((
+				tx.search(&terms, SEARCH_HIT_LIMIT).await?,
+				tx.legacy_search(&terms, SEARCH_HIT_LIMIT).await?,
+				sqlx::query_scalar::<_, i64>(
+					"SELECT COUNT(*) FROM search_documents WHERE field = 'name'",
+				)
+				.fetch_one(tx.connection())
+				.await?,
+			))
+		})
+		.await
+		.unwrap();
+
+	assert_eq!(current.len(), SEARCH_HIT_LIMIT);
+	assert!(current.iter().all(|hit| hit.field == "name"));
+	assert_eq!(names_in_rollback_table, 0);
+	assert_eq!(
+		legacy,
+		vec![SearchHitRecord {
+			conversation_id,
+			sequence: path_sequence,
+			field: "path".into(),
+			excerpt: "needle".into(),
+		}]
+	);
+}
+
+#[tokio::test]
+async fn name_reconciliation_is_idempotent_and_advances_its_watermark() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = open(&dir).await;
+	let conversation_id = conversation(&store).await;
+	let (sequence, first_read, second_read) = store
+		.write(async |tx| {
+			let sequence = tx
+				.append_event(conversation_event(
+					conversation_id,
+					"conversation.created",
+				))
+				.await?
+				.sequence;
+			tx.index_search_documents(Vec::new(), sequence).await?;
+			let first_read = tx.reconcile_name_documents().await?;
+			let second_read = tx.reconcile_name_documents().await?;
+			Ok::<_, StoreError>((sequence, first_read, second_read))
+		})
+		.await
+		.unwrap();
+
+	let (documents, reconciled_through) = store
+		.read(async |tx| {
+			Ok::<_, StoreError>((
+				sqlx::query_scalar::<_, i64>(
+					"SELECT COUNT(*) FROM search_name_documents",
+				)
+				.fetch_one(tx.connection())
+				.await?,
+				sqlx::query_scalar::<_, i64>(
+					"SELECT reconciled_through_sequence
+					 FROM search_name_index_state WHERE singleton = 1",
+				)
+				.fetch_one(tx.connection())
+				.await?,
+			))
+		})
+		.await
+		.unwrap();
+
+	assert_eq!(
+		(documents, reconciled_through, first_read, second_read),
+		(1, sequence as i64, 1, 0)
+	);
+}
+
+#[tokio::test]
+async fn name_reconciliation_advances_in_bounded_event_batches() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = open(&dir).await;
+	let conversation_id = conversation(&store).await;
+	let (through, first_read, first_watermark, second_read, second_watermark) =
+		store
+			.write(async |tx| {
+				let mut through = 0;
+				for _ in 0..=SEARCH_INDEX_BATCH_LIMIT {
+					through = tx
+						.append_event(conversation_event(
+							conversation_id,
+							"conversation.created",
+						))
+						.await?
+						.sequence;
+				}
+				tx.index_search_documents(Vec::new(), through).await?;
+				let first_read = tx.reconcile_name_documents().await?;
+				let first_watermark = sqlx::query_scalar!(
+					"SELECT reconciled_through_sequence
+					 FROM search_name_index_state WHERE singleton = 1"
+				)
+				.fetch_one(tx.connection())
+				.await?;
+				let second_read = tx.reconcile_name_documents().await?;
+				let second_watermark = sqlx::query_scalar!(
+					"SELECT reconciled_through_sequence
+					 FROM search_name_index_state WHERE singleton = 1"
+				)
+				.fetch_one(tx.connection())
+				.await?;
+				Ok::<_, StoreError>((
+					through,
+					first_read,
+					first_watermark,
+					second_read,
+					second_watermark,
+				))
+			})
+			.await
+			.unwrap();
+
+	assert_eq!(first_read, SEARCH_INDEX_BATCH_LIMIT);
+	assert!(first_watermark < through as i64);
+	assert_eq!((second_read, second_watermark), (1, through as i64));
 }
 
 /// A term is matched as content, never read as FTS5 syntax: operators and

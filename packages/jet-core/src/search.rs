@@ -65,6 +65,8 @@ impl SearchTerms {
 /// secrets, and diagnostic detail never reach the index (ADR-0036).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchField {
+	/// A Conversation or Run name.
+	Name,
 	/// A file path the Conversation touched: its Workspace root or a path
 	/// its promotion could not settle.
 	Path,
@@ -75,6 +77,7 @@ pub enum SearchField {
 impl SearchField {
 	pub(crate) fn as_str(self) -> &'static str {
 		match self {
+			Self::Name => "name",
 			Self::Path => "path",
 			Self::Branch => "branch",
 		}
@@ -82,6 +85,7 @@ impl SearchField {
 
 	fn parse(text: &str) -> Option<Self> {
 		match text {
+			"name" => Some(Self::Name),
 			"path" => Some(Self::Path),
 			"branch" => Some(Self::Branch),
 			_ => None,
@@ -141,13 +145,48 @@ pub(crate) async fn query(
 	core: &Core,
 	terms: &SearchTerms,
 ) -> Result<QueryResult, CoreError> {
+	query_visible_to(core, terms, NameVisibility::Current).await
+}
+
+/// The same result without fields introduced by independent entity names.
+pub(crate) async fn legacy_query(
+	core: &Core,
+	terms: &SearchTerms,
+) -> Result<QueryResult, CoreError> {
+	query_visible_to(core, terms, NameVisibility::BeforeNames).await
+}
+
+#[derive(Clone, Copy)]
+enum NameVisibility {
+	Current,
+	BeforeNames,
+}
+
+async fn query_visible_to(
+	core: &Core,
+	terms: &SearchTerms,
+	visibility: NameVisibility,
+) -> Result<QueryResult, CoreError> {
 	core.index_search().await?;
+	if matches!(visibility, NameVisibility::Current) {
+		// A current Search includes names, so it waits for the resumable name
+		// projection before reporting the shared index fence as complete. Legacy
+		// peers neither read nor wait for that post-minor-20 projection.
+		core.index_search_names().await?;
+	}
 	core.store
 		.read(async |tx| {
 			let cursor = EventSequence(tx.event_cursor().await?);
 			let indexed_through =
 				EventSequence(tx.search_index_position().await?);
-			let hits = tx.search(terms.as_slice(), SEARCH_HIT_LIMIT).await?;
+			let hits = match visibility {
+				NameVisibility::Current => {
+					tx.search(terms.as_slice(), SEARCH_HIT_LIMIT).await?
+				}
+				NameVisibility::BeforeNames => {
+					tx.legacy_search(terms.as_slice(), SEARCH_HIT_LIMIT).await?
+				}
+			};
 			Ok(QueryResult::Search(SearchResult {
 				cursor,
 				indexed_through,

@@ -193,6 +193,8 @@ public enum CommandRequest {
     case `cancel_schedule`(CommandRequestCancelSchedule)
     case `apply_user_edit`(CommandRequestApplyUserEdit)
     case `submit_review`(CommandRequestSubmitReview)
+    case `set_conversation_name`(CommandRequestSetConversationName)
+    case `set_run_name`(CommandRequestSetRunName)
     case `open_terminal`(CommandRequestOpenTerminal)
     case `close_terminal`(CommandRequestCloseTerminal)
     case `withdraw_turn`(CommandRequestWithdrawTurn)
@@ -227,6 +229,8 @@ public enum CommandResponse {
     case `schedule_created`(CommandResponseScheduleCreated)
     case `schedule_canceled`(CommandResponseScheduleCanceled)
     case `user_edit_applied`(CommandResponseUserEditApplied)
+    case `conversation_named`(CommandResponseConversationNamed)
+    case `run_named`(CommandResponseRunNamed)
     case `terminal`(CommandResponseTerminal)
     case `turn_withdrawn`(CommandResponseTurnWithdrawn)
     case `turn_admitted`(CommandResponseTurnAdmitted)
@@ -259,6 +263,7 @@ public enum ConflictKind: String {
 }
 
 public enum ConflictState {
+    case `conversation`(ConflictStateConversation)
     case `run`(ConflictStateRun)
 }
 
@@ -269,8 +274,10 @@ public struct ConnectionProof {
 public struct Conversation {
     public let `conversation_id`: String
     public let `created_at_unix_ms`: Int64
+    public let `name`: Name?
     public let `origin`: ConversationOrigin?
     public let `retention`: RetentionPolicy
+    public let `revision`: String?
     public let `working_tree`: WorkingTree?
 }
 
@@ -485,6 +492,7 @@ public struct InstalledCraft {
 }
 
 public struct ManagedProcess {
+    public let `label`: String?
     public let `pid`: UInt32
     public let `role`: ManagedProcessRole
     public let `running`: Bool
@@ -493,6 +501,18 @@ public struct ManagedProcess {
 public enum ManagedProcessRole: String {
     case `helper` = "helper"
     case `harness` = "harness"
+}
+
+public struct Name {
+    public let `source`: NameSource
+    public let `value`: String
+}
+
+public enum NameSource: String {
+    case `manual` = "manual"
+    case `utility` = "utility"
+    case `harness_native` = "harness_native"
+    case `deterministic` = "deterministic"
 }
 
 public struct OrphanedExecution {
@@ -707,6 +727,7 @@ public enum QueryResponse {
 
 public enum RecoveryAction {
     case `refresh_file`(RecoveryActionRefreshFile)
+    case `refresh_conversation`(RecoveryActionRefreshConversation)
     case `refresh_run`(RecoveryActionRefreshRun)
     case `resume_events`(RecoveryActionResumeEvents)
 }
@@ -771,6 +792,7 @@ public struct Run {
     public let `created_at_unix_ms`: Int64
     public let `ended_at_unix_ms`: Int64?
     public let `lifecycle`: RunLifecycle
+    public let `name`: Name?
     public let `revision`: String
     public let `run_id`: String
 }
@@ -837,6 +859,7 @@ public struct ScheduledTasks {
 }
 
 public enum SearchField: String {
+    case `name` = "name"
     case `path` = "path"
     case `branch` = "branch"
 }
@@ -1161,6 +1184,18 @@ public struct CommandRequestSubmitReview {
     public let `conversation_id`: String
 }
 
+public struct CommandRequestSetConversationName {
+    public let `conversation_id`: String
+    public let `expected_revision`: String
+    public let `name`: String
+}
+
+public struct CommandRequestSetRunName {
+    public let `expected_revision`: String
+    public let `name`: String
+    public let `run_id`: String
+}
+
 public struct CommandRequestOpenTerminal {
     public let `columns`: Int64
     public let `rows`: Int64
@@ -1313,6 +1348,14 @@ public struct CommandResponseUserEditApplied {
     public let `target`: FileTarget
 }
 
+public struct CommandResponseConversationNamed {
+
+}
+
+public struct CommandResponseRunNamed {
+
+}
+
 public struct CommandResponseTerminal {
     public let `terminal`: WorkspaceTerminal
 }
@@ -1411,6 +1454,10 @@ public struct CommandResponseWorkspacePromotionRecorded {
 
 public struct CommandResponseConversationImported {
 
+}
+
+public struct ConflictStateConversation {
+    public let `conversation`: Conversation
 }
 
 public struct ConflictStateRun {
@@ -1840,6 +1887,10 @@ public struct RecoveryActionRefreshFile {
     public let `current_revision`: FileRevision
     public let `path`: String
     public let `target`: FileTarget
+}
+
+public struct RecoveryActionRefreshConversation {
+    public let `conversation_id`: String
 }
 
 public struct RecoveryActionRefreshRun {

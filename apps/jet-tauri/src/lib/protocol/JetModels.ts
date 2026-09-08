@@ -54,17 +54,17 @@ export type ClientMessage = { after: string; credit: string; id: number; kind: "
 
 export type ClientPublicKey = { algorithm: PairingKeyAlgorithm; key: string };
 
-export type CommandRequest = { conversation_id: string; local_time: string; prompt: string; time_zone: string; type: "create_schedule" } | { schedule_id: string; type: "cancel_schedule" } | { content: string; expected_revision: FileRevision; path: string; target: FileTarget; type: "apply_user_edit" } | { comments: Array<ReviewComment>; conversation_id: string; type: "submit_review" } | { columns: number; rows: number; type: "open_terminal"; workspace_id: string } | { terminal_id: string; type: "close_terminal" } | { conversation_id: string; turn_id: string; type: "withdraw_turn" } | { conversation_id: string; prompt: string; source?: TurnSource; type: "submit_turn" } | { action: ExecutionAction; execution_id: string; instance?: string | null; type: "resolve_execution" } | { run_id: string; type: "interrupt_turn" } | { run_id: string; type: "stop_run" } | { conversation_id: string; craft: string; prompt: string; type: "start_run" } | { retention?: RetentionPolicy; type: "create_conversation"; working_tree?: WorkingTreeRequest } | { checkpoint_turn: number; source_run_id: string; type: "fork_conversation" } | { conversation_id: string; type: "create_run" } | { key: SettingKey; scope: SettingScope; type: "set_setting"; value: SettingValue } | { key: SettingKey; scope: SettingScope; type: "clear_setting" } | { credential_source: CredentialSource; label: string; provider: string; provider_account?: string | null; type: "bind_account" } | { binding_id: string; type: "unbind_account" } | { type: "begin_audit_epoch" } | { gate: PairingGate; type: "set_pairing_gate" } | { method: PairingMethod; type: "open_pairing" } | { key: ClientPublicKey; secret: string; type: "claim_pairing" } | { authentication_string: string; offer_id: string; type: "confirm_pairing" } | { offer_id: string; signature: string; type: "complete_pairing" } | { access: PairedClientAccess; client_id: string; type: "set_paired_client_access" } | { client_id: string; type: "revoke_paired_client" } | { expected_revision: string; lifecycle: RunLifecycle; run_id: string; type: "transition_run" } | { path: string; type: "register_project" } | { binding: PromotionBinding; type: "promote_workspace" } | { harness: string; native_conversation: string; type: "import_conversation" } | { import_id: string; retention?: RetentionPolicy; type: "resume_imported_conversation"; working_tree: WorkingTreeRequest };
+export type CommandRequest = { conversation_id: string; local_time: string; prompt: string; time_zone: string; type: "create_schedule" } | { schedule_id: string; type: "cancel_schedule" } | { content: string; expected_revision: FileRevision; path: string; target: FileTarget; type: "apply_user_edit" } | { comments: Array<ReviewComment>; conversation_id: string; type: "submit_review" } | { conversation_id: string; expected_revision: string; name: string; type: "set_conversation_name" } | { expected_revision: string; name: string; run_id: string; type: "set_run_name" } | { columns: number; rows: number; type: "open_terminal"; workspace_id: string } | { terminal_id: string; type: "close_terminal" } | { conversation_id: string; turn_id: string; type: "withdraw_turn" } | { conversation_id: string; prompt: string; source?: TurnSource; type: "submit_turn" } | { action: ExecutionAction; execution_id: string; instance?: string | null; type: "resolve_execution" } | { run_id: string; type: "interrupt_turn" } | { run_id: string; type: "stop_run" } | { conversation_id: string; craft: string; prompt: string; type: "start_run" } | { retention?: RetentionPolicy; type: "create_conversation"; working_tree?: WorkingTreeRequest } | { checkpoint_turn: number; source_run_id: string; type: "fork_conversation" } | { conversation_id: string; type: "create_run" } | { key: SettingKey; scope: SettingScope; type: "set_setting"; value: SettingValue } | { key: SettingKey; scope: SettingScope; type: "clear_setting" } | { credential_source: CredentialSource; label: string; provider: string; provider_account?: string | null; type: "bind_account" } | { binding_id: string; type: "unbind_account" } | { type: "begin_audit_epoch" } | { gate: PairingGate; type: "set_pairing_gate" } | { method: PairingMethod; type: "open_pairing" } | { key: ClientPublicKey; secret: string; type: "claim_pairing" } | { authentication_string: string; offer_id: string; type: "confirm_pairing" } | { offer_id: string; signature: string; type: "complete_pairing" } | { access: PairedClientAccess; client_id: string; type: "set_paired_client_access" } | { client_id: string; type: "revoke_paired_client" } | { expected_revision: string; lifecycle: RunLifecycle; run_id: string; type: "transition_run" } | { path: string; type: "register_project" } | { binding: PromotionBinding; type: "promote_workspace" } | { harness: string; native_conversation: string; type: "import_conversation" } | { import_id: string; retention?: RetentionPolicy; type: "resume_imported_conversation"; working_tree: WorkingTreeRequest };
 
-export type CommandResponse = { task: ScheduledTask; type: "schedule_created" } | { schedule_id: string; type: "schedule_canceled" } | { path: string; revision: FileRevision; target: FileTarget; type: "user_edit_applied" } | { terminal: WorkspaceTerminal; type: "terminal" } | { turn: Turn; type: "turn_withdrawn" } | { turn: Turn; type: "turn_admitted" } | { control: RunControl; run: Run; type: "run_control_accepted" } | { action: ExecutionAction; execution_id: string; type: "execution_resolution_recorded" } | Conversation | Run | Run | { key: SettingKey; scope: SettingScope; type: "setting_set"; value: SettingValue } | { key: SettingKey; scope: SettingScope; type: "setting_cleared" } | AccountBinding | { binding_id: string; credential_reference: CredentialReference; type: "account_unbound" } | { gate: PairingGate; type: "pairing_gate_set" } | { disclosure: PairingDisclosure; pending: PendingPairing; type: "pairing_opened" } | { challenge: string; pending: PendingPairing; type: "pairing_claimed" } | { pending: PendingPairing; type: "pairing_confirmed" } | { client: PairedClient; type: "pairing_completed" } | { client: PairedClient; type: "paired_client_access_set" } | { client_id: string; type: "paired_client_revoked" } | { epoch: string; type: "audit_epoch_begun" } | Project | WorkspacePromotion | ImportedConversation;
+export type CommandResponse = { task: ScheduledTask; type: "schedule_created" } | { schedule_id: string; type: "schedule_canceled" } | { path: string; revision: FileRevision; target: FileTarget; type: "user_edit_applied" } | Conversation | Run | { terminal: WorkspaceTerminal; type: "terminal" } | { turn: Turn; type: "turn_withdrawn" } | { turn: Turn; type: "turn_admitted" } | { control: RunControl; run: Run; type: "run_control_accepted" } | { action: ExecutionAction; execution_id: string; type: "execution_resolution_recorded" } | Conversation | Run | Run | { key: SettingKey; scope: SettingScope; type: "setting_set"; value: SettingValue } | { key: SettingKey; scope: SettingScope; type: "setting_cleared" } | AccountBinding | { binding_id: string; credential_reference: CredentialReference; type: "account_unbound" } | { gate: PairingGate; type: "pairing_gate_set" } | { disclosure: PairingDisclosure; pending: PendingPairing; type: "pairing_opened" } | { challenge: string; pending: PendingPairing; type: "pairing_claimed" } | { pending: PendingPairing; type: "pairing_confirmed" } | { client: PairedClient; type: "pairing_completed" } | { client: PairedClient; type: "paired_client_access_set" } | { client_id: string; type: "paired_client_revoked" } | { epoch: string; type: "audit_epoch_begun" } | Project | WorkspacePromotion | ImportedConversation;
 
 export type ConflictKind = "diverged" | "untracked" | "staged";
 
-export type ConflictState = { run: Run; type: "run" };
+export type ConflictState = { conversation: Conversation; type: "conversation" } | { run: Run; type: "run" };
 
 export type ConnectionProof = { signature: string };
 
-export type Conversation = { conversation_id: string; created_at_unix_ms: number; origin?: ConversationOrigin | null; retention: RetentionPolicy; working_tree?: WorkingTree | null };
+export type Conversation = { conversation_id: string; created_at_unix_ms: number; name?: Name | null; origin?: ConversationOrigin | null; retention: RetentionPolicy; revision?: string | null; working_tree?: WorkingTree | null };
 
 export type ConversationList = { conversations: Array<Conversation>; cursor: string; next_page?: PageCursor | null };
 
@@ -128,9 +128,13 @@ export type ImportedConversation = { harness: string; import_id: string; importe
 
 export type InstalledCraft = { craft_id: string; harnesses: Array<string>; version: string };
 
-export type ManagedProcess = { pid: number; role: ManagedProcessRole; running: boolean };
+export type ManagedProcess = { label?: string | null; pid: number; role: ManagedProcessRole; running: boolean };
 
 export type ManagedProcessRole = "helper" | "harness";
+
+export type Name = { source: NameSource; value: string };
+
+export type NameSource = "manual" | "utility" | "harness_native" | "deterministic";
 
 export type OrphanedExecution = { execution_id: string; metadata?: ExecutionMetadata | null; role?: ExecutionRole };
 
@@ -186,7 +190,7 @@ export type QueryRequest = { conversation_id: string; type: "scheduled_tasks" } 
 
 export type QueryResponse = ScheduledTasks | EditableFile | { cursor: string; terminals: Array<WorkspaceTerminal>; type: "workspace_terminals" } | ChangeArtifactChunk | ChangeDiff | TurnQueue | OrphanedExecutions | RunExecution | PlaneStatus | ConversationList | ConversationSnapshot | CapabilitySnapshot | AccountBindingList | SettingSnapshot | EventPage | PairingSnapshot | SecurityAudit | ProjectList | ProjectPreview | ProjectEntry | PromotionPreview | SearchResult | ExternalConversationList;
 
-export type RecoveryAction = { current_revision: FileRevision; path: string; target: FileTarget; type: "refresh_file" } | { run_id: string; type: "refresh_run" } | { after: string; type: "resume_events" };
+export type RecoveryAction = { current_revision: FileRevision; path: string; target: FileTarget; type: "refresh_file" } | { conversation_id: string; type: "refresh_conversation" } | { run_id: string; type: "refresh_run" } | { after: string; type: "resume_events" };
 
 export type Registrability = { repository: Repository; verdict: "registrable" } | { verdict: "not_a_repository" } | { verdict: "broken_repository" } | { verdict: "bare_repository" } | { verdict: "inside_git_dir" } | { toplevel: string; verdict: "inside_working_tree" };
 
@@ -206,7 +210,7 @@ export type ReviewComment = { comment: string; line: number; path: string };
 
 export type RevisionConflict = { current_revision: string; safe_state: ConflictState };
 
-export type Run = { conversation_id: string; created_at_unix_ms: number; ended_at_unix_ms?: number | null; lifecycle: RunLifecycle; revision: string; run_id: string };
+export type Run = { conversation_id: string; created_at_unix_ms: number; ended_at_unix_ms?: number | null; lifecycle: RunLifecycle; name?: Name | null; revision: string; run_id: string };
 
 export type RunActivity = "working" | "waiting_for_user" | "waiting_for_approval" | "waiting_for_auth" | "waiting_for_quota" | "reconnecting";
 
@@ -224,7 +228,7 @@ export type ScheduledTask = { authorized_by: string; conversation_id: string; lo
 
 export type ScheduledTasks = { cursor: string; tasks: Array<ScheduledTask> };
 
-export type SearchField = "path" | "branch";
+export type SearchField = "name" | "path" | "branch";
 
 export type SearchHit = { conversation_id: string; excerpt: string; field: SearchField; sequence: string };
 

@@ -34,12 +34,14 @@ mod discovery;
 mod effect;
 mod error;
 mod event;
+mod event_query;
 mod execution_control;
 mod execution_control_effect;
 mod filesystem;
 mod fork;
 mod import;
 mod lifecycle;
+mod name;
 mod orphan;
 mod pagination;
 mod paired_client;
@@ -67,8 +69,10 @@ mod run_command;
 mod run_craft;
 mod run_effect;
 mod run_host;
+mod run_observation;
 mod run_recovery;
 mod run_state;
+mod run_state_storage;
 mod turn;
 mod turn_dispatch;
 mod turn_queue;
@@ -117,7 +121,7 @@ pub use run_host::{
 	RunConnection, RunFuture, RunHost, RunRecoveryCursor, RunRecoveryError,
 	RunStartError,
 };
-pub use run_state::Observation as RunObservation;
+pub use run_observation::Observation as RunObservation;
 
 #[cfg(test)]
 #[path = "run_tests.rs"]
@@ -177,6 +181,7 @@ pub use jet_store::{
 	PairedClientAccess, PairingGate, PairingKeyAlgorithm, PairingMethod,
 	RetentionPolicy, RunLifecycle,
 };
+pub use name::{MAX_NAME_BYTES, Name, NameSource};
 pub use pairing::{
 	AuthenticationString, ClientPublicKey, PairedClient, PairingChallenge,
 	PairingDisclosure, PairingEnd, PairingOfferId, PairingProgress,

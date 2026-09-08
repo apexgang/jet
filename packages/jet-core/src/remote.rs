@@ -27,6 +27,8 @@ pub(crate) fn invalidated_client(
 		CommandOutcome::UserEditApplied(_)
 		| CommandOutcome::ScheduleCreated(_)
 		| CommandOutcome::ScheduleCanceled { .. }
+		| CommandOutcome::ConversationNamed(_)
+		| CommandOutcome::RunNamed(_)
 		| CommandOutcome::TurnAdmitted(_)
 		| CommandOutcome::TurnWithdrawn(_)
 		| CommandOutcome::ConversationCreated(_)

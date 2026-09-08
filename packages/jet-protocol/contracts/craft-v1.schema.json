@@ -334,6 +334,67 @@
           ]
         },
         {
+          "description": "Structured native title candidate for the owning Conversation (1.5).",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "conversation_title"
+            },
+            "title": {
+              "description": "Unescaped title text.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "title"
+          ]
+        },
+        {
+          "description": "Structured native title candidate for the current Run (1.5).",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "run_title"
+            },
+            "title": {
+              "description": "Unescaped title text.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "title"
+          ]
+        },
+        {
+          "description": "Terminal/native title for exactly one Managed process (1.5).",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "process_title"
+            },
+            "pid": {
+              "description": "OS process identity reported by `run_started`.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "title": {
+              "description": "Unescaped live label.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "pid",
+            "title"
+          ]
+        },
+        {
           "description": "The helper definitively failed to launch a native Harness.",
           "type": "object",
           "properties": {

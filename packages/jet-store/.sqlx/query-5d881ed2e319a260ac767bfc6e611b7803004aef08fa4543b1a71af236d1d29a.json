@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT reconciled_through_sequence\n\t\t\t FROM search_name_index_state WHERE singleton = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "reconciled_through_sequence",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "search_name_index_state",
+            "name": "reconciled_through_sequence"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5d881ed2e319a260ac767bfc6e611b7803004aef08fa4543b1a71af236d1d29a"
+}

@@ -8,7 +8,7 @@ pub(super) fn execution(
 ) -> wire::RunExecution {
 	wire::RunExecution {
 		cursor: value.cursor.0,
-		run: super::run(&value.run),
+		run: super::run(&value.run, minor),
 		activity: value.activity.map(activity),
 		processes: value
 			.processes
@@ -16,6 +16,9 @@ pub(super) fn execution(
 			.map(|process| wire::ManagedProcess {
 				pid: process.pid,
 				running: process.running,
+				label: (minor >= wire::NAMES_MINOR)
+					.then_some(process.label)
+					.flatten(),
 				role: match process.role {
 					core::ManagedProcessRole::Helper => {
 						wire::ManagedProcessRole::Helper

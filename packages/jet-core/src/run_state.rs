@@ -1,12 +1,16 @@
 //! Atomic projection and semantic Event updates for managed executions.
-use crate::event::EventSubject;
 use crate::turn_dispatch::Settlement;
 use crate::{
-	ConversationId, Core, CoreError, EventKind, EventSequence, ManagedProcess,
-	ManagedProcessRole, Run, RunActivity, RunExecution, RunId, RunLifecycle,
+	ConversationId, Core, CoreError, EventKind, ManagedProcess,
+	ManagedProcessRole, RunActivity, RunId, RunLifecycle,
 };
-use jet_store::{ReadTransaction, WriteTransaction};
+use jet_store::WriteTransaction;
 use serde::{Deserialize, Serialize};
+
+pub(crate) use crate::run_observation::{
+	Observation, SourceBoundary, SourcePrefix,
+};
+pub(crate) use crate::run_state_storage::{append, decode, save, snapshot};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct State {
@@ -31,124 +35,6 @@ pub(crate) struct State {
 	/// The recorded terminal outcome of that request.
 	#[serde(default)]
 	pub(crate) termination: Option<crate::RunTermination>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct SourcePrefix {
-	pub(crate) count: usize,
-	pub(crate) digest: String,
-}
-impl SourcePrefix {
-	pub(crate) fn include(
-		&mut self,
-		observation: &Observation,
-	) -> Result<(), CoreError> {
-		use sha2::{Digest, Sha256};
-		let bytes = serde_json::to_vec(observation).map_err(|_| invalid())?;
-		let mut hash = Sha256::new();
-		hash.update(self.digest.as_bytes());
-		hash.update(bytes);
-		self.digest = format!("{:x}", hash.finalize());
-		self.count += 1;
-		Ok(())
-	}
-}
-
-pub(crate) async fn snapshot(
-	tx: &mut ReadTransaction,
-	run_id: RunId,
-) -> Result<RunExecution, CoreError> {
-	let run = tx.run(run_id.0).await?.ok_or_else(missing)?;
-	let record = tx.run_execution(run_id.0).await?.ok_or_else(missing)?;
-	let state: State = decode(&record.state)?;
-	Ok(RunExecution {
-		cursor: EventSequence(tx.event_cursor().await?),
-		run: run.into(),
-		activity: if state.disconnected {
-			Some(RunActivity::Reconnecting)
-		} else {
-			state.activity
-		},
-		processes: state.processes,
-		native_conversation: state.native_conversation,
-		exit_code: state.exit_code,
-		termination: state.termination,
-	})
-}
-
-pub(crate) async fn save(
-	tx: &mut WriteTransaction,
-	run_id: RunId,
-	state: &State,
-) -> Result<(), CoreError> {
-	tx.update_run_execution(
-		run_id.0,
-		&serde_json::to_string(state)
-			.map_err(|e| CoreError::internal("run.encode", e.to_string()))?,
-	)
-	.await?;
-	Ok(())
-}
-
-/// Facts from the trusted Run Adapter, validated against the durable lifecycle.
-#[derive(Serialize)]
-pub enum Observation {
-	/// Native content receipt; the Run Adapter assigns Harness origin.
-	FileChanged(crate::ChangeEvidence),
-	/// The trusted Adapter has held a new turn's input pending durable capture.
-	/// It may release that input only after acknowledging this source boundary.
-	TurnStarted,
-	/// A turn ended while the Run may remain active.
-	TurnEnded(crate::TurnOutcome),
-	/// Legacy Craft Command completion, including native Conversation identity.
-	Completed(String),
-	/// Explicit completion of one admitted input, independent of Run activity.
-	TurnCompleted {
-		/// Correlation identity originally delivered to the pinned Craft.
-		turn_id: uuid::Uuid,
-		/// Harness-native Conversation identity for later continuation.
-		native_conversation: String,
-	},
-	/// The helper reported that it spawned a Harness.
-	Started {
-		/// Actual helper OS identity.
-		helper_pid: u32,
-		/// Native OS identity supplied by the helper.
-		harness_pid: u32,
-	},
-	/// An active Harness began working or waiting.
-	Activity(RunActivity),
-	/// Lossless native JSON and its portable views.
-	Output {
-		/// Original native JSON bytes.
-		native_json: String,
-		/// Portable Presentation blocks, preserving unknown data.
-		presentation_json: Vec<String>,
-	},
-	/// Native identity for a later explicit resume.
-	NativeConversation(String),
-	/// End offset of source whose observations preceded this marker.
-	Progress {
-		/// End of the source batch.
-		offset: u64,
-		/// Adapter parser state at that boundary.
-		checkpoint: String,
-	},
-	/// Reaped native exit status, absent for signal termination.
-	Ended(Option<i32>),
-	/// Definite launch rejection with no surviving Harness.
-	LaunchFailed,
-	/// The supervising connection was lost.
-	Disconnected,
-	/// A validated Craft has reattached to the original helper.
-	Reconnected,
-	/// The previous execution is proven gone; later work requires a new Run.
-	Lost,
-}
-
-pub(crate) enum SourceBoundary {
-	Pending,
-	Complete { offset: u64, checkpoint: String },
 }
 
 impl Core {
@@ -241,6 +127,15 @@ async fn record(
 	let authorized_by = plan.client_id;
 	let mut state: State = decode(&record.state)?;
 	let run = tx.run(run_id.0).await?.ok_or_else(missing)?;
+	if matches!(
+		&observation,
+		Observation::ConversationTitle(_)
+			| Observation::RunTitle(_)
+			| Observation::ProcessTitle { .. }
+	) && !executing(run.lifecycle)
+	{
+		return Err(invalid());
+	}
 	let actor = match &observation {
 		Observation::FileChanged(_)
 		| Observation::TurnStarted
@@ -249,7 +144,10 @@ async fn record(
 		| Observation::Activity(_)
 		| Observation::TurnCompleted { .. }
 		| Observation::Output { .. }
-		| Observation::NativeConversation(_) => crate::EventActor::Harness {
+		| Observation::NativeConversation(_)
+		| Observation::ConversationTitle(_)
+		| Observation::RunTitle(_)
+		| Observation::ProcessTitle { .. } => crate::EventActor::Harness {
 			run_id,
 			authorized_by,
 		},
@@ -263,6 +161,26 @@ async fn record(
 			run_id,
 			authorized_by,
 		},
+	};
+	let observation = match observation {
+		Observation::ConversationTitle(title) => {
+			crate::name::apply_harness_conversation(
+				tx,
+				&actor,
+				ConversationId(run.conversation_id),
+				run_id,
+				title,
+				now,
+			)
+			.await?;
+			return Ok(());
+		}
+		Observation::RunTitle(title) => {
+			crate::name::apply_harness_run(tx, &actor, run_id, title, now)
+				.await?;
+			return Ok(());
+		}
+		other => other,
 	};
 	let settlement = match &observation {
 		Observation::TurnCompleted { turn_id, .. } => {
@@ -294,20 +212,25 @@ async fn record(
 		| Observation::TurnEnded(_)
 		| Observation::Activity(_)
 		| Observation::Output { .. }
+		| Observation::ProcessTitle { .. }
+		| Observation::ConversationTitle(_)
+		| Observation::RunTitle(_)
 		| Observation::Progress { .. } => None,
 	};
 	let (lifecycle, events) = apply(run.lifecycle, &mut state, observation)?;
 	if let Some(outcome) = settlement {
 		crate::turn_dispatch::settle(tx, run_id, outcome, now).await?;
 	}
+	let event_run: crate::Run = run.clone().into();
 	if lifecycle != run.lifecycle {
+		let from = run.lifecycle;
 		tx.update_run_lifecycle(run_id.0, lifecycle, now).await?;
 		append(
 			tx,
 			&actor,
-			&run.into(),
+			&event_run,
 			EventKind::RunLifecycleChanged {
-				from: run.lifecycle,
+				from,
 				to: lifecycle,
 			},
 			now,
@@ -317,7 +240,7 @@ async fn record(
 		tx.update_run_lifecycle(run_id.0, lifecycle, now).await?;
 	}
 	for event in events {
-		append(tx, &actor, &run.into(), event, now).await?;
+		append(tx, &actor, &event_run, event, now).await?;
 	}
 	save(tx, run_id, &state).await?;
 	Ok::<_, CoreError>(())
@@ -413,11 +336,13 @@ fn apply(
 				ManagedProcess {
 					pid: helper_pid,
 					role: ManagedProcessRole::Helper,
+					label: None,
 					running: true,
 				},
 				ManagedProcess {
 					pid: harness_pid,
 					role: ManagedProcessRole::Harness,
+					label: None,
 					running: true,
 				},
 			];
@@ -428,6 +353,22 @@ fn apply(
 		}
 		Observation::Activity(reason) if executing(lifecycle) => {
 			activity(state, Some(reason), &mut events)
+		}
+		Observation::ProcessTitle { pid, title } if executing(lifecycle) => {
+			let label = crate::Name::process_label(title)?;
+			let Some(process) = state
+				.processes
+				.iter_mut()
+				.find(|process| process.pid == pid)
+			else {
+				return Err(invalid());
+			};
+			if process.label.as_deref() != Some(&label) {
+				process.label = Some(label);
+				events.push(EventKind::RunProcessesChanged {
+					processes: state.processes.clone(),
+				});
+			}
 		}
 		Observation::Reconnected => {
 			if state.disconnected {
@@ -505,6 +446,9 @@ fn apply(
 		| Observation::TurnCompleted { .. }
 		| Observation::Output { .. }
 		| Observation::NativeConversation(_)
+		| Observation::ProcessTitle { .. }
+		| Observation::ConversationTitle(_)
+		| Observation::RunTitle(_)
 		| Observation::Ended(_)
 		| Observation::LaunchFailed
 		| Observation::Disconnected => return Err(invalid()),
@@ -523,31 +467,6 @@ fn activity(
 	}
 }
 
-pub(crate) async fn append(
-	tx: &mut WriteTransaction,
-	actor: &crate::EventActor,
-	run: &Run,
-	event: EventKind,
-	now: i64,
-) -> Result<(), CoreError> {
-	let record = event.to_record_as(
-		actor.clone(),
-		EventSubject::Run {
-			conversation_id: ConversationId(run.conversation_id.0),
-			run_id: run.run_id,
-		},
-		now,
-	)?;
-	tx.append_event(record).await?;
-	Ok(())
-}
-
-pub(crate) fn decode<T: serde::de::DeserializeOwned>(
-	json: &str,
-) -> Result<T, CoreError> {
-	serde_json::from_str(json)
-		.map_err(|e| CoreError::internal("run.invalid_record", e.to_string()))
-}
 fn missing() -> CoreError {
 	CoreError::not_found(
 		"run.execution_not_found",

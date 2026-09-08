@@ -35,7 +35,7 @@ enum ReceiveError {
 	/// The peer closed the connection or the transport failed.
 	Disconnected,
 	/// The peer violated the protocol; the reply explains how.
-	Protocol(WireError),
+	Protocol(Box<WireError>),
 }
 
 /// Why a control message could not be sent: an encoding failure, which is
@@ -100,7 +100,8 @@ impl Connection {
 			Ok(_) => return None,
 			Err(ReceiveError::Disconnected) => return None,
 			Err(ReceiveError::Protocol(error)) => {
-				let _ = self.send(&ServerHello::Rejected { error }).await;
+				let _ =
+					self.send(&ServerHello::Rejected { error: *error }).await;
 				return None;
 			}
 		};
@@ -284,21 +285,23 @@ impl Connection {
 			Ok(Frame::Control { stream_id, payload }) => {
 				Ok((stream_id, payload))
 			}
-			Ok(Frame::Data { .. }) => Err(ReceiveError::Protocol(wire_error(
-				ErrorCategory::InvalidInput,
-				"protocol.unexpected_data_frame",
-				"no data stream is open on this connection".into(),
-			))),
+			Ok(Frame::Data { .. }) => {
+				Err(ReceiveError::Protocol(Box::new(wire_error(
+					ErrorCategory::InvalidInput,
+					"protocol.unexpected_data_frame",
+					"no data stream is open on this connection".into(),
+				))))
+			}
 			Err(
 				FrameError::Oversized { .. }
 				| FrameError::UnknownKind(_)
 				| FrameError::InvalidStream { .. }
 				| FrameError::MultiplexingDisabled(_),
-			) => Err(ReceiveError::Protocol(wire_error(
+			) => Err(ReceiveError::Protocol(Box::new(wire_error(
 				ErrorCategory::InvalidInput,
 				"protocol.invalid_frame",
 				"the frame violated the protocol limits".into(),
-			))),
+			)))),
 			Err(FrameError::Closed | FrameError::Io(_)) => {
 				Err(ReceiveError::Disconnected)
 			}
@@ -309,7 +312,8 @@ impl Connection {
 fn decode<T: serde::de::DeserializeOwned>(
 	payload: &[u8],
 ) -> Result<T, ReceiveError> {
-	decode_control(payload).map_err(|_| ReceiveError::Protocol(malformed()))
+	decode_control(payload)
+		.map_err(|_| ReceiveError::Protocol(Box::new(malformed())))
 }
 
 pub(super) async fn answer(
@@ -477,6 +481,11 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		| CommandRequest::SubmitReview { .. } => Some(MinorRequirement {
 			minor: jet_protocol::USER_INPUT_MINOR,
 			feature: "direct user input",
+		}),
+		CommandRequest::SetConversationName { .. }
+		| CommandRequest::SetRunName { .. } => Some(MinorRequirement {
+			minor: jet_protocol::NAMES_MINOR,
+			feature: "Conversation and Run names",
 		}),
 		CommandRequest::OpenTerminal { .. }
 		| CommandRequest::CloseTerminal { .. } => Some(MinorRequirement {

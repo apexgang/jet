@@ -118,6 +118,7 @@ async fn a_conversation_exists_and_is_queryable_before_any_run() {
 
 	let conversation =
 		create_conversation(&core, RetentionPolicy::Retain).await;
+	let conversation_name = conversation.name.clone();
 
 	assert_eq!(
 		snapshot(&core, conversation.conversation_id).await,
@@ -136,6 +137,7 @@ async fn a_conversation_exists_and_is_queryable_before_any_run() {
 				retention: RetentionPolicy::Retain,
 				working_tree: WorkingTree::NoProject,
 				origin: ConversationOrigin::New,
+				name: Some(conversation_name),
 			}
 		)]
 	);
@@ -162,6 +164,7 @@ async fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
 	let restored = snapshot(&second, conversation_id).await;
 	let third_run = create_run(&second, conversation_id).await;
 	let kinds = event_kinds(&second, EventSequence(6)).await;
+	assert!(completed.ended_at.is_some() && canceled.ended_at.is_some());
 
 	assert_eq!(
 		restored,
@@ -172,7 +175,6 @@ async fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
 			runs: vec![completed, canceled],
 		}
 	);
-	assert!(completed.ended_at.is_some() && canceled.ended_at.is_some());
 	assert_eq!(
 		kinds,
 		vec![
@@ -183,7 +185,12 @@ async fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
 					to: RunLifecycle::Canceled,
 				}
 			),
-			(8, EventKind::RunCreated {}),
+			(
+				8,
+				EventKind::RunCreated {
+					name: Some(third_run.name.clone()),
+				},
+			),
 		]
 	);
 	assert_eq!(
@@ -193,6 +200,7 @@ async fn a_conversation_retains_its_terminal_runs_across_core_restarts() {
 			conversation_id,
 			revision: Revision(1),
 			lifecycle: RunLifecycle::Created,
+			name: third_run.name.clone(),
 			created_at: third_run.created_at,
 			ended_at: None,
 		}
@@ -245,7 +253,7 @@ async fn a_run_lifecycle_only_moves_forward_and_never_leaves_a_terminal_state()
 	let conversation =
 		create_conversation(&core, RetentionPolicy::Retain).await;
 	let run = create_run(&core, conversation.conversation_id).await;
-	let refused = async |run: Run, lifecycle: RunLifecycle| {
+	let refused = async |run: &Run, lifecycle: RunLifecycle| {
 		core.execute(
 			&actor(),
 			request(Command::TransitionRun {
@@ -258,10 +266,10 @@ async fn a_run_lifecycle_only_moves_forward_and_never_leaves_a_terminal_state()
 		.unwrap_err()
 	};
 
-	let skipped = refused(run, RunLifecycle::Active).await;
-	let never_active = refused(run, RunLifecycle::Completed).await;
+	let skipped = refused(&run, RunLifecycle::Active).await;
+	let never_active = refused(&run, RunLifecycle::Completed).await;
 	let failed = transition(&core, run, RunLifecycle::Failed).await;
-	let revived = refused(failed, RunLifecycle::Active).await;
+	let revived = refused(&failed, RunLifecycle::Active).await;
 
 	let invalid = |message: &str| CoreError {
 		category: ErrorCategory::Conflict,
@@ -380,12 +388,14 @@ async fn a_command_identity_older_than_thirty_days_cannot_execute_again() {
 	assert_eq!(
 		(within_window, conversations.conversations),
 		(
-			CommandOutcome::ConversationCreated(original),
+			CommandOutcome::ConversationCreated(original.clone()),
 			vec![Conversation {
 				conversation_id: original.conversation_id,
+				revision: original.revision,
 				retention: RetentionPolicy::Retain,
 				working_tree: WorkingTree::NoProject,
 				origin: ConversationOrigin::New,
+				name: original.name.clone(),
 				created_at: start,
 			}]
 		)

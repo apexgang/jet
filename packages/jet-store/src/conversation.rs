@@ -5,9 +5,9 @@ use uuid::Uuid;
 use crate::StoreError;
 use crate::records::{
 	ConversationOriginColumns, ConversationOriginRecord, ConversationPageKey,
-	ConversationPageStart, ConversationRecord, NewConversation,
-	RetentionPolicy, WorkingTreeRecord, column_error, parse_optional_uuid,
-	parse_uuid,
+	ConversationPageStart, ConversationRecord, NameRecord, NameSourceRecord,
+	NewConversation, RetentionPolicy, WorkingTreeRecord, column_error,
+	parse_name, parse_optional_uuid, parse_uuid,
 };
 use crate::transaction::{ReadTransaction, WriteTransaction};
 
@@ -18,6 +18,7 @@ pub const CONVERSATION_PAGE_LIMIT: usize = 256;
 /// parsed back into domain types.
 struct Row {
 	conversation_id: String,
+	revision: i64,
 	retention: String,
 	working_tree: String,
 	project_id: Option<String>,
@@ -25,6 +26,8 @@ struct Row {
 	fork_source_conversation_id: Option<String>,
 	fork_source_run_id: Option<String>,
 	fork_checkpoint_turn: Option<i64>,
+	name: Option<String>,
+	name_source: Option<String>,
 	created_at_unix_ms: i64,
 }
 
@@ -41,10 +44,11 @@ impl ReadTransaction {
 		let conversation_id = conversation_id.to_string();
 		let row = sqlx::query_as!(
 			Row,
-			r#"SELECT conversation_id AS "conversation_id!", retention,
+			r#"SELECT conversation_id AS "conversation_id!", revision, retention,
 				working_tree, project_id, import_id,
 				fork_source_conversation_id, fork_source_run_id,
-				fork_checkpoint_turn, created_at_unix_ms
+				fork_checkpoint_turn, name, name_source,
+				created_at_unix_ms
 			 FROM conversations
 			 WHERE conversation_id = ?1"#,
 			conversation_id
@@ -64,10 +68,11 @@ impl ReadTransaction {
 	) -> Result<Vec<ConversationRecord>, StoreError> {
 		let rows = sqlx::query_as!(
 			Row,
-			r#"SELECT conversation_id AS "conversation_id!", retention,
+			r#"SELECT conversation_id AS "conversation_id!", revision, retention,
 				working_tree, project_id, import_id,
 				fork_source_conversation_id, fork_source_run_id,
-				fork_checkpoint_turn, created_at_unix_ms
+				fork_checkpoint_turn, name, name_source,
+				created_at_unix_ms
 			 FROM conversations
 			 ORDER BY rowid"#
 		)
@@ -99,10 +104,11 @@ impl ReadTransaction {
 			i64::try_from(CONVERSATION_PAGE_LIMIT + 1).unwrap_or(i64::MAX);
 		let rows = sqlx::query!(
 			r#"SELECT rowid AS "rowid!",
-				conversation_id AS "conversation_id!", retention,
+				conversation_id AS "conversation_id!", revision, retention,
 				working_tree, project_id, import_id,
 				fork_source_conversation_id, fork_source_run_id,
-				fork_checkpoint_turn, created_at_unix_ms
+				fork_checkpoint_turn, name, name_source,
+				created_at_unix_ms
 			 FROM conversations
 			 WHERE rowid > ?1 ORDER BY rowid LIMIT ?2"#,
 			after,
@@ -117,6 +123,7 @@ impl ReadTransaction {
 					ConversationPageKey(row.rowid),
 					read_row(Row {
 						conversation_id: row.conversation_id,
+						revision: row.revision,
 						retention: row.retention,
 						working_tree: row.working_tree,
 						project_id: row.project_id,
@@ -125,6 +132,8 @@ impl ReadTransaction {
 							.fork_source_conversation_id,
 						fork_source_run_id: row.fork_source_run_id,
 						fork_checkpoint_turn: row.fork_checkpoint_turn,
+						name: row.name,
+						name_source: row.name_source,
 						created_at_unix_ms: row.created_at_unix_ms,
 					})?,
 				))
@@ -150,9 +159,11 @@ impl WriteTransaction {
 	) -> Result<ConversationRecord, StoreError> {
 		let record = ConversationRecord {
 			conversation_id: conversation.conversation_id,
+			revision: 1,
 			retention: conversation.retention,
 			working_tree: conversation.working_tree,
 			origin: conversation.origin,
+			name: fallback_name(conversation.conversation_id),
 			created_at_unix_ms: conversation.created_at_unix_ms,
 		};
 		let conversation_id = record.conversation_id.to_string();
@@ -169,16 +180,19 @@ impl WriteTransaction {
 		let fork_source_conversation_id =
 			fork_source_conversation_id.map(|id| id.to_string());
 		let fork_source_run_id = fork_source_run_id.map(|id| id.to_string());
+		let name_source = record.name.source.as_str();
+		let revision = i64::try_from(record.revision).unwrap_or(i64::MAX);
 		// ASVS 1.2.4: provenance values remain bound parameters; clients never
 		// contribute SQL or column names.
 		sqlx::query!(
 			"INSERT INTO conversations
-				(conversation_id, retention, working_tree, project_id,
+				(conversation_id, revision, retention, working_tree, project_id,
 					import_id, fork_source_conversation_id,
 					fork_source_run_id, fork_checkpoint_turn,
-					created_at_unix_ms)
-			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+					name, name_source, created_at_unix_ms)
+			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
 			conversation_id,
+			revision,
 			retention,
 			working_tree,
 			project_id,
@@ -186,17 +200,47 @@ impl WriteTransaction {
 			fork_source_conversation_id,
 			fork_source_run_id,
 			fork_checkpoint_turn,
+			record.name.value,
+			name_source,
 			record.created_at_unix_ms
 		)
 		.execute(self.connection())
 		.await?;
 		Ok(record)
 	}
+
+	/// Replaces one Conversation's resolved name and advances its Revision.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the row cannot be written.
+	pub async fn update_conversation_name(
+		&mut self,
+		conversation_id: Uuid,
+		name: &NameRecord,
+	) -> Result<(), StoreError> {
+		let conversation_id = conversation_id.to_string();
+		let source = name.source.as_str();
+		// ASVS 1.2.4: display text remains a bound value, never SQL source.
+		sqlx::query!(
+			"UPDATE conversations SET name = ?2, name_source = ?3,
+				revision = revision + 1
+			 WHERE conversation_id = ?1",
+			conversation_id,
+			name.value,
+			source
+		)
+		.execute(self.connection())
+		.await?;
+		Ok(())
+	}
 }
 
 fn read_row(row: Row) -> Result<ConversationRecord, StoreError> {
+	let conversation_id = parse_uuid("conversation_id", &row.conversation_id)?;
 	Ok(ConversationRecord {
-		conversation_id: parse_uuid("conversation_id", &row.conversation_id)?,
+		conversation_id,
+		revision: parse_revision(row.revision)?,
 		retention: parse_retention(&row.retention)?,
 		working_tree: WorkingTreeRecord::parse(
 			&row.working_tree,
@@ -217,7 +261,28 @@ fn read_row(row: Row) -> Result<ConversationRecord, StoreError> {
 			)?,
 			fork_checkpoint_turn: row.fork_checkpoint_turn,
 		})?,
+		name: parse_name(
+			row.name,
+			row.name_source.as_deref(),
+			fallback_name(conversation_id),
+		)?,
 		created_at_unix_ms: row.created_at_unix_ms,
+	})
+}
+
+fn fallback_name(id: Uuid) -> NameRecord {
+	NameRecord {
+		value: format!("Conversation {}", &id.simple().to_string()[..8]),
+		source: NameSourceRecord::Deterministic,
+	}
+}
+
+fn parse_revision(revision: i64) -> Result<u64, StoreError> {
+	u64::try_from(revision).map_err(|_| {
+		column_error(
+			"revision",
+			format!("conversation revision {revision} is negative"),
+		)
 	})
 }
 

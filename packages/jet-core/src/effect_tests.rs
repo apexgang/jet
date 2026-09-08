@@ -53,7 +53,7 @@ async fn create_run(core: &Core) -> (ConversationId, Run) {
 	(conversation.conversation_id, run)
 }
 
-async fn queue_start(core: &Core, run: Run) -> CommandId {
+async fn queue_start(core: &Core, run: &Run) -> CommandId {
 	let command_id = CommandId(Uuid::now_v7());
 	execute(
 		core,
@@ -128,7 +128,7 @@ async fn a_starting_run_and_its_effect_commit_before_external_work_begins() {
 	let path = dir.path().join("plane.sqlite3");
 	let first = start_core(&path).await;
 	let (conversation_id, run) = create_run(&first).await;
-	let command_id = queue_start(&first, run).await;
+	let command_id = queue_start(&first, &run).await;
 	assert_eq!(
 		lifecycle(&first, conversation_id).await,
 		RunLifecycle::Starting
@@ -177,7 +177,7 @@ async fn an_idempotent_effect_resumes_under_the_same_identity_after_interruption
 	let path = dir.path().join("plane.sqlite3");
 	let first = start_core(&path).await;
 	let (_, run) = create_run(&first).await;
-	let command_id = queue_start(&first, run).await;
+	let command_id = queue_start(&first, &run).await;
 	let mut interrupted_adapter = RecordingAdapter::new(EffectResult::Unknown);
 	let first_pass = first
 		.reconcile_effects(&mut interrupted_adapter, EffectKindRecord::StartRun)

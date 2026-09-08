@@ -1,6 +1,6 @@
 # Scheduled tasks
 
-Issue #43 implements ADR-0024 and ADR-0080 through Jet protocol minor 20.
+Issue #43 implements ADR-0024 and ADR-0080 through Jet protocol minor 21.
 
 `create_schedule` takes `conversation_id`, an original IANA `time_zone`, a
 `local_time` in `HH:MM:SS` form, and a `prompt` of 1 to 8192 UTF-8 bytes.

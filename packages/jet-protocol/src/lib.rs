@@ -46,6 +46,7 @@ pub(crate) use decimal::{Decimal, optional::OptionalDecimal};
 pub(crate) use hex::Hex;
 mod import;
 mod message;
+mod name;
 mod pairing;
 mod presentation;
 mod project;
@@ -124,9 +125,9 @@ pub use handshake::{
 	ACCOUNT_BINDINGS_MINOR, CHANGE_CHECKPOINTS_MINOR, CODEC_JSON_V1,
 	CONVERSATION_FORKS_MINOR, ClientHello, EXECUTION_CONTROL_MINOR,
 	EXECUTION_RECOVERY_MINOR, FENCED_READS_MINOR, IMPORTED_CONVERSATIONS_MINOR,
-	MANAGED_RUNS_MINOR, MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE,
-	PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR,
-	SCHEDULES_MINOR, SEARCH_MINOR, SECURITY_AUDIT_MINOR,
+	MANAGED_RUNS_MINOR, MULTIPLEXED_STREAMS_MINOR, NAMES_MINOR, PAIRING_MINOR,
+	PREFACE, PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION,
+	REMOTE_AUTH_MINOR, SCHEDULES_MINOR, SEARCH_MINOR, SECURITY_AUDIT_MINOR,
 	SEEDED_WORKSPACES_MINOR, SETTINGS_AND_CAPABILITIES_MINOR, ServerHello,
 	TURN_QUEUE_MINOR, USER_INPUT_MINOR, VersionRange,
 	WORKSPACE_PROMOTION_MINOR, WORKSPACE_TERMINALS_MINOR, WORKSPACES_MINOR,
@@ -140,6 +141,7 @@ pub use message::{
 	QueryRequest, QueryResponse, RecoveryAction, RequestId, RestartMetadata,
 	ServerMessage, WireError, raw_command,
 };
+pub use name::{Name, NameSource};
 pub use pairing::{
 	ClientPublicKey, PairedClient, PairedClientAccess, PairingDisclosure,
 	PairingEnd, PairingGate, PairingKeyAlgorithm, PairingMethod,

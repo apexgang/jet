@@ -1247,6 +1247,66 @@
           ]
         },
         {
+          "description": "Set the authoritative manual name of a Conversation.",
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "description": "Conversation to name.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "expected_revision": {
+              "description": "Revision observed when the Command was prepared.",
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "name": {
+              "description": "Validated as 1 to 256 UTF-8 bytes by the trusted core.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "set_conversation_name"
+            }
+          },
+          "required": [
+            "type",
+            "conversation_id",
+            "expected_revision",
+            "name"
+          ]
+        },
+        {
+          "description": "Set the authoritative manual name of a Run.",
+          "type": "object",
+          "properties": {
+            "expected_revision": {
+              "description": "Revision observed when the Command was prepared.",
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "name": {
+              "description": "Validated as 1 to 256 UTF-8 bytes by the trusted core.",
+              "type": "string"
+            },
+            "run_id": {
+              "description": "Run to name.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "set_run_name"
+            }
+          },
+          "required": [
+            "type",
+            "run_id",
+            "expected_revision",
+            "name"
+          ]
+        },
+        {
           "description": "Open a PTY under a Workspace-owned helper.",
           "type": "object",
           "properties": {
@@ -1979,6 +2039,34 @@
           ]
         },
         {
+          "description": "A Conversation's manual name committed.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "conversation_named"
+            }
+          },
+          "$ref": "#/$defs/Conversation",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "A Run's manual name committed.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "run_named"
+            }
+          },
+          "$ref": "#/$defs/Run",
+          "required": [
+            "type"
+          ]
+        },
+        {
           "description": "Terminal admission or close was committed.",
           "type": "object",
           "properties": {
@@ -2435,6 +2523,24 @@
       "description": "Safe resource state attached to a Revision conflict.",
       "oneOf": [
         {
+          "description": "The current Conversation.",
+          "type": "object",
+          "properties": {
+            "conversation": {
+              "description": "Complete safe Conversation state.",
+              "$ref": "#/$defs/Conversation"
+            },
+            "type": {
+              "type": "string",
+              "const": "conversation"
+            }
+          },
+          "required": [
+            "type",
+            "conversation"
+          ]
+        },
+        {
           "description": "The current Run.",
           "type": "object",
           "properties": {
@@ -2483,6 +2589,17 @@
           "type": "integer",
           "format": "int64"
         },
+        "name": {
+          "description": "Resolved name and its authority. Absent before protocol minor 20.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "origin": {
           "description": "Where it came from. Absent before protocol minor 13.",
           "anyOf": [
@@ -2497,6 +2614,14 @@
         "retention": {
           "description": "Retention choice.",
           "$ref": "#/$defs/RetentionPolicy"
+        },
+        "revision": {
+          "description": "Current version for conflict-sensitive Commands. Absent before minor 20.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(0|[1-9][0-9]*)$"
         },
         "working_tree": {
           "description": "Where it does its work. Absent before protocol minor 9.",
@@ -3405,7 +3530,7 @@
       "type": "object",
       "properties": {
         "cursor": {
-          "description": "Newest Event sequence in the journal when the page was read, carried\nas a decimal string (ADR-0089).",
+          "description": "Newest Event sequence visible to this peer when the page was read,\ncarried as a decimal string (ADR-0089).",
           "type": "string",
           "pattern": "^(0|[1-9][0-9]*)$"
         },
@@ -3884,6 +4009,13 @@
       "description": "Observable process identity; distinct from a Conversation or Run identity.",
       "type": "object",
       "properties": {
+        "label": {
+          "description": "Live native title for this process alone, never an entity name (1.20).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "pid": {
           "description": "OS process identifier, meaningful only on the Home Plane.",
           "type": "integer",
@@ -3917,6 +4049,49 @@
           "description": "Native coding Harness.",
           "type": "string",
           "const": "harness"
+        }
+      ]
+    },
+    "Name": {
+      "description": "One resolved user-facing name and its authority.",
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "Authority that supplied `value`.",
+          "$ref": "#/$defs/NameSource"
+        },
+        "value": {
+          "description": "Original validated text; clients encode it for their render context.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "source"
+      ]
+    },
+    "NameSource": {
+      "description": "Authority that supplied a current Conversation or Run name.",
+      "oneOf": [
+        {
+          "description": "An interactive user's authoritative choice.",
+          "type": "string",
+          "const": "manual"
+        },
+        {
+          "description": "A validated Utility-model result.",
+          "type": "string",
+          "const": "utility"
+        },
+        {
+          "description": "A structured title supplied by the Harness through its Craft.",
+          "type": "string",
+          "const": "harness_native"
+        },
+        {
+          "description": "Stable local text used without Utility work.",
+          "type": "string",
+          "const": "deterministic"
         }
       ]
     },
@@ -5547,6 +5722,25 @@
           ]
         },
         {
+          "description": "Refresh current Conversation state before preparing another Command.",
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "description": "Conversation whose current state should be queried.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "refresh_conversation"
+            }
+          },
+          "required": [
+            "type",
+            "conversation_id"
+          ]
+        },
+        {
           "description": "Refresh current Run state before preparing another Command.",
           "type": "object",
           "properties": {
@@ -6023,6 +6217,17 @@
           "description": "Current lifecycle state.",
           "$ref": "#/$defs/RunLifecycle"
         },
+        "name": {
+          "description": "Resolved name and its authority. Absent before protocol minor 20.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "revision": {
           "description": "Monotonic version used by conflict-sensitive Commands, carried as a\ndecimal string (ADR-0089).",
           "type": "string",
@@ -6315,6 +6520,11 @@
     "SearchField": {
       "description": "What kind of human-visible content a hit matched.",
       "oneOf": [
+        {
+          "description": "A Conversation or Run name.",
+          "type": "string",
+          "const": "name"
+        },
         {
           "description": "A file path the Conversation touched: its Workspace root or a path\nits promotion could not settle.",
           "type": "string",

@@ -19,7 +19,7 @@ use crate::account::{
 use crate::audit::{self, AuditEpoch, AuditSubject, Decision};
 use crate::capability::{Capability, ExternalTool, HarnessId};
 use crate::command_receipt::{
-	COMMAND_RETENTION_MS, OUTCOME_VERSION, encode_result, replay,
+	COMMAND_RETENTION_MS, encode_result, outcome_version, replay,
 };
 use crate::conversation::{
 	Conversation, ConversationId, ConversationOrigin, Revision, Run, RunId,
@@ -147,6 +147,24 @@ pub enum Command {
 		conversation_id: ConversationId,
 		/// Validated comments in submission order.
 		comments: Vec<crate::ReviewComment>,
+	},
+	/// Set the authoritative manual name of a Conversation (ADR-0044).
+	SetConversationName {
+		/// Conversation to name.
+		conversation_id: ConversationId,
+		/// Revision observed when the Command was prepared.
+		expected_revision: Revision,
+		/// Validated manual name.
+		name: crate::Name,
+	},
+	/// Set the authoritative manual name of a Run (ADR-0044).
+	SetRunName {
+		/// Run to name.
+		run_id: RunId,
+		/// Revision observed when the Command was prepared.
+		expected_revision: Revision,
+		/// Validated manual name.
+		name: crate::Name,
 	},
 	/// Open a Workspace-owned terminal.
 	OpenTerminal {
@@ -371,6 +389,8 @@ impl Command {
 		match self {
 			Self::CreateSchedule { .. }
 			| Self::CancelSchedule { .. }
+			| Self::SetConversationName { .. }
+			| Self::SetRunName { .. }
 			| Self::SubmitTurn { .. }
 			| Self::SubmitReview { .. }
 			| Self::WithdrawTurn { .. }
@@ -444,6 +464,10 @@ pub enum CommandOutcome {
 	},
 	/// A direct edit committed to its registered root.
 	UserEditApplied(crate::UserEdit),
+	/// The Conversation after its manual name committed.
+	ConversationNamed(Conversation),
+	/// The Run after its manual name committed.
+	RunNamed(Run),
 	/// Terminal request committed.
 	Terminal(crate::WorkspaceTerminal),
 	/// Durable withdrawal of queued user work.
@@ -645,12 +669,13 @@ impl Core {
 				// as long as the offer lasts. A Command whose partial
 				// writes must not survive its own failure wraps them in a
 				// savepoint.
+				let outcome_version = outcome_version(&result);
 				tx.insert_command_receipt(&NewCommandReceipt {
 					actor: actor_record,
 					command_id: command_id.0,
 					request_digest,
 					recorded_at_unix_ms,
-					outcome_version: OUTCOME_VERSION,
+					outcome_version,
 					outcome: encode_result(&redacted_for_receipt(&result))?,
 				})
 				.await?;
@@ -697,6 +722,8 @@ fn redacted_for_receipt(
 		}
 		Ok(
 			outcome @ (CommandOutcome::UserEditApplied(_)
+			| CommandOutcome::ConversationNamed(_)
+			| CommandOutcome::RunNamed(_)
 			| CommandOutcome::TurnWithdrawn(_)
 			| CommandOutcome::ScheduleCreated(_)
 			| CommandOutcome::ScheduleCanceled { .. }
@@ -780,6 +807,36 @@ async fn execute_new(
 				command_id,
 				conversation_id,
 				comments,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::SetConversationName {
+			conversation_id,
+			expected_revision,
+			name,
+		} => {
+			crate::name::set_conversation(
+				tx,
+				actor,
+				conversation_id,
+				expected_revision,
+				name,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::SetRunName {
+			run_id,
+			expected_revision,
+			name,
+		} => {
+			crate::name::set_run(
+				tx,
+				actor,
+				run_id,
+				expected_revision,
+				name,
 				now_unix_ms,
 			)
 			.await
@@ -1105,6 +1162,7 @@ async fn create_conversation(
 		.await?
 		.into();
 	let event = EventKind::ConversationCreated {
+		name: Some(conversation.name.clone()),
 		retention,
 		working_tree: WorkingTree::NoProject,
 		origin: ConversationOrigin::New,
@@ -1150,14 +1208,19 @@ pub(crate) async fn create_run(
 		})
 		.await?
 		.into();
-	tx.append_event(EventKind::RunCreated {}.to_record(
-		actor,
-		EventSubject::Run {
-			conversation_id,
-			run_id: run.run_id,
-		},
-		now_unix_ms,
-	)?)
+	tx.append_event(
+		EventKind::RunCreated {
+			name: Some(run.name.clone()),
+		}
+		.to_record(
+			actor,
+			EventSubject::Run {
+				conversation_id,
+				run_id: run.run_id,
+			},
+			now_unix_ms,
+		)?,
+	)
 	.await?;
 	Ok(CommandOutcome::RunCreated(run))
 }

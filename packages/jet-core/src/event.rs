@@ -223,7 +223,7 @@ pub struct Event {
 /// equals `cursor`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventPage {
-	/// Newest Event sequence in the journal when the page was read.
+	/// Newest Event sequence visible to this query when the page was read.
 	pub cursor: EventSequence,
 	/// The Events strictly after the requested position, in sequence order.
 	pub events: Vec<Event>,
@@ -287,6 +287,18 @@ pub enum EventKind {
 		turn_id: Uuid,
 		/// Comments in the order the user submitted them.
 		comments: Vec<crate::ReviewComment>,
+	},
+	/// An authoritative source changed a Conversation's resolved name.
+	#[serde(rename = "conversation.name_changed")]
+	ConversationNameChanged {
+		/// New resolved name and the source that supplied it.
+		name: crate::Name,
+	},
+	/// An authoritative source changed a Run's resolved name.
+	#[serde(rename = "run.name_changed")]
+	RunNameChanged {
+		/// New resolved name and the source that supplied it.
+		name: crate::Name,
 	},
 	/// A Workspace terminal changed lifecycle, without recording terminal bytes.
 	#[serde(rename = "terminal.state_changed")]
@@ -373,6 +385,9 @@ pub enum EventKind {
 	/// A Conversation came into existence.
 	#[serde(rename = "conversation.created")]
 	ConversationCreated {
+		/// Initial deterministic name. Absent in journals written before names.
+		#[serde(default, skip_serializing_if = "Option::is_none")]
+		name: Option<crate::Name>,
 		/// Its retention choice.
 		retention: RetentionPolicy,
 		/// Where it does its work. A journal written before Conversations
@@ -449,7 +464,11 @@ pub enum EventKind {
 	},
 	/// A Run was recorded in the `created` state.
 	#[serde(rename = "run.created")]
-	RunCreated {},
+	RunCreated {
+		/// Initial deterministic name. Absent in journals written before names.
+		#[serde(default, skip_serializing_if = "Option::is_none")]
+		name: Option<crate::Name>,
+	},
 	/// One scope stored a Setting value.
 	#[serde(rename = "setting.changed")]
 	SettingChanged {
@@ -602,6 +621,8 @@ impl EventKind {
 			| Self::ScheduleFired { .. }
 			| Self::UserEditApplied { .. }
 			| Self::ReviewSubmitted { .. }
+			| Self::ConversationNameChanged { .. }
+			| Self::RunNameChanged { .. }
 			| Self::ChangeEvidenceRecorded { .. }
 			| Self::ChangeCheckpointRecorded { .. }
 			| Self::TurnInput { .. }
@@ -615,7 +636,7 @@ impl EventKind {
 			| Self::RunOutput { .. }
 			| Self::RunNativeConversation { .. }
 			| Self::ConversationImported { .. }
-			| Self::RunCreated {}
+			| Self::RunCreated { .. }
 			| Self::RunLifecycleChanged { .. }
 			| Self::SettingChanged { .. }
 			| Self::SettingCleared { .. }
