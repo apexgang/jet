@@ -9,7 +9,12 @@ export function check<Model>(schemaURL: URL, fixturesURL: URL, contract: string)
   const root = JSON.parse(readFileSync(schemaURL, "utf8"));
   function resolve(s: Schema): Record<string, any> {
     if (typeof s === "boolean") return {};
-    return s.$ref ? resolve(root.$defs[s.$ref.split("/").at(-1)]) : s;
+    if (!s.$ref) return s;
+    const base = resolve(root.$defs[s.$ref.split("/").at(-1)]);
+    const { $ref, ...own } = s;
+    return { ...base, ...own,
+      properties: { ...base.properties, ...own.properties },
+      required: [...(base.required ?? []), ...(own.required ?? [])] };
   }
   // Branches are tagged by whichever property carries a constant: "kind" on
   // Craft messages, "type" on an Actor, "breach" on an audit finding.
@@ -66,7 +71,7 @@ export function check<Model>(schemaURL: URL, fixturesURL: URL, contract: string)
   }
   function matches(s: Schema, value: unknown): boolean {
     if (typeof s === "boolean") return s;
-    if (s.$ref) return matches(root.$defs[s.$ref.split("/").at(-1)], value);
+    if (s.$ref && !matches(root.$defs[s.$ref.split("/").at(-1)], value)) return false;
     if (s.not && matches(s.not, value)) return false;
     if (s.anyOf && !s.anyOf.some((part: Schema) => matches(part, value))) return false;
     if (s.oneOf && s.oneOf.filter((part: Schema) => matches(part, value)).length !== 1) return false;

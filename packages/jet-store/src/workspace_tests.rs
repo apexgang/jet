@@ -3,9 +3,9 @@ use uuid::Uuid;
 
 use super::{NewWorkspace, WorkspaceRecord, WorkspaceSeedRecord};
 use crate::{
-	ActorRecord, ConversationOriginRecord, NewConversation, NewProject, NewRun,
-	RetentionPolicy, RunLifecycle, RunRecord, Store, StoreError,
-	WorkingTreeRecord,
+	ActorRecord, ConversationOriginRecord, NameRecord, NameSourceRecord,
+	NewConversation, NewProject, NewRun, RetentionPolicy, RunLifecycle,
+	RunRecord, Store, StoreError, WorkingTreeRecord,
 };
 
 const NOW_UNIX_MS: i64 = 1_700_000_000_000;
@@ -217,6 +217,13 @@ async fn local_checkout_runs_are_found_through_their_conversations() {
 				conversation_id: local.conversation_id,
 				revision: 1,
 				lifecycle: RunLifecycle::Created,
+				name: NameRecord {
+					value: format!(
+						"Run {}",
+						&local_run.run_id.simple().to_string()[..8]
+					),
+					source: NameSourceRecord::Deterministic,
+				},
 				created_at_unix_ms: NOW_UNIX_MS,
 				ended_at_unix_ms: None,
 			}]

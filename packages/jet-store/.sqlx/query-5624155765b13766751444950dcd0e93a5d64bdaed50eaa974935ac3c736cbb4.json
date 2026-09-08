@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO search_name_documents (\n\t\t\t\t\t\tconversation_id, sequence, field, body\n\t\t\t\t\t) VALUES (?1, ?2, ?3, ?4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "5624155765b13766751444950dcd0e93a5d64bdaed50eaa974935ac3c736cbb4"
+}

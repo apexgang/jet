@@ -9,6 +9,7 @@ mod capability;
 mod checkpoint;
 mod execution_control;
 mod import;
+mod name;
 mod pairing;
 mod project;
 mod promotion;
@@ -30,8 +31,8 @@ use jet_core::{
 	AccountBindingId, Actor, AuditSequence, AuthenticationString,
 	BaseSelection, ClientId, Command, CommandOutcome, ConflictState,
 	Conversation, ConversationId, ConversationList, ConversationOrigin,
-	ConversationSnapshot, CoreError, ErrorCategory, Event, EventPage,
-	EventPayload, EventSequence, FileRevision, FileTarget, HarnessId, ImportId,
+	ConversationSnapshot, CoreError, ErrorCategory, Event, EventPayload,
+	EventSequence, FileRevision, FileTarget, HarnessId, ImportId,
 	NativeConversationId, PairingOfferId, PairingSecret, PairingSignature,
 	PathGrant, PlaneStatus, ProjectId, ProviderId, Query, QueryResult,
 	RecoveryAction, RelativePath, RetentionPolicy, Revision, RevisionConflict,
@@ -125,9 +126,17 @@ pub(crate) fn query(
 			scope: setting::scope_from_wire(*scope),
 			selection: setting::selection_from_wire(*selection),
 		},
-		wire::QueryRequest::Events { after } => Query::Events {
-			after: EventSequence(*after),
-		},
+		wire::QueryRequest::Events { after } => {
+			if minor >= wire::NAMES_MINOR {
+				Query::Events {
+					after: EventSequence(*after),
+				}
+			} else {
+				Query::LegacyEvents {
+					after: EventSequence(*after),
+				}
+			}
+		}
 		wire::QueryRequest::Pairing => Query::Pairing,
 		wire::QueryRequest::SecurityAudit { after } => Query::SecurityAudit {
 			after: AuditSequence(*after),
@@ -152,9 +161,14 @@ pub(crate) fn query(
 			workspace_id: WorkspaceId(*workspace_id),
 			destination: promotion::destination_from_wire(destination),
 		},
-		wire::QueryRequest::Search { text } => Query::Search {
-			terms: SearchTerms::parse(text)?,
-		},
+		wire::QueryRequest::Search { text } => {
+			let terms = SearchTerms::parse(text)?;
+			if minor >= wire::NAMES_MINOR {
+				Query::Search { terms }
+			} else {
+				Query::LegacySearch { terms }
+			}
+		}
 		wire::QueryRequest::ExternalConversations => {
 			Query::ExternalConversations
 		}
@@ -235,7 +249,7 @@ pub(crate) fn query_result(
 			wire::QueryResponse::Settings(setting::snapshot(snapshot, minor))
 		}
 		QueryResult::Events(page) => {
-			wire::QueryResponse::Events(event_page(&page, minor)?)
+			wire::QueryResponse::Events(name::event_page(&page, minor)?)
 		}
 		QueryResult::Pairing(snapshot) => {
 			wire::QueryResponse::Pairing(pairing::snapshot(snapshot))
@@ -258,7 +272,7 @@ pub(crate) fn query_result(
 			)))
 		}
 		QueryResult::Search(result) => {
-			wire::QueryResponse::Search(search::result(result))
+			wire::QueryResponse::Search(search::result(result, minor))
 		}
 		QueryResult::ExternalConversations(list) => {
 			wire::QueryResponse::ExternalConversations(import::list(list))
@@ -303,6 +317,24 @@ pub(crate) fn command(
 					})
 				})
 				.collect::<Result<_, CoreError>>()?,
+		},
+		wire::CommandRequest::SetConversationName {
+			conversation_id,
+			expected_revision,
+			name,
+		} => Command::SetConversationName {
+			conversation_id: ConversationId(*conversation_id),
+			expected_revision: Revision(*expected_revision),
+			name: jet_core::Name::manual(name.clone())?,
+		},
+		wire::CommandRequest::SetRunName {
+			run_id,
+			expected_revision,
+			name,
+		} => Command::SetRunName {
+			run_id: RunId(*run_id),
+			expected_revision: Revision(*expected_revision),
+			name: jet_core::Name::manual(name.clone())?,
 		},
 		wire::CommandRequest::OpenTerminal {
 			workspace_id,
@@ -520,6 +552,14 @@ pub(crate) fn command_outcome(
 				revision: file_revision(edit.revision),
 			}
 		}
+		CommandOutcome::ConversationNamed(named) => {
+			wire::CommandResponse::ConversationNamed(conversation(
+				&named, minor,
+			))
+		}
+		CommandOutcome::RunNamed(named) => {
+			wire::CommandResponse::RunNamed(run(&named, minor))
+		}
 		CommandOutcome::Terminal(value) => wire::CommandResponse::Terminal {
 			terminal: terminal::snapshot(value),
 		},
@@ -533,7 +573,7 @@ pub(crate) fn command_outcome(
 			run: value,
 			control,
 		} => wire::CommandResponse::RunControlAccepted {
-			run: run(&value),
+			run: run(&value, minor),
 			control: execution_control::control(control),
 		},
 		CommandOutcome::TurnWithdrawn(value) => {
@@ -560,10 +600,10 @@ pub(crate) fn command_outcome(
 			))
 		}
 		CommandOutcome::RunCreated(created) => {
-			wire::CommandResponse::RunCreated(run(&created))
+			wire::CommandResponse::RunCreated(run(&created, minor))
 		}
 		CommandOutcome::RunTransitioned(transitioned) => {
-			wire::CommandResponse::RunTransitioned(run(&transitioned))
+			wire::CommandResponse::RunTransitioned(run(&transitioned, minor))
 		}
 		CommandOutcome::SettingSet { key, scope, value } => {
 			wire::CommandResponse::SettingSet {
@@ -695,13 +735,19 @@ fn conversation_snapshot(
 					.map(|workspace| self::workspace(workspace, minor))
 			})
 			.flatten(),
-		runs: snapshot.runs.iter().map(run).collect(),
+		runs: snapshot
+			.runs
+			.iter()
+			.map(|value| run(value, minor))
+			.collect(),
 	}
 }
 
 fn conversation(conversation: &Conversation, minor: u32) -> wire::Conversation {
 	wire::Conversation {
 		conversation_id: conversation.conversation_id.0,
+		revision: (minor >= wire::NAMES_MINOR)
+			.then_some(conversation.revision.0),
 		retention: retention(conversation.retention),
 		working_tree: (minor >= wire::WORKSPACES_MINOR)
 			.then(|| working_tree(conversation.working_tree)),
@@ -718,6 +764,8 @@ fn conversation(conversation: &Conversation, minor: u32) -> wire::Conversation {
 			}
 			_ => None,
 		},
+		name: (minor >= wire::NAMES_MINOR)
+			.then(|| name::resolved(&conversation.name)),
 		created_at_unix_ms: unix_ms(conversation.created_at),
 	}
 }
@@ -814,29 +862,16 @@ fn workspace(workspace: &Workspace, minor: u32) -> wire::Workspace {
 	}
 }
 
-fn run(run: &Run) -> wire::Run {
+fn run(run: &Run, minor: u32) -> wire::Run {
 	wire::Run {
 		run_id: run.run_id.0,
 		conversation_id: run.conversation_id.0,
 		revision: run.revision.0,
 		lifecycle: lifecycle(run.lifecycle),
+		name: (minor >= wire::NAMES_MINOR).then(|| name::resolved(&run.name)),
 		created_at_unix_ms: unix_ms(run.created_at),
 		ended_at_unix_ms: run.ended_at.map(unix_ms),
 	}
-}
-
-fn event_page(
-	page: &EventPage,
-	minor: u32,
-) -> Result<wire::EventPage, CoreError> {
-	Ok(wire::EventPage {
-		cursor: page.cursor.0,
-		events: page
-			.events
-			.iter()
-			.map(|value| event(value, minor))
-			.collect::<Result<_, _>>()?,
-	})
 }
 
 fn event(event: &Event, minor: u32) -> Result<wire::Event, CoreError> {
@@ -847,6 +882,29 @@ fn event(event: &Event, minor: u32) -> Result<wire::Event, CoreError> {
 	} = event.kind.encode()?;
 	if let jet_core::EventKind::TurnChanged { turn: value } = &event.kind {
 		payload = serde_json::json!({"turn":turn::turn(value.clone())});
+	}
+	if minor < wire::NAMES_MINOR
+		&& matches!(
+			&event.kind,
+			jet_core::EventKind::ConversationCreated { .. }
+				| jet_core::EventKind::RunCreated { .. }
+		) && let Some(payload) = payload.as_object_mut()
+	{
+		payload.remove("name");
+	}
+	if minor < wire::NAMES_MINOR
+		&& matches!(
+			&event.kind,
+			jet_core::EventKind::RunProcessesChanged { .. }
+		) && let Some(processes) = payload
+		.get_mut("processes")
+		.and_then(serde_json::Value::as_array_mut)
+	{
+		for process in processes {
+			if let Some(process) = process.as_object_mut() {
+				process.remove("label");
+			}
+		}
 	}
 	Ok(wire::Event {
 		sequence: event.sequence.0,
@@ -944,7 +1002,9 @@ pub(crate) fn error(error: CoreError, minor: u32) -> wire::WireError {
 		code: error.code,
 		retryable: error.retryable,
 		message: error.message,
-		revision_conflict: error.revision_conflict.map(revision_conflict),
+		revision_conflict: error
+			.revision_conflict
+			.map(|conflict| revision_conflict(conflict, minor)),
 		restart,
 		recovery_actions: error
 			.recovery_actions
@@ -965,6 +1025,11 @@ fn recovery_action(action: RecoveryAction) -> Option<wire::RecoveryAction> {
 			path,
 			current_revision: file_revision(current_revision),
 		}),
+		RecoveryAction::RefreshConversation { conversation_id } => {
+			Some(wire::RecoveryAction::RefreshConversation {
+				conversation_id: conversation_id.0,
+			})
+		}
 		RecoveryAction::RefreshRun { run_id } => {
 			Some(wire::RecoveryAction::RefreshRun { run_id: run_id.0 })
 		}
@@ -975,6 +1040,7 @@ fn recovery_action(action: RecoveryAction) -> Option<wire::RecoveryAction> {
 fn restart_metadata(action: &RecoveryAction) -> Option<wire::RestartMetadata> {
 	match action {
 		RecoveryAction::RefreshFile { .. }
+		| RecoveryAction::RefreshConversation { .. }
 		| RecoveryAction::RefreshRun { .. } => None,
 		RecoveryAction::RestartSnapshot { metadata } => Some(match metadata {
 			jet_core::RestartMetadata::CursorExpired {
@@ -1034,13 +1100,21 @@ fn file_revision(revision: FileRevision) -> wire::FileRevision {
 	}
 }
 
-fn revision_conflict(conflict: RevisionConflict) -> wire::RevisionConflict {
+fn revision_conflict(
+	conflict: RevisionConflict,
+	minor: u32,
+) -> wire::RevisionConflict {
 	wire::RevisionConflict {
 		current_revision: conflict.current_revision.0,
 		safe_state: match conflict.safe_state {
-			ConflictState::Run(current) => {
-				wire::ConflictState::Run { run: run(&current) }
+			ConflictState::Conversation(current) => {
+				wire::ConflictState::Conversation {
+					conversation: conversation(&current, minor),
+				}
 			}
+			ConflictState::Run(current) => wire::ConflictState::Run {
+				run: run(&current, minor),
+			},
 		},
 	}
 }

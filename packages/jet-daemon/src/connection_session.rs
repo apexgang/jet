@@ -39,7 +39,7 @@ enum Request {
 enum Stop {
 	Disconnected,
 	Draining,
-	Protocol(WireError),
+	Protocol(Box<WireError>),
 }
 
 pub(super) async fn serve(
@@ -70,7 +70,7 @@ pub(super) async fn serve(
 		let final_error = match stop {
 			Stop::Disconnected => None,
 			Stop::Draining => Some(draining_error()),
-			Stop::Protocol(error) => Some(error),
+			Stop::Protocol(error) => Some(*error),
 		};
 		if let Some(error) = final_error
 			&& let Ok(payload) =
@@ -120,24 +120,25 @@ async fn read_requests(
 				| FrameError::InvalidStream { .. }
 				| FrameError::MultiplexingDisabled(_),
 			) => {
-				return Stop::Protocol(wire_error(
+				return Stop::Protocol(Box::new(wire_error(
 					ErrorCategory::InvalidInput,
 					"protocol.invalid_frame",
 					"the frame violated the protocol limits".into(),
-				));
+				)));
 			}
 		};
 		if minor >= MULTIPLEXED_STREAMS_MINOR && stream_id.is_connection() {
-			return Stop::Protocol(wire_error(
+			return Stop::Protocol(Box::new(wire_error(
 				ErrorCategory::InvalidInput,
 				"protocol.invalid_stream",
 				"requests must use a numbered application stream".into(),
-			));
+			)));
 		}
-		let message = match decode_control(&payload) {
-			Ok(message) => message,
-			Err(_) => {
-				return Stop::Protocol(match decode_control(&payload) {
+		let message =
+			match decode_control(&payload) {
+				Ok(message) => message,
+				Err(_) => {
+					return Stop::Protocol(Box::new(match decode_control(&payload) {
 					Ok(StreamControl::Credit { bytes }) => {
 						if requests
 							.send(Request::Credit { stream_id, bytes })
@@ -159,9 +160,9 @@ async fn read_requests(
 							.into(),
 					),
 					Err(_) => malformed(),
-				});
-			}
-		};
+				}));
+				}
+			};
 		if requests
 			.send(Request::Control {
 				stream_id,

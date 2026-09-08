@@ -9,6 +9,7 @@ mod connection;
 mod fork_requests;
 mod handshake;
 mod import_requests;
+mod name_requests;
 mod pairing_requests;
 mod project_requests;
 mod promotion_requests;

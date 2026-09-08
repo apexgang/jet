@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use jet_store::ConversationOriginRecord;
 
+use crate::Name;
 use crate::event::EventSequence;
 use crate::import::ImportId;
 use crate::system_time;
@@ -113,22 +114,26 @@ impl From<ConversationOriginRecord> for ConversationOrigin {
 
 /// A logical interaction between a user and a Harness. It exists before
 /// its first Run and outlives every Run it has had.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Conversation {
 	/// Durable identity.
 	pub conversation_id: ConversationId,
+	/// Current version for conflict-sensitive Conversation Commands.
+	pub revision: Revision,
 	/// Whether Jet keeps the Conversation after its final Run.
 	pub retention: RetentionPolicy,
 	/// Where it does its work (ADR-0025).
 	pub working_tree: WorkingTree,
 	/// Where it came from (ADR-0010).
 	pub origin: ConversationOrigin,
+	/// Resolved user-facing name and its authority (ADR-0044).
+	pub name: Name,
 	/// When the Conversation was created.
 	pub created_at: SystemTime,
 }
 
 /// One bounded execution of a Conversation on this Plane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Run {
 	/// Durable identity.
 	pub run_id: RunId,
@@ -138,6 +143,8 @@ pub struct Run {
 	pub revision: Revision,
 	/// Current lifecycle state.
 	pub lifecycle: RunLifecycle,
+	/// Resolved user-facing name and its authority (ADR-0044).
+	pub name: Name,
 	/// When the Run was created.
 	pub created_at: SystemTime,
 	/// When the Run reached a terminal state, if it has.
@@ -174,9 +181,11 @@ impl From<ConversationRecord> for Conversation {
 	fn from(record: ConversationRecord) -> Self {
 		Self {
 			conversation_id: ConversationId(record.conversation_id),
+			revision: Revision(record.revision),
 			retention: record.retention,
 			working_tree: record.working_tree.into(),
 			origin: record.origin.into(),
+			name: record.name.into(),
 			created_at: system_time(record.created_at_unix_ms),
 		}
 	}
@@ -189,6 +198,7 @@ impl From<RunRecord> for Run {
 			conversation_id: ConversationId(record.conversation_id),
 			revision: Revision(record.revision),
 			lifecycle: record.lifecycle,
+			name: record.name.into(),
 			created_at: system_time(record.created_at_unix_ms),
 			ended_at: record.ended_at_unix_ms.map(system_time),
 		}

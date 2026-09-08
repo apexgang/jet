@@ -161,6 +161,7 @@ async fn a_managed_conversation_receives_a_detached_workspace_of_its_own() {
 					retention: RetentionPolicy::Retain,
 					working_tree: WorkingTree::Workspace { project_id },
 					origin: ConversationOrigin::New,
+					name: Some(first.name.clone()),
 				},
 				EventKind::WorkspaceCreated {
 					workspace_id: first_workspace.workspace_id,
@@ -172,6 +173,7 @@ async fn a_managed_conversation_receives_a_detached_workspace_of_its_own() {
 					retention: RetentionPolicy::Retain,
 					working_tree: WorkingTree::Workspace { project_id },
 					origin: ConversationOrigin::New,
+					name: Some(second.name.clone()),
 				},
 				EventKind::WorkspaceCreated {
 					workspace_id: second_workspace.workspace_id,

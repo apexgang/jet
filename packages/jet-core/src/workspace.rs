@@ -381,6 +381,7 @@ pub(crate) async fn create(
 		.into();
 	let subject = EventSubject::Conversation(conversation.conversation_id);
 	let created = EventKind::ConversationCreated {
+		name: Some(conversation.name.clone()),
 		retention,
 		working_tree: conversation.working_tree,
 		origin,
@@ -447,6 +448,7 @@ pub(crate) async fn create_in_local_checkout(
 		.await?
 		.into();
 	let event = EventKind::ConversationCreated {
+		name: Some(conversation.name.clone()),
 		retention,
 		working_tree: conversation.working_tree,
 		origin,

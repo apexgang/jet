@@ -335,8 +335,8 @@ async fn resume_needs_a_project_and_continues_the_import_once() {
 			refused(unknown),
 			refused(unregistered),
 			refused(twice),
-			in_checkout,
-			in_workspace,
+			in_checkout.clone(),
+			in_workspace.clone(),
 			run.map(|outcome| match outcome {
 				CommandOutcome::RunCreated(run) => run.conversation_id,
 				other => panic!("unexpected outcome {other:?}"),
@@ -355,20 +355,24 @@ async fn resume_needs_a_project_and_continues_the_import_once() {
 			(ErrorCategory::Conflict, "import.already_resumed".into()),
 			Conversation {
 				conversation_id: in_checkout.conversation_id,
+				revision: in_checkout.revision,
 				retention: RetentionPolicy::Retain,
 				working_tree: WorkingTree::LocalCheckout { project_id },
 				origin: ConversationOrigin::Imported {
 					import_id: first.import_id,
 				},
+				name: in_checkout.name.clone(),
 				created_at: in_checkout.created_at,
 			},
 			Conversation {
 				conversation_id: in_workspace.conversation_id,
+				revision: in_workspace.revision,
 				retention: RetentionPolicy::Retain,
 				working_tree: WorkingTree::Workspace { project_id },
 				origin: ConversationOrigin::Imported {
 					import_id: second.import_id,
 				},
+				name: in_workspace.name.clone(),
 				created_at: in_workspace.created_at,
 			},
 			Ok(in_checkout.conversation_id),
@@ -390,6 +394,7 @@ async fn resume_needs_a_project_and_continues_the_import_once() {
 					origin: ConversationOrigin::Imported {
 						import_id: first.import_id,
 					},
+					name: Some(in_checkout.name.clone()),
 				},
 				EventKind::ConversationCreated {
 					retention: RetentionPolicy::Retain,
@@ -397,6 +402,7 @@ async fn resume_needs_a_project_and_continues_the_import_once() {
 					origin: ConversationOrigin::Imported {
 						import_id: second.import_id,
 					},
+					name: Some(in_workspace.name.clone()),
 				},
 			]
 			.to_vec(),

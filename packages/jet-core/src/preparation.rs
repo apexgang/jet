@@ -223,6 +223,8 @@ impl Core {
 			}
 			Command::CreateSchedule { .. }
 			| Command::CancelSchedule { .. }
+			| Command::SetConversationName { .. }
+			| Command::SetRunName { .. }
 			| Command::SubmitTurn { .. }
 			| Command::SubmitReview { .. }
 			| Command::WithdrawTurn { .. }

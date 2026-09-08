@@ -94,6 +94,8 @@ impl Client {
 			other @ (CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
 			| CommandResponse::Terminal { .. }
 			| CommandResponse::TurnAdmitted { .. }
 			| CommandResponse::TurnWithdrawn { .. }

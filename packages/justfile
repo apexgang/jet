@@ -32,7 +32,7 @@ test *args: build-run-helper
 
 # Subprocess conformance uses the separately deployed helper and Crafts.
 build-run-helper:
-	cargo build -p jet-fueld -p jet-craft-claude
+	cargo build -p jet-fueld -p jet-craft-claude -p jet-craft-codex
 
 # List tests without running them; accepts nextest package and filter arguments.
 [unix]

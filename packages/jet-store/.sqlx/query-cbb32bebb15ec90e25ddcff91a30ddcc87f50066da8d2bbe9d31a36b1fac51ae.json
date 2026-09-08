@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO runs (run_id, conversation_id, revision, lifecycle,\n\t\t\t\tname, name_source, created_at_unix_ms, ended_at_unix_ms)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "cbb32bebb15ec90e25ddcff91a30ddcc87f50066da8d2bbe9d31a36b1fac51ae"
+}

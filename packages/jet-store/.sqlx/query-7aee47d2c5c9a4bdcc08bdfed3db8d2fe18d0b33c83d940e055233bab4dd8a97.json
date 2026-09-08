@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT rowid AS \"rowid!\",\n\t\t\t\tconversation_id AS \"conversation_id!\", retention,\n\t\t\t\tworking_tree, project_id, import_id,\n\t\t\t\tfork_source_conversation_id, fork_source_run_id,\n\t\t\t\tfork_checkpoint_turn, created_at_unix_ms\n\t\t\t FROM conversations\n\t\t\t WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
+  "query": "SELECT rowid AS \"rowid!\",\n\t\t\t\tconversation_id AS \"conversation_id!\", revision, retention,\n\t\t\t\tworking_tree, project_id, import_id,\n\t\t\t\tfork_source_conversation_id, fork_source_run_id,\n\t\t\t\tfork_checkpoint_turn, name, name_source,\n\t\t\t\tcreated_at_unix_ms\n\t\t\t FROM conversations\n\t\t\t WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
   "describe": {
     "columns": [
       {
@@ -26,8 +26,19 @@
         }
       },
       {
-        "name": "retention",
+        "name": "revision",
         "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "name": "retention",
+        "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -38,7 +49,7 @@
       },
       {
         "name": "working_tree",
-        "ordinal": 3,
+        "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +60,7 @@
       },
       {
         "name": "project_id",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "import_id",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "fork_source_conversation_id",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,7 +93,7 @@
       },
       {
         "name": "fork_source_run_id",
-        "ordinal": 7,
+        "ordinal": 8,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -93,7 +104,7 @@
       },
       {
         "name": "fork_checkpoint_turn",
-        "ordinal": 8,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -103,8 +114,30 @@
         }
       },
       {
+        "name": "name",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "name_source",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "name_source"
+          }
+        }
+      },
+      {
         "name": "created_at_unix_ms",
-        "ordinal": 9,
+        "ordinal": 12,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -122,6 +155,9 @@
       true,
       false,
       false,
+      false,
+      true,
+      true,
       true,
       true,
       true,
@@ -130,5 +166,5 @@
       false
     ]
   },
-  "hash": "d206d0c322eb0e082075c4572bdfa29c863364e9f39bad2746403e04050a9ec0"
+  "hash": "7aee47d2c5c9a4bdcc08bdfed3db8d2fe18d0b33c83d940e055233bab4dd8a97"
 }

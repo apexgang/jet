@@ -15,12 +15,25 @@ schema_path, typescript_path, swift_path = map(Path, sys.argv[1:4])
 definitions = json.loads(schema_path.read_text())["$defs"]
 
 
+def referenced_object(item):
+    """Keep a tagged object's fields when its payload is a referenced schema."""
+    if not isinstance(item, dict) or "$ref" not in item or "properties" not in item:
+        return item
+    base = referenced_object(definitions[item["$ref"].split("/")[-1]])
+    merged = {**base, **item}
+    del merged["$ref"]
+    merged["properties"] = {**base.get("properties", {}), **item["properties"]}
+    merged["required"] = list(dict.fromkeys(base.get("required", []) + item.get("required", [])))
+    return merged
+
+
 def is_raw(item):
     """An unconstrained schema: original JSON the caller must retain verbatim."""
     return item is True or not (set(item) - {"description"})
 
 
 def ts_type(item):
+    item = referenced_object(item)
     if is_raw(item):
         return "RawJSON"
     if "$ref" in item:
@@ -49,6 +62,7 @@ swift_extra = {}
 
 
 def swift_type(item, name):
+    item = referenced_object(item)
     if is_raw(item):
         return "RawJSON"
     if "$ref" in item:
@@ -82,6 +96,7 @@ def discriminator(part):
 
 
 def swift_declaration(name, item):
+    item = referenced_object(item)
     choices = item.get("oneOf", item.get("anyOf", []))
     if choices and all(isinstance(part.get("const"), str) for part in choices):
         item = {"enum": [part["const"] for part in choices]}
