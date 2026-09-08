@@ -1401,11 +1401,23 @@ public struct CommandResponseUserEditApplied {
 }
 
 public struct CommandResponseConversationNamed {
-
+    public let `conversation_id`: String
+    public let `created_at_unix_ms`: Int64
+    public let `name`: Name?
+    public let `origin`: ConversationOrigin?
+    public let `retention`: RetentionPolicy
+    public let `revision`: String?
+    public let `working_tree`: WorkingTree?
 }
 
 public struct CommandResponseRunNamed {
-
+    public let `conversation_id`: String
+    public let `created_at_unix_ms`: Int64
+    public let `ended_at_unix_ms`: Int64?
+    public let `lifecycle`: RunLifecycle
+    public let `name`: Name?
+    public let `revision`: String
+    public let `run_id`: String
 }
 
 public struct CommandResponseTerminal {
@@ -1431,15 +1443,33 @@ public struct CommandResponseExecutionResolutionRecorded {
 }
 
 public struct CommandResponseConversationCreated {
-
+    public let `conversation_id`: String
+    public let `created_at_unix_ms`: Int64
+    public let `name`: Name?
+    public let `origin`: ConversationOrigin?
+    public let `retention`: RetentionPolicy
+    public let `revision`: String?
+    public let `working_tree`: WorkingTree?
 }
 
 public struct CommandResponseRunCreated {
-
+    public let `conversation_id`: String
+    public let `created_at_unix_ms`: Int64
+    public let `ended_at_unix_ms`: Int64?
+    public let `lifecycle`: RunLifecycle
+    public let `name`: Name?
+    public let `revision`: String
+    public let `run_id`: String
 }
 
 public struct CommandResponseRunTransitioned {
-
+    public let `conversation_id`: String
+    public let `created_at_unix_ms`: Int64
+    public let `ended_at_unix_ms`: Int64?
+    public let `lifecycle`: RunLifecycle
+    public let `name`: Name?
+    public let `revision`: String
+    public let `run_id`: String
 }
 
 public struct CommandResponseSettingSet {
@@ -1454,7 +1484,12 @@ public struct CommandResponseSettingCleared {
 }
 
 public struct CommandResponseAccountBound {
-
+    public let `binding_id`: String
+    public let `created_at_unix_ms`: Int64
+    public let `credential_reference`: CredentialReference
+    public let `label`: String
+    public let `provider`: String
+    public let `provider_account`: String?
 }
 
 public struct CommandResponseAccountUnbound {
@@ -1497,15 +1532,29 @@ public struct CommandResponseAuditEpochBegun {
 }
 
 public struct CommandResponseProjectRegistered {
-
+    public let `project_id`: String
+    public let `registered_at_unix_ms`: Int64
+    public let `registered_by`: Actor
+    public let `root`: String
 }
 
 public struct CommandResponseWorkspacePromotionRecorded {
-
+    public let `binding`: PromotionBinding
+    public let `changed_paths`: UInt32
+    public let `promotion_id`: String
+    public let `recorded_at_unix_ms`: Int64
+    public let `settled_at_unix_ms`: Int64?
+    public let `state`: PromotionState
 }
 
 public struct CommandResponseConversationImported {
-
+    public let `harness`: String
+    public let `import_id`: String
+    public let `imported_at_unix_ms`: Int64
+    public let `imported_by`: Actor
+    public let `native_conversation`: String
+    public let `resumed_as`: String?
+    public let `working_directory`: String?
 }
 
 public struct ConflictStateConversation {
@@ -1847,15 +1896,27 @@ public struct QueryRequestExternalConversations {
 }
 
 public struct QueryResponseUtility {
-
+    public let `binding_id`: String?
+    public let `job_id`: String
+    public let `model`: String?
+    public let `outcome`: UtilityOutcome
+    public let `plane_id`: String
+    public let `policy`: UtilityPolicy
+    public let `provider`: String?
+    public let `purpose`: UtilityPurpose
 }
 
 public struct QueryResponseScheduledTasks {
-
+    public let `cursor`: String
+    public let `tasks`: [ScheduledTask]
 }
 
 public struct QueryResponseEditableFile {
-
+    public let `content`: String?
+    public let `cursor`: String
+    public let `path`: String
+    public let `revision`: FileRevision
+    public let `target`: FileTarget
 }
 
 public struct QueryResponseWorkspaceTerminals {
@@ -1864,83 +1925,144 @@ public struct QueryResponseWorkspaceTerminals {
 }
 
 public struct QueryResponseChangeArtifact {
-
+    public let `artifact`: ChangeArtifact
+    public let `bytes`: [Int64]
+    public let `offset`: String
 }
 
 public struct QueryResponseChangeDiff {
-
+    public let `after`: ChangeSnapshot
+    public let `artifact`: ChangeArtifact
+    public let `before`: ChangeSnapshot
+    public let `cursor`: String
+    public let `files`: [ChangedFile]
+    public let `latest_turn`: UInt32
+    public let `next_page`: PageCursor?
+    public let `outcome`: TurnOutcome?
+    public let `patch`: String
+    public let `patch_truncated`: Bool
+    public let `plane_id`: String
+    public let `run_id`: String
+    public let `scope`: DiffScope
+    public let `total_files`: UInt32
+    public let `workspace_id`: String?
 }
 
 public struct QueryResponseTurnQueue {
-
+    public let `cursor`: String
+    public let `turns`: [Turn]
 }
 
 public struct QueryResponseOrphanedExecutions {
-
+    public let `executions`: [OrphanedExecution]
+    public let `next`: String?
 }
 
 public struct QueryResponseRunExecution {
-
+    public let `activity`: RunActivity?
+    public let `cursor`: String
+    public let `exit_code`: Int32?
+    public let `native_conversation`: String?
+    public let `processes`: [ManagedProcess]
+    public let `run`: Run
+    public let `termination`: RunTermination?
 }
 
 public struct QueryResponseStatus {
-
+    public let `core_version`: String
+    public let `cursor`: String?
+    public let `daemon_starts`: UInt64
+    public let `plane_id`: String
+    public let `security`: SecurityState?
+    public let `started_at_unix_ms`: Int64
 }
 
 public struct QueryResponseConversations {
-
+    public let `conversations`: [Conversation]
+    public let `cursor`: String
+    public let `next_page`: PageCursor?
 }
 
 public struct QueryResponseConversation {
-
+    public let `conversation`: Conversation
+    public let `cursor`: String
+    public let `runs`: [Run]
+    public let `workspace`: Workspace?
 }
 
 public struct QueryResponseCapabilities {
-
+    public let `core_version`: String
+    public let `crafts`: [InstalledCraft]
+    public let `credential_store`: CredentialStoreStatus
+    public let `degraded`: [DegradedCondition]
+    public let `external_tools`: [ExternalToolStatus]
+    public let `harnesses`: [String]
+    public let `observed_at_unix_ms`: Int64
+    public let `platform`: Platform
 }
 
 public struct QueryResponseAccountBindings {
-
+    public let `bindings`: [AccountBindingStatus]
+    public let `cursor`: String
 }
 
 public struct QueryResponseSettings {
-
+    public let `cursor`: String
+    public let `scope`: SettingScope
+    public let `settings`: [ResolvedSetting]
 }
 
 public struct QueryResponseEvents {
-
+    public let `cursor`: String
+    public let `events`: [Event]
 }
 
 public struct QueryResponsePairing {
-
+    public let `clients`: [PairedClient]?
+    public let `cursor`: String
+    public let `gate`: PairingGate
+    public let `pending`: PendingPairing?
 }
 
 public struct QueryResponseSecurityAudit {
-
+    public let `cursor`: String
+    public let `entries`: [AuditEntry]
 }
 
 public struct QueryResponseProjects {
-
+    public let `cursor`: String
+    public let `projects`: [Project]
 }
 
 public struct QueryResponseProjectPreview {
-
+    public let `registrability`: Registrability
+    public let `root`: String
 }
 
 public struct QueryResponseProjectEntry {
-
+    public let `cursor`: String
+    public let `kind`: EntryKind
+    public let `path`: String
+    public let `project_id`: String
 }
 
 public struct QueryResponsePromotionPreview {
-
+    public let `binding`: PromotionBinding
+    public let `changed_paths`: UInt32
+    public let `changes`: [PromotedChange]
+    public let `cursor`: String
 }
 
 public struct QueryResponseSearch {
-
+    public let `cursor`: String
+    public let `hits`: [SearchHit]
+    public let `indexed_through`: String
 }
 
 public struct QueryResponseExternalConversations {
-
+    public let `cursor`: String
+    public let `discovered`: [ExternalConversation]
+    public let `imported`: [ImportedConversation]
 }
 
 public struct RecoveryActionRefreshFile {

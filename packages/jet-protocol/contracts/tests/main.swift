@@ -6,7 +6,14 @@ let root = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWi
 let definitions = root["$defs"] as! [String: Any]
 func resolve(_ schema: Any) -> [String: Any] {
     guard let node = schema as? [String: Any] else { return [:] }
-    if let ref = node["$ref"] as? String { return resolve(definitions[String(ref.split(separator: "/").last!)]!) }
+    if let ref = node["$ref"] as? String {
+        let base = resolve(definitions[String(ref.split(separator: "/").last!)]!)
+        var merged = base.merging(node) { _, own in own }
+        merged.removeValue(forKey: "$ref")
+        merged["properties"] = (base["properties"] as? [String: Any] ?? [:]).merging(node["properties"] as? [String: Any] ?? [:]) { _, own in own }
+        merged["required"] = (base["required"] as? [String] ?? []) + (node["required"] as? [String] ?? [])
+        return merged
+    }
     return node
 }
 // Branches are tagged by whichever property carries a constant: "kind" on
@@ -75,7 +82,7 @@ func uniqueFields(_ source: String, _ schema: Any) -> Bool {
 func matches(_ schema: Any, _ value: Any) -> Bool {
     if let allowed = schema as? Bool { return allowed }
     let s = schema as! [String: Any]
-    if let ref = s["$ref"] as? String { return matches(definitions[String(ref.split(separator: "/").last!)]!, value) }
+    if let ref = s["$ref"] as? String, !matches(definitions[String(ref.split(separator: "/").last!)]!, value) { return false }
     if let not = s["not"], matches(not, value) { return false }
     if let any = s["anyOf"] as? [Any], !any.contains(where: { matches($0, value) }) { return false }
     if let one = s["oneOf"] as? [Any], one.filter({ matches($0, value) }).count != 1 { return false }

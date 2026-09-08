@@ -218,5 +218,20 @@
     "schema": "ClientMessage",
     "valid": false,
     "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"00000000-0000-0000-0000-000000000038\",\"command\":{\"type\":\"request_utility\",\"request\":{\"purpose\":\"autodelete\",\"prompt\":\"90 days\",\"tools\":[]}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":4,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"set_conversation_name\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"expected_revision\":\"7\",\"name\":\"Scheduled work\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"command\",\"id\":4,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"set_conversation_name\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"expected_revision\":7,\"name\":\"Scheduled work\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":4,\"result\":{\"type\":\"conversation_named\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"revision\":\"8\",\"retention\":\"retain\",\"created_at_unix_ms\":1772953200000,\"name\":{\"value\":\"Scheduled work\",\"source\":\"manual\"}}}"
   }
 ]

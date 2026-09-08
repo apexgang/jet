@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 /// Authority that supplied a current Conversation or Run name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NameSource {
 	/// An interactive user's authoritative choice.
@@ -18,8 +18,8 @@ pub enum NameSource {
 }
 
 /// One resolved user-facing name and its authority.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Name {
 	/// Original validated text; clients encode it for their render context.
 	pub value: String,
