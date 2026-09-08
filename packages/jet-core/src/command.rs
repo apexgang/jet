@@ -219,6 +219,8 @@ pub enum Command {
 		/// What is asked of it.
 		control: crate::RunControl,
 	},
+	/// Start native execution using explicit destination-local selections.
+	StartVisaRun(crate::VisaRunRequest),
 	/// Start a managed Run with one installed Craft and its initial input.
 	StartRun {
 		/// The Conversation whose registered working tree is used.
@@ -409,7 +411,7 @@ impl Command {
 			| Self::SubmitReview { .. }
 			| Self::WithdrawTurn { .. }
 			| Self::ControlRun { .. } => &[],
-			Self::StartRun { .. } => GIT,
+			Self::StartRun { .. } | Self::StartVisaRun(_) => GIT,
 			Self::SetSetting {
 				key: SettingKey::GitAutoCommit,
 				value: SettingValue::Flag(true),
@@ -981,7 +983,11 @@ async fn execute_new(
 		}
 		Command::StartRun {
 			conversation_id, ..
-		} => {
+		}
+		| Command::StartVisaRun(crate::VisaRunRequest {
+			conversation_id,
+			..
+		}) => {
 			let Prepared::Run(plan) = prepared else {
 				return Err(CoreError::internal(
 					"run.unprepared",

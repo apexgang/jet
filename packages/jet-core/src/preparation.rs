@@ -174,6 +174,9 @@ impl Core {
 				self.prepare_execution_resolution(request).await?;
 				Ok(Prepared::Nothing)
 			}
+			Command::StartVisaRun(request) => Ok(Prepared::Run(
+				crate::visa::prepare(self, actor, request).await?,
+			)),
 			Command::StartRun {
 				conversation_id,
 				craft,

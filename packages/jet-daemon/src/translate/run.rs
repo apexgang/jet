@@ -7,6 +7,12 @@ pub(super) fn execution(
 	minor: u32,
 ) -> wire::RunExecution {
 	wire::RunExecution {
+		visa: value.visa.filter(|_| minor >= wire::VISA_RUNS_MINOR).map(
+			|selection| wire::VisaSelection {
+				plane_id: selection.plane_id.0,
+				account_binding_id: selection.account_binding_id.0,
+			},
+		),
 		cursor: value.cursor.0,
 		run: super::run(&value.run, minor),
 		activity: value.activity.map(activity),

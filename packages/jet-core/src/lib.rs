@@ -9,6 +9,8 @@
 //! translates at the transport seam.
 
 mod account;
+mod visa;
+pub use visa::{VisaRunRequest, VisaSelection};
 mod audit;
 mod capability;
 mod capability_probe;

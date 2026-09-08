@@ -268,5 +268,30 @@
     "schema": "ClientMessage",
     "valid": false,
     "payload": "{\"kind\":\"command\",\"id\":29,\"command_id\":\"00000000-0000-0000-0000-000000000029\",\"command\":{\"type\":\"handoff_conversation\",\"source_run_id\":\"00000000-0000-0000-0000-000000000002\",\"craft\":\"codex\",\"plan\":\"Selected plan\",\"files\":[\"src/main.rs\"]}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96502\",\"command\":{\"type\":\"start_visa_run\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"destination_plane_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96500\",\"account_binding_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96501\",\"craft\":\"codex\",\"prompt\":\"Make a change\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96502\",\"command\":{\"type\":\"start_visa_run\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"destination_plane_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96500\",\"account_binding_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96501\",\"craft\":\"codex\",\"prompt\":\"Make a change\",\"credential\":\"must not accept secret fields\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96502\",\"command\":{\"type\":\"start_visa_run\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"account_binding_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96501\",\"craft\":\"codex\",\"prompt\":\"Make a change\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":2,\"result\":{\"type\":\"run_execution\",\"cursor\":\"10\",\"run\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96502\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"revision\":\"3\",\"lifecycle\":\"active\",\"created_at_unix_ms\":1788876430000,\"ended_at_unix_ms\":null},\"activity\":\"waiting_for_auth\",\"processes\":[],\"native_conversation\":null,\"exit_code\":null,\"visa\":{\"plane_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96500\",\"account_binding_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96501\"}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"query_result\",\"id\":2,\"result\":{\"type\":\"run_execution\",\"cursor\":\"10\",\"run\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96502\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"revision\":\"3\",\"lifecycle\":\"active\",\"created_at_unix_ms\":1788876430000,\"ended_at_unix_ms\":null},\"activity\":\"waiting_for_auth\",\"processes\":[],\"native_conversation\":null,\"exit_code\":null,\"visa\":{\"plane_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96500\"}}}"
   }
 ]

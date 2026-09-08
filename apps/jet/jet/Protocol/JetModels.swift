@@ -210,6 +210,7 @@ public enum CommandRequest {
     case `resolve_execution`(CommandRequestResolveExecution)
     case `interrupt_turn`(CommandRequestInterruptTurn)
     case `stop_run`(CommandRequestStopRun)
+    case `start_visa_run`(CommandRequestStartVisaRun)
     case `start_run`(CommandRequestStartRun)
     case `create_conversation`(CommandRequestCreateConversation)
     case `handoff_conversation`(CommandRequestHandoffConversation)
@@ -883,6 +884,7 @@ public struct RunExecution {
     public let `processes`: [ManagedProcess]
     public let `run`: Run
     public let `termination`: RunTermination?
+    public let `visa`: VisaSelection?
 }
 
 public enum RunLifecycle: String {
@@ -1118,6 +1120,11 @@ public struct VersionRange {
     public let `min`: UInt32
 }
 
+public struct VisaSelection {
+    public let `account_binding_id`: String
+    public let `plane_id`: String
+}
+
 public struct WireError {
     public let `category`: ErrorCategory
     public let `code`: String
@@ -1342,6 +1349,14 @@ public struct CommandRequestInterruptTurn {
 
 public struct CommandRequestStopRun {
     public let `run_id`: String
+}
+
+public struct CommandRequestStartVisaRun {
+    public let `account_binding_id`: String
+    public let `conversation_id`: String
+    public let `craft`: String
+    public let `destination_plane_id`: String
+    public let `prompt`: String
 }
 
 public struct CommandRequestStartRun {
@@ -2082,6 +2097,7 @@ public struct QueryResponseRunExecution {
     public let `processes`: [ManagedProcess]
     public let `run`: Run
     public let `termination`: RunTermination?
+    public let `visa`: VisaSelection?
 }
 
 public struct QueryResponseStatus {

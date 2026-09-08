@@ -16,7 +16,9 @@ pub(crate) async fn snapshot(
 	let run = tx.run(run_id.0).await?.ok_or_else(missing)?;
 	let record = tx.run_execution(run_id.0).await?.ok_or_else(missing)?;
 	let state: State = decode(&record.state)?;
+	let plan: crate::LaunchPlan = decode(&record.plan)?;
 	Ok(RunExecution {
+		visa: plan.visa,
 		cursor: EventSequence(tx.event_cursor().await?),
 		run: run.into(),
 		activity: if state.disconnected {

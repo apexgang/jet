@@ -51,6 +51,9 @@ pub struct ManagedProcess {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RunExecution {
+	/// Explicit Visa selection; absent on legacy Runs and before minor 25.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub visa: Option<crate::VisaSelection>,
 	/// Snapshot cursor.
 	#[serde(with = "crate::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]

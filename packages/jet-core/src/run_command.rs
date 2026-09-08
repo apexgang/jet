@@ -49,6 +49,9 @@ pub struct ForkLaunchSource {
 /// Durable domain plan: authority, working roots, and the exact accepted artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaunchPlan {
+	/// Explicit Visa selection; absent on legacy managed executions.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub visa: Option<crate::VisaSelection>,
 	/// Domain plan format version.
 	pub version: u32,
 	/// Canonical permitted working root.
@@ -186,6 +189,7 @@ pub(crate) async fn prepare(
 		)
 	})?;
 	let mut plan = LaunchPlan {
+		visa: None,
 		version: 1,
 		root,
 		project_root,
@@ -233,7 +237,7 @@ impl LaunchPlan {
 	/// # Errors
 	/// Returns a conflict or unavailable error when the accepted boundary changed.
 	pub async fn revalidate(&self) -> Result<(), CoreError> {
-		if self.version != 1 {
+		if !matches!((self.version, self.visa), (1, None) | (2, Some(_))) {
 			return Err(CoreError::conflict(
 				"run.incompatible_pin",
 				"this execution requires an unavailable protocol version",
@@ -302,6 +306,9 @@ pub(crate) async fn record(
 ) -> Result<CommandOutcome, CoreError> {
 	// Preparation runs outside the write lock. Recheck consumption in this
 	// transaction so concurrent StartRun commands cannot reissue the fork.
+	if let Some(selection) = plan.visa {
+		selection.binding(tx).await?;
+	}
 	if tx.conversation_has_run_execution(conversation_id.0).await? {
 		plan.fork = None;
 	}

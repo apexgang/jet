@@ -141,6 +141,8 @@ pub use handshake::{
 	TURN_QUEUE_MINOR, USER_INPUT_MINOR, UTILITY_MINOR, VersionRange,
 	WORKSPACE_PROMOTION_MINOR, WORKSPACE_TERMINALS_MINOR, WORKSPACES_MINOR,
 };
+mod visa;
+pub use handshake::VISA_RUNS_MINOR;
 pub use import::{
 	ConversationOrigin, ExternalConversation, ExternalConversationList,
 	ExternalOrigin, ExternalProcess, ImportedConversation,
@@ -177,6 +179,7 @@ pub use stream::{
 	MAX_OPEN_BINARY_STREAMS, OutboundLimits, OutboundQueue, StreamQueueError,
 };
 pub use stream_control::StreamControl;
+pub use visa::{VisaRunRequest, VisaSelection};
 pub use workspace::{
 	BaseSelection, SeedSelection, WorkingTree, WorkingTreeRequest, Workspace,
 	WorkspaceBase, WorkspaceSeed,
