@@ -137,6 +137,23 @@ pub struct ConversationSnapshot {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandRequest {
+	/// Attach a daily Scheduled task to a retained Conversation.
+	CreateSchedule {
+		/// Owning Conversation.
+		conversation_id: Uuid,
+		/// Original IANA zone.
+		time_zone: String,
+		/// Daily local time in HH:MM:SS form.
+		local_time: String,
+		/// Scheduled input, 1 to 8192 UTF-8 bytes.
+		prompt: String,
+	},
+	/// Cancel future firings and withdraw this schedule's pending input.
+	CancelSchedule {
+		/// Immutable schedule identity.
+		schedule_id: Uuid,
+	},
+
 	/// Apply a bounded UTF-8 edit through a registered root.
 	ApplyUserEdit {
 		/// Registered Project or Workspace root.
@@ -394,6 +411,16 @@ pub enum CommandRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResponse {
+	/// Enabled daily schedule.
+	ScheduleCreated {
+		/// Enabled schedule and next firing.
+		task: crate::ScheduledTask,
+	},
+	/// Canceled immutable schedule identity.
+	ScheduleCanceled {
+		/// Immutable schedule identity.
+		schedule_id: Uuid,
+	},
 	/// A direct edit committed to the registered root.
 	UserEditApplied {
 		/// Registered root that was edited.

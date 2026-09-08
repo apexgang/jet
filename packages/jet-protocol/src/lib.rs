@@ -64,6 +64,8 @@ pub use terminal::{
 	TerminalHelperReply, TerminalHelperRequest, TerminalState,
 	WorkspaceTerminal,
 };
+mod schedule;
+pub use schedule::{ScheduleFiring, ScheduledTask, ScheduledTasks};
 mod turn;
 pub use turn::{Turn, TurnQueue, TurnSource, TurnState};
 pub use user_input::{EditableFile, FileRevision, FileTarget, ReviewComment};
@@ -124,10 +126,10 @@ pub use handshake::{
 	EXECUTION_RECOVERY_MINOR, FENCED_READS_MINOR, IMPORTED_CONVERSATIONS_MINOR,
 	MANAGED_RUNS_MINOR, MULTIPLEXED_STREAMS_MINOR, PAIRING_MINOR, PREFACE,
 	PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR,
-	SEARCH_MINOR, SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
-	SETTINGS_AND_CAPABILITIES_MINOR, ServerHello, TURN_QUEUE_MINOR,
-	USER_INPUT_MINOR, VersionRange, WORKSPACE_PROMOTION_MINOR,
-	WORKSPACE_TERMINALS_MINOR, WORKSPACES_MINOR,
+	SCHEDULES_MINOR, SEARCH_MINOR, SECURITY_AUDIT_MINOR,
+	SEEDED_WORKSPACES_MINOR, SETTINGS_AND_CAPABILITIES_MINOR, ServerHello,
+	TURN_QUEUE_MINOR, USER_INPUT_MINOR, VersionRange,
+	WORKSPACE_PROMOTION_MINOR, WORKSPACE_TERMINALS_MINOR, WORKSPACES_MINOR,
 };
 pub use import::{
 	ConversationOrigin, ExternalConversation, ExternalConversationList,

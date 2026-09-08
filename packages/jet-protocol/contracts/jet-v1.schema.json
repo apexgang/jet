@@ -1134,6 +1134,59 @@
       "description": "Commands a client may execute.",
       "oneOf": [
         {
+          "description": "Attach a daily Scheduled task to a retained Conversation.",
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "description": "Owning Conversation.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "local_time": {
+              "description": "Daily local time in HH:MM:SS form.",
+              "type": "string"
+            },
+            "prompt": {
+              "description": "Scheduled input, 1 to 8192 UTF-8 bytes.",
+              "type": "string"
+            },
+            "time_zone": {
+              "description": "Original IANA zone.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "create_schedule"
+            }
+          },
+          "required": [
+            "type",
+            "conversation_id",
+            "time_zone",
+            "local_time",
+            "prompt"
+          ]
+        },
+        {
+          "description": "Cancel future firings and withdraw this schedule's pending input.",
+          "type": "object",
+          "properties": {
+            "schedule_id": {
+              "description": "Immutable schedule identity.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "cancel_schedule"
+            }
+          },
+          "required": [
+            "type",
+            "schedule_id"
+          ]
+        },
+        {
           "description": "Apply a bounded UTF-8 edit through a registered root.",
           "type": "object",
           "properties": {
@@ -1860,6 +1913,43 @@
     "CommandResponse": {
       "description": "Durable Command outcomes.",
       "oneOf": [
+        {
+          "description": "Enabled daily schedule.",
+          "type": "object",
+          "properties": {
+            "task": {
+              "description": "Enabled schedule and next firing.",
+              "$ref": "#/$defs/ScheduledTask"
+            },
+            "type": {
+              "type": "string",
+              "const": "schedule_created"
+            }
+          },
+          "required": [
+            "type",
+            "task"
+          ]
+        },
+        {
+          "description": "Canceled immutable schedule identity.",
+          "type": "object",
+          "properties": {
+            "schedule_id": {
+              "description": "Immutable schedule identity.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "schedule_canceled"
+            }
+          },
+          "required": [
+            "type",
+            "schedule_id"
+          ]
+        },
         {
           "description": "A direct edit committed to the registered root.",
           "type": "object",
@@ -3252,6 +3342,25 @@
       "description": "Responsible execution origin, when legacy client authorization is insufficient.",
       "oneOf": [
         {
+          "description": "Input originated from a durable Scheduled task.",
+          "type": "object",
+          "properties": {
+            "schedule_id": {
+              "description": "Responsible schedule.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "scheduled_task"
+            }
+          },
+          "required": [
+            "type",
+            "schedule_id"
+          ]
+        },
+        {
           "description": "Semantic observations from the pinned Harness.",
           "type": "object",
           "properties": {
@@ -4590,6 +4699,25 @@
       "description": "Queries a client may run.",
       "oneOf": [
         {
+          "description": "Enabled schedules in one Conversation.",
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "description": "Owning Conversation.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "scheduled_tasks"
+            }
+          },
+          "required": [
+            "type",
+            "conversation_id"
+          ]
+        },
+        {
           "description": "Read bounded UTF-8 file content through a registered root.",
           "type": "object",
           "properties": {
@@ -5050,6 +5178,20 @@
     "QueryResponse": {
       "description": "Query snapshots.",
       "oneOf": [
+        {
+          "description": "Fenced schedule snapshot.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "scheduled_tasks"
+            }
+          },
+          "$ref": "#/$defs/ScheduledTasks",
+          "required": [
+            "type"
+          ]
+        },
         {
           "description": "Bounded editable content and its exact file Revision.",
           "type": "object",
@@ -6075,6 +6217,99 @@
       "required": [
         "control",
         "stage"
+      ]
+    },
+    "ScheduleFiring": {
+      "description": "One intended local occurrence, resolved once and persisted before delivery.",
+      "type": "object",
+      "properties": {
+        "due_at_unix_ms": {
+          "description": "Selected UTC instant in signed Unix milliseconds.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "firing_id": {
+          "description": "Deterministic identity, also the admitted Turn identity.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "intended_local": {
+          "description": "Original local date and time, including a nonexistent or repeated time.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "firing_id",
+        "intended_local",
+        "due_at_unix_ms"
+      ]
+    },
+    "ScheduledTask": {
+      "description": "An enabled daily Scheduled task. Cancel and create anew to change its rule.",
+      "type": "object",
+      "properties": {
+        "authorized_by": {
+          "description": "Client that authorized scheduled input.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "conversation_id": {
+          "description": "Durable owning Conversation.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "local_time": {
+          "description": "Daily local time in HH:MM:SS form.",
+          "type": "string"
+        },
+        "next": {
+          "description": "Next intended occurrence, retained unchanged across restarts.",
+          "$ref": "#/$defs/ScheduleFiring"
+        },
+        "prompt": {
+          "description": "Turn input, bounded to 8192 UTF-8 bytes.",
+          "type": "string"
+        },
+        "schedule_id": {
+          "description": "Immutable schedule identity.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "time_zone": {
+          "description": "Original IANA zone, independent of the Plane's current zone.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schedule_id",
+        "conversation_id",
+        "authorized_by",
+        "time_zone",
+        "local_time",
+        "prompt",
+        "next"
+      ]
+    },
+    "ScheduledTasks": {
+      "description": "Enabled schedules and their snapshot fence.",
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "description": "Plane Event high-water cursor in this read transaction.",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "tasks": {
+          "description": "At most 32 schedules in the addressed Conversation.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScheduledTask"
+          }
+        }
+      },
+      "required": [
+        "cursor",
+        "tasks"
       ]
     },
     "SearchField": {

@@ -113,6 +113,23 @@ impl CommandEnvelope {
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
+	/// Attach a daily Scheduled task to a retained Conversation.
+	CreateSchedule {
+		/// Owning Conversation.
+		conversation_id: ConversationId,
+		/// Original IANA zone.
+		time_zone: String,
+		/// Daily local time in HH:MM:SS form.
+		local_time: String,
+		/// Scheduled input, 1 to 8192 UTF-8 bytes.
+		prompt: String,
+	},
+	/// Cancel future firings and withdraw this schedule's pending input.
+	CancelSchedule {
+		/// Immutable schedule identity.
+		schedule_id: Uuid,
+	},
+
 	/// Apply a bounded UTF-8 edit through a registered root.
 	ApplyUserEdit {
 		/// Registered Project or Workspace root.
@@ -352,7 +369,9 @@ impl Command {
 	/// (ADR-0086).
 	pub(crate) fn required_capabilities(&self) -> &'static [Capability] {
 		match self {
-			Self::SubmitTurn { .. }
+			Self::CreateSchedule { .. }
+			| Self::CancelSchedule { .. }
+			| Self::SubmitTurn { .. }
 			| Self::SubmitReview { .. }
 			| Self::WithdrawTurn { .. }
 			| Self::ControlRun { .. } => &[],
@@ -416,6 +435,13 @@ impl Command {
 /// The durable result of a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
+	/// Enabled immutable schedule and its first persisted firing.
+	ScheduleCreated(crate::ScheduledTask),
+	/// Removed schedule identity.
+	ScheduleCanceled {
+		/// Immutable schedule identity.
+		schedule_id: Uuid,
+	},
 	/// A direct edit committed to its registered root.
 	UserEditApplied(crate::UserEdit),
 	/// Terminal request committed.
@@ -672,6 +698,8 @@ fn redacted_for_receipt(
 		Ok(
 			outcome @ (CommandOutcome::UserEditApplied(_)
 			| CommandOutcome::TurnWithdrawn(_)
+			| CommandOutcome::ScheduleCreated(_)
+			| CommandOutcome::ScheduleCanceled { .. }
 			| CommandOutcome::TurnAdmitted(_)
 			| CommandOutcome::ConversationCreated(_)
 			| CommandOutcome::ExecutionResolutionRecorded(_)
@@ -791,6 +819,26 @@ async fn execute_new(
 				now_unix_ms,
 			)
 			.await
+		}
+		Command::CreateSchedule {
+			conversation_id,
+			time_zone,
+			local_time,
+			prompt,
+		} => {
+			crate::schedule::create(
+				tx,
+				actor,
+				conversation_id,
+				time_zone,
+				local_time,
+				prompt,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::CancelSchedule { schedule_id } => {
+			crate::schedule::cancel(tx, actor, schedule_id, now_unix_ms).await
 		}
 		Command::SubmitTurn {
 			conversation_id,

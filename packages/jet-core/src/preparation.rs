@@ -221,7 +221,9 @@ impl Core {
 					| WorkingTreeRequest::LocalCheckout { .. } => Ok(Prepared::Nothing),
 				}
 			}
-			Command::SubmitTurn { .. }
+			Command::CreateSchedule { .. }
+			| Command::CancelSchedule { .. }
+			| Command::SubmitTurn { .. }
 			| Command::SubmitReview { .. }
 			| Command::WithdrawTurn { .. }
 			| Command::CreateConversation { .. }

@@ -73,6 +73,8 @@ async fn apply(
 			})
 		}
 		CommandOutcome::UserEditApplied(_)
+		| CommandOutcome::ScheduleCreated(_)
+		| CommandOutcome::ScheduleCanceled { .. }
 		| CommandOutcome::TurnAdmitted(_)
 		| CommandOutcome::TurnWithdrawn(_)
 		| CommandOutcome::ConversationCreated(_)

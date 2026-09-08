@@ -383,6 +383,8 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		| Command::ForkConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
+		| Command::CreateSchedule { .. }
+		| Command::CancelSchedule { .. }
 		| Command::SubmitTurn { .. }
 		| Command::SubmitReview { .. }
 		| Command::WithdrawTurn { .. }
@@ -432,6 +434,8 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::ForkConversation { .. }
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
+		| Command::CreateSchedule { .. }
+		| Command::CancelSchedule { .. }
 		| Command::SubmitTurn { .. }
 		| Command::SubmitReview { .. }
 		| Command::WithdrawTurn { .. }

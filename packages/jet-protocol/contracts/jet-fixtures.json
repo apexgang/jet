@@ -138,5 +138,35 @@
     "schema": "PlaneStatus",
     "valid": false,
     "payload": "{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e71\",\"daemon_starts\":4,\"started_at_unix_ms\":1757000000000,\"core_version\":\"0.2.0\",\"cursor\":\"007\"}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"create_schedule\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"time_zone\":\"America/New_York\",\"local_time\":\"02:30:00\",\"prompt\":\"Continue\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":2,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"cancel_schedule\",\"schedule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":3,\"query\":{\"type\":\"scheduled_tasks\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":3,\"result\":{\"type\":\"scheduled_tasks\",\"cursor\":\"123\",\"tasks\":[]}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":1,\"result\":{\"type\":\"schedule_created\",\"task\":{\"schedule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"authorized_by\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"time_zone\":\"America/New_York\",\"local_time\":\"02:30:00\",\"prompt\":\"Continue\",\"next\":{\"firing_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"intended_local\":\"2026-03-08T02:30:00\",\"due_at_unix_ms\":1772953200000}}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":2,\"result\":{\"type\":\"events\",\"cursor\":\"1\",\"events\":[{\"sequence\":\"1\",\"event_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"actor\":{\"type\":\"interactive_client\",\"client_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"},\"origin\":{\"type\":\"scheduled_task\",\"schedule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"},\"recorded_at_unix_ms\":1772953200000,\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"run_id\":null,\"kind\":\"schedule.fired\",\"payload_version\":1,\"payload\":{\"schedule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"firing\":{\"firing_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"intended_local\":\"2026-03-08T02:30:00\",\"due_at_unix_ms\":1772953200000},\"outcome\":\"queued\"}}]}}"
   }
 ]

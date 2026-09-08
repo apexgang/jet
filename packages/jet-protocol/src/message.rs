@@ -141,6 +141,11 @@ pub enum ServerMessage {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryRequest {
+	/// Enabled schedules in one Conversation.
+	ScheduledTasks {
+		/// Owning Conversation.
+		conversation_id: Uuid,
+	},
 	/// Read bounded UTF-8 file content through a registered root.
 	EditableFile {
 		/// Registered Project or Workspace root.
@@ -290,6 +295,8 @@ pub enum QueryRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryResponse {
+	/// Fenced schedule snapshot.
+	ScheduledTasks(crate::ScheduledTasks),
 	/// Bounded editable content and its exact file Revision.
 	EditableFile(crate::EditableFile),
 	/// Terminal lifecycle snapshots, separate from Runs.

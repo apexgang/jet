@@ -22,6 +22,11 @@ pub enum Actor {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventOrigin {
+	/// Input originated from a durable Scheduled task.
+	ScheduledTask {
+		/// Responsible schedule.
+		schedule_id: Uuid,
+	},
 	/// Semantic observations from the pinned Harness.
 	Harness {
 		/// Owning Run identity.

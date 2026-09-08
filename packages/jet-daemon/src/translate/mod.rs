@@ -13,6 +13,7 @@ mod pairing;
 mod project;
 mod promotion;
 mod run;
+mod schedule;
 mod search;
 mod setting;
 mod terminal;
@@ -85,6 +86,11 @@ pub(crate) fn query(
 		wire::QueryRequest::RunExecution { run_id } => Query::RunExecution {
 			run_id: RunId(*run_id),
 		},
+		wire::QueryRequest::ScheduledTasks { conversation_id } => {
+			Query::ScheduledTasks {
+				conversation_id: ConversationId(*conversation_id),
+			}
+		}
 		wire::QueryRequest::TurnQueue { conversation_id } => Query::TurnQueue {
 			conversation_id: ConversationId(*conversation_id),
 		},
@@ -188,6 +194,12 @@ pub(crate) fn query_result(
 		QueryResult::ChangeDiff(diff) => {
 			wire::QueryResponse::ChangeDiff(Box::new(checkpoint::diff(*diff)))
 		}
+		QueryResult::ScheduledTasks(snapshot) => {
+			wire::QueryResponse::ScheduledTasks(wire::ScheduledTasks {
+				cursor: snapshot.cursor.0,
+				tasks: snapshot.tasks.into_iter().map(schedule::task).collect(),
+			})
+		}
 		QueryResult::TurnQueue(queue) => {
 			wire::QueryResponse::TurnQueue(wire::TurnQueue {
 				cursor: queue.cursor.0,
@@ -223,7 +235,7 @@ pub(crate) fn query_result(
 			wire::QueryResponse::Settings(setting::snapshot(snapshot, minor))
 		}
 		QueryResult::Events(page) => {
-			wire::QueryResponse::Events(event_page(&page)?)
+			wire::QueryResponse::Events(event_page(&page, minor)?)
 		}
 		QueryResult::Pairing(snapshot) => {
 			wire::QueryResponse::Pairing(pairing::snapshot(snapshot))
@@ -322,6 +334,22 @@ pub(crate) fn command(
 			conversation_id: ConversationId(*conversation_id),
 			turn_id: *turn_id,
 		},
+		wire::CommandRequest::CreateSchedule {
+			conversation_id,
+			time_zone,
+			local_time,
+			prompt,
+		} => Command::CreateSchedule {
+			conversation_id: ConversationId(*conversation_id),
+			time_zone: time_zone.clone(),
+			local_time: local_time.clone(),
+			prompt: prompt.clone(),
+		},
+		wire::CommandRequest::CancelSchedule { schedule_id } => {
+			Command::CancelSchedule {
+				schedule_id: *schedule_id,
+			}
+		}
 		wire::CommandRequest::SubmitTurn {
 			conversation_id,
 			source,
@@ -512,6 +540,14 @@ pub(crate) fn command_outcome(
 			wire::CommandResponse::TurnWithdrawn {
 				turn: turn::turn(value),
 			}
+		}
+		CommandOutcome::ScheduleCreated(value) => {
+			wire::CommandResponse::ScheduleCreated {
+				task: schedule::task(value),
+			}
+		}
+		CommandOutcome::ScheduleCanceled { schedule_id } => {
+			wire::CommandResponse::ScheduleCanceled { schedule_id }
 		}
 		CommandOutcome::TurnAdmitted(value) => {
 			wire::CommandResponse::TurnAdmitted {
@@ -789,14 +825,21 @@ fn run(run: &Run) -> wire::Run {
 	}
 }
 
-fn event_page(page: &EventPage) -> Result<wire::EventPage, CoreError> {
+fn event_page(
+	page: &EventPage,
+	minor: u32,
+) -> Result<wire::EventPage, CoreError> {
 	Ok(wire::EventPage {
 		cursor: page.cursor.0,
-		events: page.events.iter().map(event).collect::<Result<_, _>>()?,
+		events: page
+			.events
+			.iter()
+			.map(|value| event(value, minor))
+			.collect::<Result<_, _>>()?,
 	})
 }
 
-fn event(event: &Event) -> Result<wire::Event, CoreError> {
+fn event(event: &Event, minor: u32) -> Result<wire::Event, CoreError> {
 	let EventPayload {
 		kind,
 		payload_version,
@@ -811,10 +854,14 @@ fn event(event: &Event) -> Result<wire::Event, CoreError> {
 		actor: actor_of(match event.actor {
 			jet_core::EventActor::InteractiveClient { client_id } => client_id,
 			jet_core::EventActor::Harness { authorized_by, .. }
-			| jet_core::EventActor::RunSupervisor { authorized_by, .. } => authorized_by,
+			| jet_core::EventActor::RunSupervisor { authorized_by, .. }
+			| jet_core::EventActor::ScheduledTask { authorized_by, .. } => authorized_by,
 		}),
 		origin: match event.actor {
 			jet_core::EventActor::InteractiveClient { .. } => None,
+			jet_core::EventActor::ScheduledTask { schedule_id, .. } => (minor
+				>= wire::SCHEDULES_MINOR)
+				.then_some(wire::EventOrigin::ScheduledTask { schedule_id }),
 			jet_core::EventActor::Harness { run_id, .. } => {
 				Some(wire::EventOrigin::Harness { run_id: run_id.0 })
 			}

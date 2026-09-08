@@ -85,12 +85,18 @@ pub use turn::{Turn, TurnQueue, TurnSource, TurnState};
 pub use user_input::{
 	EditableFile, FileRevision, FileTarget, ReviewComment, UserEdit,
 };
+mod schedule;
+mod schedule_clock;
+mod schedule_work;
 mod search;
 mod search_index;
 mod security;
 mod seed;
 mod seed_capture;
 mod setting;
+pub use schedule::{
+	ScheduleFiring, ScheduleFiringOutcome, ScheduledTask, ScheduledTasks,
+};
 mod status;
 mod terminal;
 mod terminal_command;
@@ -488,3 +494,7 @@ mod paired_client_tests;
 mod search_tests;
 
 mod terminal_orphan;
+
+#[cfg(test)]
+#[path = "schedule_tests.rs"]
+mod schedule_tests;

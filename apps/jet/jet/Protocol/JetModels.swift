@@ -189,6 +189,8 @@ public struct ClientPublicKey {
 }
 
 public enum CommandRequest {
+    case `create_schedule`(CommandRequestCreateSchedule)
+    case `cancel_schedule`(CommandRequestCancelSchedule)
     case `apply_user_edit`(CommandRequestApplyUserEdit)
     case `submit_review`(CommandRequestSubmitReview)
     case `open_terminal`(CommandRequestOpenTerminal)
@@ -222,6 +224,8 @@ public enum CommandRequest {
 }
 
 public enum CommandResponse {
+    case `schedule_created`(CommandResponseScheduleCreated)
+    case `schedule_canceled`(CommandResponseScheduleCanceled)
     case `user_edit_applied`(CommandResponseUserEditApplied)
     case `terminal`(CommandResponseTerminal)
     case `turn_withdrawn`(CommandResponseTurnWithdrawn)
@@ -382,6 +386,7 @@ public struct Event {
 }
 
 public enum EventOrigin {
+    case `scheduled_task`(EventOriginScheduledTask)
     case `harness`(EventOriginHarness)
     case `run_supervisor`(EventOriginRunSupervisor)
 }
@@ -647,6 +652,7 @@ public enum PromotionState: String {
 }
 
 public enum QueryRequest {
+    case `scheduled_tasks`(QueryRequestScheduledTasks)
     case `editable_file`(QueryRequestEditableFile)
     case `workspace_terminals`(QueryRequestWorkspaceTerminals)
     case `change_artifact`(QueryRequestChangeArtifact)
@@ -674,6 +680,7 @@ public enum QueryRequest {
 }
 
 public enum QueryResponse {
+    case `scheduled_tasks`(QueryResponseScheduledTasks)
     case `editable_file`(QueryResponseEditableFile)
     case `workspace_terminals`(QueryResponseWorkspaceTerminals)
     case `change_artifact`(QueryResponseChangeArtifact)
@@ -806,6 +813,27 @@ public enum RunLifecycle: String {
 public struct RunTermination {
     public let `control`: RunControl
     public let `stage`: TerminationStage
+}
+
+public struct ScheduleFiring {
+    public let `due_at_unix_ms`: Int64
+    public let `firing_id`: String
+    public let `intended_local`: String
+}
+
+public struct ScheduledTask {
+    public let `authorized_by`: String
+    public let `conversation_id`: String
+    public let `local_time`: String
+    public let `next`: ScheduleFiring
+    public let `prompt`: String
+    public let `schedule_id`: String
+    public let `time_zone`: String
+}
+
+public struct ScheduledTasks {
+    public let `cursor`: String
+    public let `tasks`: [ScheduledTask]
 }
 
 public enum SearchField: String {
@@ -1110,6 +1138,17 @@ public struct ClientMessageCommand {
     public let `id`: UInt64
 }
 
+public struct CommandRequestCreateSchedule {
+    public let `conversation_id`: String
+    public let `local_time`: String
+    public let `prompt`: String
+    public let `time_zone`: String
+}
+
+public struct CommandRequestCancelSchedule {
+    public let `schedule_id`: String
+}
+
 public struct CommandRequestApplyUserEdit {
     public let `content`: String
     public let `expected_revision`: FileRevision
@@ -1258,6 +1297,14 @@ public struct CommandRequestResumeImportedConversation {
     public let `import_id`: String
     public let `retention`: RetentionPolicy?
     public let `working_tree`: WorkingTreeRequest
+}
+
+public struct CommandResponseScheduleCreated {
+    public let `task`: ScheduledTask
+}
+
+public struct CommandResponseScheduleCanceled {
+    public let `schedule_id`: String
 }
 
 public struct CommandResponseUserEditApplied {
@@ -1497,6 +1544,10 @@ public struct EntryKindMissing {
 
 }
 
+public struct EventOriginScheduledTask {
+    public let `schedule_id`: String
+}
+
 public struct EventOriginHarness {
     public let `run_id`: String
 }
@@ -1583,6 +1634,10 @@ public struct PromotionDestinationLocalCheckout {
 
 public struct PromotionDestinationBranch {
     public let `name`: String
+}
+
+public struct QueryRequestScheduledTasks {
+    public let `conversation_id`: String
 }
 
 public struct QueryRequestEditableFile {
@@ -1685,6 +1740,10 @@ public struct QueryRequestSearch {
 }
 
 public struct QueryRequestExternalConversations {
+
+}
+
+public struct QueryResponseScheduledTasks {
 
 }
 
