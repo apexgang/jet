@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ChangeEvidence, CoreError, RunActivity, TurnOutcome};
+use crate::{
+	ApprovalRequest, ChangeEvidence, CoreError, RunActivity, TurnOutcome,
+};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct SourcePrefix {
@@ -73,6 +75,10 @@ pub enum Observation {
 	/// What the Harness reported about its own consumption, or about a
 	/// Provider quota window, normalized by its Craft (ADR-0023).
 	Usage(crate::UsageReport),
+	/// The Harness asked for something that needs a decision and is
+	/// waiting for exactly one. The Craft keeps holding the native
+	/// request until Core answers it.
+	ApprovalRequested(ApprovalRequest),
 	/// Lossless native JSON and its portable views.
 	Output {
 		/// Original native JSON bytes.

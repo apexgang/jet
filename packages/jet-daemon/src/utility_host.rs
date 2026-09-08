@@ -115,7 +115,11 @@ impl UtilityHost for Utilities {
 		})
 	}
 }
-async fn exchange(
+/// One bounded, one-shot exchange with an accepted Craft entrypoint. The
+/// process gets the request on standard input, answers on standard output,
+/// and is supervised as its own group so a timeout also ends the credential
+/// helpers and transport it started.
+pub(crate) async fn exchange(
 	pin: &PinnedCraft,
 	mode: &str,
 	input: &[u8],

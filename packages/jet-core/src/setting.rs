@@ -128,6 +128,15 @@ pub enum SettingKey {
 	SecurityAuditRetentionDays,
 	/// Whether local and source-built third-party Crafts may be installed.
 	DeveloperMode,
+	/// Whether this Plane reviews eligible approval requests automatically
+	/// instead of waiting for a person (ADR-0012).
+	AutomaticReview,
+	/// The Account binding Automatic review uses, empty to keep each Run's
+	/// own binding.
+	AutomaticReviewBinding,
+	/// Persistent consent to review through that binding when it is not the
+	/// Run's own Provider.
+	AutomaticReviewConsent,
 }
 
 /// Fewest days a Plane may keep its Security audit. Below this the audit
@@ -160,7 +169,7 @@ struct Catalog {
 }
 
 /// Every Setting this core resolves, in the order a snapshot reports them.
-const CATALOG: [Catalog; 9] = [
+const CATALOG: [Catalog; 12] = [
 	Catalog {
 		key: SettingKey::UtilityAutomaticNaming,
 		spelling: "utility.automatic_naming",
@@ -224,6 +233,28 @@ const CATALOG: [Catalog; 9] = [
 		spelling: "craft.developer_mode",
 		scopes: &[SettingScopeKind::Plane],
 		built_in: BuiltIn::Flag(false),
+	},
+	Catalog {
+		// ADR-0012 makes Automatic review one mode for the whole Plane, so
+		// no narrower scope can turn it on for part of it. It defaults off:
+		// deciding for a person is something a person turns on.
+		key: SettingKey::AutomaticReview,
+		spelling: "review.automatic",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Flag(false),
+	},
+	Catalog {
+		// Empty keeps each Run's own binding, which is the default reviewer.
+		key: SettingKey::AutomaticReviewBinding,
+		spelling: "review.account_binding",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Text(""),
+	},
+	Catalog {
+		key: SettingKey::AutomaticReviewConsent,
+		spelling: "review.cross_provider_consent",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Text(""),
 	},
 ];
 
@@ -302,7 +333,10 @@ impl SettingKey {
 	fn require_value(self, value: &SettingValue) -> Result<(), CoreError> {
 		if matches!(
 			self,
-			Self::UtilityAccountBinding | Self::UtilityContentConsent
+			Self::UtilityAccountBinding
+				| Self::UtilityContentConsent
+				| Self::AutomaticReviewBinding
+				| Self::AutomaticReviewConsent
 		) && let SettingValue::Text(text) = value
 			&& !text.is_empty()
 			&& uuid::Uuid::parse_str(text).is_err()

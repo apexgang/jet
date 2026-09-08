@@ -87,6 +87,9 @@ pub(crate) async fn run(
 			.with_utility_host(Arc::new(crate::utility_host::Utilities {
 				home: home.root().to_path_buf(),
 			}))
+			.with_review_host(Arc::new(crate::review_host::Reviews {
+				home: home.root().to_path_buf(),
+			}))
 			.with_terminal_host(Arc::new(crate::terminal_host::Terminals)),
 		),
 		Err(error) => {

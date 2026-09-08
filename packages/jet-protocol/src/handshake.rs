@@ -14,7 +14,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 29;
+pub const PROTOCOL_MINOR: u32 = 30;
+
+/// Plane-wide Automatic review of Harness approval requests.
+pub const AUTOMATIC_REVIEW_MINOR: u32 = 30;
 
 /// Normalized Usage records and the Plane-local Usage Query.
 pub const USAGE_RECORDS_MINOR: u32 = 29;

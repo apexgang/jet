@@ -43,6 +43,12 @@ public enum CraftApprovalDecision: String {
     case `deny` = "deny"
 }
 
+public struct CraftApprovalRequest {
+    public let `action`: String
+    public let `request_id`: String
+    public let `tool`: String
+}
+
 public enum CraftCommand {
     case `configure_remote_tools`(CraftCommandConfigureRemoteTools)
     case `remote_tool_result`(CraftCommandRemoteToolResult)
@@ -58,6 +64,7 @@ public enum CraftCommand {
 public enum CraftEvent {
     case `remote_tool`(CraftEventRemoteTool)
     case `usage`(CraftEventUsage)
+    case `approval_requested`(CraftEventApprovalRequested)
     case `turn_started`(CraftEventTurnStarted)
     case `turn_ended`(CraftEventTurnEnded)
     case `file_changed`(CraftEventFileChanged)
@@ -173,6 +180,38 @@ public struct CraftRemoteTool {
 public struct CraftResume {
     public let `native_conversation`: String
     public let `version`: ProtocolVersion
+}
+
+public struct CraftReviewInput {
+    public let `action`: String
+    public let `tool`: String
+    public let `transcript`: String
+}
+
+public struct CraftReviewModel {
+    public let `model`: String
+    public let `reviewer`: CraftReviewer
+    public let `version`: UInt32
+}
+
+public struct CraftReviewReply {
+    public let `model`: String
+    public let `output`: String
+    public let `reviewer`: CraftReviewer
+    public let `version`: UInt32
+}
+
+public struct CraftReviewRequest {
+    public let `binding_id`: String
+    public let `credential_reference`: CredentialReference
+    public let `input`: CraftReviewInput
+    public let `model`: String
+    public let `version`: UInt32
+}
+
+public enum CraftReviewer: String {
+    case `native` = "native"
+    case `equivalent` = "equivalent"
 }
 
 public struct CraftSpecification {
@@ -550,6 +589,10 @@ public struct CraftEventRemoteTool {
 
 public struct CraftEventUsage {
     public let `usage`: CraftUsage
+}
+
+public struct CraftEventApprovalRequested {
+    public let `request`: CraftApprovalRequest
 }
 
 public struct CraftEventTurnStarted {

@@ -30,7 +30,7 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 			accept_craft(&craft_socket, run).await;
 		assert_eq!(
 			ready.protocol.version,
-			ProtocolVersion { major: 1, minor: 7 }
+			ProtocolVersion { major: 1, minor: 8 }
 		);
 
 		command(
@@ -281,6 +281,99 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 			]
 		);
 
+		assert!(helper.wait().await.unwrap().success());
+		craft.start_kill().unwrap();
+	})
+	.await
+	.unwrap();
+}
+
+/// A host that negotiated Craft 1.7 is told what the Harness asked for
+/// before it is told that the Harness is waiting, and the answer it sends
+/// back is for exactly that request (ADR-0012).
+#[tokio::test]
+async fn a_held_permission_request_reaches_the_host_as_the_exact_action() {
+	tokio::time::timeout(Duration::from_secs(120), async {
+		let (root, run, harness) = workspace();
+		let mut helper = start_helper(&root, run, &harness).await;
+		let (craft_socket, mut craft) = start_craft(&root, &harness);
+		let (mut reader, mut writer, ready) =
+			accept_craft_at_minor(&craft_socket, run, 8).await;
+		assert_eq!(
+			ready.protocol.version,
+			ProtocolVersion { major: 1, minor: 8 }
+		);
+		command(
+			&mut writer,
+			&json!({
+				"kind": "start", "id": run.to_string(), "text": "write",
+				"helper_socket": root.join("h.sock"),
+			}),
+		)
+		.await;
+		let mut events = vec![];
+		let request = loop {
+			events.extend(batch(&mut reader, &mut writer).await);
+			if let Some(request) = events.iter().find_map(|event| match event {
+				CraftEvent::ApprovalRequested { request } => {
+					Some(request.clone())
+				}
+				_ => None,
+			}) {
+				break request;
+			}
+		};
+		assert_eq!(
+			(request.tool.clone(), request.action.clone()),
+			("Write".into(), json!({"file_path": "note.txt"}).to_string())
+		);
+		// The wait is reported after the request, so nothing has to guess
+		// which request a waiting Run is waiting on.
+		assert_eq!(
+			activities(&events),
+			vec![RunActivity::Working, RunActivity::WaitingForApproval]
+		);
+		command(
+			&mut writer,
+			&json!({
+				"kind": "action", "id": "action-1",
+				"action": {
+					"kind": "approval",
+					"request_id": request.request_id,
+					"decision": "allow_once",
+				},
+			}),
+		)
+		.await;
+		while !events
+			.iter()
+			.any(|event| matches!(event, CraftEvent::Completed { .. }))
+		{
+			events.extend(batch(&mut reader, &mut writer).await);
+		}
+		// The Harness was answered for that one request, with the input it
+		// was shown rather than one this Craft rewrote.
+		assert_eq!(
+			std::fs::read_to_string(root.join("decision.json")).unwrap(),
+			json!({
+				"behavior": "allow",
+				"updatedInput": {"file_path": "note.txt"},
+			})
+			.to_string()
+		);
+		// The answered turn leaves the Run able to take the next one, which
+		// is the turn that ends this Harness.
+		command(
+			&mut writer,
+			&json!({"kind": "turn", "id": "turn-2", "text": "finish"}),
+		)
+		.await;
+		while !events
+			.iter()
+			.any(|event| matches!(event, CraftEvent::RunEnded { .. }))
+		{
+			events.extend(batch(&mut reader, &mut writer).await);
+		}
 		assert!(helper.wait().await.unwrap().success());
 		craft.start_kill().unwrap();
 	})

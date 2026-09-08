@@ -952,16 +952,40 @@ async fn wait_for(core: &Core, run_id: RunId, lifecycle: RunLifecycle) {
 }
 
 async fn start(home: &Path) -> (Arc<Core>, mpsc::Sender<RunObservation>) {
+	let (core, sender, _) = start_answering(home).await;
+	(core, sender)
+}
+
+/// Every decision this fixture's Craft was sent, in order.
+pub(crate) type Answered =
+	Arc<std::sync::Mutex<Vec<(String, crate::ReviewDecision)>>>;
+
+/// The same fixture, keeping what Core answered held approval requests with.
+pub(crate) async fn start_answering(
+	home: &Path,
+) -> (Arc<Core>, mpsc::Sender<RunObservation>, Answered) {
 	let (sender, receiver) = mpsc::channel(32);
+	let answered = Answered::default();
 	let core = crate::test_support::start_core(&home.join("plane.sqlite3"))
 		.await
-		.with_run_host(Arc::new(Host(Mutex::new(Some(receiver)))));
-	(Arc::new(core), sender)
+		.with_run_host(Arc::new(Host(
+			Mutex::new(Some(receiver)),
+			Arc::clone(&answered),
+		)));
+	(Arc::new(core), sender, answered)
 }
 
 #[derive(Debug)]
-struct Host(Mutex<Option<mpsc::Receiver<RunObservation>>>);
+struct Host(Mutex<Option<mpsc::Receiver<RunObservation>>>, Answered);
 impl RunHost for Host {
+	/// The fixture Craft stands in for a Harness whose native Provider the
+	/// host knows, which is what a Visa Run and its reviewer need.
+	fn native_provider(
+		&self,
+		_craft: &PinnedCraft,
+	) -> Result<ProviderId, CoreError> {
+		Ok(ProviderId("anthropic".into()))
+	}
 	fn prepare_next_run(
 		&self,
 		plan: LaunchPlan,
@@ -997,6 +1021,7 @@ impl RunHost for Host {
 			Ok(Box::new(Connection {
 				receiver: Mutex::new(self.0.lock().await.take().unwrap()),
 				started: std::sync::atomic::AtomicBool::new(false),
+				answered: Arc::clone(&self.1),
 			}) as Box<dyn RunConnection>)
 		})
 	}
@@ -1004,6 +1029,7 @@ impl RunHost for Host {
 struct Connection {
 	receiver: Mutex<mpsc::Receiver<RunObservation>>,
 	started: std::sync::atomic::AtomicBool,
+	answered: Answered,
 }
 impl RunConnection for Connection {
 	fn submit_turn(
@@ -1036,6 +1062,19 @@ impl RunConnection for Connection {
 		_turn_id: uuid::Uuid,
 	) -> RunFuture<'_, Result<(), CoreError>> {
 		Box::pin(async { panic!("no cancellation in this fixture") })
+	}
+	fn decide_approval<'a>(
+		&'a self,
+		request_id: &'a str,
+		decision: crate::ReviewDecision,
+	) -> RunFuture<'a, Result<(), CoreError>> {
+		Box::pin(async move {
+			self.answered
+				.lock()
+				.expect("answered lock")
+				.push((request_id.to_owned(), decision));
+			Ok(())
+		})
 	}
 	fn acknowledge(
 		&self,

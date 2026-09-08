@@ -141,6 +141,10 @@ pub(crate) fn documents_of(event: &Event) -> Vec<NewSearchDocument> {
         // Craft payloads stay opaque here; preserve the explicit search
         // allowlist rather than indexing native JSON or unknown views.
         | EventKind::RunOutput { .. }
+        // An approval request and its review are a security decision about
+        // Conversation content, not text a user looks for by name.
+        | EventKind::ApprovalRequested { .. }
+        | EventKind::ApprovalReviewed { .. }
 		// Settings and Account bindings are Plane configuration, and a
 		// binding sits next to a Credential; neither is Conversation
 		// content (ADR-0076).

@@ -18,11 +18,12 @@ host_access = [
 features = [
     { name = "extensions" },
     { name = "utility" },
+    { name = "review" },
 	{ name = "turns", required = true },
 	{ name = "actions", required = true },
 ]
 
 [protocol]
 family = "craft"
-versions = [{ major = 1, minor = 7 }]
+versions = [{ major = 1, minor = 8 }]
 capabilities = ["runs", "actions"]

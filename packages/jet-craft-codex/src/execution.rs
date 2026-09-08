@@ -299,6 +299,15 @@ async fn line_observed(
 		if run.asking.is_some() {
 			return Err(CraftError::InvalidMessage);
 		}
+		// What was asked reaches the host before the wait does, so nothing
+		// has to guess which request the Harness is waiting on (Craft 1.7).
+		if minor >= 7 {
+			sender
+				.send(&CraftEvent::ApprovalRequested {
+					request: request.asked(),
+				})
+				.await?;
+		}
 		run.asking = Some(request);
 		return sender
 			.send(&CraftEvent::Activity {

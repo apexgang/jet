@@ -278,6 +278,21 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 					SettingValue::Flag(false),
 					SettingSource::BuiltIn
 				),
+				resolved(
+					SettingKey::AutomaticReview,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::AutomaticReviewBinding,
+					SettingValue::Text(String::new()),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::AutomaticReviewConsent,
+					SettingValue::Text(String::new()),
+					SettingSource::BuiltIn
+				),
 			],
 			vec![
 				resolved(
@@ -325,6 +340,21 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 				resolved(
 					SettingKey::DeveloperMode,
 					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::AutomaticReview,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::AutomaticReviewBinding,
+					SettingValue::Text(String::new()),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::AutomaticReviewConsent,
+					SettingValue::Text(String::new()),
 					SettingSource::BuiltIn
 				),
 			]

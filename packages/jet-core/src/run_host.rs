@@ -201,6 +201,15 @@ pub trait RunConnection: Send + Sync {
 		&self,
 		turn_id: uuid::Uuid,
 	) -> RunFuture<'_, Result<(), CoreError>>;
+	/// Answers exactly one held approval request. Core has already
+	/// committed this decision, and it authorizes nothing else: an
+	/// implementation must not turn it into a standing permission, and a
+	/// Craft that is no longer holding `request_id` must refuse it.
+	fn decide_approval<'a>(
+		&'a self,
+		request_id: &'a str,
+		decision: crate::ReviewDecision,
+	) -> RunFuture<'a, Result<(), CoreError>>;
 	/// Releases native source only after Core committed its meaning.
 	fn acknowledge(&self, offset: u64) -> RunFuture<'_, Result<(), CoreError>>;
 	/// Closes the execution connection after its terminal source is committed.

@@ -58,6 +58,16 @@ pub enum SettingKey {
 	/// Whether local and source-built third-party Crafts may be installed.
 	#[serde(rename = "craft.developer_mode")]
 	DeveloperMode,
+	/// Whether this Plane reviews eligible approval requests automatically.
+	#[serde(rename = "review.automatic")]
+	AutomaticReview,
+	/// Plane-wide review.account_binding reviewer selection.
+	#[serde(rename = "review.account_binding")]
+	AutomaticReviewBinding,
+	/// Persistent consent to review through a binding outside the Run's own
+	/// Provider.
+	#[serde(rename = "review.cross_provider_consent")]
+	AutomaticReviewConsent,
 }
 
 /// One Setting's value. Each key holds exactly one of these shapes.

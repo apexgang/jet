@@ -48,6 +48,18 @@ fn shared_craft_contract_fixtures_match_the_wire_decoder() {
 				decode_control::<jet_protocol::CraftUtilityReply>(payload)
 					.is_ok()
 			}
+			"CraftReviewModel" => {
+				decode_control::<jet_protocol::CraftReviewModel>(payload)
+					.is_ok()
+			}
+			"CraftReviewRequest" => {
+				decode_control::<jet_protocol::CraftReviewRequest>(payload)
+					.is_ok()
+			}
+			"CraftReviewReply" => {
+				decode_control::<jet_protocol::CraftReviewReply>(payload)
+					.is_ok()
+			}
 			"CraftCommand" => decode_control::<CraftCommand>(payload).is_ok(),
 			"CraftEvent" => decode_control::<CraftEvent>(payload).is_ok(),
 			"ProtocolOffer" => decode_control::<ProtocolOffer>(payload).is_ok(),
