@@ -258,5 +258,15 @@
     "schema": "ServerMessage",
     "valid": true,
     "payload": "{\"kind\":\"command_result\",\"id\":6,\"result\":{\"type\":\"craft_installation_queued\",\"craft_id\":\"demo\",\"version\":\"1.2.3\",\"artifact_sha256\":\"abababababababababababababababababababababababababababababababab\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":29,\"command_id\":\"00000000-0000-0000-0000-000000000029\",\"command\":{\"type\":\"handoff_conversation\",\"source_run_id\":\"00000000-0000-0000-0000-000000000002\",\"craft\":\"codex\",\"summary\":\"Selected summary\",\"plan\":\"Selected plan\",\"files\":[\"src/main.rs\"]}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"command\",\"id\":29,\"command_id\":\"00000000-0000-0000-0000-000000000029\",\"command\":{\"type\":\"handoff_conversation\",\"source_run_id\":\"00000000-0000-0000-0000-000000000002\",\"craft\":\"codex\",\"plan\":\"Selected plan\",\"files\":[\"src/main.rs\"]}}"
   }
 ]

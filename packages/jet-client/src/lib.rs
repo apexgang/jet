@@ -8,6 +8,7 @@ mod checkpoint_requests;
 mod connection;
 mod craft_installation_requests;
 mod fork_requests;
+mod handoff_requests;
 mod handshake;
 mod import_requests;
 mod name_requests;

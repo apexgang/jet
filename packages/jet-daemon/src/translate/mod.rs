@@ -438,6 +438,19 @@ pub(crate) fn command(
 			retention: retention_from_wire(*retention),
 			working_tree: working_tree_request(working_tree)?,
 		},
+		wire::CommandRequest::HandoffConversation(request) => {
+			Command::HandoffConversation(jet_core::HandoffRequest {
+				source_run_id: RunId(request.source_run_id),
+				craft: request.craft.clone(),
+				summary: request.summary.clone(),
+				plan: request.plan.clone(),
+				files: request
+					.files
+					.iter()
+					.map(|path| jet_core::RelativePath::parse(path))
+					.collect::<Result<_, _>>()?,
+			})
+		}
 		wire::CommandRequest::ForkConversation {
 			source_run_id,
 			checkpoint_turn,

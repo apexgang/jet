@@ -151,9 +151,9 @@ enum PreparedChanges {
 	None,
 	/// Local-checkout changes selected as a Workspace seed.
 	Seed(CapturedSeed),
-	/// The selected checkpoint tree. It is applied like a seed internally,
-	/// but remains a Change checkpoint in the public domain model.
-	Checkpoint(CapturedSeed),
+	/// A captured tree applied like a seed internally, with its origin
+	/// recorded separately by the fork or Handoff operation.
+	Snapshot(CapturedSeed),
 }
 
 impl BaseSelection {
@@ -243,9 +243,9 @@ pub(crate) async fn prepare(
 	})
 }
 
-/// Builds a Workspace preparation from a checkpoint tree already validated
-/// against the source Run and Project by the fork command.
-pub(crate) fn from_checkpoint(
+/// Builds a Workspace preparation from an immutable tree already validated
+/// against the source Run and Project by the fork or Handoff command.
+pub(crate) fn from_snapshot(
 	project_id: ProjectId,
 	project_root: PathBuf,
 	commit: String,
@@ -259,7 +259,7 @@ pub(crate) fn from_checkpoint(
 			selection: BaseSelection::Revision(commit.clone()),
 			commit: commit.clone(),
 		},
-		changes: PreparedChanges::Checkpoint(CapturedSeed {
+		changes: PreparedChanges::Snapshot(CapturedSeed {
 			head: commit,
 			tree,
 			changed_paths,
@@ -339,7 +339,7 @@ pub(crate) async fn create(
 	} = prepared;
 	let seed = match &changes {
 		PreparedChanges::Seed(captured) => Some(WorkspaceSeed::from(captured)),
-		PreparedChanges::None | PreparedChanges::Checkpoint(_) => None,
+		PreparedChanges::None | PreparedChanges::Snapshot(_) => None,
 	};
 	if tx.project(project_id.0).await?.is_none() {
 		return Err(project_not_found());
@@ -407,7 +407,7 @@ pub(crate) async fn create(
 	worktree::add_detached(&project_root, &root_text, &base.commit).await?;
 	let captured = match changes {
 		PreparedChanges::Seed(captured)
-		| PreparedChanges::Checkpoint(captured) => Some(captured),
+		| PreparedChanges::Snapshot(captured) => Some(captured),
 		PreparedChanges::None => None,
 	};
 	if let Some(captured) = captured

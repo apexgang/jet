@@ -1592,7 +1592,21 @@
           ]
         },
         {
-          "description": "Create a new Conversation and separate Workspace from one immutable\nChange checkpoint.",
+          "description": "Continue through another Harness with a new Conversation and Workspace.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "handoff_conversation"
+            }
+          },
+          "$ref": "#/$defs/HandoffRequest",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Fork from an immutable checkpoint rather than a current Handoff package.",
           "type": "object",
           "properties": {
             "checkpoint_turn": {
@@ -4267,6 +4281,43 @@
       "required": [
         "path",
         "commit"
+      ]
+    },
+    "HandoffRequest": {
+      "description": "Selected context; the daemon captures files, current diff, and provenance.",
+      "type": "object",
+      "properties": {
+        "craft": {
+          "description": "Installed destination Craft for a different Harness.",
+          "type": "string"
+        },
+        "files": {
+          "description": "At most 16 distinct relative regular-file paths, each at most 8 KiB.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "plan": {
+          "description": "Selected plan; empty selects none. Maximum 8 KiB.",
+          "type": "string"
+        },
+        "source_run_id": {
+          "description": "Managed source Run.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "summary": {
+          "description": "Selected summary; empty selects none. Maximum 8 KiB.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_run_id",
+        "craft",
+        "summary",
+        "plan",
+        "files"
       ]
     },
     "ImportedConversation": {

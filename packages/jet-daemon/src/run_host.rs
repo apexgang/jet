@@ -212,6 +212,9 @@ impl jet_core::RunConnection for RunConnection {
 	}
 }
 impl RunHost for CraftProcesses {
+	fn harness(&self, craft: &PinnedCraft) -> Result<String, CoreError> {
+		Ok(run_craft::Contract::of(craft)?.specification.harness)
+	}
 	fn pin(
 		&self,
 		home: PathBuf,
