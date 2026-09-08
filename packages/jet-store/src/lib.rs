@@ -48,6 +48,7 @@ mod terminal;
 mod transaction;
 mod turn_queue;
 mod usage;
+mod usage_quota;
 mod user_edit_intent;
 mod workspace;
 pub use terminal::TerminalRecord;
@@ -109,11 +110,14 @@ pub use search::{
 };
 pub use transaction::{ReadTransaction, WriteTransaction};
 pub use usage::{
-	NewUsageObservation, ProviderReachRecord, QuotaScopeRecord,
-	QuotaUnitRecord, UsageEstimationRecord, UsageFinalityRecord,
+	NewUsageObservation, UsageEstimationRecord, UsageFinalityRecord,
+	UsageScopeRecord, UsageSelectionRecord, UsageTokensRecord,
+	UsageTotalRecord,
+};
+pub use usage_quota::{
+	ProviderReachRecord, QuotaScopeRecord, QuotaUnitRecord,
 	UsageProviderReachRecord, UsageQuotaHeartbeatRecord,
-	UsageQuotaSnapshotRecord, UsageScopeRecord, UsageSelectionRecord,
-	UsageTokensRecord, UsageTotalRecord,
+	UsageQuotaSnapshotRecord,
 };
 pub use workspace::{NewWorkspace, WorkspaceRecord, WorkspaceSeedRecord};
 
