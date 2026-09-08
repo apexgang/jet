@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT digest, observed_at_unix_ms\n\t\t\t FROM usage_quota_snapshots\n\t\t\t WHERE binding_id = ?1 AND window_id = ?2\n\t\t\t ORDER BY observed_at_unix_ms DESC, rowid DESC\n\t\t\t LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "digest",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "digest"
+          }
+        }
+      },
+      {
+        "name": "observed_at_unix_ms",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "observed_at_unix_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "346a6bad647cfb2c31a88567436f36723332fac744905a8e601644ef93617624"
+}

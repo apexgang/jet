@@ -626,6 +626,15 @@ public enum ManagedProcessRole: String {
     case `harness` = "harness"
 }
 
+public struct ModelConsumption {
+    public let `estimated`: UInt64
+    public let `interim`: UInt64
+    public let `last_observed_at_unix_ms`: Int64
+    public let `measurements`: UInt64
+    public let `model`: String?
+    public let `tokens`: UsageTokens
+}
+
 public struct Name {
     public let `source`: NameSource
     public let `value`: String
@@ -657,6 +666,15 @@ public struct NoVisaSelection {
     public let `jet_equivalent`: [String]
     public let `native_unavailable`: [String]
     public let `origin_plane_id`: String
+}
+
+public struct ObservedConsumption {
+    public let `estimated`: UInt64
+    public let `interim`: UInt64
+    public let `last_observed_at_unix_ms`: Int64?
+    public let `measurements`: UInt64
+    public let `models`: [ModelConsumption]
+    public let `tokens`: UsageTokens
 }
 
 public struct OrphanedExecution {
@@ -741,6 +759,13 @@ public struct PlaneStatus {
     public let `plane_id`: String
     public let `security`: SecurityState?
     public let `started_at_unix_ms`: Int64
+}
+
+public struct PlaneUsage {
+    public let `consumption`: ObservedConsumption
+    public let `cursor`: String
+    public let `plane_id`: String
+    public let `quota_windows`: [QuotaWindow]
 }
 
 public struct Platform {
@@ -837,6 +862,7 @@ public enum QueryRequest {
     case `conversation`(QueryRequestConversation)
     case `capabilities`(QueryRequestCapabilities)
     case `account_bindings`(QueryRequestAccountBindings)
+    case `usage`(QueryRequestUsage)
     case `settings`(QueryRequestSettings)
     case `events`(QueryRequestEvents)
     case `pairing`(QueryRequestPairing)
@@ -868,6 +894,7 @@ public enum QueryResponse {
     case `conversation`(QueryResponseConversation)
     case `capabilities`(QueryResponseCapabilities)
     case `account_bindings`(QueryResponseAccountBindings)
+    case `usage`(QueryResponseUsage)
     case `settings`(QueryResponseSettings)
     case `events`(QueryResponseEvents)
     case `pairing`(QueryResponsePairing)
@@ -878,6 +905,38 @@ public enum QueryResponse {
     case `promotion_preview`(QueryResponsePromotionPreview)
     case `search`(QueryResponseSearch)
     case `external_conversations`(QueryResponseExternalConversations)
+}
+
+public struct QuotaMeasure {
+    public let `limit`: UInt64?
+    public let `unit`: QuotaUnit
+    public let `used`: UInt64
+}
+
+public enum QuotaScope {
+    case `provider_account`(QuotaScopeProviderAccount)
+    case `model`(QuotaScopeModel)
+}
+
+public enum QuotaUnit: String {
+    case `tokens` = "tokens"
+    case `requests` = "requests"
+    case `credits` = "credits"
+    case `share` = "share"
+}
+
+public struct QuotaWindow {
+    public let `binding_id`: String
+    public let `estimation`: UsageEstimation
+    public let `finality`: UsageFinality
+    public let `freshness`: UsageFreshness
+    public let `measure`: QuotaMeasure
+    public let `observed_at_unix_ms`: Int64
+    public let `provider`: String
+    public let `resets_at_unix_ms`: Int64?
+    public let `scope`: QuotaScope
+    public let `window`: String
+    public let `window_seconds`: UInt64?
 }
 
 public enum RecoveryAction {
@@ -1210,6 +1269,36 @@ public enum TurnState: String {
     case `withdrawn` = "withdrawn"
     case `failed` = "failed"
     case `outcome_unknown` = "outcome_unknown"
+}
+
+public enum UsageEstimation: String {
+    case `measured` = "measured"
+    case `estimated` = "estimated"
+}
+
+public enum UsageFinality: String {
+    case `interim` = "interim"
+    case `final` = "final"
+}
+
+public enum UsageFreshness {
+    case `fresh`(UsageFreshnessFresh)
+    case `stale`(UsageFreshnessStale)
+    case `unreachable`(UsageFreshnessUnreachable)
+}
+
+public enum UsageSelection {
+    case `plane`(UsageSelectionPlane)
+    case `binding`(UsageSelectionBinding)
+    case `conversation`(UsageSelectionConversation)
+    case `run`(UsageSelectionRun)
+}
+
+public struct UsageTokens {
+    public let `cached_input`: UInt64
+    public let `input`: UInt64
+    public let `output`: UInt64
+    public let `reasoning`: UInt64
 }
 
 public struct UtilityJob {
@@ -2176,6 +2265,10 @@ public struct QueryRequestAccountBindings {
     public let `observation`: CapabilityObservation
 }
 
+public struct QueryRequestUsage {
+    public let `selection`: UsageSelection
+}
+
 public struct QueryRequestSettings {
     public let `scope`: SettingScope
     public let `selection`: SettingSelection
@@ -2364,6 +2457,13 @@ public struct QueryResponseAccountBindings {
     public let `cursor`: String
 }
 
+public struct QueryResponseUsage {
+    public let `consumption`: ObservedConsumption
+    public let `cursor`: String
+    public let `plane_id`: String
+    public let `quota_windows`: [QuotaWindow]
+}
+
 public struct QueryResponseSettings {
     public let `cursor`: String
     public let `scope`: SettingScope
@@ -2421,6 +2521,14 @@ public struct QueryResponseExternalConversations {
     public let `cursor`: String
     public let `discovered`: [ExternalConversation]
     public let `imported`: [ImportedConversation]
+}
+
+public struct QuotaScopeProviderAccount {
+
+}
+
+public struct QuotaScopeModel {
+    public let `model`: String
 }
 
 public struct RecoveryActionRefreshFile {
@@ -2685,6 +2793,34 @@ public struct ToolAvailabilityPresent {
 
 public struct ToolAvailabilityMissing {
 
+}
+
+public struct UsageFreshnessFresh {
+
+}
+
+public struct UsageFreshnessStale {
+
+}
+
+public struct UsageFreshnessUnreachable {
+    public let `reason`: String
+}
+
+public struct UsageSelectionPlane {
+
+}
+
+public struct UsageSelectionBinding {
+    public let `binding_id`: String
+}
+
+public struct UsageSelectionConversation {
+    public let `conversation_id`: String
+}
+
+public struct UsageSelectionRun {
+    public let `run_id`: String
 }
 
 public struct UtilityOutcomePending {

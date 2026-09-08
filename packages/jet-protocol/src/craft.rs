@@ -115,6 +115,13 @@ pub enum CraftEvent {
 		/// Closed, destination-scoped request.
 		call: crate::CraftRemoteTool,
 	},
+	/// Normalized Usage the Harness reported (1.8). It records what was
+	/// consumed or how full a Provider window is; it changes no Run state
+	/// and grants nothing.
+	Usage {
+		/// The report, in Jet's vocabulary rather than the Harness's.
+		usage: crate::CraftUsage,
+	},
 	/// Capture before a subsequent turn (1.3). Hold native input until the
 	/// host acknowledges this marker's source record. Initial Start is pre-captured.
 	TurnStarted,
@@ -225,6 +232,21 @@ impl<'de> Deserialize<'de> for CraftEvent {
 						.map_err(serde::de::Error::custom)?;
 				let _ = request.kind;
 				Ok(Self::RemoteTool { call: request.call })
+			}
+			"usage" => {
+				#[derive(Deserialize)]
+				#[serde(deny_unknown_fields)]
+				struct Reported {
+					kind: String,
+					usage: crate::CraftUsage,
+				}
+				let reported: Reported =
+					crate::decode_control(raw.get().as_bytes())
+						.map_err(serde::de::Error::custom)?;
+				let _ = reported.kind;
+				Ok(Self::Usage {
+					usage: reported.usage,
+				})
 			}
 			"conversation_title" | "run_title" | "process_title" => {
 				#[derive(Deserialize)]

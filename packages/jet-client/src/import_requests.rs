@@ -47,6 +47,7 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
+			| QueryResponse::Usage(_)
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)

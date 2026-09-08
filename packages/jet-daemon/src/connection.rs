@@ -471,6 +471,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR,
 			feature: "the Capability Query",
 		}),
+		QueryRequest::Usage { .. } => Some(MinorRequirement {
+			minor: jet_protocol::USAGE_RECORDS_MINOR,
+			feature: "the Usage Query",
+		}),
 		QueryRequest::AccountBindings { .. } => Some(MinorRequirement {
 			minor: jet_protocol::ACCOUNT_BINDINGS_MINOR,
 			feature: "the Account binding Query",

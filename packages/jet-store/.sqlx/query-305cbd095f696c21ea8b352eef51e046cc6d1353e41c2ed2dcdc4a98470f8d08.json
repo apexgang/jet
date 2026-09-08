@@ -1,0 +1,218 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT s.snapshot_id AS \"snapshot_id!\", s.binding_id,\n\t\t\t\ts.provider, s.window_id, s.scope, s.model,\n\t\t\t\ts.conversation_id, s.run_id, s.unit, s.used, s.limit_amount,\n\t\t\t\ts.window_seconds, s.resets_at_unix_ms, s.estimation,\n\t\t\t\ts.finality, s.observed_at_unix_ms, s.digest\n\t\t\t FROM usage_quota_snapshots s\n\t\t\t WHERE (?1 IS NULL OR s.binding_id = ?1)\n\t\t\t   AND s.rowid = (\n\t\t\t\t SELECT t.rowid FROM usage_quota_snapshots t\n\t\t\t\t  WHERE t.binding_id = s.binding_id\n\t\t\t\t    AND t.window_id = s.window_id\n\t\t\t\t  ORDER BY t.observed_at_unix_ms DESC, t.rowid DESC\n\t\t\t\t  LIMIT 1)\n\t\t\t ORDER BY s.binding_id, s.window_id",
+  "describe": {
+    "columns": [
+      {
+        "name": "snapshot_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "snapshot_id"
+          }
+        }
+      },
+      {
+        "name": "binding_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "binding_id"
+          }
+        }
+      },
+      {
+        "name": "provider",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "name": "window_id",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "window_id"
+          }
+        }
+      },
+      {
+        "name": "scope",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "name": "model",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "name": "conversation_id",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "name": "run_id",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "name": "unit",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "unit"
+          }
+        }
+      },
+      {
+        "name": "used",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "used"
+          }
+        }
+      },
+      {
+        "name": "limit_amount",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "limit_amount"
+          }
+        }
+      },
+      {
+        "name": "window_seconds",
+        "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "window_seconds"
+          }
+        }
+      },
+      {
+        "name": "resets_at_unix_ms",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "resets_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "estimation",
+        "ordinal": 13,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "estimation"
+          }
+        }
+      },
+      {
+        "name": "finality",
+        "ordinal": 14,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "finality"
+          }
+        }
+      },
+      {
+        "name": "observed_at_unix_ms",
+        "ordinal": 15,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "observed_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "digest",
+        "ordinal": 16,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "digest"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "305cbd095f696c21ea8b352eef51e046cc6d1353e41c2ed2dcdc4a98470f8d08"
+}

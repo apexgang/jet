@@ -142,6 +142,12 @@ pub enum Query {
 		/// credential store asks for a new one (ADR-0086).
 		observation: CapabilityObservation,
 	},
+	/// The Usage records this Plane holds for one scope, with the
+	/// freshness and estimation each of them carries (ADR-0023).
+	Usage {
+		/// What the answer covers.
+		selection: crate::UsageSelection,
+	},
 	/// Settings resolved for one scope (ADR-0085).
 	Settings {
 		/// The scope to resolve for; its own values win over the Plane's.
@@ -258,6 +264,9 @@ pub enum QueryResult {
 	Capabilities(CapabilitySnapshot),
 	/// Every Account binding on the Plane.
 	AccountBindings(AccountBindingList),
+	/// What one Plane knows about Usage for the selected scope. Boxed: it
+	/// carries the Plane's quota windows beside its per-Model totals.
+	Usage(Box<crate::PlaneUsage>),
 	/// Settings resolved for one scope.
 	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.
@@ -462,6 +471,9 @@ impl Core {
 			}
 			Query::AccountBindings { observation } => {
 				account_bindings(self, observation).await
+			}
+			Query::Usage { selection } => {
+				crate::usage_query::usage(self, selection).await
 			}
 			Query::Settings { scope, selection } => {
 				settings(self, scope, selection).await

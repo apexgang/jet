@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT binding_id AS \"binding_id!\", state, reason,\n\t\t\t\tobserved_at_unix_ms\n\t\t\t FROM usage_provider_reach\n\t\t\t WHERE (?1 IS NULL OR binding_id = ?1)\n\t\t\t ORDER BY binding_id",
+  "describe": {
+    "columns": [
+      {
+        "name": "binding_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_provider_reach",
+            "name": "binding_id"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_provider_reach",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "name": "reason",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_provider_reach",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "name": "observed_at_unix_ms",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "usage_provider_reach",
+            "name": "observed_at_unix_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "73f5b5a14fbd98742b22b9af9375cc37fc4c66a6f9caaa5352ea6b44d89dd4a1"
+}

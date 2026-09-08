@@ -99,8 +99,16 @@ impl jet_core::RunConnection for RunConnection {
 				) {
 				return Err(failed("native titles require Craft 1.5"));
 			}
+			if self.craft_minor < 8
+				&& matches!(&event, CraftEvent::Usage { .. })
+			{
+				return Err(failed("Usage records require Craft 1.8"));
+			}
 			Ok(match event {
 				CraftEvent::RemoteTool { .. } => unreachable!("handled above"),
+				CraftEvent::Usage { usage } => RunObservation::Usage(
+					crate::translate::usage::report(usage),
+				),
 				CraftEvent::ConversationTitle { title } => {
 					RunObservation::ConversationTitle(title)
 				}

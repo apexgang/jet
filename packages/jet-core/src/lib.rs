@@ -101,6 +101,9 @@ mod run_state_storage;
 mod turn;
 mod turn_dispatch;
 mod turn_queue;
+mod usage;
+mod usage_query;
+mod usage_record;
 mod user_input;
 mod user_input_files;
 pub use execution_control::{
@@ -238,6 +241,12 @@ pub use setting::{
 	SettingSnapshot, SettingSource, SettingValue,
 };
 pub use status::PlaneStatus;
+pub use usage::{
+	ModelConsumption, ModelId, ObservedConsumption, ObservedUsage, PlaneUsage,
+	QuotaMeasure, QuotaReport, QuotaScope, QuotaUnit, QuotaWindow,
+	UsageEstimation, UsageFinality, UsageFreshness, UsageMeasurement,
+	UsageReport, UsageSelection, UsageSource, UsageTokens,
+};
 pub use workspace::{
 	BaseSelection, WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase,
 	WorkspaceHome, WorkspaceId,
@@ -585,6 +594,10 @@ mod schedule_tests;
 #[cfg(test)]
 #[path = "utility_tests.rs"]
 mod utility_tests;
+
+#[cfg(test)]
+#[path = "usage_tests.rs"]
+mod usage_tests;
 
 mod utility;
 pub use utility::{UtilityJob, UtilityOutcome, UtilityPurpose, UtilityRequest};

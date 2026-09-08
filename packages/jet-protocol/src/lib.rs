@@ -26,8 +26,14 @@ mod craft;
 mod craft_change;
 mod craft_installation;
 mod craft_lifecycle;
+mod craft_usage;
 pub use craft_change::CraftFileChange;
 pub use craft_lifecycle::CraftDisableMode;
+pub use craft_usage::{
+	CraftObservedUsage, CraftQuotaScope, CraftQuotaUnit, CraftQuotaWindow,
+	CraftUsage, CraftUsageEstimation, CraftUsageFinality,
+	CraftUsageMeasurement, CraftUsageTokens,
+};
 pub use handshake::CRAFT_LIFECYCLE_MINOR;
 mod craft_handshake;
 mod craft_spec;
@@ -141,8 +147,15 @@ pub use handshake::{
 	PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR,
 	SCHEDULES_MINOR, SEARCH_MINOR, SECURITY_AUDIT_MINOR,
 	SEEDED_WORKSPACES_MINOR, SETTINGS_AND_CAPABILITIES_MINOR, ServerHello,
-	TURN_QUEUE_MINOR, USER_INPUT_MINOR, UTILITY_MINOR, VersionRange,
-	WORKSPACE_PROMOTION_MINOR, WORKSPACE_TERMINALS_MINOR, WORKSPACES_MINOR,
+	TURN_QUEUE_MINOR, USAGE_RECORDS_MINOR, USER_INPUT_MINOR, UTILITY_MINOR,
+	VersionRange, WORKSPACE_PROMOTION_MINOR, WORKSPACE_TERMINALS_MINOR,
+	WORKSPACES_MINOR,
+};
+mod usage;
+pub use usage::{
+	ModelConsumption, ObservedConsumption, PlaneUsage, QuotaMeasure,
+	QuotaScope, QuotaUnit, QuotaWindow, UsageEstimation, UsageFinality,
+	UsageFreshness, UsageSelection, UsageTokens,
 };
 mod no_visa;
 pub use handshake::NO_VISA_MINOR;

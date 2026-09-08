@@ -57,6 +57,7 @@ public enum CraftCommand {
 
 public enum CraftEvent {
     case `remote_tool`(CraftEventRemoteTool)
+    case `usage`(CraftEventUsage)
     case `turn_started`(CraftEventTurnStarted)
     case `turn_ended`(CraftEventTurnEnded)
     case `file_changed`(CraftEventFileChanged)
@@ -123,6 +124,38 @@ public enum CraftHostAccess {
     case `network`(CraftHostAccessNetwork)
 }
 
+public struct CraftObservedUsage {
+    public let `estimation`: CraftUsageEstimation
+    public let `finality`: CraftUsageFinality
+    public let `measurement`: CraftUsageMeasurement
+    public let `model`: String?
+    public let `tokens`: CraftUsageTokens
+}
+
+public enum CraftQuotaScope {
+    case `provider_account`(CraftQuotaScopeProviderAccount)
+    case `model`(CraftQuotaScopeModel)
+}
+
+public enum CraftQuotaUnit: String {
+    case `tokens` = "tokens"
+    case `requests` = "requests"
+    case `credits` = "credits"
+    case `share` = "share"
+}
+
+public struct CraftQuotaWindow {
+    public let `estimation`: CraftUsageEstimation
+    public let `finality`: CraftUsageFinality
+    public let `limit`: UInt64?
+    public let `resets_in_seconds`: UInt64?
+    public let `scope`: CraftQuotaScope
+    public let `unit`: CraftQuotaUnit
+    public let `used`: UInt64
+    public let `window`: String
+    public let `window_seconds`: UInt64?
+}
+
 public struct CraftReady {
     public let `enabled_features`: [String]
     public let `protocol`: NegotiatedProtocol
@@ -150,6 +183,34 @@ public struct CraftSpecification {
     public let `id`: String
     public let `protocol`: ProtocolOffer
     public let `schema`: ProtocolVersion
+}
+
+public enum CraftUsage {
+    case `observed`(CraftUsageObserved)
+    case `quota`(CraftUsageQuota)
+    case `unavailable`(CraftUsageUnavailable)
+}
+
+public enum CraftUsageEstimation: String {
+    case `measured` = "measured"
+    case `estimated` = "estimated"
+}
+
+public enum CraftUsageFinality: String {
+    case `interim` = "interim"
+    case `final` = "final"
+}
+
+public enum CraftUsageMeasurement {
+    case `turn`(CraftUsageMeasurementTurn)
+    case `run`(CraftUsageMeasurementRun)
+}
+
+public struct CraftUsageTokens {
+    public let `cached_input`: UInt64?
+    public let `input`: UInt64?
+    public let `output`: UInt64?
+    public let `reasoning`: UInt64?
 }
 
 public struct CraftUtilityModel {
@@ -487,6 +548,10 @@ public struct CraftEventRemoteTool {
     public let `call`: CraftRemoteTool
 }
 
+public struct CraftEventUsage {
+    public let `usage`: CraftUsage
+}
+
 public struct CraftEventTurnStarted {
 
 }
@@ -587,6 +652,35 @@ public struct CraftHostAccessEnvironment {
 
 public struct CraftHostAccessNetwork {
     public let `destination`: String
+}
+
+public struct CraftQuotaScopeProviderAccount {
+
+}
+
+public struct CraftQuotaScopeModel {
+    public let `model`: String
+}
+
+public struct CraftUsageObserved {
+    public let `observed`: CraftObservedUsage
+}
+
+public struct CraftUsageQuota {
+    public let `quota`: CraftQuotaWindow
+}
+
+public struct CraftUsageUnavailable {
+    public let `reason`: String
+}
+
+public struct CraftUsageMeasurementTurn {
+    public let `native_usage_id`: String?
+    public let `turn`: String
+}
+
+public struct CraftUsageMeasurementRun {
+    public let `native_usage_id`: String?
 }
 
 public struct CredentialReferencePlatformStore {
