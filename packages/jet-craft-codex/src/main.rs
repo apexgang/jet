@@ -5,6 +5,7 @@ mod extensions;
 mod harness;
 mod presentation;
 mod specification;
+mod usage;
 
 use clap::Parser;
 

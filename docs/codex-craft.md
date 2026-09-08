@@ -36,7 +36,7 @@ schema emitted by `codex app-server generate-json-schema`.
 | Start a Conversation | Native | `initialize`, `initialized`, then `thread/start` |
 | Exchange turns | Native | `turn/start` on the open app-server input |
 | Structured progress and plans | Native | Complete `item/*` and `turn/plan/updated` events |
-| Report usage | Native | Complete `thread/tokenUsage/updated` events |
+| Report usage | Native + normalized | Complete `thread/tokenUsage/updated` events; the last turn's counts and the reported rate-limit windows are also Usage records |
 | Interrupt turn | Native | `turn/interrupt`; the app-server remains alive |
 | Waiting for approval | Native | Codex server requests answered only through Jet |
 | Waiting for authentication or quota | Native | Structured Codex error information |

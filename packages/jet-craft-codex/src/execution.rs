@@ -373,6 +373,19 @@ async fn line_observed(
 			}
 			Ok(())
 		}
+		Some("thread/tokenUsage/updated") => {
+			if minor >= 8 {
+				let finality = if run.in_flight {
+					jet_protocol::CraftUsageFinality::Interim
+				} else {
+					jet_protocol::CraftUsageFinality::Final
+				};
+				for usage in crate::usage::reports(&value, &run.id, finality) {
+					sender.send(&CraftEvent::Usage { usage }).await?;
+				}
+			}
+			Ok(())
+		}
 		Some("turn/completed") => {
 			let thread = value
 				.pointer("/params/threadId")

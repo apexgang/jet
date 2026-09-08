@@ -34,7 +34,7 @@ ADR-0104 pins v1 parity to explicitly tested releases. This Craft is tested agai
 | Start a Conversation | Native | `--print` with the stream-json protocol on both sides |
 | Exchange turns | Native | User messages written to open standard input (Helper 1.3) |
 | Structured progress | Native | `assistant` content blocks retained whole |
-| Report usage | Native | `result` carries `usage`, `total_cost_usd`, and `modelUsage` |
+| Report usage | Native + normalized | `result` carries `usage`, `total_cost_usd`, and `modelUsage`; the counts and the `rate_limit_event` window are also reported as Usage records |
 | Resume a Conversation | Native | `--resume` with the pinned `--session-id` |
 | Interrupt turn | Native | `interrupt` control request; the Run stays active |
 | Waiting for quota | Native | `rate_limit_event` status |

@@ -25,5 +25,5 @@ features = [
 
 [protocol]
 family = "craft"
-versions = [{ major = 1, minor = 6 }]
+versions = [{ major = 1, minor = 8 }]
 capabilities = ["runs", "resume", "actions"]

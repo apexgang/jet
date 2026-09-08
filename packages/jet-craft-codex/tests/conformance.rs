@@ -150,6 +150,38 @@ async fn a_conversation_uses_codex_native_events_through_the_craft_contract() {
 			event.contains("thread/tokenUsage/updated")
 				&& event.contains("\"inputTokens\":21")
 		}));
+		// The turn's own counts are reported; the thread's cumulative total
+		// covers earlier Runs too and is deliberately left out (ADR-0023).
+		assert!(reported(&events).contains(&CraftUsage::Observed {
+			observed: CraftObservedUsage {
+				measurement: CraftUsageMeasurement::Turn {
+					turn: run.to_string(),
+					native_usage_id: Some("native-first".into()),
+				},
+				model: Some("gpt-5.4-codex".into()),
+				estimation: CraftUsageEstimation::Measured,
+				finality: CraftUsageFinality::Interim,
+				tokens: CraftUsageTokens {
+					input: 8,
+					cached_input: 2,
+					output: 5,
+					reasoning: 1,
+				},
+			},
+		}));
+		assert!(reported(&events).contains(&CraftUsage::Quota {
+			quota: CraftQuotaWindow {
+				window: "primary".into(),
+				scope: CraftQuotaScope::ProviderAccount,
+				unit: CraftQuotaUnit::Share,
+				used: 4_250,
+				limit: Some(10_000),
+				window_seconds: Some(18_000),
+				resets_in_seconds: Some(3_600),
+				estimation: CraftUsageEstimation::Measured,
+				finality: CraftUsageFinality::Interim,
+			},
+		}));
 		assert_eq!(
 			presentations(&events),
 			vec![
@@ -187,6 +219,16 @@ fn completions(events: &[CraftEvent]) -> Vec<(String, String)> {
 				id,
 				native_conversation,
 			} => Some((id.clone(), native_conversation.clone())),
+			_ => None,
+		})
+		.collect()
+}
+
+fn reported(events: &[CraftEvent]) -> Vec<CraftUsage> {
+	events
+		.iter()
+		.filter_map(|event| match event {
+			CraftEvent::Usage { usage } => Some(usage.clone()),
 			_ => None,
 		})
 		.collect()
@@ -341,7 +383,7 @@ async fn accept_craft(socket: &Path, run: Uuid) -> (Reader, Writer) {
 	let mut reader = FrameReader::new(read);
 	let mut writer = FrameWriter::new(write);
 	let hello = json!({
-		"protocol": {"family": "craft", "versions": [{"major": 1, "minor": 4}], "capabilities": ["runs", "actions"]},
+		"protocol": {"family": "craft", "versions": [{"major": 1, "minor": 8}], "capabilities": ["runs", "actions"]},
 		"specification": {"family": "specification", "versions": [{"major": 1, "minor": 0}]},
 		"execution_id": run, "resume": Value::Null,
 	});
@@ -355,7 +397,7 @@ async fn accept_craft(socket: &Path, run: Uuid) -> (Reader, Writer) {
 	let ready: CraftReady = decode_control(&payload).unwrap();
 	assert_eq!(
 		ready.protocol.version,
-		ProtocolVersion { major: 1, minor: 4 }
+		ProtocolVersion { major: 1, minor: 8 }
 	);
 	reader.enable_multiplexing();
 	writer.enable_multiplexing();
@@ -468,9 +510,15 @@ fn codex_double() {
 				"thread/tokenUsage/updated",
 				json!({
 					"threadId": "thread-native-1", "turnId": turn_id,
+					"model": "gpt-5.4-codex",
 					"tokenUsage": {
 						"total": {"inputTokens": 21},
-						"last": {"inputTokens": 8},
+						"last": {"inputTokens": 8, "cachedInputTokens": 2,
+							"outputTokens": 5, "reasoningOutputTokens": 1},
+					},
+					"rateLimits": {
+						"primary": {"usedPercent": 42.5, "windowMinutes": 300,
+							"resetsInSeconds": 3600},
 					},
 				}),
 			);
