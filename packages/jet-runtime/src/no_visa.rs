@@ -7,7 +7,7 @@ use rustix::process::{
 use std::future::Future;
 use std::process::ExitStatus;
 use std::time::Duration;
-use tokio::process::{Child, ChildStdout, Command};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -17,6 +17,7 @@ use tokio::time::timeout;
 pub struct NoVisaOperation {
 	task: JoinHandle<std::io::Result<ExitStatus>>,
 	stdout: Option<ChildStdout>,
+	stdin: Option<ChildStdin>,
 }
 
 impl NoVisaOperation {
@@ -34,6 +35,7 @@ impl NoVisaOperation {
 		)?;
 		let mut child = command.process_group(0).kill_on_drop(true).spawn()?;
 		let stdout = child.stdout.take();
+		let stdin = child.stdin.take();
 		let group = Pid::from_raw(
 			i32::try_from(child.id().expect("new child has a pid"))
 				.expect("pid fits i32"),
@@ -77,7 +79,16 @@ impl NoVisaOperation {
 			}
 			Ok(status)
 		});
-		Ok(Self { task, stdout })
+		Ok(Self {
+			task,
+			stdout,
+			stdin,
+		})
+	}
+
+	/// Takes the input pipe when the launch requested piped stdin.
+	pub fn take_stdin(&mut self) -> Option<ChildStdin> {
+		self.stdin.take()
 	}
 
 	/// Takes the output pipe when the launch requested piped stdout.
