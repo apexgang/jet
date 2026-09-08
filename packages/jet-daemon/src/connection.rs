@@ -538,6 +538,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::TURN_QUEUE_MINOR,
 			feature: "Turn queue",
 		}),
+		CommandRequest::StartVisaRun(_) => Some(MinorRequirement {
+			minor: jet_protocol::VISA_RUNS_MINOR,
+			feature: "Visa Runs",
+		}),
 		CommandRequest::StartRun { .. } => Some(MinorRequirement {
 			minor: jet_protocol::MANAGED_RUNS_MINOR,
 			feature: "managed Runs",

@@ -270,6 +270,8 @@ pub enum CommandRequest {
 		/// The managed Run to end.
 		run_id: Uuid,
 	},
+	/// Start native execution on the selected Conversation Home Plane (1.25).
+	StartVisaRun(crate::VisaRunRequest),
 	/// Start a managed Run with an installed Craft and initial input.
 	StartRun {
 		/// Conversation whose working tree is used.

@@ -412,6 +412,7 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		| Command::HandoffConversation(_)
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
+		| Command::StartVisaRun(_)
 		| Command::RequestUtility { .. }
 		| Command::CreateSchedule { .. }
 		| Command::CancelSchedule { .. }
@@ -470,6 +471,7 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::HandoffConversation(_)
 		| Command::CreateRun { .. }
 		| Command::StartRun { .. }
+		| Command::StartVisaRun(_)
 		| Command::RequestUtility { .. }
 		| Command::CreateSchedule { .. }
 		| Command::CancelSchedule { .. }

@@ -47,6 +47,9 @@ pub struct ManagedProcess {
 /// Durable execution projection, fenced with the Event journal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunExecution {
+	/// Explicit native execution destination and binding, when selected.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub visa: Option<crate::VisaSelection>,
 	/// Snapshot cursor.
 	pub cursor: EventSequence,
 	/// Authoritative lifecycle and revision.

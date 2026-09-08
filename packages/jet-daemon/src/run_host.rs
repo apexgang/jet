@@ -212,6 +212,12 @@ impl jet_core::RunConnection for RunConnection {
 	}
 }
 impl RunHost for CraftProcesses {
+	fn native_provider(
+		&self,
+		craft: &PinnedCraft,
+	) -> Result<jet_core::ProviderId, CoreError> {
+		crate::run_craft::native_provider(craft)
+	}
 	fn harness(&self, craft: &PinnedCraft) -> Result<String, CoreError> {
 		Ok(run_craft::Contract::of(craft)?.specification.harness)
 	}

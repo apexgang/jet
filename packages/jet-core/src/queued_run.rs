@@ -57,6 +57,7 @@ impl Core {
 		let prepared = async {
 			let plan = host.prepare_next_run(accepted.plan.clone()).await?;
 			plan.revalidate().await?;
+			self.revalidate_visa(&plan).await?;
 			Ok::<_, CoreError>(plan)
 		}
 		.await;
@@ -126,6 +127,9 @@ async fn prepare(
 	mut plan: LaunchPlan,
 	now: i64,
 ) -> Result<(), CoreError> {
+	if let Some(selection) = plan.visa {
+		selection.binding(tx).await?;
+	}
 	let mut queue = turn_queue::load(tx, id).await?;
 	let actor = Actor::InteractiveClient {
 		client_id: queue.entries[0].turn.client_id,

@@ -422,6 +422,19 @@ pub(crate) fn command(
 			run_id: RunId(*run_id),
 			control: jet_core::RunControl::StopRun,
 		},
+		wire::CommandRequest::StartVisaRun(request) => {
+			Command::StartVisaRun(jet_core::VisaRunRequest {
+				conversation_id: ConversationId(request.conversation_id),
+				destination_plane_id: jet_core::PlaneId(
+					request.destination_plane_id,
+				),
+				account_binding_id: jet_core::AccountBindingId(
+					request.account_binding_id,
+				),
+				craft: request.craft.clone(),
+				prompt: request.prompt.clone(),
+			})
+		}
 		wire::CommandRequest::StartRun {
 			conversation_id,
 			craft,

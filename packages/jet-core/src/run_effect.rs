@@ -48,7 +48,9 @@ impl EffectAdapter for Runs<'_> {
 			Ok(plan) => plan,
 			Err(_) => return EffectResult::Unknown,
 		};
-		if plan.revalidate().await.is_err() {
+		if plan.revalidate().await.is_err()
+			|| self.0.revalidate_visa(&plan).await.is_err()
+		{
 			return EffectResult::Failed;
 		}
 		let Some(host) = &self.0.run_host else {

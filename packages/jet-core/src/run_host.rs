@@ -10,6 +10,18 @@ pub type RunFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Host-specific Craft validation and native transport, supplied by jetd.
 pub trait RunHost: std::fmt::Debug + Send + Sync {
+	/// Identifies the Provider whose native authentication this accepted
+	/// Harness uses. Unknown mappings must be refused, never guessed from a
+	/// client label or executable name.
+	fn native_provider(
+		&self,
+		_craft: &PinnedCraft,
+	) -> Result<crate::ProviderId, CoreError> {
+		Err(CoreError::conflict(
+			"visa.provider_unavailable",
+			"the selected Harness's native Provider is unavailable",
+		))
+	}
 	/// Resolves an installed identity and pins its accepted execution contract.
 	fn pin(
 		&self,

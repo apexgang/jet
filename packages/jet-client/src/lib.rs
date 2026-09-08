@@ -20,6 +20,7 @@ mod search_requests;
 mod ssh;
 mod turn_requests;
 mod user_input_requests;
+mod visa_requests;
 
 pub use connection::{Client, ClientError};
 pub use handshake::ClientIdentity;

@@ -1,5 +1,8 @@
 # Managed Run execution
 
+For explicit destination and Account-binding selection over a local or remote
+connection, see [Visa Runs](visa-runs.md).
+
 Issue [#20](https://github.com/apexgang/jet/issues/20) adds `start_run` and `run_execution` in Jet protocol 1.13. A start request names a Conversation, an installed Craft identity, and initial input. Core validates its registered Project and canonical Workspace or Local checkout, reobserves Git capability, verifies the accepted Craft digest and declarations, and commits the Run, immutable launch plan, Events, Command receipt, and start Effect together. The response contains the Run in `starting`; external work follows the commit.
 
 ```json

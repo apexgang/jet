@@ -1541,6 +1541,48 @@
           ]
         },
         {
+          "description": "Start native execution on the selected Conversation Home Plane (1.25).",
+          "type": "object",
+          "properties": {
+            "account_binding_id": {
+              "description": "Account binding on that Plane; never a credential copied from the client.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "conversation_id": {
+              "description": "Conversation already owned by the selected destination.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "craft": {
+              "description": "Installed Craft identity, never an executable path.",
+              "type": "string"
+            },
+            "destination_plane_id": {
+              "description": "Expected Home Plane; prevents launching against the wrong connection.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "prompt": {
+              "description": "Initial Harness input.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "start_visa_run"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "conversation_id",
+            "destination_plane_id",
+            "account_binding_id",
+            "craft",
+            "prompt"
+          ]
+        },
+        {
           "description": "Start a managed Run with an installed Craft and initial input.",
           "type": "object",
           "properties": {
@@ -6809,6 +6851,17 @@
               "type": "null"
             }
           ]
+        },
+        "visa": {
+          "description": "Explicit Visa selection; absent on legacy Runs and before minor 25.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VisaSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -8287,6 +8340,26 @@
       "required": [
         "min",
         "max"
+      ]
+    },
+    "VisaSelection": {
+      "description": "The immutable selection used by one admitted Visa Run.",
+      "type": "object",
+      "properties": {
+        "account_binding_id": {
+          "description": "Binding in that Plane's own store.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "plane_id": {
+          "description": "Home Plane on which its native processes execute.",
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "plane_id",
+        "account_binding_id"
       ]
     },
     "WireError": {

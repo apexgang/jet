@@ -38,6 +38,22 @@ impl Contract {
 		Ok(contract)
 	}
 }
+
+/// Only accepted Harness identities establish a known native Provider.
+pub(crate) fn native_provider(
+	pin: &PinnedCraft,
+) -> Result<jet_core::ProviderId, CoreError> {
+	match Contract::of(pin)?.specification.harness.as_str() {
+		"codex" => Ok(jet_core::ProviderId("openai".into())),
+		"claude-code" => Ok(jet_core::ProviderId("anthropic".into())),
+		_ => Err(CoreError {
+			code: "visa.provider_unavailable".into(),
+			message: "the selected Harness's native Provider is unavailable"
+				.into(),
+			..unavailable()
+		}),
+	}
+}
 pub(crate) async fn load(
 	home: &Path,
 	id: &str,

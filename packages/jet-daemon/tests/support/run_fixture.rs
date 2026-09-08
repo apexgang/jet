@@ -490,6 +490,14 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 								.unwrap();
 						}
 					}
+					if native["phase"] == "auth" {
+						sender
+							.send(&CraftEvent::Activity {
+								activity: RunActivity::WaitingForAuth,
+							})
+							.await
+							.unwrap();
+					}
 				}
 			}
 			HelperEvent::Output {
@@ -592,6 +600,13 @@ fn fake_harness_process() {
 	);
 	if Path::new("queue").exists() {
 		return queue_fixture::harness();
+	}
+	if Path::new("auth-wait").exists() {
+		println!("{}", json!({"phase":"auth"}));
+		std::io::stdout().flush().unwrap();
+		while !Path::new("authenticated").exists() {
+			std::thread::sleep(std::time::Duration::from_millis(10));
+		}
 	}
 	let before = if Path::new("result.txt").exists() {
 		file_object("result.txt")
