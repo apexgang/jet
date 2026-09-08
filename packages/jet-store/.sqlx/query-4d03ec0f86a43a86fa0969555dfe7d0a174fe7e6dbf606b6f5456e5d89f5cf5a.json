@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO scheduled_tasks (schedule_id, conversation_id, next_due_unix_ms, state) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(schedule_id) DO UPDATE SET next_due_unix_ms = excluded.next_due_unix_ms, state = excluded.state",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "4d03ec0f86a43a86fa0969555dfe7d0a174fe7e6dbf606b6f5456e5d89f5cf5a"
+}
