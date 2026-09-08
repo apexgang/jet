@@ -233,5 +233,30 @@
     "schema": "ServerMessage",
     "valid": true,
     "payload": "{\"kind\":\"command_result\",\"id\":4,\"result\":{\"type\":\"conversation_named\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"revision\":\"8\",\"retention\":\"retain\",\"created_at_unix_ms\":1772953200000,\"name\":{\"value\":\"Scheduled work\",\"source\":\"manual\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":5,\"query\":{\"type\":\"discover_craft\",\"source\":{\"type\":\"github_release\",\"repository\":\"apex/jet-craft-demo\",\"tag\":\"v1.2.3\"}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":5,\"result\":{\"type\":\"craft_installation_preview\",\"craft_id\":\"demo\",\"version\":\"1.2.3\",\"enabled_features\":[\"turns\"],\"confirmation\":{\"source\":{\"type\":\"github_release\",\"repository\":\"apex/jet-craft-demo\",\"tag\":\"v1.2.3\"},\"repository\":\"https://github.com/apex/jet-craft-demo\",\"publisher_claim\":\"Example Org\",\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"artifact_sha256\":\"abababababababababababababababababababababababababababababababab\",\"broker_permissions\":[\"artifact_read\"],\"host_access\":[{\"kind\":\"network\",\"destination\":\"api.example.com\"}],\"trust\":\"same_user_executable\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":6,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"install_craft\",\"confirmation\":{\"source\":{\"type\":\"github_release\",\"repository\":\"apex/jet-craft-demo\",\"tag\":\"v1.2.3\"},\"repository\":\"https://github.com/apex/jet-craft-demo\",\"publisher_claim\":\"Example Org\",\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"artifact_sha256\":\"abababababababababababababababababababababababababababababababab\",\"broker_permissions\":[\"artifact_read\"],\"host_access\":[{\"kind\":\"network\",\"destination\":\"api.example.com\"}],\"trust\":\"same_user_executable\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"command\",\"id\":6,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"install_craft\",\"confirmation\":{\"source\":{\"type\":\"github_release\",\"repository\":\"apex/jet-craft-demo\",\"tag\":\"v1.2.3\"},\"repository\":\"https://github.com/apex/jet-craft-demo\",\"publisher_claim\":\"Example Org\",\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"artifact_sha256\":\"abababababababababababababababababababababababababababababababab\",\"broker_permissions\":[\"future_permission\"],\"host_access\":[],\"trust\":\"same_user_executable\"}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":6,\"result\":{\"type\":\"craft_installation_queued\",\"craft_id\":\"demo\",\"version\":\"1.2.3\",\"artifact_sha256\":\"abababababababababababababababababababababababababababababababab\"}}"
   }
 ]

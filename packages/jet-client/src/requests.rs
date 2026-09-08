@@ -33,6 +33,7 @@ impl Client {
 			}
 			QueryResponse::Status(status) => Ok(status),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -69,6 +70,7 @@ impl Client {
 		match self.query(QueryRequest::Conversations).await? {
 			QueryResponse::Conversations(list) => Ok(list),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -112,6 +114,7 @@ impl Client {
 		{
 			QueryResponse::Conversations(list) => Ok(list),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -155,6 +158,7 @@ impl Client {
 		{
 			QueryResponse::Conversation(snapshot) => Ok(*snapshot),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -195,6 +199,7 @@ impl Client {
 		match self.query(QueryRequest::Events { after: sequence }).await? {
 			QueryResponse::Events(page) => Ok(page),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -238,6 +243,7 @@ impl Client {
 		{
 			CommandResponse::AuditEpochBegun { epoch } => Ok(epoch),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -288,6 +294,7 @@ impl Client {
 		{
 			QueryResponse::SecurityAudit(page) => Ok(page),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -371,6 +378,7 @@ impl Client {
 				Ok(conversation)
 			}
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -424,6 +432,7 @@ impl Client {
 		{
 			CommandResponse::RunCreated(run) => Ok(run),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -484,6 +493,7 @@ impl Client {
 		{
 			CommandResponse::RunTransitioned(run) => Ok(run),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -536,6 +546,7 @@ impl Client {
 		{
 			QueryResponse::Settings(snapshot) => Ok(snapshot),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -586,6 +597,7 @@ impl Client {
 		{
 			CommandResponse::SettingSet { value, .. } => Ok(value),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -641,6 +653,7 @@ impl Client {
 		{
 			CommandResponse::SettingCleared { .. } => Ok(()),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -695,6 +708,7 @@ impl Client {
 		{
 			QueryResponse::Capabilities(snapshot) => Ok(snapshot),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -745,6 +759,7 @@ impl Client {
 		{
 			QueryResponse::AccountBindings(list) => Ok(list),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -806,6 +821,7 @@ impl Client {
 		{
 			CommandResponse::AccountBound(binding) => Ok(binding),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -865,6 +881,7 @@ impl Client {
 				..
 			} => Ok(credential_reference),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }

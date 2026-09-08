@@ -24,6 +24,7 @@ mod control;
 mod conversation;
 mod craft;
 mod craft_change;
+mod craft_installation;
 pub use craft_change::CraftFileChange;
 mod craft_handshake;
 mod craft_spec;
@@ -113,6 +114,10 @@ pub use conversation::{
 };
 pub use craft::{CraftAction, CraftApprovalDecision, CraftCommand, CraftEvent};
 pub use craft_handshake::{CraftFork, CraftHello, CraftReady, CraftResume};
+pub use craft_installation::{
+	CraftInstallationConfirmation, CraftInstallationPreview,
+	CraftInstallationQueued, CraftSource, CraftTrust,
+};
 pub use craft_spec::{
 	BrokerPermission, CraftFeature, CraftHostAccess, CraftSpecification,
 };
@@ -123,11 +128,12 @@ pub use frame::{
 };
 pub use handshake::{
 	ACCOUNT_BINDINGS_MINOR, CHANGE_CHECKPOINTS_MINOR, CODEC_JSON_V1,
-	CONVERSATION_FORKS_MINOR, ClientHello, EXECUTION_CONTROL_MINOR,
-	EXECUTION_RECOVERY_MINOR, FENCED_READS_MINOR, IMPORTED_CONVERSATIONS_MINOR,
-	MANAGED_RUNS_MINOR, MULTIPLEXED_STREAMS_MINOR, NAMES_MINOR, PAIRING_MINOR,
-	PREFACE, PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION,
-	REMOTE_AUTH_MINOR, SCHEDULES_MINOR, SEARCH_MINOR, SECURITY_AUDIT_MINOR,
+	CONVERSATION_FORKS_MINOR, CRAFT_INSTALLATION_MINOR, ClientHello,
+	EXECUTION_CONTROL_MINOR, EXECUTION_RECOVERY_MINOR, FENCED_READS_MINOR,
+	IMPORTED_CONVERSATIONS_MINOR, MANAGED_RUNS_MINOR,
+	MULTIPLEXED_STREAMS_MINOR, NAMES_MINOR, PAIRING_MINOR, PREFACE,
+	PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR,
+	SCHEDULES_MINOR, SEARCH_MINOR, SECURITY_AUDIT_MINOR,
 	SEEDED_WORKSPACES_MINOR, SETTINGS_AND_CAPABILITIES_MINOR, ServerHello,
 	TURN_QUEUE_MINOR, USER_INPUT_MINOR, UTILITY_MINOR, VersionRange,
 	WORKSPACE_PROMOTION_MINOR, WORKSPACE_TERMINALS_MINOR, WORKSPACES_MINOR,

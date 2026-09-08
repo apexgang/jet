@@ -62,8 +62,8 @@ async fn a_plane_reports_the_machine_it_runs_on() {
 				ExternalTool::Ssh,
 				ExternalTool::Tailscale
 			],
-			// Craft discovery arrives with the Craft issues, so a Plane
-			// reports none and says plainly that it can run no Harness.
+			// A fresh Plane has installed no Craft, so it says plainly that
+			// it can run no Harness.
 			vec![],
 			vec![],
 			true,

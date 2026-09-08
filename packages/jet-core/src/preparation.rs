@@ -19,6 +19,8 @@ use crate::{Actor, Core};
 
 /// What the preparation of one Command produced for its transaction.
 pub(crate) enum Prepared {
+	/// A verified Artifact staged for durable idempotent publication.
+	CraftInstallation(crate::craft_installation::PreparedCraftInstallation),
 	/// A direct edit resolved and revision-checked at its registered root.
 	UserEdit(crate::user_input::PreparedUserEdit),
 	Terminal(crate::TerminalPlan),
@@ -77,7 +79,10 @@ impl Core {
 		if recorded {
 			return Ok(Prepared::Nothing);
 		}
-		if matches!(command, Command::ApplyUserEdit { .. }) {
+		if matches!(
+			command,
+			Command::ApplyUserEdit { .. } | Command::InstallCraft { .. }
+		) {
 			security.admit(command.security_class())?;
 		}
 		let admitted = match self.revalidate_capabilities(command).await {
@@ -119,6 +124,12 @@ impl Core {
 		now_unix_ms: i64,
 	) -> Result<Prepared, CoreError> {
 		match command {
+			Command::InstallCraft { confirmation } => {
+				Ok(Prepared::CraftInstallation(
+					crate::craft_installation::prepare(self, confirmation)
+						.await?,
+				))
+			}
 			Command::ApplyUserEdit {
 				target,
 				path,

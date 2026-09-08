@@ -20,6 +20,7 @@ impl Client {
 		{
 			QueryResponse::TurnQueue(queue) => Ok(queue),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }

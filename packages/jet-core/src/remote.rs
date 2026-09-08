@@ -26,6 +26,7 @@ pub(crate) fn invalidated_client(
 		},
 		CommandOutcome::UserEditApplied(_)
 		| CommandOutcome::UtilityQueued { .. }
+		| CommandOutcome::CraftInstallationQueued { .. }
 		| CommandOutcome::ScheduleCreated(_)
 		| CommandOutcome::ScheduleCanceled { .. }
 		| CommandOutcome::ConversationNamed(_)

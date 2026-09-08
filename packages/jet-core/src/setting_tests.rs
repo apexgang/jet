@@ -273,6 +273,11 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 					SettingValue::Flag(false),
 					SettingSource::BuiltIn
 				),
+				resolved(
+					SettingKey::DeveloperMode,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
 			],
 			vec![
 				resolved(
@@ -314,6 +319,11 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 				),
 				resolved(
 					SettingKey::UtilityAutodeleteCompilation,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::DeveloperMode,
 					SettingValue::Flag(false),
 					SettingSource::BuiltIn
 				),

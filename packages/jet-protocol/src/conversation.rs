@@ -156,6 +156,11 @@ pub enum CommandRequest {
 		/// Purpose-specific input references.
 		request: crate::UtilityRequest,
 	},
+	/// Install only the exact Craft proposal returned by discovery.
+	InstallCraft {
+		/// Repository, provenance, Artifact, authority, and trust acceptance.
+		confirmation: crate::CraftInstallationConfirmation,
+	},
 	/// Attach a daily Scheduled task to a retained Conversation.
 	CreateSchedule {
 		/// Owning Conversation.
@@ -457,6 +462,8 @@ pub enum CommandResponse {
 		/// Plane-assigned job identity.
 		job_id: Uuid,
 	},
+	/// Durable publication work accepted for one verified Craft Artifact.
+	CraftInstallationQueued(crate::CraftInstallationQueued),
 	/// Enabled daily schedule.
 	ScheduleCreated {
 		/// Enabled schedule and next firing.

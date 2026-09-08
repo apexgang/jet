@@ -250,6 +250,8 @@ pub enum EffectKindRecord {
 	ControlRun,
 	/// Apply one Workspace promotion to its destination (ADR-0025).
 	PromoteWorkspace,
+	/// Publish one accepted third-party Craft installation (ADR-0013).
+	InstallCraft,
 }
 
 impl EffectKindRecord {
@@ -262,6 +264,7 @@ impl EffectKindRecord {
 			Self::StartRun => "run.start",
 			Self::ControlRun => "run.control",
 			Self::PromoteWorkspace => "workspace.promote",
+			Self::InstallCraft => "craft.install",
 		}
 	}
 
@@ -274,6 +277,7 @@ impl EffectKindRecord {
 			"run.start" => Some(Self::StartRun),
 			"run.control" => Some(Self::ControlRun),
 			"workspace.promote" => Some(Self::PromoteWorkspace),
+			"craft.install" => Some(Self::InstallCraft),
 			_ => None,
 		}
 	}

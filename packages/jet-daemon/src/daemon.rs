@@ -88,6 +88,11 @@ pub(crate) async fn run(
 	if let Err(error) = core.perform_user_edits().await {
 		eprintln!("jetd: cannot reconcile direct user edits: {error}");
 	}
+	// A verified Artifact accepted before a restart is published before
+	// capabilities or new Commands can observe the installed Craft.
+	if let Err(error) = core.perform_craft_installations().await {
+		eprintln!("jetd: cannot reconcile Craft installations: {error}");
+	}
 	// A promotion a previous daemon did not finish is settled from what its
 	// destination holds before any client can ask for another (ADR-0064,
 	// ADR-0067).
@@ -139,6 +144,13 @@ pub(crate) async fn run(
 	let recovery = tokio::spawn(async move {
 		loop {
 			tokio::time::sleep(Duration::from_secs(1)).await;
+			if let Err(error) =
+				recovery_core.perform_craft_installations().await
+			{
+				eprintln!(
+					"jetd: cannot reconcile Craft installations: {error}"
+				);
+			}
 			if let Err(error) = recovery_core.perform_schedules().await {
 				eprintln!("jetd: cannot advance schedules: {error}");
 			}

@@ -31,6 +31,8 @@ pub(crate) enum EffectKind {
 	PromoteWorkspace {
 		promotion_id: PromotionId,
 	},
+	/// Publish a verified staged Craft Artifact and accepted manifest.
+	InstallCraft,
 }
 
 pub(crate) type EffectSafety = EffectSafetyRecord;
@@ -212,6 +214,7 @@ async fn settle(
 		EffectKind::PromoteWorkspace { promotion_id } => {
 			promotion_effect::settle(tx, promotion_id, state, now_unix_ms).await
 		}
+		EffectKind::InstallCraft => Ok(()),
 	}
 }
 
@@ -260,6 +263,7 @@ impl TryFrom<EffectRecord> for Effect {
 					)?),
 				}
 			}
+			EffectKindRecord::InstallCraft => EffectKind::InstallCraft,
 		};
 		Ok(Self {
 			effect_id: record.effect_id,

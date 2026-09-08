@@ -6,6 +6,7 @@
 
 mod checkpoint_requests;
 mod connection;
+mod craft_installation_requests;
 mod fork_requests;
 mod handshake;
 mod import_requests;

@@ -41,6 +41,7 @@ impl Client {
 		{
 			QueryResponse::PromotionPreview(preview) => Ok(*preview),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -100,6 +101,7 @@ impl Client {
 				Ok(promotion)
 			}
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }

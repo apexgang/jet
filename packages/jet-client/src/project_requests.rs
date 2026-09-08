@@ -37,6 +37,7 @@ impl Client {
 		{
 			QueryResponse::ProjectPreview(preview) => Ok(preview),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -93,6 +94,7 @@ impl Client {
 		{
 			CommandResponse::ProjectRegistered(project) => Ok(project),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -152,6 +154,7 @@ impl Client {
 		{
 			QueryResponse::ProjectEntry(entry) => Ok(entry),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -189,6 +192,7 @@ impl Client {
 		match self.query(QueryRequest::Projects).await? {
 			QueryResponse::Projects(list) => Ok(list),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }

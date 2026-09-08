@@ -7,6 +7,7 @@ mod account;
 mod audit;
 mod capability;
 mod checkpoint;
+mod craft_installation;
 mod execution_control;
 mod import;
 mod name;
@@ -54,6 +55,9 @@ pub(crate) fn query(
 	minor: u32,
 ) -> Result<Query, CoreError> {
 	Ok(match request {
+		wire::QueryRequest::DiscoverCraft { source } => Query::DiscoverCraft {
+			source: craft_installation::source_from_wire(source),
+		},
 		wire::QueryRequest::EditableFile { target, path } => {
 			Query::EditableFile {
 				target: file_target_from_wire(*target),
@@ -184,6 +188,11 @@ pub(crate) fn query_result(
 	minor: u32,
 ) -> Result<wire::QueryResponse, CoreError> {
 	Ok(match result {
+		QueryResult::CraftInstallationPreview(preview) => {
+			wire::QueryResponse::CraftInstallationPreview(
+				craft_installation::preview(*preview),
+			)
+		}
 		QueryResult::EditableFile(file) => {
 			wire::QueryResponse::EditableFile(wire::EditableFile {
 				cursor: file.cursor.0,
@@ -298,6 +307,13 @@ pub(crate) fn command(
 	request: &wire::CommandRequest,
 ) -> Result<Command, CoreError> {
 	Ok(match request {
+		wire::CommandRequest::InstallCraft { confirmation } => {
+			Command::InstallCraft {
+				confirmation: craft_installation::confirmation_from_wire(
+					confirmation,
+				),
+			}
+		}
 		wire::CommandRequest::ApplyUserEdit {
 			target,
 			path,
@@ -560,6 +576,17 @@ pub(crate) fn command_outcome(
 		CommandOutcome::UtilityQueued { job_id } => {
 			wire::CommandResponse::UtilityQueued { job_id }
 		}
+		CommandOutcome::CraftInstallationQueued {
+			craft_id,
+			version,
+			artifact_sha256,
+		} => wire::CommandResponse::CraftInstallationQueued(
+			wire::CraftInstallationQueued {
+				craft_id,
+				version,
+				artifact_sha256,
+			},
+		),
 		CommandOutcome::UserEditApplied(edit) => {
 			wire::CommandResponse::UserEditApplied {
 				target: file_target(edit.target),

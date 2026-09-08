@@ -119,12 +119,22 @@ pub enum AuditDecision {
 	/// An interactive user granted Jet a directory as a Project, widening
 	/// what it may read and change on this Plane (ADR-0101).
 	ProjectRegistered,
+	/// An owner accepted one third-party Craft's exact executable authority.
+	CraftInstallationApproved,
+	/// The Plane began accepting unverified local or source-built Crafts.
+	DeveloperModeEnabled,
+	/// The Plane stopped accepting new unverified Craft installations.
+	DeveloperModeDisabled,
+	/// The Plane returned Developer Mode to its disabled built-in default.
+	DeveloperModeCleared,
 }
 
 /// What a decision is about. The core turns each one into the durable kind
 /// and identity the store keeps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AuditSubject {
+	/// One installed or proposed third-party Craft.
+	Craft(String),
 	Terminal(crate::TerminalId),
 	/// One helper execution, including unmatched identities.
 	Execution(crate::RunId),
@@ -255,6 +265,10 @@ impl AuditDecision {
 			Self::PairedClientDisabled => "pairing.client_disabled",
 			Self::PairedClientRevoked => "pairing.client_revoked",
 			Self::ProjectRegistered => "project.registered",
+			Self::CraftInstallationApproved => "craft.installation_approved",
+			Self::DeveloperModeEnabled => "craft.developer_mode_enabled",
+			Self::DeveloperModeDisabled => "craft.developer_mode_disabled",
+			Self::DeveloperModeCleared => "craft.developer_mode_cleared",
 		}
 	}
 
@@ -289,7 +303,9 @@ impl AuditDecision {
 			| Self::PairedClientEnabled
 			// A Path grant is the one way a directory comes under Jet's
 			// management, and everything a Run does there follows from it.
-			| Self::ProjectRegistered => AuditRisk::Elevated,
+			| Self::ProjectRegistered
+			| Self::CraftInstallationApproved
+			| Self::DeveloperModeEnabled => AuditRisk::Elevated,
 			// Revoking destroys the key the pairing was, and no part of Jet
 			// can put it back: the installation pairs again or it does not
 			// control this Plane.
@@ -301,6 +317,8 @@ impl AuditDecision {
 			| Self::AuditRetentionCleared => AuditRisk::Destructive,
 			Self::GitAutomationDisabled
 			| Self::PairingGateClosed
+			| Self::DeveloperModeDisabled
+			| Self::DeveloperModeCleared
 			// Stopping a client is the safe direction, and its key stays
 			// where it is.
 			| Self::PairedClientDisabled => AuditRisk::Routine,
@@ -321,8 +339,9 @@ impl AuditSubject {
 		}
 	}
 
-	fn kind(self) -> &'static str {
+	fn kind(&self) -> &'static str {
 		match self {
+			Self::Craft(_) => "craft",
 			Self::Terminal(_) => "terminal",
 			Self::Execution(_) => "execution",
 			Self::Plane => "plane",
@@ -334,8 +353,9 @@ impl AuditSubject {
 		}
 	}
 
-	fn identity(self) -> Option<String> {
+	fn identity(&self) -> Option<String> {
 		match self {
+			Self::Craft(id) => Some(id.clone()),
 			Self::Terminal(crate::TerminalId(id)) => Some(id.to_string()),
 			Self::Execution(crate::RunId(id)) => Some(id.to_string()),
 			Self::Plane => None,
@@ -355,6 +375,9 @@ impl AuditSubject {
 /// guards can never drift apart.
 pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 	match command {
+		Command::InstallCraft { .. } => {
+			Some(AuditDecision::CraftInstallationApproved)
+		}
 		Command::OpenTerminal { .. } => Some(AuditDecision::TerminalOpened),
 		Command::CloseTerminal { .. } => Some(AuditDecision::TerminalClosed),
 		Command::ResolveExecution(_) => {
@@ -410,6 +433,9 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 /// that exists.
 fn refused_subject(command: &Command) -> AuditSubject {
 	match command {
+		Command::InstallCraft { confirmation } => {
+			AuditSubject::Craft(refused_craft_identity(confirmation))
+		}
 		Command::OpenTerminal { .. } => AuditSubject::Plane,
 		Command::CloseTerminal { terminal_id } => {
 			AuditSubject::Terminal(*terminal_id)
@@ -452,6 +478,27 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::ImportConversation { .. }
 		| Command::ResumeImportedConversation { .. }
 		| Command::TransitionRun { .. } => AuditSubject::Plane,
+	}
+}
+
+fn refused_craft_identity(
+	confirmation: &crate::CraftInstallationConfirmation,
+) -> String {
+	if let crate::CraftSource::GitHubRelease { repository, .. } =
+		&confirmation.source
+		&& let Some(name) = repository.split_once('/').map(|(_, name)| name)
+		&& let Some(id) = name.strip_prefix("jet-craft-")
+		&& !id.is_empty()
+		&& id.len() <= 80
+		&& id.bytes().all(|byte| {
+			byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')
+		}) {
+		return id.to_owned();
+	}
+	if crate::craft_installation::is_sha256(&confirmation.artifact_sha256) {
+		confirmation.artifact_sha256.clone()
+	} else {
+		"unidentified".into()
 	}
 }
 
@@ -522,6 +569,12 @@ pub(crate) fn stored_setting(
 		(SettingKey::SecurityAuditRetentionDays, SettingValue::Count(_)) => {
 			Some(AuditDecision::AuditRetentionChanged)
 		}
+		(SettingKey::DeveloperMode, SettingValue::Flag(true)) => {
+			Some(AuditDecision::DeveloperModeEnabled)
+		}
+		(SettingKey::DeveloperMode, SettingValue::Flag(false)) => {
+			Some(AuditDecision::DeveloperModeDisabled)
+		}
 		(
 			SettingKey::GitAutoCommit,
 			SettingValue::Text(_) | SettingValue::Count(_),
@@ -529,6 +582,10 @@ pub(crate) fn stored_setting(
 		| (
 			SettingKey::SecurityAuditRetentionDays,
 			SettingValue::Flag(_) | SettingValue::Text(_),
+		)
+		| (
+			SettingKey::DeveloperMode,
+			SettingValue::Text(_) | SettingValue::Count(_),
 		)
 		| (SettingKey::UtilityAutomaticNaming, _)
 		| (SettingKey::GitMessageInstructions, _) => None,
@@ -548,6 +605,7 @@ pub(crate) fn cleared_setting(key: SettingKey) -> Option<AuditDecision> {
 		SettingKey::SecurityAuditRetentionDays => {
 			Some(AuditDecision::AuditRetentionCleared)
 		}
+		SettingKey::DeveloperMode => Some(AuditDecision::DeveloperModeCleared),
 		SettingKey::UtilityAutomaticNaming
 		| SettingKey::GitMessageInstructions => None,
 	}

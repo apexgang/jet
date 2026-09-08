@@ -118,6 +118,12 @@ pub enum Command {
 		/// Purpose-specific input.
 		request: crate::UtilityRequest,
 	},
+	/// Install only the exact Craft release whose complete consent surface
+	/// was returned by a preceding discovery Query.
+	InstallCraft {
+		/// Repository, provenance, Artifact, authority, and trust acceptance.
+		confirmation: crate::CraftInstallationConfirmation,
+	},
 	/// Attach a daily Scheduled task to a retained Conversation.
 	CreateSchedule {
 		/// Owning Conversation.
@@ -393,6 +399,7 @@ impl Command {
 	pub(crate) fn required_capabilities(&self) -> &'static [Capability] {
 		match self {
 			Self::RequestUtility { .. }
+			| Self::InstallCraft { .. }
 			| Self::CreateSchedule { .. }
 			| Self::CancelSchedule { .. }
 			| Self::SetConversationName { .. }
@@ -465,6 +472,15 @@ pub enum CommandOutcome {
 	UtilityQueued {
 		/// Plane-assigned identity.
 		job_id: Uuid,
+	},
+	/// Durable publication work accepted for one verified Craft Artifact.
+	CraftInstallationQueued {
+		/// Stable Craft identity.
+		craft_id: String,
+		/// Publisher-declared release version.
+		version: String,
+		/// SHA-256 of the exact Artifact that will be published.
+		artifact_sha256: String,
 	},
 	/// Enabled immutable schedule and its first persisted firing.
 	ScheduleCreated(crate::ScheduledTask),
@@ -734,6 +750,7 @@ fn redacted_for_receipt(
 		}
 		Ok(
 			outcome @ (CommandOutcome::UtilityQueued { .. }
+			| CommandOutcome::CraftInstallationQueued { .. }
 			| CommandOutcome::UserEditApplied(_)
 			| CommandOutcome::ConversationNamed(_)
 			| CommandOutcome::RunNamed(_)
@@ -795,6 +812,22 @@ async fn execute_new(
 	match command {
 		Command::RequestUtility { request } => {
 			crate::utility_work::admit(tx, actor, command_id, request).await
+		}
+		Command::InstallCraft { .. } => {
+			let Prepared::CraftInstallation(prepared) = prepared else {
+				return Err(CoreError::internal(
+					"craft.installation_unprepared",
+					"a Craft installation reached its transaction without a verified Artifact",
+				));
+			};
+			crate::craft_installation::record(
+				tx,
+				actor,
+				command_id,
+				prepared,
+				now_unix_ms,
+			)
+			.await
 		}
 		Command::ApplyUserEdit { .. } => {
 			let Prepared::UserEdit(prepared) = prepared else {

@@ -2,6 +2,10 @@
 
 A Craft is an executable Harness adapter. Rust adapters can use `jet-craft-sdk`; other languages implement the same byte contract. The SDK has no dependency on `jet-core`, creates no processes, and grants no credentials or broker authority. Bundled Harness implementations and execution supervision are separate work in issues #20 and #21.
 
+Public release discovery, exact consent, verified Artifact publication, and
+the Developer Mode exception are documented in
+[Third-party Craft installation](craft-installation.md).
+
 The wire DTOs live in `jet-protocol`, separately from core domain types. `just contracts` emits `packages/jet-protocol/contracts/craft-v1.schema.json` directly from those DTOs and generates Swift and TypeScript model declarations alongside it; `craft-fixtures.json` is shared by the Rust decoder tests and `just contracts-test`. See [Jet wire contracts](wire-contracts.md) for the artifacts, the drift gate, and the shared corpora. The subprocess tests exercise the executable SDK contract. `packages/jet-craft-sdk/tests/fixtures/craft-spec.toml` is a complete specification example.
 
 ## Transport and handshake
