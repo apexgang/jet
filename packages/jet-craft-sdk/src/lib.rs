@@ -13,3 +13,8 @@ pub use jet_protocol::{
 	PresentationBlock,
 };
 pub use specification::parse_specification;
+
+mod utility;
+mod utility_credentials;
+mod utility_http;
+pub use utility::{UtilityProvider, serve_utility, utility_model};
