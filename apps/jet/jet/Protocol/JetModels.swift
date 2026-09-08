@@ -189,6 +189,7 @@ public struct ClientPublicKey {
 }
 
 public enum CommandRequest {
+    case `request_utility`(CommandRequestRequestUtility)
     case `create_schedule`(CommandRequestCreateSchedule)
     case `cancel_schedule`(CommandRequestCancelSchedule)
     case `apply_user_edit`(CommandRequestApplyUserEdit)
@@ -226,6 +227,7 @@ public enum CommandRequest {
 }
 
 public enum CommandResponse {
+    case `utility_queued`(CommandResponseUtilityQueued)
     case `schedule_created`(CommandResponseScheduleCreated)
     case `schedule_canceled`(CommandResponseScheduleCanceled)
     case `user_edit_applied`(CommandResponseUserEditApplied)
@@ -672,6 +674,7 @@ public enum PromotionState: String {
 }
 
 public enum QueryRequest {
+    case `utility`(QueryRequestUtility)
     case `scheduled_tasks`(QueryRequestScheduledTasks)
     case `editable_file`(QueryRequestEditableFile)
     case `workspace_terminals`(QueryRequestWorkspaceTerminals)
@@ -700,6 +703,7 @@ public enum QueryRequest {
 }
 
 public enum QueryResponse {
+    case `utility`(QueryResponseUtility)
     case `scheduled_tasks`(QueryResponseScheduledTasks)
     case `editable_file`(QueryResponseEditableFile)
     case `workspace_terminals`(QueryResponseWorkspaceTerminals)
@@ -908,6 +912,10 @@ public enum ServerMessage {
 }
 
 public enum SettingKey: String {
+    case `utility.account_binding` = "utility.account_binding"
+    case `utility.content_consent` = "utility.content_consent"
+    case `utility.autodelete_compilation` = "utility.autodelete_compilation"
+    case `utility.git_text` = "utility.git_text"
     case `utility.automatic_naming` = "utility.automatic_naming"
     case `git.auto_commit` = "git.auto_commit"
     case `git.message_instructions` = "git.message_instructions"
@@ -1006,6 +1014,42 @@ public enum TurnState: String {
     case `withdrawn` = "withdrawn"
     case `failed` = "failed"
     case `outcome_unknown` = "outcome_unknown"
+}
+
+public struct UtilityJob {
+    public let `binding_id`: String?
+    public let `job_id`: String
+    public let `model`: String?
+    public let `outcome`: UtilityOutcome
+    public let `plane_id`: String
+    public let `policy`: UtilityPolicy
+    public let `provider`: String?
+    public let `purpose`: UtilityPurpose
+}
+
+public enum UtilityOutcome {
+    case `pending`(UtilityOutcomePending)
+    case `draft`(UtilityOutcomeDraft)
+    case `text`(UtilityOutcomeText)
+    case `refused`(UtilityOutcomeRefused)
+}
+
+public struct UtilityPolicy {
+    public let `cross_provider_consent`: Bool
+    public let `enabled`: Bool
+    public let `version`: UInt32
+}
+
+public enum UtilityPurpose: String {
+    case `naming` = "naming"
+    case `git_text` = "git_text"
+    case `autodelete` = "autodelete"
+}
+
+public enum UtilityRequest {
+    case `naming`(UtilityRequestNaming)
+    case `git_text`(UtilityRequestGitText)
+    case `autodelete`(UtilityRequestAutodelete)
 }
 
 public struct VersionRange {
@@ -1159,6 +1203,10 @@ public struct ClientMessageCommand {
     public let `command`: CommandRequest
     public let `command_id`: String
     public let `id`: UInt64
+}
+
+public struct CommandRequestRequestUtility {
+    public let `request`: UtilityRequest
 }
 
 public struct CommandRequestCreateSchedule {
@@ -1332,6 +1380,10 @@ public struct CommandRequestResumeImportedConversation {
     public let `import_id`: String
     public let `retention`: RetentionPolicy?
     public let `working_tree`: WorkingTreeRequest
+}
+
+public struct CommandResponseUtilityQueued {
+    public let `job_id`: String
 }
 
 public struct CommandResponseScheduleCreated {
@@ -1683,6 +1735,10 @@ public struct PromotionDestinationBranch {
     public let `name`: String
 }
 
+public struct QueryRequestUtility {
+    public let `job_id`: String
+}
+
 public struct QueryRequestScheduledTasks {
     public let `conversation_id`: String
 }
@@ -1787,6 +1843,10 @@ public struct QueryRequestSearch {
 }
 
 public struct QueryRequestExternalConversations {
+
+}
+
+public struct QueryResponseUtility {
 
 }
 
@@ -2090,6 +2150,37 @@ public struct ToolAvailabilityPresent {
 
 public struct ToolAvailabilityMissing {
 
+}
+
+public struct UtilityOutcomePending {
+
+}
+
+public struct UtilityOutcomeDraft {
+    public let `inactive_days`: UInt32
+}
+
+public struct UtilityOutcomeText {
+    public let `body`: String
+    public let `fallback_reason`: String?
+    public let `text`: String
+}
+
+public struct UtilityOutcomeRefused {
+    public let `reason`: String
+}
+
+public struct UtilityRequestNaming {
+    public let `run_id`: String
+}
+
+public struct UtilityRequestGitText {
+    public let `run_id`: String
+    public let `turn`: UInt32
+}
+
+public struct UtilityRequestAutodelete {
+    public let `prompt`: String
 }
 
 public struct WorkingTreeNoProject {

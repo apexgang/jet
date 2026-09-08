@@ -27,6 +27,11 @@ pub(super) fn snapshot(
 /// The protocol minor that first named each Setting.
 fn introduced_in(key: SettingKey) -> u32 {
 	match key {
+		SettingKey::UtilityAccountBinding => wire::UTILITY_MINOR,
+		SettingKey::UtilityContentConsent => wire::UTILITY_MINOR,
+		SettingKey::UtilityAutodeleteCompilation => wire::UTILITY_MINOR,
+		SettingKey::UtilityGitText => wire::UTILITY_MINOR,
+
 		SettingKey::UtilityAutomaticNaming
 		| SettingKey::GitAutoCommit
 		| SettingKey::GitMessageInstructions => wire::SETTINGS_AND_CAPABILITIES_MINOR,
@@ -49,6 +54,17 @@ fn resolved_setting(resolved: ResolvedSetting) -> wire::ResolvedSetting {
 
 pub(super) fn key(key: SettingKey) -> wire::SettingKey {
 	match key {
+		SettingKey::UtilityAccountBinding => {
+			wire::SettingKey::UtilityAccountBinding
+		}
+		SettingKey::UtilityContentConsent => {
+			wire::SettingKey::UtilityContentConsent
+		}
+		SettingKey::UtilityAutodeleteCompilation => {
+			wire::SettingKey::UtilityAutodeleteCompilation
+		}
+		SettingKey::UtilityGitText => wire::SettingKey::UtilityGitText,
+
 		SettingKey::UtilityAutomaticNaming => {
 			wire::SettingKey::UtilityAutomaticNaming
 		}
@@ -64,6 +80,17 @@ pub(super) fn key(key: SettingKey) -> wire::SettingKey {
 
 pub(super) fn key_from_wire(key: wire::SettingKey) -> SettingKey {
 	match key {
+		wire::SettingKey::UtilityAccountBinding => {
+			SettingKey::UtilityAccountBinding
+		}
+		wire::SettingKey::UtilityContentConsent => {
+			SettingKey::UtilityContentConsent
+		}
+		wire::SettingKey::UtilityAutodeleteCompilation => {
+			SettingKey::UtilityAutodeleteCompilation
+		}
+		wire::SettingKey::UtilityGitText => SettingKey::UtilityGitText,
+
 		wire::SettingKey::UtilityAutomaticNaming => {
 			SettingKey::UtilityAutomaticNaming
 		}

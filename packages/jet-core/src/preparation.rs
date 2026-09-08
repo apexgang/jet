@@ -221,7 +221,8 @@ impl Core {
 					| WorkingTreeRequest::LocalCheckout { .. } => Ok(Prepared::Nothing),
 				}
 			}
-			Command::CreateSchedule { .. }
+			Command::RequestUtility { .. }
+			| Command::CreateSchedule { .. }
 			| Command::CancelSchedule { .. }
 			| Command::SetConversationName { .. }
 			| Command::SetRunName { .. }

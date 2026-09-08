@@ -1,25 +1,22 @@
-//! Turn queue reads through the typed client boundary.
+//! Durable Utility results through the typed client boundary.
 use crate::connection::{Client, ClientError};
 use crate::requests::unexpected;
 use jet_protocol::{QueryRequest, QueryResponse};
 use uuid::Uuid;
 impl Client {
-	/// Reads the authoritative Turn queue and Event fence (protocol minor 16).
-	/// Vector order is queue position; admission identity is stable as it moves.
+	/// Reads the attributed result of a Utility request (protocol minor 22).
+	/// Results contain data only; this method grants no execution authority.
 	///
 	/// # Errors
 	/// Returns a feature, transport, or stable remote error.
-	pub async fn turn_queue(
+	pub async fn utility(
 		&self,
-		conversation_id: Uuid,
-	) -> Result<jet_protocol::TurnQueue, ClientError> {
-		self.require_minor(jet_protocol::TURN_QUEUE_MINOR)?;
-		match self
-			.query(QueryRequest::TurnQueue { conversation_id })
-			.await?
-		{
-			QueryResponse::TurnQueue(queue) => Ok(queue),
-			other @ (QueryResponse::Utility(_)
+		job_id: Uuid,
+	) -> Result<jet_protocol::UtilityJob, ClientError> {
+		self.require_minor(jet_protocol::UTILITY_MINOR)?;
+		match self.query(QueryRequest::Utility { job_id }).await? {
+			QueryResponse::Utility(job) => Ok(job),
+			other @ (QueryResponse::TurnQueue(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }

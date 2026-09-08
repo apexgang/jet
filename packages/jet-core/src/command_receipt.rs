@@ -23,6 +23,7 @@ pub(crate) fn outcome_version(
 		Ok(
 			CommandOutcome::ConversationNamed(_)
 			| CommandOutcome::RunNamed(_)
+			| CommandOutcome::UtilityQueued { .. }
 			| CommandOutcome::ScheduleCreated(_)
 			| CommandOutcome::ScheduleCanceled { .. },
 		) => OUTCOME_VERSION,

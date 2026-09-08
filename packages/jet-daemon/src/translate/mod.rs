@@ -19,6 +19,7 @@ mod search;
 mod setting;
 mod terminal;
 mod turn;
+pub(crate) mod utility;
 
 pub(crate) use capability::snapshot as capabilities;
 pub(crate) use pairing::{client as paired_client, pending as pairing_pending};
@@ -87,6 +88,9 @@ pub(crate) fn query(
 		wire::QueryRequest::RunExecution { run_id } => Query::RunExecution {
 			run_id: RunId(*run_id),
 		},
+		wire::QueryRequest::Utility { job_id } => {
+			Query::Utility { job_id: *job_id }
+		}
 		wire::QueryRequest::ScheduledTasks { conversation_id } => {
 			Query::ScheduledTasks {
 				conversation_id: ConversationId(*conversation_id),
@@ -207,6 +211,9 @@ pub(crate) fn query_result(
 		}
 		QueryResult::ChangeDiff(diff) => {
 			wire::QueryResponse::ChangeDiff(Box::new(checkpoint::diff(*diff)))
+		}
+		QueryResult::Utility(job) => {
+			wire::QueryResponse::Utility(utility::job(job))
 		}
 		QueryResult::ScheduledTasks(snapshot) => {
 			wire::QueryResponse::ScheduledTasks(wire::ScheduledTasks {
@@ -427,6 +434,11 @@ pub(crate) fn command(
 				conversation_id: ConversationId(*conversation_id),
 			}
 		}
+		wire::CommandRequest::RequestUtility { request } => {
+			Command::RequestUtility {
+				request: utility::request(request.clone()),
+			}
+		}
 		wire::CommandRequest::SetSetting { key, scope, value } => {
 			Command::SetSetting {
 				key: setting::key_from_wire(*key),
@@ -545,6 +557,9 @@ pub(crate) fn command_outcome(
 	minor: u32,
 ) -> wire::CommandResponse {
 	match outcome {
+		CommandOutcome::UtilityQueued { job_id } => {
+			wire::CommandResponse::UtilityQueued { job_id }
+		}
 		CommandOutcome::UserEditApplied(edit) => {
 			wire::CommandResponse::UserEditApplied {
 				target: file_target(edit.target),

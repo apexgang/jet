@@ -32,6 +32,16 @@ export type CraftResume = { native_conversation: string; version: ProtocolVersio
 
 export type CraftSpecification = { broker_permissions?: Array<BrokerPermission>; features?: Array<CraftFeature>; harness: string; host_access?: Array<CraftHostAccess>; id: string; protocol: ProtocolOffer; schema: ProtocolVersion };
 
+export type CraftUtilityModel = { model: string; version: number };
+
+export type CraftUtilityReply = { model: string; output: string; version: number };
+
+export type CraftUtilityRequest = { binding_id: string; credential_reference: CredentialReference; input: UtilityInput; model: string; version: number };
+
+export type CredentialItem = { account: string; service: string };
+
+export type CredentialReference = { item: CredentialItem; source: "platform_store" } | { helper: string; source: "external_helper" } | { source: "harness_native" } | { established_at_daemon_start: number; source: "session_only" };
+
 export type NegotiatedProtocol = { capabilities: Array<string>; family: ProtocolFamily; version: ProtocolVersion };
 
 export type Presentation = { kind: "text"; text: string } | { kind: "markdown"; text: string } | { actions: Array<PresentationAction>; kind: "actions" };
@@ -47,3 +57,5 @@ export type ProtocolVersion = { major: number; minor: number };
 export type RunActivity = "working" | "waiting_for_user" | "waiting_for_approval" | "waiting_for_auth" | "waiting_for_quota" | "reconnecting";
 
 export type TurnOutcome = "completed" | "interrupted";
+
+export type UtilityInput = { opening_context: string; purpose: "naming"; title: string } | { instructions: string; patch: string; purpose: "git_text" } | { prompt: string; purpose: "autodelete" };

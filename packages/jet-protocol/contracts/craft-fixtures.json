@@ -98,5 +98,20 @@
     "schema": "CraftEvent",
     "valid": false,
     "payload": "{\"kind\": \"progress\", \"source_offset\": 17, \"checkpoint\": {}}"
+  },
+  {
+    "schema": "CraftUtilityModel",
+    "valid": true,
+    "payload": "{\"version\":1,\"model\":\"pinned-model\"}"
+  },
+  {
+    "schema": "CraftUtilityRequest",
+    "valid": true,
+    "payload": "{\"version\":1,\"model\":\"pinned-model\",\"binding_id\":\"00000000-0000-0000-0000-000000000038\",\"credential_reference\":{\"source\":\"harness_native\"},\"input\":{\"purpose\":\"autodelete\",\"prompt\":\"Inactive for 90 days\"}}"
+  },
+  {
+    "schema": "CraftUtilityReply",
+    "valid": true,
+    "payload": "{\"version\":1,\"model\":\"pinned-model\",\"output\":\"{\\\"inactive_days\\\":90}\"}"
   }
 ]

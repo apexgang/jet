@@ -29,6 +29,19 @@ pub enum SettingScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum SettingKey {
+	/// Plane-wide utility.account_binding policy (Utility minor).
+	#[serde(rename = "utility.account_binding")]
+	UtilityAccountBinding,
+	/// Plane-wide utility.content_consent policy (Utility minor).
+	#[serde(rename = "utility.content_consent")]
+	UtilityContentConsent,
+	/// Plane-wide utility.autodelete_compilation policy (Utility minor).
+	#[serde(rename = "utility.autodelete_compilation")]
+	UtilityAutodeleteCompilation,
+	/// Plane-wide utility.git_text policy (Utility minor).
+	#[serde(rename = "utility.git_text")]
+	UtilityGitText,
+
 	/// Whether the Utility model names Conversations automatically.
 	#[serde(rename = "utility.automatic_naming")]
 	UtilityAutomaticNaming,

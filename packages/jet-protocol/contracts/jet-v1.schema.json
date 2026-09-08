@@ -1134,6 +1134,24 @@
       "description": "Commands a client may execute.",
       "oneOf": [
         {
+          "description": "Admit one bounded Utility request.",
+          "type": "object",
+          "properties": {
+            "request": {
+              "description": "Purpose-specific input references.",
+              "$ref": "#/$defs/UtilityRequest"
+            },
+            "type": {
+              "type": "string",
+              "const": "request_utility"
+            }
+          },
+          "required": [
+            "type",
+            "request"
+          ]
+        },
+        {
           "description": "Attach a daily Scheduled task to a retained Conversation.",
           "type": "object",
           "properties": {
@@ -1973,6 +1991,25 @@
     "CommandResponse": {
       "description": "Durable Command outcomes.",
       "oneOf": [
+        {
+          "description": "Durable Utility admission; query for its result.",
+          "type": "object",
+          "properties": {
+            "job_id": {
+              "description": "Plane-assigned job identity.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "utility_queued"
+            }
+          },
+          "required": [
+            "type",
+            "job_id"
+          ]
+        },
         {
           "description": "Enabled daily schedule.",
           "type": "object",
@@ -4874,6 +4911,25 @@
       "description": "Queries a client may run.",
       "oneOf": [
         {
+          "description": "Read a durable Utility result.",
+          "type": "object",
+          "properties": {
+            "job_id": {
+              "description": "Plane-assigned job identity.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "utility"
+            }
+          },
+          "required": [
+            "type",
+            "job_id"
+          ]
+        },
+        {
           "description": "Enabled schedules in one Conversation.",
           "type": "object",
           "properties": {
@@ -5353,6 +5409,20 @@
     "QueryResponse": {
       "description": "Query snapshots.",
       "oneOf": [
+        {
+          "description": "Attributed Utility result, with no execution authority.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "utility"
+            }
+          },
+          "$ref": "#/$defs/UtilityJob",
+          "required": [
+            "type"
+          ]
+        },
         {
           "description": "Fenced schedule snapshot.",
           "type": "object",
@@ -6950,6 +7020,26 @@
       "description": "A Setting this protocol minor names. A spelling it does not name is\nrefused rather than guessed (ADR-0094).",
       "oneOf": [
         {
+          "description": "Plane-wide utility.account_binding policy (Utility minor).",
+          "type": "string",
+          "const": "utility.account_binding"
+        },
+        {
+          "description": "Plane-wide utility.content_consent policy (Utility minor).",
+          "type": "string",
+          "const": "utility.content_consent"
+        },
+        {
+          "description": "Plane-wide utility.autodelete_compilation policy (Utility minor).",
+          "type": "string",
+          "const": "utility.autodelete_compilation"
+        },
+        {
+          "description": "Plane-wide utility.git_text policy (Utility minor).",
+          "type": "string",
+          "const": "utility.git_text"
+        },
+        {
           "description": "Whether the Utility model names Conversations automatically.",
           "type": "string",
           "const": "utility.automatic_naming"
@@ -7520,6 +7610,269 @@
           "description": "Delivery or execution cannot currently be reconciled.",
           "type": "string",
           "const": "outcome_unknown"
+        }
+      ]
+    },
+    "UtilityJob": {
+      "description": "Durable Utility result and its complete routing and policy attribution.",
+      "type": "object",
+      "properties": {
+        "binding_id": {
+          "description": "Explicit selected binding, including one that later became unavailable.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "job_id": {
+          "description": "Plane-assigned request identity.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "model": {
+          "description": "Exact selected Model; absent when selection was unavailable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "description": "Validated data or a closed failure.",
+          "$ref": "#/$defs/UtilityOutcome"
+        },
+        "plane_id": {
+          "description": "The only Plane authorized to execute this request.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "policy": {
+          "description": "Policy at admission and the consent it recorded.",
+          "$ref": "#/$defs/UtilityPolicy"
+        },
+        "provider": {
+          "description": "Exact selected Provider; absent when no usable binding was configured.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "purpose": {
+          "description": "Purpose, independent of the generated data.",
+          "$ref": "#/$defs/UtilityPurpose"
+        }
+      },
+      "required": [
+        "job_id",
+        "plane_id",
+        "purpose",
+        "policy",
+        "outcome"
+      ]
+    },
+    "UtilityOutcome": {
+      "description": "A Utility result carries no execution or deletion authority.",
+      "oneOf": [
+        {
+          "description": "Durable admission, awaiting a single inference attempt.",
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "pending"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "status"
+          ]
+        },
+        {
+          "description": "A draft inactivity predicate. It cannot execute until reviewed separately.",
+          "type": "object",
+          "properties": {
+            "inactive_days": {
+              "description": "Whole days of inactivity, from 1 through 36500.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "status": {
+              "type": "string",
+              "const": "draft"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "inactive_days"
+          ]
+        },
+        {
+          "description": "Validated text, or a deterministic local fallback. Never executed.",
+          "type": "object",
+          "properties": {
+            "body": {
+              "description": "Git body; empty for naming.",
+              "type": "string"
+            },
+            "fallback_reason": {
+              "description": "Content-free fallback explanation; absent for inference.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "const": "text"
+            },
+            "text": {
+              "description": "Name or Git subject.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "text",
+            "body"
+          ]
+        },
+        {
+          "description": "Compilation did not produce a usable draft.",
+          "type": "object",
+          "properties": {
+            "reason": {
+              "description": "Stable, content-free reason.",
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "reason"
+          ]
+        }
+      ]
+    },
+    "UtilityPolicy": {
+      "description": "The exact policy used by a job. Version 1 means smallest suitable Model,\nminimum reasoning, one inference request, no tools, and bounded input/output.",
+      "type": "object",
+      "properties": {
+        "cross_provider_consent": {
+          "description": "Persistent consent to send content outside its originating Provider.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "Whether the purpose was enabled.",
+          "type": "boolean"
+        },
+        "version": {
+          "description": "Version of the allowlists and limits.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "version",
+        "enabled",
+        "cross_provider_consent"
+      ]
+    },
+    "UtilityPurpose": {
+      "description": "Closed set of Utility purposes, used for durable attribution.",
+      "oneOf": [
+        {
+          "description": "Conversation or Run naming.",
+          "type": "string",
+          "const": "naming"
+        },
+        {
+          "description": "Git commit or pull-request text.",
+          "type": "string",
+          "const": "git_text"
+        },
+        {
+          "description": "Unapproved natural-language rule compilation.",
+          "type": "string",
+          "const": "autodelete"
+        }
+      ]
+    },
+    "UtilityRequest": {
+      "description": "One purpose-specific request for Jet-owned inference.",
+      "oneOf": [
+        {
+          "description": "Suggest a Run name using only its title and opening input.",
+          "type": "object",
+          "properties": {
+            "purpose": {
+              "type": "string",
+              "const": "naming"
+            },
+            "run_id": {
+              "description": "Owning Run on this Plane.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "purpose",
+            "run_id"
+          ]
+        },
+        {
+          "description": "Draft Git commit or pull-request text from one retained turn.",
+          "type": "object",
+          "properties": {
+            "purpose": {
+              "type": "string",
+              "const": "git_text"
+            },
+            "run_id": {
+              "description": "Owning Run.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "turn": {
+              "description": "Completed or interrupted turn, starting at one.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "purpose",
+            "run_id",
+            "turn"
+          ]
+        },
+        {
+          "description": "Compile only this rule prompt into an unapproved draft.",
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "description": "Rule prompt, bounded to 4096 UTF-8 bytes.",
+              "type": "string"
+            },
+            "purpose": {
+              "type": "string",
+              "const": "autodelete"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "purpose",
+            "prompt"
+          ]
         }
       ]
     },

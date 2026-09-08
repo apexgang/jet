@@ -7,6 +7,9 @@ use jet_protocol::{
 #[derive(schemars::JsonSchema)]
 #[expect(dead_code, reason = "schema roots, not instantiated runtime data")]
 struct CraftContracts {
+	utility_model: jet_protocol::CraftUtilityModel,
+	utility_request: jet_protocol::CraftUtilityRequest,
+	utility_reply: jet_protocol::CraftUtilityReply,
 	hello: CraftHello,
 	ready: CraftReady,
 	command: CraftCommand,

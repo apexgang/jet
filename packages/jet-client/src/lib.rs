@@ -22,3 +22,5 @@ mod user_input_requests;
 pub use connection::{Client, ClientError};
 pub use handshake::ClientIdentity;
 pub use ssh::SshEndpoint;
+
+mod utility_requests;

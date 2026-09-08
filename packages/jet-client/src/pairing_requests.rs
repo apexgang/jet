@@ -27,7 +27,8 @@ impl Client {
 		self.require_minor(jet_protocol::PAIRING_MINOR)?;
 		match self.query(QueryRequest::Pairing).await? {
 			QueryResponse::Pairing(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::ScheduledTasks(_)
+			other @ (QueryResponse::Utility(_)
+			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -77,7 +78,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingGateSet { gate } => Ok(gate),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -136,7 +138,8 @@ impl Client {
 				pending,
 				disclosure,
 			} => Ok((pending, disclosure)),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -201,7 +204,8 @@ impl Client {
 			CommandResponse::PairingClaimed { pending, challenge } => {
 				Ok((pending, challenge))
 			}
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -264,7 +268,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingConfirmed { pending } => Ok(pending),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -323,7 +328,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingCompleted { client } => Ok(client),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -381,7 +387,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairedClientAccessSet { client } => Ok(client),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)
@@ -437,7 +444,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairedClientRevoked { client_id } => Ok(client_id),
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)

@@ -40,7 +40,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::PromotionPreview(preview) => Ok(*preview),
-			other @ (QueryResponse::ScheduledTasks(_)
+			other @ (QueryResponse::Utility(_)
+			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -98,7 +99,8 @@ impl Client {
 			CommandResponse::WorkspacePromotionRecorded(promotion) => {
 				Ok(promotion)
 			}
-			other @ (CommandResponse::ScheduleCreated { .. }
+			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
 			| CommandResponse::ConversationNamed(_)

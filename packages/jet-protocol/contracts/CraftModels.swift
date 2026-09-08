@@ -109,6 +109,37 @@ public struct CraftSpecification {
     public let `schema`: ProtocolVersion
 }
 
+public struct CraftUtilityModel {
+    public let `model`: String
+    public let `version`: UInt32
+}
+
+public struct CraftUtilityReply {
+    public let `model`: String
+    public let `output`: String
+    public let `version`: UInt32
+}
+
+public struct CraftUtilityRequest {
+    public let `binding_id`: String
+    public let `credential_reference`: CredentialReference
+    public let `input`: UtilityInput
+    public let `model`: String
+    public let `version`: UInt32
+}
+
+public struct CredentialItem {
+    public let `account`: String
+    public let `service`: String
+}
+
+public enum CredentialReference {
+    case `platform_store`(CredentialReferencePlatformStore)
+    case `external_helper`(CredentialReferenceExternalHelper)
+    case `harness_native`(CredentialReferenceHarnessNative)
+    case `session_only`(CredentialReferenceSessionOnly)
+}
+
 public struct NegotiatedProtocol {
     public let `capabilities`: [String]
     public let `family`: ProtocolFamily
@@ -156,6 +187,12 @@ public enum RunActivity: String {
 public enum TurnOutcome: String {
     case `completed` = "completed"
     case `interrupted` = "interrupted"
+}
+
+public enum UtilityInput {
+    case `naming`(UtilityInputNaming)
+    case `git_text`(UtilityInputGitText)
+    case `autodelete`(UtilityInputAutodelete)
 }
 
 public struct CraftActionInvoke {
@@ -281,6 +318,22 @@ public struct CraftHostAccessNetwork {
     public let `destination`: String
 }
 
+public struct CredentialReferencePlatformStore {
+    public let `item`: CredentialItem
+}
+
+public struct CredentialReferenceExternalHelper {
+    public let `helper`: String
+}
+
+public struct CredentialReferenceHarnessNative {
+
+}
+
+public struct CredentialReferenceSessionOnly {
+    public let `established_at_daemon_start`: UInt64
+}
+
 public struct PresentationText {
     public let `text`: String
 }
@@ -291,4 +344,18 @@ public struct PresentationMarkdown {
 
 public struct PresentationActions {
     public let `actions`: [PresentationAction]
+}
+
+public struct UtilityInputNaming {
+    public let `opening_context`: String
+    public let `title`: String
+}
+
+public struct UtilityInputGitText {
+    public let `instructions`: String
+    public let `patch`: String
+}
+
+public struct UtilityInputAutodelete {
+    public let `prompt`: String
 }

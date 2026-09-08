@@ -129,7 +129,7 @@ pub use handshake::{
 	PREFACE, PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION,
 	REMOTE_AUTH_MINOR, SCHEDULES_MINOR, SEARCH_MINOR, SECURITY_AUDIT_MINOR,
 	SEEDED_WORKSPACES_MINOR, SETTINGS_AND_CAPABILITIES_MINOR, ServerHello,
-	TURN_QUEUE_MINOR, USER_INPUT_MINOR, VersionRange,
+	TURN_QUEUE_MINOR, USER_INPUT_MINOR, UTILITY_MINOR, VersionRange,
 	WORKSPACE_PROMOTION_MINOR, WORKSPACE_TERMINALS_MINOR, WORKSPACES_MINOR,
 };
 pub use import::{
@@ -171,4 +171,13 @@ pub use stream_control::StreamControl;
 pub use workspace::{
 	BaseSelection, SeedSelection, WorkingTree, WorkingTreeRequest, Workspace,
 	WorkspaceBase, WorkspaceSeed,
+};
+
+mod utility;
+pub use utility::{
+	UtilityJob, UtilityOutcome, UtilityPolicy, UtilityPurpose, UtilityRequest,
+};
+mod craft_utility;
+pub use craft_utility::{
+	CraftUtilityModel, CraftUtilityReply, CraftUtilityRequest, UtilityInput,
 };

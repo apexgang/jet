@@ -28,6 +28,11 @@ use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
+	/// Read the durable result of one Utility request.
+	Utility {
+		/// Plane-assigned identity.
+		job_id: uuid::Uuid,
+	},
 	/// Enabled schedules in one Conversation.
 	ScheduledTasks {
 		/// Owning Conversation.
@@ -182,6 +187,8 @@ pub enum Query {
 /// Snapshots returned by [`Core::query`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult {
+	/// Durable Utility result.
+	Utility(crate::UtilityJob),
 	/// Fenced schedule snapshot.
 	ScheduledTasks(crate::ScheduledTasks),
 	/// Bounded editable content and its exact file Revision.
@@ -296,6 +303,11 @@ impl Core {
 			Query::NextChangeDiff { cursor } => {
 				crate::checkpoint_query::next(self, cursor).await
 			}
+			Query::Utility { job_id } => self
+				.store
+				.read(async |tx| crate::utility_work::query(tx, job_id).await)
+				.await
+				.map(QueryResult::Utility),
 			Query::ScheduledTasks { conversation_id } => self
 				.store
 				.read(async |tx| {

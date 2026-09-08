@@ -285,7 +285,10 @@ impl Actor {
 /// One running core bound to one Plane store.
 #[derive(Debug)]
 pub struct Core {
+	utility_host: Option<Arc<dyn UtilityHost>>,
+	utility_work: tokio::sync::Mutex<()>,
 	run_work: tokio::sync::Notify,
+	utility_wake: tokio::sync::Notify,
 	turn_wake: tokio::sync::watch::Sender<()>,
 	run_host: Option<Arc<dyn run_host::RunHost>>,
 	terminal_host: Option<Arc<dyn terminal::TerminalHost>>,
@@ -373,7 +376,10 @@ impl Core {
 			started_at,
 		);
 		let core = Self {
+			utility_host: None,
+			utility_work: tokio::sync::Mutex::new(()),
 			run_work: tokio::sync::Notify::new(),
+			utility_wake: tokio::sync::Notify::new(),
 			turn_wake: tokio::sync::watch::channel(()).0,
 			run_host: None,
 			terminal_host: None,
@@ -508,5 +514,8 @@ mod utility;
 pub use utility::{UtilityJob, UtilityOutcome, UtilityPurpose, UtilityRequest};
 
 mod utility_host;
+mod utility_work;
 pub use utility::UtilityPolicy;
 pub use utility_host::{UtilityHost, UtilityInput, UtilityModel, UtilityReply};
+mod utility_input;
+mod utility_output;
