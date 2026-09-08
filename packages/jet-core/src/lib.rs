@@ -510,6 +510,10 @@ mod terminal_orphan;
 #[path = "schedule_tests.rs"]
 mod schedule_tests;
 
+#[cfg(test)]
+#[path = "utility_tests.rs"]
+mod utility_tests;
+
 mod utility;
 pub use utility::{UtilityJob, UtilityOutcome, UtilityPurpose, UtilityRequest};
 
