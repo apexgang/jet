@@ -6,4 +6,7 @@ name = "jet"
 script = ""
 
 [cleanup]
-script = "just clean"
+script = '''
+cd "$CODEX_WORKTREE_PATH"
+cd packages
+just clean'''
