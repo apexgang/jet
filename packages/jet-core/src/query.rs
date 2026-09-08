@@ -33,6 +33,11 @@ pub enum Query {
 		/// Plane-assigned identity.
 		job_id: uuid::Uuid,
 	},
+	/// Verify a third-party Craft source and return its exact consent surface.
+	DiscoverCraft {
+		/// Repository release or explicit Developer Mode source.
+		source: crate::CraftSource,
+	},
 	/// Enabled schedules in one Conversation.
 	ScheduledTasks {
 		/// Owning Conversation.
@@ -189,6 +194,8 @@ pub enum Query {
 pub enum QueryResult {
 	/// Durable Utility result.
 	Utility(crate::UtilityJob),
+	/// Verified proposal that performs no installation by itself.
+	CraftInstallationPreview(Box<crate::CraftInstallationPreview>),
 	/// Fenced schedule snapshot.
 	ScheduledTasks(crate::ScheduledTasks),
 	/// Bounded editable content and its exact file Revision.
@@ -263,6 +270,12 @@ impl Core {
 			.expect("authority gate never closes");
 		actor.authorize(&self.remote_sessions)?;
 		match query {
+			Query::DiscoverCraft { source } => {
+				crate::craft_installation::discover(self, source)
+					.await
+					.map(Box::new)
+					.map(QueryResult::CraftInstallationPreview)
+			}
 			Query::EditableFile { target, path } => {
 				crate::user_input::read(self, target, path)
 					.await

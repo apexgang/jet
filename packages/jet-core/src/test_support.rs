@@ -15,6 +15,9 @@ use crate::capability::{
 	ToolAvailability,
 };
 use crate::clock::{Clock, SystemClock};
+use crate::craft_repository::{
+	CraftRepository, ReleasedArtifact, ReleasedCraft,
+};
 use crate::discovery::ConversationDiscovery;
 use crate::{
 	Actor, BaseSelection, ClientId, Command, CommandEnvelope, CommandId,
@@ -63,6 +66,102 @@ pub(crate) async fn start_core_discovering(
 		discovery,
 	)
 	.await
+}
+
+pub(crate) async fn start_core_installing(
+	path: &Path,
+	repository: Arc<FixedCraftRepository>,
+) -> Core {
+	start_core(path).await.with_craft_repository(repository)
+}
+
+#[derive(Debug)]
+pub(crate) struct FixedCraftRepository {
+	release: ReleasedCraft,
+	artifact: Vec<u8>,
+}
+
+impl FixedCraftRepository {
+	#[allow(clippy::too_many_arguments)]
+	pub(crate) fn release(
+		repository: &str,
+		tag: &str,
+		commit: &str,
+		specification: Vec<u8>,
+		artifact_name: &str,
+		sha256: String,
+		artifact: Vec<u8>,
+	) -> Arc<Self> {
+		Arc::new(Self {
+			release: ReleasedCraft {
+				repository: repository.into(),
+				tag: tag.into(),
+				commit: commit.into(),
+				specification,
+				artifacts: vec![ReleasedArtifact {
+					name: artifact_name.into(),
+					url: "https://github.com/download/artifact".into(),
+					sha256,
+					size: artifact.len() as u64,
+				}],
+			},
+			artifact,
+		})
+	}
+}
+
+impl CraftRepository for FixedCraftRepository {
+	fn release(
+		&self,
+		repository: &str,
+		tag: &str,
+	) -> Pin<
+		Box<
+			dyn Future<Output = Result<ReleasedCraft, crate::CoreError>>
+				+ Send
+				+ '_,
+		>,
+	> {
+		let matches =
+			self.release.repository == repository && self.release.tag == tag;
+		let release = self.release.clone();
+		Box::pin(async move {
+			matches.then_some(release).ok_or_else(|| {
+				crate::CoreError::not_found(
+					"craft.release_not_found",
+					"the Craft release does not exist",
+				)
+			})
+		})
+	}
+
+	fn download(
+		&self,
+		url: &str,
+		limit: u64,
+		mut staging: crate::craft_publication::ArtifactStaging,
+	) -> Pin<Box<dyn Future<Output = Result<(), crate::CoreError>> + Send + '_>>
+	{
+		let accepted = url == "https://github.com/download/artifact"
+			&& self.artifact.len() as u64 <= limit;
+		let artifact = self.artifact.clone();
+		Box::pin(async move {
+			if !accepted {
+				staging.abort().await;
+				return Err(crate::CoreError::not_found(
+					"craft.artifact_not_found",
+					"the Craft Artifact does not exist",
+				));
+			}
+			for chunk in artifact.chunks(64 * 1024) {
+				if let Err(error) = staging.write_chunk(chunk).await {
+					staging.abort().await;
+					return Err(error);
+				}
+			}
+			staging.finish().await
+		})
+	}
 }
 
 async fn start_core_at(

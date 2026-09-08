@@ -126,6 +126,8 @@ pub enum SettingKey {
 	GitMessageInstructions,
 	/// How many days the Plane keeps its Security audit (ADR-0105).
 	SecurityAuditRetentionDays,
+	/// Whether local and source-built third-party Crafts may be installed.
+	DeveloperMode,
 }
 
 /// Fewest days a Plane may keep its Security audit. Below this the audit
@@ -158,7 +160,7 @@ struct Catalog {
 }
 
 /// Every Setting this core resolves, in the order a snapshot reports them.
-const CATALOG: [Catalog; 8] = [
+const CATALOG: [Catalog; 9] = [
 	Catalog {
 		key: SettingKey::UtilityAutomaticNaming,
 		spelling: "utility.automatic_naming",
@@ -212,6 +214,14 @@ const CATALOG: [Catalog; 8] = [
 	Catalog {
 		key: SettingKey::UtilityAutodeleteCompilation,
 		spelling: "utility.autodelete_compilation",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Flag(false),
+	},
+	Catalog {
+		// Source provenance changes the Plane's executable trust boundary, so
+		// Developer Mode is an explicit Plane-wide choice and defaults off.
+		key: SettingKey::DeveloperMode,
+		spelling: "craft.developer_mode",
 		scopes: &[SettingScopeKind::Plane],
 		built_in: BuiltIn::Flag(false),
 	},

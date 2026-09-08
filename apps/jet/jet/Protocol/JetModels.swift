@@ -83,6 +83,12 @@ public enum BaseSelection {
     case `revision`(BaseSelectionRevision)
 }
 
+public enum BrokerPermission: String {
+    case `artifact_read` = "artifact_read"
+    case `artifact_write` = "artifact_write"
+    case `remote_tools` = "remote_tools"
+}
+
 public enum CapabilityObservation {
     case `last_observed`(CapabilityObservationLastObserved)
     case `fresh`(CapabilityObservationFresh)
@@ -190,6 +196,7 @@ public struct ClientPublicKey {
 
 public enum CommandRequest {
     case `request_utility`(CommandRequestRequestUtility)
+    case `install_craft`(CommandRequestInstallCraft)
     case `create_schedule`(CommandRequestCreateSchedule)
     case `cancel_schedule`(CommandRequestCancelSchedule)
     case `apply_user_edit`(CommandRequestApplyUserEdit)
@@ -228,6 +235,7 @@ public enum CommandRequest {
 
 public enum CommandResponse {
     case `utility_queued`(CommandResponseUtilityQueued)
+    case `craft_installation_queued`(CommandResponseCraftInstallationQueued)
     case `schedule_created`(CommandResponseScheduleCreated)
     case `schedule_canceled`(CommandResponseScheduleCanceled)
     case `user_edit_applied`(CommandResponseUserEditApplied)
@@ -300,6 +308,47 @@ public struct ConversationSnapshot {
     public let `cursor`: String
     public let `runs`: [Run]
     public let `workspace`: Workspace?
+}
+
+public enum CraftHostAccess {
+    case `executable`(CraftHostAccessExecutable)
+    case `filesystem`(CraftHostAccessFilesystem)
+    case `environment`(CraftHostAccessEnvironment)
+    case `network`(CraftHostAccessNetwork)
+}
+
+public struct CraftInstallationConfirmation {
+    public let `artifact_sha256`: String
+    public let `broker_permissions`: [BrokerPermission]
+    public let `commit`: String
+    public let `host_access`: [CraftHostAccess]
+    public let `publisher_claim`: String
+    public let `repository`: String
+    public let `source`: CraftSource
+    public let `trust`: CraftTrust
+}
+
+public struct CraftInstallationPreview {
+    public let `confirmation`: CraftInstallationConfirmation
+    public let `craft_id`: String
+    public let `enabled_features`: [String]
+    public let `version`: String
+}
+
+public struct CraftInstallationQueued {
+    public let `artifact_sha256`: String
+    public let `craft_id`: String
+    public let `version`: String
+}
+
+public enum CraftSource {
+    case `github_release`(CraftSourceGithubRelease)
+    case `local`(CraftSourceLocal)
+}
+
+public enum CraftTrust: String {
+    case `same_user_executable` = "same_user_executable"
+    case `developer_source` = "developer_source"
 }
 
 public struct CredentialItem {
@@ -675,6 +724,7 @@ public enum PromotionState: String {
 
 public enum QueryRequest {
     case `utility`(QueryRequestUtility)
+    case `discover_craft`(QueryRequestDiscoverCraft)
     case `scheduled_tasks`(QueryRequestScheduledTasks)
     case `editable_file`(QueryRequestEditableFile)
     case `workspace_terminals`(QueryRequestWorkspaceTerminals)
@@ -704,6 +754,7 @@ public enum QueryRequest {
 
 public enum QueryResponse {
     case `utility`(QueryResponseUtility)
+    case `craft_installation_preview`(QueryResponseCraftInstallationPreview)
     case `scheduled_tasks`(QueryResponseScheduledTasks)
     case `editable_file`(QueryResponseEditableFile)
     case `workspace_terminals`(QueryResponseWorkspaceTerminals)
@@ -920,6 +971,7 @@ public enum SettingKey: String {
     case `git.auto_commit` = "git.auto_commit"
     case `git.message_instructions` = "git.message_instructions"
     case `security.audit_retention_days` = "security.audit_retention_days"
+    case `craft.developer_mode` = "craft.developer_mode"
 }
 
 public enum SettingScope {
@@ -1209,6 +1261,10 @@ public struct CommandRequestRequestUtility {
     public let `request`: UtilityRequest
 }
 
+public struct CommandRequestInstallCraft {
+    public let `confirmation`: CraftInstallationConfirmation
+}
+
 public struct CommandRequestCreateSchedule {
     public let `conversation_id`: String
     public let `local_time`: String
@@ -1384,6 +1440,12 @@ public struct CommandRequestResumeImportedConversation {
 
 public struct CommandResponseUtilityQueued {
     public let `job_id`: String
+}
+
+public struct CommandResponseCraftInstallationQueued {
+    public let `artifact_sha256`: String
+    public let `craft_id`: String
+    public let `version`: String
 }
 
 public struct CommandResponseScheduleCreated {
@@ -1577,6 +1639,32 @@ public struct ConversationOriginForked {
     public let `checkpoint_turn`: UInt32
     public let `source_conversation_id`: String
     public let `source_run_id`: String
+}
+
+public struct CraftHostAccessExecutable {
+    public let `name`: String
+}
+
+public struct CraftHostAccessFilesystem {
+    public let `path`: String
+}
+
+public struct CraftHostAccessEnvironment {
+    public let `name`: String
+}
+
+public struct CraftHostAccessNetwork {
+    public let `destination`: String
+}
+
+public struct CraftSourceGithubRelease {
+    public let `repository`: String
+    public let `tag`: String
+}
+
+public struct CraftSourceLocal {
+    public let `artifact`: String
+    public let `specification`: String
 }
 
 public struct CredentialReferencePlatformStore {
@@ -1788,6 +1876,10 @@ public struct QueryRequestUtility {
     public let `job_id`: String
 }
 
+public struct QueryRequestDiscoverCraft {
+    public let `source`: CraftSource
+}
+
 public struct QueryRequestScheduledTasks {
     public let `conversation_id`: String
 }
@@ -1904,6 +1996,13 @@ public struct QueryResponseUtility {
     public let `policy`: UtilityPolicy
     public let `provider`: String?
     public let `purpose`: UtilityPurpose
+}
+
+public struct QueryResponseCraftInstallationPreview {
+    public let `confirmation`: CraftInstallationConfirmation
+    public let `craft_id`: String
+    public let `enabled_features`: [String]
+    public let `version`: String
 }
 
 public struct QueryResponseScheduledTasks {

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT plan FROM craft_installation_plans WHERE effect_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "plan",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "craft_installation_plans",
+            "name": "plan"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "539735b36e5820db0370ba6de2c92f58f92c1274a9aec1d5777f9ff98ffa25ab"
+}

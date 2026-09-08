@@ -28,6 +28,7 @@ impl Client {
 		match self.query(QueryRequest::Pairing).await? {
 			QueryResponse::Pairing(snapshot) => Ok(snapshot),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -79,6 +80,7 @@ impl Client {
 		{
 			CommandResponse::PairingGateSet { gate } => Ok(gate),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -139,6 +141,7 @@ impl Client {
 				disclosure,
 			} => Ok((pending, disclosure)),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -205,6 +208,7 @@ impl Client {
 				Ok((pending, challenge))
 			}
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -269,6 +273,7 @@ impl Client {
 		{
 			CommandResponse::PairingConfirmed { pending } => Ok(pending),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -329,6 +334,7 @@ impl Client {
 		{
 			CommandResponse::PairingCompleted { client } => Ok(client),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -388,6 +394,7 @@ impl Client {
 		{
 			CommandResponse::PairedClientAccessSet { client } => Ok(client),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -445,6 +452,7 @@ impl Client {
 		{
 			CommandResponse::PairedClientRevoked { client_id } => Ok(client_id),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }

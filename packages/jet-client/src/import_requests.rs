@@ -31,6 +31,7 @@ impl Client {
 		match self.query(QueryRequest::ExternalConversations).await? {
 			QueryResponse::ExternalConversations(list) => Ok(list),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -86,6 +87,7 @@ impl Client {
 		{
 			CommandResponse::ConversationImported(imported) => Ok(imported),
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }
@@ -152,6 +154,7 @@ impl Client {
 				Ok(conversation)
 			}
 			other @ (CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }

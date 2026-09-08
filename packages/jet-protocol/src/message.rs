@@ -146,6 +146,11 @@ pub enum QueryRequest {
 		/// Plane-assigned job identity.
 		job_id: Uuid,
 	},
+	/// Verify one third-party Craft source and return its exact consent surface.
+	DiscoverCraft {
+		/// Repository release or explicit Developer Mode source.
+		source: crate::CraftSource,
+	},
 	/// Enabled schedules in one Conversation.
 	ScheduledTasks {
 		/// Owning Conversation.
@@ -302,6 +307,8 @@ pub enum QueryRequest {
 pub enum QueryResponse {
 	/// Attributed Utility result, with no execution authority.
 	Utility(crate::UtilityJob),
+	/// Verified immutable Craft installation proposal.
+	CraftInstallationPreview(crate::CraftInstallationPreview),
 	/// Fenced schedule snapshot.
 	ScheduledTasks(crate::ScheduledTasks),
 	/// Bounded editable content and its exact file Revision.

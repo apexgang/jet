@@ -36,6 +36,7 @@ impl Client {
 		match self.query(query).await? {
 			QueryResponse::ChangeDiff(diff) => Ok(diff),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -79,6 +80,7 @@ impl Client {
 		{
 			QueryResponse::ChangeArtifact(chunk) => Ok(chunk),
 			other @ (QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }

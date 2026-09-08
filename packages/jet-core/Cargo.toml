@@ -15,12 +15,14 @@ getrandom.workspace = true
 jet-store.workspace = true
 jet-runtime.workspace = true
 rustix.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+toml.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

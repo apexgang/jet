@@ -20,6 +20,7 @@ mod checkpoint;
 mod command;
 mod conversation;
 mod conversation_fork;
+mod craft_installation;
 mod effect;
 mod execution_recovery;
 mod import;

@@ -55,6 +55,9 @@ pub enum SettingKey {
 	/// How many days the Plane keeps its Security audit.
 	#[serde(rename = "security.audit_retention_days")]
 	SecurityAuditRetentionDays,
+	/// Whether local and source-built third-party Crafts may be installed.
+	#[serde(rename = "craft.developer_mode")]
+	DeveloperMode,
 }
 
 /// One Setting's value. Each key holds exactly one of these shapes.

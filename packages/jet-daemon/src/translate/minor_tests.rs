@@ -51,6 +51,11 @@ fn resolved() -> SettingSnapshot {
 				value: SettingValue::Count(365),
 				source: SettingSource::BuiltIn,
 			},
+			ResolvedSetting {
+				key: SettingKey::DeveloperMode,
+				value: SettingValue::Flag(false),
+				source: SettingSource::BuiltIn,
+			},
 		],
 	}
 }
@@ -154,6 +159,35 @@ fn the_minor_that_names_the_security_audit_is_told_both() {
 				wire::SettingKey::UtilityAutomaticNaming,
 				wire::SettingKey::SecurityAuditRetentionDays
 			]
+		)
+	);
+}
+
+#[test]
+fn developer_mode_is_reported_only_to_the_installation_minor() {
+	let keys = |minor| {
+		setting::snapshot(resolved(), minor)
+			.settings
+			.into_iter()
+			.map(|resolved| resolved.key)
+			.collect::<Vec<_>>()
+	};
+
+	assert_eq!(
+		(
+			keys(wire::CRAFT_INSTALLATION_MINOR - 1),
+			keys(wire::CRAFT_INSTALLATION_MINOR),
+		),
+		(
+			vec![
+				wire::SettingKey::UtilityAutomaticNaming,
+				wire::SettingKey::SecurityAuditRetentionDays,
+			],
+			vec![
+				wire::SettingKey::UtilityAutomaticNaming,
+				wire::SettingKey::SecurityAuditRetentionDays,
+				wire::SettingKey::DeveloperMode,
+			],
 		)
 	);
 }

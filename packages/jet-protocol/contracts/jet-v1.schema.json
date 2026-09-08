@@ -448,6 +448,26 @@
         }
       ]
     },
+    "BrokerPermission": {
+      "description": "Jet-enforced broker permissions, all required declarations in v1.",
+      "oneOf": [
+        {
+          "description": "Read authorized Artifacts through the broker.",
+          "type": "string",
+          "const": "artifact_read"
+        },
+        {
+          "description": "Publish Artifacts through the broker.",
+          "type": "string",
+          "const": "artifact_write"
+        },
+        {
+          "description": "Use authorized paired-Plane tools through the broker.",
+          "type": "string",
+          "const": "remote_tools"
+        }
+      ]
+    },
     "CapabilityObservation": {
       "description": "Which snapshot a Capability Query answers with. A Plane is observed at\nstartup and whenever a caller asks for a new look, never on a timer.",
       "oneOf": [
@@ -1149,6 +1169,24 @@
           "required": [
             "type",
             "request"
+          ]
+        },
+        {
+          "description": "Install only the exact Craft proposal returned by discovery.",
+          "type": "object",
+          "properties": {
+            "confirmation": {
+              "description": "Repository, provenance, Artifact, authority, and trust acceptance.",
+              "$ref": "#/$defs/CraftInstallationConfirmation"
+            },
+            "type": {
+              "type": "string",
+              "const": "install_craft"
+            }
+          },
+          "required": [
+            "type",
+            "confirmation"
           ]
         },
         {
@@ -2011,6 +2049,20 @@
           ]
         },
         {
+          "description": "Durable publication work accepted for one verified Craft Artifact.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "craft_installation_queued"
+            }
+          },
+          "$ref": "#/$defs/CraftInstallationQueued",
+          "required": [
+            "type"
+          ]
+        },
+        {
           "description": "Enabled daily schedule.",
           "type": "object",
           "properties": {
@@ -2816,6 +2868,257 @@
         "cursor",
         "conversation",
         "runs"
+      ]
+    },
+    "CraftHostAccess": {
+      "description": "Disclosed same-user host access; not a portable sandbox guarantee.",
+      "oneOf": [
+        {
+          "description": "An executable the Craft expects to launch.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "executable"
+            },
+            "name": {
+              "description": "Executable name or absolute path.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ]
+        },
+        {
+          "description": "A filesystem area the Craft expects to use.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "filesystem"
+            },
+            "path": {
+              "description": "Disclosed filesystem path.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ]
+        },
+        {
+          "description": "An environment input, never its secret value.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "environment"
+            },
+            "name": {
+              "description": "Environment variable name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ]
+        },
+        {
+          "description": "An expected network destination.",
+          "type": "object",
+          "properties": {
+            "destination": {
+              "description": "Destination description shown during installation.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "network"
+            }
+          },
+          "required": [
+            "kind",
+            "destination"
+          ]
+        }
+      ]
+    },
+    "CraftInstallationConfirmation": {
+      "description": "Every security-sensitive value copied from preview into confirmation.",
+      "type": "object",
+      "properties": {
+        "artifact_sha256": {
+          "description": "SHA-256 of the exact executable Artifact.",
+          "type": "string"
+        },
+        "broker_permissions": {
+          "description": "Jet-enforced broker authority the user accepts.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BrokerPermission"
+          }
+        },
+        "commit": {
+          "description": "Immutable Git commit, or `developer-source` for a local build.",
+          "type": "string"
+        },
+        "host_access": {
+          "description": "Same-user host access the user accepts.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CraftHostAccess"
+          }
+        },
+        "publisher_claim": {
+          "description": "Publisher's unendorsed claim from the specification.",
+          "type": "string"
+        },
+        "repository": {
+          "description": "Canonical repository identity, or the local specification identity.",
+          "type": "string"
+        },
+        "source": {
+          "description": "Exact source the user previewed.",
+          "$ref": "#/$defs/CraftSource"
+        },
+        "trust": {
+          "description": "Jet's explicit trust boundary for this executable.",
+          "$ref": "#/$defs/CraftTrust"
+        }
+      },
+      "required": [
+        "source",
+        "repository",
+        "publisher_claim",
+        "commit",
+        "artifact_sha256",
+        "broker_permissions",
+        "host_access",
+        "trust"
+      ]
+    },
+    "CraftInstallationPreview": {
+      "description": "A verified immutable proposal that performs no installation by itself.",
+      "type": "object",
+      "properties": {
+        "confirmation": {
+          "description": "Exact consent object a subsequent installation Command must return.",
+          "$ref": "#/$defs/CraftInstallationConfirmation"
+        },
+        "craft_id": {
+          "description": "Stable Craft identity.",
+          "type": "string"
+        },
+        "enabled_features": {
+          "description": "Known optional features that remain enabled.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "version": {
+          "description": "Publisher-declared release version.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "craft_id",
+        "version",
+        "enabled_features",
+        "confirmation"
+      ]
+    },
+    "CraftInstallationQueued": {
+      "description": "Durable publication work accepted for one verified Craft Artifact.",
+      "type": "object",
+      "properties": {
+        "artifact_sha256": {
+          "description": "SHA-256 of the exact Artifact being published.",
+          "type": "string"
+        },
+        "craft_id": {
+          "description": "Stable Craft identity.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Publisher-declared release version.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "craft_id",
+        "version",
+        "artifact_sha256"
+      ]
+    },
+    "CraftSource": {
+      "description": "An explicit source from which a third-party Craft may be considered.",
+      "oneOf": [
+        {
+          "description": "A public GitHub Release from a qualifying `jet-craft-*` repository.",
+          "type": "object",
+          "properties": {
+            "repository": {
+              "description": "GitHub repository in `owner/name` form.",
+              "type": "string"
+            },
+            "tag": {
+              "description": "Exact release tag to resolve and pin.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "github_release"
+            }
+          },
+          "required": [
+            "type",
+            "repository",
+            "tag"
+          ]
+        },
+        {
+          "description": "Local files accepted only while Developer Mode is enabled.",
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "description": "Path to the locally built executable Artifact.",
+              "type": "string"
+            },
+            "specification": {
+              "description": "Absolute or Plane-local path to `.jet/craft-spec.toml`.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "local"
+            }
+          },
+          "required": [
+            "type",
+            "specification",
+            "artifact"
+          ]
+        }
+      ]
+    },
+    "CraftTrust": {
+      "description": "The executable trust implication an interactive user must accept.",
+      "oneOf": [
+        {
+          "description": "A verified release still executes with the user's OS authority.",
+          "type": "string",
+          "const": "same_user_executable"
+        },
+        {
+          "description": "A local or source build has no verified release provenance.",
+          "type": "string",
+          "const": "developer_source"
+        }
       ]
     },
     "CredentialItem": {
@@ -4930,6 +5233,24 @@
           ]
         },
         {
+          "description": "Verify one third-party Craft source and return its exact consent surface.",
+          "type": "object",
+          "properties": {
+            "source": {
+              "description": "Repository release or explicit Developer Mode source.",
+              "$ref": "#/$defs/CraftSource"
+            },
+            "type": {
+              "type": "string",
+              "const": "discover_craft"
+            }
+          },
+          "required": [
+            "type",
+            "source"
+          ]
+        },
+        {
           "description": "Enabled schedules in one Conversation.",
           "type": "object",
           "properties": {
@@ -5419,6 +5740,20 @@
             }
           },
           "$ref": "#/$defs/UtilityJob",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Verified immutable Craft installation proposal.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "craft_installation_preview"
+            }
+          },
+          "$ref": "#/$defs/CraftInstallationPreview",
           "required": [
             "type"
           ]
@@ -7058,6 +7393,11 @@
           "description": "How many days the Plane keeps its Security audit.",
           "type": "string",
           "const": "security.audit_retention_days"
+        },
+        {
+          "description": "Whether local and source-built third-party Crafts may be installed.",
+          "type": "string",
+          "const": "craft.developer_mode"
         }
       ]
     },

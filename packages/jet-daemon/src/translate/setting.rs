@@ -36,6 +36,7 @@ fn introduced_in(key: SettingKey) -> u32 {
 		| SettingKey::GitAutoCommit
 		| SettingKey::GitMessageInstructions => wire::SETTINGS_AND_CAPABILITIES_MINOR,
 		SettingKey::SecurityAuditRetentionDays => wire::SECURITY_AUDIT_MINOR,
+		SettingKey::DeveloperMode => wire::CRAFT_INSTALLATION_MINOR,
 	}
 }
 
@@ -75,6 +76,7 @@ pub(super) fn key(key: SettingKey) -> wire::SettingKey {
 		SettingKey::SecurityAuditRetentionDays => {
 			wire::SettingKey::SecurityAuditRetentionDays
 		}
+		SettingKey::DeveloperMode => wire::SettingKey::DeveloperMode,
 	}
 }
 
@@ -101,6 +103,7 @@ pub(super) fn key_from_wire(key: wire::SettingKey) -> SettingKey {
 		wire::SettingKey::SecurityAuditRetentionDays => {
 			SettingKey::SecurityAuditRetentionDays
 		}
+		wire::SettingKey::DeveloperMode => SettingKey::DeveloperMode,
 	}
 }
 

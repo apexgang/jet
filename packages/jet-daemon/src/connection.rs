@@ -4,7 +4,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use jet_core::{Actor, ClientId, CommandEnvelope, CommandId, Core};
+use jet_core::{
+	Actor, ClientId, CommandEnvelope, CommandId, CommandOutcome, Core,
+};
 use jet_protocol::{
 	CODEC_JSON_V1, CONNECTION_STREAM, ClientHello, CommandRequest,
 	ErrorCategory, Frame, FrameError, FrameLimits, FrameReader, FrameWriter,
@@ -365,6 +367,11 @@ pub(super) async fn execute(
 		Ok(envelope) => core.execute(actor, envelope).await,
 		Err(error) => Err(error),
 	};
+	if matches!(&outcome, Ok(CommandOutcome::CraftInstallationQueued { .. }))
+		&& let Err(error) = core.perform_craft_installations().await
+	{
+		eprintln!("jetd: cannot publish accepted Craft installation: {error}");
+	}
 	match outcome {
 		Ok(outcome) => ServerMessage::CommandResult {
 			id,
@@ -388,6 +395,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 		QueryRequest::Utility { .. } => Some(MinorRequirement {
 			minor: jet_protocol::UTILITY_MINOR,
 			feature: "Utility work",
+		}),
+		QueryRequest::DiscoverCraft { .. } => Some(MinorRequirement {
+			minor: jet_protocol::CRAFT_INSTALLATION_MINOR,
+			feature: "third-party Craft discovery",
 		}),
 		QueryRequest::ScheduledTasks { .. } => Some(MinorRequirement {
 			minor: jet_protocol::SCHEDULES_MINOR,
@@ -493,6 +504,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		CommandRequest::RequestUtility { .. } => Some(MinorRequirement {
 			minor: jet_protocol::UTILITY_MINOR,
 			feature: "Utility work",
+		}),
+		CommandRequest::InstallCraft { .. } => Some(MinorRequirement {
+			minor: jet_protocol::CRAFT_INSTALLATION_MINOR,
+			feature: "third-party Craft installation",
 		}),
 		CommandRequest::CreateSchedule { .. }
 		| CommandRequest::CancelSchedule { .. } => Some(MinorRequirement {

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO craft_installation_plans (effect_id, craft_id, plan) VALUES (?1, ?2, ?3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "b294b0a139aaf1936785086c4da024b1ed70a49df2adc4d339a0061ef193e2b1"
+}

@@ -30,6 +30,12 @@ mod clock;
 mod command;
 mod command_receipt;
 mod conversation;
+mod craft_artifact_collection;
+mod craft_installation;
+mod craft_local_source;
+mod craft_publication;
+mod craft_repository;
+mod craft_specification;
 mod discovery;
 mod effect;
 mod error;
@@ -141,6 +147,7 @@ use uuid::Uuid;
 use capability::CapabilityProbe;
 use capability_probe::SystemCapabilityProbe;
 use clock::{Clock, SystemClock};
+use craft_repository::{CraftRepository, SystemCraftRepository};
 use discovery::{ConversationDiscovery, SystemConversationDiscovery};
 
 pub use account::{
@@ -161,6 +168,10 @@ pub use command::{Command, CommandEnvelope, CommandId, CommandOutcome};
 pub use conversation::{
 	Conversation, ConversationId, ConversationList, ConversationOrigin,
 	ConversationSnapshot, PageCursor, Revision, Run, RunId,
+};
+pub use craft_installation::{
+	BrokerPermission, CraftHostAccess, CraftInstallationConfirmation,
+	CraftInstallationPreview, CraftSource, CraftTrust,
 };
 pub use error::{
 	ConflictState, CoreError, ErrorCategory, RecoveryAction, RestartMetadata,
@@ -311,6 +322,8 @@ pub struct Core {
 	/// Serializes every Effect decision, so two workers never perform the
 	/// same durable request at once (ADR-0067).
 	effect_reconciliation: tokio::sync::Mutex<()>,
+	/// Serializes pre-transaction Craft publication with orphan collection.
+	craft_artifact_publication: tokio::sync::Mutex<()>,
 	conversation_pages: pagination::ConversationPages,
 	checkpoint_pages: checkpoint_pages::Pages,
 	/// Where this core creates Workspaces (ADR-0025).
@@ -318,12 +331,23 @@ pub struct Core {
 	/// How this core sees the Harness-native Conversations outside its
 	/// management (ADR-0010).
 	discovery: Arc<dyn ConversationDiscovery>,
+	/// How this core reads versioned Craft releases from their repository.
+	craft_repository: Arc<dyn CraftRepository>,
 }
 
 impl Core {
 	/// Installs the trusted host Adapter before accepting managed Runs.
 	pub fn with_run_host(mut self, host: Arc<dyn run_host::RunHost>) -> Self {
 		self.run_host = Some(host);
+		self
+	}
+
+	#[cfg(test)]
+	pub(crate) fn with_craft_repository(
+		mut self,
+		repository: Arc<dyn CraftRepository>,
+	) -> Self {
+		self.craft_repository = repository;
 		self
 	}
 
@@ -368,13 +392,26 @@ impl Core {
 		// backwards keeps every record it still has until an owner has
 		// seen the evidence and decided what to do (ADR-0105).
 		let security = SecurityState::of(store.validate_audit().await?);
+		let craft_home = workspace_home
+			.0
+			.parent()
+			.expect("Workspace home has a parent")
+			.join("crafts");
 		if security == SecurityState::Trusted {
 			audit::sweep_retention(&store, unix_ms(started_at)).await?;
+			craft_artifact_collection::collect_unreferenced(
+				&store,
+				craft_home.clone(),
+				started_at,
+			)
+			.await?;
 		}
-		let capabilities = CapabilitySnapshot::from_observation(
-			probe.observe().await,
-			started_at,
-		);
+		let mut observed = probe.observe().await;
+		observed
+			.crafts
+			.extend(craft_publication::installed_crafts(craft_home).await);
+		let capabilities =
+			CapabilitySnapshot::from_observation(observed, started_at);
 		let core = Self {
 			utility_host: None,
 			utility_work: tokio::sync::Mutex::new(()),
@@ -395,10 +432,12 @@ impl Core {
 			security: tokio::sync::RwLock::new(security),
 			started_at,
 			effect_reconciliation: tokio::sync::Mutex::new(()),
+			craft_artifact_publication: tokio::sync::Mutex::new(()),
 			conversation_pages: pagination::ConversationPages::default(),
 			checkpoint_pages: checkpoint_pages::Pages::default(),
 			workspace_home,
 			discovery,
+			craft_repository: Arc::new(SystemCraftRepository),
 		};
 		// The index follows the journal; a daemon that stopped between a
 		// Command and its indexing catches up here (ADR-0036).
@@ -422,7 +461,11 @@ impl Core {
 	/// Observes the Plane again and keeps the result as its latest
 	/// snapshot.
 	pub(crate) async fn observe_capabilities(&self) -> CapabilitySnapshot {
-		let observed = self.probe.observe().await;
+		let mut observed = self.probe.observe().await;
+		observed.crafts.extend(
+			craft_publication::installed_crafts(self.run_home().join("crafts"))
+				.await,
+		);
 		let snapshot =
 			CapabilitySnapshot::from_observation(observed, self.clock.now());
 		*self.capabilities.write().await = snapshot.clone();
@@ -471,6 +514,10 @@ mod setting_tests;
 #[cfg(test)]
 #[path = "capability_tests.rs"]
 mod capability_tests;
+
+#[cfg(test)]
+#[path = "craft_installation_tests.rs"]
+mod craft_installation_tests;
 
 #[cfg(test)]
 #[path = "account_tests.rs"]
