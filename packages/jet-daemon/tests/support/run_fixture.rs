@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use std::{os::unix::fs::PermissionsExt, path::Path};
 use tokio::net::{UnixListener, UnixStream};
 
+#[allow(dead_code)]
 pub fn install(home: &Path) {
 	install_craft(home, CraftProfile::Standard, ForkCapture::Ignore, "fake");
 }
@@ -469,6 +470,16 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 								.unwrap();
 						}
 					}
+					if craft_minor >= 8
+						&& let Some(usage) = native.get("usage").cloned()
+						&& let Ok(usage) =
+							serde_json::from_value::<CraftUsage>(usage)
+					{
+						sender
+							.send(&CraftEvent::Usage { usage })
+							.await
+							.unwrap();
+					}
 					if let Some(turn_id) = native["turn_id"].as_str() {
 						sender
 							.send(&CraftEvent::Completed {
@@ -675,6 +686,31 @@ fn fake_harness_process() {
 				"run_title":"Harness Run",
 				"process_title":"Harness Process",
 				"text":"Named"
+			})
+		);
+	}
+	if Path::new("usage-events").exists() {
+		println!(
+			"{}",
+			json!({
+				"text":"Counted",
+				"usage":{"source":"observed","observed":{
+					"measurement":{"covers":"turn","turn":"initial"},
+					"model":"fake-model",
+					"estimation":"measured","finality":"final",
+					"tokens":{"input":120,"cached_input":30,"output":45}}}
+			})
+		);
+		println!(
+			"{}",
+			json!({
+				"text":"Limited",
+				"usage":{"source":"quota","quota":{
+					"window":"five_hour",
+					"scope":{"covers":"provider_account"},
+					"unit":"share","used":4200,"limit":10000,
+					"window_seconds":18000,"resets_in_seconds":3600,
+					"estimation":"measured","finality":"interim"}}
 			})
 		);
 	}
