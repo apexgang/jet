@@ -63,6 +63,182 @@
         }
       ]
     },
+    "ConflictState": {
+      "description": "Safe resource state attached to a Revision conflict.",
+      "oneOf": [
+        {
+          "description": "The current Conversation.",
+          "type": "object",
+          "properties": {
+            "conversation": {
+              "description": "Complete safe Conversation state.",
+              "$ref": "#/$defs/Conversation"
+            },
+            "type": {
+              "type": "string",
+              "const": "conversation"
+            }
+          },
+          "required": [
+            "type",
+            "conversation"
+          ]
+        },
+        {
+          "description": "The current Run.",
+          "type": "object",
+          "properties": {
+            "run": {
+              "description": "Complete safe Run state.",
+              "$ref": "#/$defs/Run"
+            },
+            "type": {
+              "type": "string",
+              "const": "run"
+            }
+          },
+          "required": [
+            "type",
+            "run"
+          ]
+        }
+      ]
+    },
+    "Conversation": {
+      "description": "One Conversation.",
+      "type": "object",
+      "properties": {
+        "conversation_id": {
+          "description": "Durable identity.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "created_at_unix_ms": {
+          "description": "When it was created, in signed Unix milliseconds.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "name": {
+          "description": "Resolved name and its authority. Absent before protocol minor 20.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "origin": {
+          "description": "Where it came from. Absent before protocol minor 13.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConversationOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retention": {
+          "description": "Retention choice.",
+          "$ref": "#/$defs/RetentionPolicy"
+        },
+        "revision": {
+          "description": "Current version for conflict-sensitive Commands. Absent before minor 20.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "working_tree": {
+          "description": "Where it does its work. Absent before protocol minor 9.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkingTree"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "conversation_id",
+        "retention",
+        "created_at_unix_ms"
+      ]
+    },
+    "ConversationOrigin": {
+      "description": "Where a Conversation came from.",
+      "oneOf": [
+        {
+          "description": "Created in Jet.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "new"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "Created by a managed Resume to continue an Imported conversation.",
+          "type": "object",
+          "properties": {
+            "import_id": {
+              "description": "The import it continues.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "kind": {
+              "type": "string",
+              "const": "imported"
+            }
+          },
+          "required": [
+            "kind",
+            "import_id"
+          ]
+        },
+        {
+          "description": "Created from one immutable Change checkpoint.",
+          "type": "object",
+          "properties": {
+            "checkpoint_turn": {
+              "description": "One-based turn boundary selected from that Run.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "forked"
+            },
+            "source_conversation_id": {
+              "description": "Conversation that owns the selected Run.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "source_run_id": {
+              "description": "Run that owns the selected checkpoint.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "source_conversation_id",
+            "source_run_id",
+            "checkpoint_turn"
+          ]
+        }
+      ]
+    },
     "CraftAction": {
       "description": "Structured action input; unknown security-sensitive variants fail closed.",
       "oneOf": [
@@ -131,6 +307,48 @@
     "CraftCommand": {
       "description": "Host-to-Craft Commands, admitted by Jet before crossing this boundary.",
       "oneOf": [
+        {
+          "description": "Pinned remote destinations and honest capability report (Craft 1.6).",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "configure_remote_tools"
+            },
+            "selection": {
+              "description": "Origin and authorized destinations.",
+              "$ref": "#/$defs/NoVisaSelection"
+            }
+          },
+          "required": [
+            "kind",
+            "selection"
+          ]
+        },
+        {
+          "description": "Reply to one remote call, without disrupting other destination work (1.6).",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "remote_tool_result"
+            },
+            "operation_id": {
+              "description": "Original operation identity.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "outcome": {
+              "description": "Destination result or stable refusal.",
+              "$ref": "#/$defs/RemoteToolOutcome"
+            }
+          },
+          "required": [
+            "kind",
+            "operation_id",
+            "outcome"
+          ]
+        },
         {
           "description": "Reconnect an existing helper without issuing native input (Craft 1.2).",
           "type": "object",
@@ -296,6 +514,24 @@
     "CraftEvent": {
       "description": "Craft-to-host events. Native content remains the authoritative payload.",
       "oneOf": [
+        {
+          "description": "Request a Jet remote tool; the host supplies Actor and permissions (1.6).",
+          "type": "object",
+          "properties": {
+            "call": {
+              "description": "Closed, destination-scoped request.",
+              "$ref": "#/$defs/CraftRemoteTool"
+            },
+            "kind": {
+              "type": "string",
+              "const": "remote_tool"
+            }
+          },
+          "required": [
+            "kind",
+            "call"
+          ]
+        },
         {
           "description": "Capture before a subsequent turn (1.3). Hold native input until the\nhost acknowledges this marker's source record. Initial Start is pre-captured.",
           "type": "object",
@@ -841,6 +1077,38 @@
         "enabled_features"
       ]
     },
+    "CraftRemoteTool": {
+      "description": "A Craft can select only a pinned destination and action, never authority.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Exact requested operation.",
+          "$ref": "#/$defs/RemoteToolAction"
+        },
+        "destination_plane_id": {
+          "description": "Selected destination.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "operation_id": {
+          "description": "Stable identity retained across Craft source replay.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "workspace_id": {
+          "description": "Selected registered Workspace.",
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "destination_plane_id",
+        "workspace_id",
+        "action"
+      ]
+    },
     "CraftResume": {
       "description": "Host-owned recovery context; never evidence that an unacknowledged action failed.",
       "type": "object",
@@ -1087,6 +1355,160 @@
         }
       ]
     },
+    "ErrorCategory": {
+      "description": "Stable error categories exposed to clients (ADR-0068).",
+      "oneOf": [
+        {
+          "description": "The request was malformed or violated a precondition.",
+          "type": "string",
+          "const": "invalid_input"
+        },
+        {
+          "description": "The Actor may not perform the request.",
+          "type": "string",
+          "const": "unauthorized"
+        },
+        {
+          "description": "The request conflicts with current state.",
+          "type": "string",
+          "const": "conflict"
+        },
+        {
+          "description": "A required resource is temporarily unavailable.",
+          "type": "string",
+          "const": "unavailable"
+        },
+        {
+          "description": "The peers cannot agree on a protocol, codec, or version.",
+          "type": "string",
+          "const": "incompatible"
+        },
+        {
+          "description": "The request was throttled.",
+          "type": "string",
+          "const": "rate_limited"
+        },
+        {
+          "description": "The addressed resource does not exist.",
+          "type": "string",
+          "const": "not_found"
+        },
+        {
+          "description": "The result of external work could not be established.",
+          "type": "string",
+          "const": "outcome_unknown"
+        },
+        {
+          "description": "An unexpected internal failure.",
+          "type": "string",
+          "const": "internal"
+        }
+      ]
+    },
+    "FileRevision": {
+      "description": "Exact Git content and mode observed for one file.",
+      "type": "object",
+      "properties": {
+        "mode": {
+          "description": "Git mode, or `000000` when the file is missing.",
+          "type": "string"
+        },
+        "object": {
+          "description": "Git blob object, or all zeroes when the file is missing.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "object",
+        "mode"
+      ]
+    },
+    "FileTarget": {
+      "description": "A registered root through which an ordinary file operation is addressed.",
+      "oneOf": [
+        {
+          "description": "A registered Project's Local checkout.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "project"
+            },
+            "project_id": {
+              "description": "Project identity.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "project_id"
+          ]
+        },
+        {
+          "description": "A Conversation-owned Workspace.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "workspace"
+            },
+            "workspace_id": {
+              "description": "Workspace identity.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "workspace_id"
+          ]
+        }
+      ]
+    },
+    "Name": {
+      "description": "One resolved user-facing name and its authority.",
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "Authority that supplied `value`.",
+          "$ref": "#/$defs/NameSource"
+        },
+        "value": {
+          "description": "Original validated text; clients encode it for their render context.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "source"
+      ]
+    },
+    "NameSource": {
+      "description": "Authority that supplied a current Conversation or Run name.",
+      "oneOf": [
+        {
+          "description": "An interactive user's authoritative choice.",
+          "type": "string",
+          "const": "manual"
+        },
+        {
+          "description": "A validated Utility-model result.",
+          "type": "string",
+          "const": "utility"
+        },
+        {
+          "description": "A structured title supplied by the Harness through its Craft.",
+          "type": "string",
+          "const": "harness_native"
+        },
+        {
+          "description": "Stable local text used without Utility work.",
+          "type": "string",
+          "const": "deterministic"
+        }
+      ]
+    },
     "NegotiatedProtocol": {
       "description": "The immutable selection callers persist with the execution identity.",
       "type": "object",
@@ -1111,6 +1533,82 @@
         "family",
         "version",
         "capabilities"
+      ]
+    },
+    "NoVisaDestination": {
+      "description": "One destination selected by the desktop, never by the Craft.",
+      "type": "object",
+      "properties": {
+        "plane_id": {
+          "description": "Expected paired Plane identity.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "ssh_endpoint": {
+          "description": "System SSH destination, resolved through the user's SSH configuration.",
+          "type": "string"
+        },
+        "workspace_id": {
+          "description": "Registered destination Workspace.",
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "plane_id",
+        "workspace_id",
+        "ssh_endpoint"
+      ]
+    },
+    "NoVisaSelection": {
+      "description": "Immutable origin and destination selection retained with the execution.",
+      "type": "object",
+      "properties": {
+        "account_binding_id": {
+          "description": "Native authentication stays on this Plane.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "conversation_id": {
+          "description": "Authoritative Conversation on the origin.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "destinations": {
+          "description": "Destinations the broker may contact.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NoVisaDestination"
+          }
+        },
+        "jet_equivalent": {
+          "description": "Jet-provided equivalents, subject to destination authority and bounds.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "native_unavailable": {
+          "description": "Native remote behavior that this mode cannot promise.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "origin_plane_id": {
+          "description": "Native execution's Home Plane.",
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "jet_equivalent",
+        "native_unavailable",
+        "origin_plane_id",
+        "account_binding_id",
+        "conversation_id",
+        "destinations"
       ]
     },
     "Presentation": {
@@ -1296,6 +1794,591 @@
         "minor"
       ]
     },
+    "RecoveryAction": {
+      "description": "Structured action a client may take to recover from an error.",
+      "oneOf": [
+        {
+          "description": "Refresh a file before preparing another direct edit.",
+          "type": "object",
+          "properties": {
+            "current_revision": {
+              "description": "Exact file state now authoritative.",
+              "$ref": "#/$defs/FileRevision"
+            },
+            "path": {
+              "description": "Validated path relative to that root.",
+              "type": "string"
+            },
+            "target": {
+              "description": "Registered root to refresh.",
+              "$ref": "#/$defs/FileTarget"
+            },
+            "type": {
+              "type": "string",
+              "const": "refresh_file"
+            }
+          },
+          "required": [
+            "type",
+            "target",
+            "path",
+            "current_revision"
+          ]
+        },
+        {
+          "description": "Refresh current Conversation state before preparing another Command.",
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "description": "Conversation whose current state should be queried.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "refresh_conversation"
+            }
+          },
+          "required": [
+            "type",
+            "conversation_id"
+          ]
+        },
+        {
+          "description": "Refresh current Run state before preparing another Command.",
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "description": "Run whose current state should be queried.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "refresh_run"
+            }
+          },
+          "required": [
+            "type",
+            "run_id"
+          ]
+        },
+        {
+          "description": "Reconnect and resume the semantic Event stream after this cursor.",
+          "type": "object",
+          "properties": {
+            "after": {
+              "description": "Last Event cursor the disconnected client received completely.",
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "type": {
+              "type": "string",
+              "const": "resume_events"
+            }
+          },
+          "required": [
+            "type",
+            "after"
+          ]
+        }
+      ]
+    },
+    "RemoteEnvironment": {
+      "description": "Explicit destination environment change; absent values remove a variable.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Variable name, without equals signs or NULs.",
+          "type": "string"
+        },
+        "value": {
+          "description": "Explicit value or removal.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
+    "RemoteGitOperation": {
+      "description": "Read-only Git operations with bounded output.",
+      "oneOf": [
+        {
+          "description": "Porcelain v1 status, including untracked paths.",
+          "type": "string",
+          "const": "status"
+        },
+        {
+          "description": "Working-tree diff without external diff or text conversion commands.",
+          "type": "string",
+          "const": "diff"
+        }
+      ]
+    },
+    "RemoteToolAction": {
+      "description": "Operations available through the remote broker.",
+      "oneOf": [
+        {
+          "description": "One reviewed input batch in a real PTY, closed after the batch exits.",
+          "type": "object",
+          "properties": {
+            "columns": {
+              "description": "Fixed terminal dimensions.",
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "directory": {
+              "description": "Workspace-relative cwd; empty selects its root.",
+              "type": "string"
+            },
+            "input": {
+              "description": "Exact terminal input, shown in destination review.",
+              "type": "string"
+            },
+            "rows": {
+              "description": "Fixed terminal dimensions.",
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "terminal"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "directory",
+            "input",
+            "rows",
+            "columns"
+          ]
+        },
+        {
+          "description": "Argument-array process invocation, reviewed exactly once at destination.",
+          "type": "object",
+          "properties": {
+            "arguments": {
+              "description": "Executable followed by literal arguments; never a shell command string.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "directory": {
+              "description": "Workspace-relative cwd; empty selects its root.",
+              "type": "string"
+            },
+            "environment": {
+              "description": "Explicit changes to a minimal environment.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RemoteEnvironment"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "process"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "arguments",
+            "directory",
+            "environment"
+          ]
+        },
+        {
+          "description": "Read-only Git inspection with fixed arguments and hooks disabled.",
+          "type": "object",
+          "properties": {
+            "operation": {
+              "description": "Closed inspection vocabulary.",
+              "$ref": "#/$defs/RemoteGitOperation"
+            },
+            "type": {
+              "type": "string",
+              "const": "git"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "operation"
+          ]
+        },
+        {
+          "description": "Visibly labelled shell syntax, requiring exact destination review.",
+          "type": "object",
+          "properties": {
+            "directory": {
+              "description": "Workspace-relative directory; empty selects the Workspace root.",
+              "type": "string"
+            },
+            "environment": {
+              "description": "Explicit environment changes, applied to a minimal environment.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RemoteEnvironment"
+              }
+            },
+            "script": {
+              "description": "Shell source, never interpolated into SSH or a process argument array.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "shell"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "directory",
+            "environment",
+            "script"
+          ]
+        },
+        {
+          "description": "Atomically replace at most 64 KiB inside the Workspace.",
+          "type": "object",
+          "properties": {
+            "content": {
+              "description": "New UTF-8 content.",
+              "type": "string"
+            },
+            "path": {
+              "description": "Workspace-relative file path.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "write_file"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "path",
+            "content"
+          ]
+        },
+        {
+          "description": "Read at most 64 KiB of UTF-8 file content.",
+          "type": "object",
+          "properties": {
+            "path": {
+              "description": "Validated Workspace-relative path.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "read_file"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "path"
+          ]
+        }
+      ]
+    },
+    "RemoteToolOutcome": {
+      "description": "A remote failure belongs to this call, not the origin Run or another Plane.",
+      "oneOf": [
+        {
+          "description": "The destination returned a result, possibly awaiting exact review.",
+          "type": "object",
+          "properties": {
+            "result": {
+              "description": "Destination outcome.",
+              "$ref": "#/$defs/RemoteToolResult"
+            },
+            "type": {
+              "type": "string",
+              "const": "completed"
+            }
+          },
+          "required": [
+            "type",
+            "result"
+          ]
+        },
+        {
+          "description": "The request failed or has an unknown outcome; never retry mutations blindly.",
+          "type": "object",
+          "properties": {
+            "error": {
+              "description": "Stable, bounded error without transport secrets.",
+              "$ref": "#/$defs/WireError"
+            },
+            "type": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "type",
+            "error"
+          ]
+        }
+      ]
+    },
+    "RemoteToolResult": {
+      "description": "Bounded response from one destination operation.",
+      "oneOf": [
+        {
+          "description": "This action has not executed and needs a destination user decision.",
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "description": "Stable identity of the action to inspect and review.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "approval_required"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id"
+          ]
+        },
+        {
+          "description": "Bounded process output after native exit.",
+          "type": "object",
+          "properties": {
+            "exit_code": {
+              "description": "Native exit status, absent when terminated by a signal.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            },
+            "stderr": {
+              "description": "At most 64 KiB, rendered with replacement for invalid UTF-8.",
+              "type": "string"
+            },
+            "stdout": {
+              "description": "At most 64 KiB, rendered with replacement for invalid UTF-8.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "process"
+            }
+          },
+          "required": [
+            "type",
+            "stdout",
+            "stderr"
+          ]
+        },
+        {
+          "description": "The file replacement and directory sync completed.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "written"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "UTF-8 content inside the selected Workspace.",
+          "type": "object",
+          "properties": {
+            "content": {
+              "description": "At most 64 KiB.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "file"
+            }
+          },
+          "required": [
+            "type",
+            "content"
+          ]
+        }
+      ]
+    },
+    "RestartMetadata": {
+      "description": "Stable metadata explaining why a snapshot must be restarted.",
+      "oneOf": [
+        {
+          "description": "Required Event replay is no longer retained.",
+          "type": "object",
+          "properties": {
+            "current_snapshot_revision": {
+              "description": "Current Event high-water cursor for a replacement snapshot.",
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "minimum_available_cursor": {
+              "description": "Oldest cursor from which continuous replay remains possible.",
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "reason": {
+              "type": "string",
+              "const": "cursor_expired"
+            }
+          },
+          "required": [
+            "reason",
+            "minimum_available_cursor",
+            "current_snapshot_revision"
+          ]
+        },
+        {
+          "description": "The supplied Event cursor belongs to a later or different Plane.",
+          "type": "object",
+          "properties": {
+            "current_snapshot_revision": {
+              "description": "Current Event high-water cursor for the replacement snapshot.",
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "reason": {
+              "type": "string",
+              "const": "cursor_ahead"
+            }
+          },
+          "required": [
+            "reason",
+            "current_snapshot_revision"
+          ]
+        },
+        {
+          "description": "A later page no longer belongs to the current projection state.",
+          "type": "object",
+          "properties": {
+            "current_snapshot_revision": {
+              "description": "Current Event high-water cursor for the replacement first page.",
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "reason": {
+              "type": "string",
+              "const": "pagination_stale"
+            }
+          },
+          "required": [
+            "reason",
+            "current_snapshot_revision"
+          ]
+        }
+      ]
+    },
+    "RetentionPolicy": {
+      "description": "Whether Jet keeps a Conversation after its final Run.",
+      "oneOf": [
+        {
+          "description": "Keep the Conversation and its history. The default.",
+          "type": "string",
+          "const": "retain"
+        },
+        {
+          "description": "Forget the Conversation once it has no live Run and no other\nprotected state.",
+          "type": "string",
+          "const": "forget_after_final_run"
+        }
+      ]
+    },
+    "RevisionConflict": {
+      "description": "Structured state returned when a Revision precondition is stale.",
+      "type": "object",
+      "properties": {
+        "current_revision": {
+          "description": "Revision that is authoritative now, carried as a decimal string\n(ADR-0089).",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "safe_state": {
+          "description": "Safe current state with which the caller can refresh.",
+          "$ref": "#/$defs/ConflictState"
+        }
+      },
+      "required": [
+        "current_revision",
+        "safe_state"
+      ]
+    },
+    "Run": {
+      "description": "One Run of a Conversation.",
+      "type": "object",
+      "properties": {
+        "conversation_id": {
+          "description": "The Conversation it executes.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "created_at_unix_ms": {
+          "description": "When it was created, in signed Unix milliseconds.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "ended_at_unix_ms": {
+          "description": "When it reached a terminal state, if it has.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "lifecycle": {
+          "description": "Current lifecycle state.",
+          "$ref": "#/$defs/RunLifecycle"
+        },
+        "name": {
+          "description": "Resolved name and its authority. Absent before protocol minor 20.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "description": "Monotonic version used by conflict-sensitive Commands, carried as a\ndecimal string (ADR-0089).",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "run_id": {
+          "description": "Durable identity.",
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "run_id",
+        "conversation_id",
+        "revision",
+        "lifecycle",
+        "created_at_unix_ms"
+      ]
+    },
     "RunActivity": {
       "description": "Why an active Run is working or waiting.",
       "oneOf": [
@@ -1328,6 +2411,51 @@
           "description": "Reconnecting to its execution.",
           "type": "string",
           "const": "reconnecting"
+        }
+      ]
+    },
+    "RunLifecycle": {
+      "description": "Mutually exclusive lifecycle state of one Run.",
+      "oneOf": [
+        {
+          "description": "Recorded but not yet launching.",
+          "type": "string",
+          "const": "created"
+        },
+        {
+          "description": "Launching its Harness.",
+          "type": "string",
+          "const": "starting"
+        },
+        {
+          "description": "Executing.",
+          "type": "string",
+          "const": "active"
+        },
+        {
+          "description": "Ending gracefully.",
+          "type": "string",
+          "const": "stopping"
+        },
+        {
+          "description": "Terminal: finished its work.",
+          "type": "string",
+          "const": "completed"
+        },
+        {
+          "description": "Terminal: ended with an error.",
+          "type": "string",
+          "const": "failed"
+        },
+        {
+          "description": "Terminal: ended on request.",
+          "type": "string",
+          "const": "canceled"
+        },
+        {
+          "description": "Terminal: its execution can no longer be observed.",
+          "type": "string",
+          "const": "lost"
         }
       ]
     },
@@ -1414,6 +2542,119 @@
           "required": [
             "purpose",
             "prompt"
+          ]
+        }
+      ]
+    },
+    "WireError": {
+      "description": "Stable error body carried by every failed reply.",
+      "type": "object",
+      "properties": {
+        "category": {
+          "description": "Category the client may branch on.",
+          "$ref": "#/$defs/ErrorCategory"
+        },
+        "code": {
+          "description": "Domain-specific code such as `protocol.unsupported_version`.",
+          "type": "string"
+        },
+        "message": {
+          "description": "Safe human-readable description free of native error strings.",
+          "type": "string"
+        },
+        "recovery_actions": {
+          "description": "Structured actions that can safely recover from this error.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecoveryAction"
+          }
+        },
+        "restart": {
+          "description": "Structured metadata when a stale read must restart.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RestartMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retryable": {
+          "description": "Whether repeating the same request may succeed.",
+          "type": "boolean"
+        },
+        "revision_conflict": {
+          "description": "Current resource state when an expected Revision was stale.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RevisionConflict"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "category",
+        "code",
+        "retryable",
+        "message"
+      ]
+    },
+    "WorkingTree": {
+      "description": "Where a Conversation does its work.",
+      "oneOf": [
+        {
+          "description": "In no Project. Nothing on disk belongs to the Conversation.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "no_project"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "In a managed Workspace of a Project, isolated from every other\nConversation. The Workspace itself comes with the Conversation\nsnapshot.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "workspace"
+            },
+            "project_id": {
+              "description": "The Project the Workspace was created from.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "project_id"
+          ]
+        },
+        {
+          "description": "In the Project's own Local checkout, without isolation. The Plane\nadmits one live managed Run there at a time and cannot lock the\nprocesses outside its management.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "local_checkout"
+            },
+            "project_id": {
+              "description": "The Project whose checkout it works in.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "project_id"
           ]
         }
       ]

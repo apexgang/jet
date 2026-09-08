@@ -55,6 +55,13 @@ pub(crate) fn query(
 	minor: u32,
 ) -> Result<Query, CoreError> {
 	Ok(match request {
+		wire::QueryRequest::RemoteToolReview {
+			client_id,
+			operation_id,
+		} => Query::RemoteToolReview {
+			client_id: ClientId(*client_id),
+			operation_id: *operation_id,
+		},
 		wire::QueryRequest::DiscoverCraft { source } => Query::DiscoverCraft {
 			source: craft_installation::source_from_wire(source),
 		},
@@ -188,6 +195,11 @@ pub(crate) fn query_result(
 	minor: u32,
 ) -> Result<wire::QueryResponse, CoreError> {
 	Ok(match result {
+		QueryResult::RemoteToolReview(request) => {
+			wire::QueryResponse::RemoteToolReview(crate::remote_tool::to_wire(
+				request,
+			))
+		}
 		QueryResult::CraftInstallationPreview(preview) => {
 			wire::QueryResponse::CraftInstallationPreview(
 				craft_installation::preview(*preview),
@@ -422,6 +434,44 @@ pub(crate) fn command(
 			run_id: RunId(*run_id),
 			control: jet_core::RunControl::StopRun,
 		},
+		wire::CommandRequest::ReviewRemoteTool {
+			client_id,
+			operation_id,
+			decision,
+		} => Command::ReviewRemoteTool {
+			client_id: ClientId(*client_id),
+			operation_id: *operation_id,
+			decision: match decision {
+				wire::RemoteToolDecision::AllowOnce => {
+					jet_core::RemoteToolDecision::AllowOnce
+				}
+				wire::RemoteToolDecision::Deny => {
+					jet_core::RemoteToolDecision::Deny
+				}
+			},
+		},
+		wire::CommandRequest::StartNoVisaRun(request) => {
+			Command::StartNoVisaRun(jet_core::NoVisaRunRequest {
+				conversation_id: jet_core::ConversationId(
+					request.conversation_id,
+				),
+				origin_plane_id: jet_core::PlaneId(request.origin_plane_id),
+				account_binding_id: jet_core::AccountBindingId(
+					request.account_binding_id,
+				),
+				craft: request.craft.clone(),
+				prompt: request.prompt.clone(),
+				destinations: request
+					.destinations
+					.iter()
+					.map(|d| jet_core::NoVisaDestination {
+						plane_id: jet_core::PlaneId(d.plane_id),
+						workspace_id: jet_core::WorkspaceId(d.workspace_id),
+						ssh_endpoint: d.ssh_endpoint.clone(),
+					})
+					.collect(),
+			})
+		}
 		wire::CommandRequest::StartVisaRun(request) => {
 			Command::StartVisaRun(jet_core::VisaRunRequest {
 				conversation_id: ConversationId(request.conversation_id),
@@ -685,6 +735,9 @@ pub(crate) fn command_outcome(
 				key: setting::key(key),
 				scope: setting::scope(scope),
 			}
+		}
+		CommandOutcome::RemoteToolReviewed { operation_id } => {
+			wire::CommandResponse::RemoteToolReviewed { operation_id }
 		}
 		CommandOutcome::AccountBound(bound) => {
 			wire::CommandResponse::AccountBound(account::binding(bound))

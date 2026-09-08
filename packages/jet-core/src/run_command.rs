@@ -49,6 +49,9 @@ pub struct ForkLaunchSource {
 /// Durable domain plan: authority, working roots, and the exact accepted artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaunchPlan {
+	/// Immutable No-Visa destinations; native binding stays on the origin.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub no_visa: Option<crate::NoVisaSelection>,
 	/// Explicit Visa selection; absent on legacy managed executions.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub visa: Option<crate::VisaSelection>,
@@ -190,6 +193,7 @@ pub(crate) async fn prepare(
 	})?;
 	let mut plan = LaunchPlan {
 		visa: None,
+		no_visa: None,
 		version: 1,
 		root,
 		project_root,
@@ -237,7 +241,10 @@ impl LaunchPlan {
 	/// # Errors
 	/// Returns a conflict or unavailable error when the accepted boundary changed.
 	pub async fn revalidate(&self) -> Result<(), CoreError> {
-		if !matches!((self.version, self.visa), (1, None) | (2, Some(_))) {
+		if !matches!(
+			(self.version, self.visa, &self.no_visa),
+			(1, None, None) | (2, Some(_), None) | (3, Some(_), Some(_))
+		) {
 			return Err(CoreError::conflict(
 				"run.incompatible_pin",
 				"this execution requires an unavailable protocol version",

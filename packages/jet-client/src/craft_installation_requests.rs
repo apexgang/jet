@@ -25,7 +25,8 @@ impl Client {
 		self.require_minor(jet_protocol::CRAFT_INSTALLATION_MINOR)?;
 		match self.query(QueryRequest::DiscoverCraft { source }).await? {
 			QueryResponse::CraftInstallationPreview(preview) => Ok(preview),
-			other @ (QueryResponse::Utility(_)
+			other @ (QueryResponse::RemoteToolReview(_)
+			| QueryResponse::Utility(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -73,7 +74,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::CraftInstallationQueued(queued) => Ok(queued),
-			other @ (CommandResponse::UtilityQueued { .. }
+			other @ (CommandResponse::RemoteToolReviewed { .. }
+			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }

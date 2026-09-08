@@ -293,5 +293,100 @@
     "schema": "ServerMessage",
     "valid": false,
     "payload": "{\"kind\":\"query_result\",\"id\":2,\"result\":{\"type\":\"run_execution\",\"cursor\":\"10\",\"run\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96502\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"revision\":\"3\",\"lifecycle\":\"active\",\"created_at_unix_ms\":1788876430000,\"ended_at_unix_ms\":null},\"activity\":\"waiting_for_auth\",\"processes\":[],\"native_conversation\":null,\"exit_code\":null,\"visa\":{\"plane_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96500\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"remote_tool\",\"id\":1,\"request\":{\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"origin\":{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"conversation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"run_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"},\"destination_plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"workspace_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"permissions\":[\"remote_tools\"],\"action\":{\"type\":\"read_file\",\"path\":\"src/main.rs\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"remote_tool\",\"id\":2,\"request\":{\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"origin\":{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"conversation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"run_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"},\"destination_plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"workspace_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"permissions\":[\"remote_tools\"],\"action\":{\"type\":\"write_file\",\"path\":\"note.txt\",\"content\":\"hello\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"remote_tool\",\"id\":3,\"request\":{\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"origin\":{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"conversation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"run_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"},\"destination_plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"workspace_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"permissions\":[\"all_tools\"],\"action\":{\"type\":\"write_file\",\"path\":\"note.txt\",\"content\":\"hello\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"remote_tool\",\"id\":4,\"request\":{\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"origin\":{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"conversation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"run_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"},\"destination_plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"workspace_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"permissions\":[\"remote_tools\"],\"action\":{\"type\":\"raw_command\",\"command\":\"rm -rf /\"}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"remote_tool_result\",\"id\":1,\"result\":{\"type\":\"file\",\"content\":\"hello\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"remote_tool_result\",\"id\":2,\"result\":{\"type\":\"written\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"remote_tool\",\"id\":1,\"request\":{\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"origin\":{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"conversation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"run_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"},\"destination_plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"workspace_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"permissions\":[\"remote_tools\"],\"action\":{\"type\":\"git\",\"operation\":\"status\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"remote_tool\",\"id\":1,\"request\":{\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"origin\":{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"conversation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"run_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"},\"destination_plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"workspace_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"permissions\":[\"remote_tools\"],\"action\":{\"type\":\"git\",\"operation\":\"diff\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"remote_tool\",\"id\":1,\"request\":{\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"origin\":{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"conversation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"run_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"},\"destination_plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"workspace_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"permissions\":[\"remote_tools\"],\"action\":{\"type\":\"process\",\"arguments\":[\"/usr/bin/printf\",\"%s\",\"literal; data\"],\"directory\":\"\",\"environment\":[]}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"remote_tool\",\"id\":1,\"request\":{\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"origin\":{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"conversation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"run_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"},\"destination_plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"workspace_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"permissions\":[\"remote_tools\"],\"action\":{\"type\":\"shell\",\"directory\":\"\",\"environment\":[{\"name\":\"EXAMPLE\",\"value\":\"value\"}],\"script\":\"pwd\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"remote_tool\",\"id\":1,\"request\":{\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"origin\":{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"conversation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"run_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"},\"destination_plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"workspace_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"permissions\":[\"remote_tools\"],\"action\":{\"type\":\"terminal\",\"directory\":\"\",\"input\":\"pwd\",\"rows\":24,\"columns\":80}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"command\":{\"type\":\"review_remote_tool\",\"client_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"decision\":\"allow_once\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":1,\"query\":{\"type\":\"remote_tool_review\",\"client_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"command\":{\"type\":\"start_no_visa_run\",\"origin_plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"account_binding_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"conversation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"destinations\":[{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"workspace_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"ssh_endpoint\":\"paired-host\"}],\"craft\":\"claude-code\",\"prompt\":\"Inspect the selected Workspace\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"remote_tool_result\",\"id\":1,\"result\":{\"type\":\"approval_required\",\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"remote_tool_result\",\"id\":1,\"result\":{\"type\":\"process\",\"exit_code\":0,\"stdout\":\"ok\",\"stderr\":\"\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":1,\"result\":{\"type\":\"remote_tool_review\",\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"origin\":{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"conversation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"run_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"},\"destination_plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"workspace_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"permissions\":[\"remote_tools\"],\"action\":{\"type\":\"shell\",\"directory\":\"\",\"environment\":[],\"script\":\"pwd\"}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":1,\"result\":{\"type\":\"remote_tool_reviewed\",\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":2,\"result\":{\"type\":\"run_execution\",\"cursor\":\"10\",\"run\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96502\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"revision\":\"3\",\"lifecycle\":\"active\",\"created_at_unix_ms\":1788876430000,\"ended_at_unix_ms\":null},\"activity\":\"waiting_for_auth\",\"processes\":[],\"native_conversation\":null,\"exit_code\":null,\"no_visa\":{\"origin_plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"account_binding_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"conversation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"destinations\":[{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"workspace_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"ssh_endpoint\":\"paired-host\"}],\"jet_equivalent\":[\"files\",\"git\",\"processes\",\"bounded_terminals\"],\"native_unavailable\":[\"remote_checkpoints\",\"tool_discovery\",\"extensions\",\"sandbox_internals\",\"persistent_terminals\"]}}}"
   }
 ]

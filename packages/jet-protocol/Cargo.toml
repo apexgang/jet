@@ -32,3 +32,7 @@ required-features = ["schema"]
 [[example]]
 name = "jet-schema"
 required-features = ["schema"]
+
+[[example]]
+name = "remote-tool-schema"
+required-features = ["schema"]

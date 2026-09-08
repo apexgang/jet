@@ -33,6 +33,8 @@ mod plane;
 mod project;
 mod promotion;
 mod records;
+mod remote_operation;
+pub use remote_operation::RemoteOperationRecord;
 mod run;
 mod run_execution;
 mod schedule;

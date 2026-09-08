@@ -186,7 +186,7 @@ pub(crate) async fn write_atomic(
 		.await?
 }
 
-fn replace_atomic(
+pub(crate) fn replace_atomic(
 	root: PathBuf,
 	path: RelativePath,
 	content: String,

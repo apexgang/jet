@@ -67,6 +67,7 @@ emit-contracts root:
 	mkdir -p "$contracts" "$typescript" "$swift"
 	cargo run -q -p jet-protocol --features schema --example craft-schema > "$contracts/craft-v1.schema.json"
 	cargo run -q -p jet-protocol --features schema --example jet-schema > "$contracts/jet-v1.schema.json"
+	cargo run -q -p jet-protocol --features schema --example remote-tool-schema > "$contracts/remote-tool.schema.json"
 	# Craft models serve the contract test; only clients need the Jet models.
 	python3 ../scripts/wire-models.py "$contracts/craft-v1.schema.json" "$contracts/CraftModels.ts" "$contracts/CraftModels.swift"
 	python3 ../scripts/wire-models.py "$contracts/jet-v1.schema.json" "$typescript/JetModels.ts" "$swift/JetModels.swift"

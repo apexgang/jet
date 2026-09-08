@@ -24,7 +24,8 @@ pub(crate) fn invalidated_client(
 			PairedClientAccess::Disabled => Some(client.client_id),
 			PairedClientAccess::Enabled => None,
 		},
-		CommandOutcome::UserEditApplied(_)
+		CommandOutcome::RemoteToolReviewed { .. }
+		| CommandOutcome::UserEditApplied(_)
 		| CommandOutcome::UtilityQueued { .. }
 		| CommandOutcome::CraftInstallationQueued { .. }
 		| CommandOutcome::ScheduleCreated(_)
@@ -190,7 +191,10 @@ impl Core {
 		self.remote_sessions.authorize(session)?;
 		let session = session.clone();
 		jet_runtime::NoVisaOperation::spawn(command, async move {
-			session.revoked().await
+			tokio::select! {
+				() = session.revoked() => {},
+				() = tokio::time::sleep(std::time::Duration::from_secs(60)) => {},
+			}
 		})
 		.map_err(|error| {
 			CoreError::unavailable(

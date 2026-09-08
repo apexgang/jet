@@ -6,6 +6,7 @@ regenerates every machine-readable artifact from the Rust DTOs:
 | Artifact | Contract |
 | --- | --- |
 | `packages/jet-protocol/contracts/jet-v1.schema.json` | Client protocol, GUI to `jetd` |
+| `packages/jet-protocol/contracts/remote-tool.schema.json` | Native MCP input for the bounded Jet remote tool |
 | `packages/jet-protocol/contracts/craft-v1.schema.json` | Craft protocol, `jetd` to Craft |
 | `apps/jet-tauri/src/lib/protocol/JetModels.ts` | Client models the Tauri GUI compiles |
 | `apps/jet/jet/Protocol/JetModels.swift` | Client models the Swift GUI compiles |
@@ -38,3 +39,16 @@ and Swift) checks the same payloads against the emitted schema. Between them
 they cover optional fields an older reader ignores, rejected unknown message
 kinds, duplicate discriminators a dictionary would discard, non-canonical
 decimal strings, and hexadecimal of the wrong width or case (ADR-0094).
+
+## No-Visa negotiation
+
+Jet 1.26 adds `start_no_visa_run`, `remote_tool`, exact remote-action review,
+and the execution's `no_visa` selection and capability report. Older peers
+cannot admit these operations; snapshots omit the new field for older minors.
+
+Craft 1.6 adds `configure_remote_tools`, the `remote_tool` event, and the
+`remote_tool_result` command. The accepted Craft must declare the
+`remote_tools` feature and broker permission. Configuration precedes Start
+or Recover and is immutable for that Run. A Craft receives results for its
+own operation IDs; transport failure is an affected-call failure, never an
+instruction to replay a mutation under another identity.

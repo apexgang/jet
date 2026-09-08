@@ -28,7 +28,7 @@ impl Contract {
 			jet_protocol::decode_control(pin.adapter_state.as_bytes())
 				.map_err(|_| unavailable())?;
 		if contract.version != 1
-			|| !(1..=5).contains(&contract.craft_protocol.minor)
+			|| !(1..=6).contains(&contract.craft_protocol.minor)
 			|| contract.craft_protocol.major != 1
 			|| contract.helper_protocol.major != 1
 			|| contract.helper_protocol.minor > 1
@@ -85,7 +85,7 @@ pub(crate) async fn load(
 	}
 	let offer = jet_protocol::ProtocolOffer {
 		family: jet_protocol::ProtocolFamily::Craft,
-		versions: vec![jet_protocol::ProtocolVersion { major: 1, minor: 5 }],
+		versions: vec![jet_protocol::ProtocolVersion { major: 1, minor: 6 }],
 		capabilities: vec!["fork".into(), "runs".into()],
 	};
 	let negotiated = offer

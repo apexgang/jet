@@ -141,6 +141,15 @@ pub use handshake::{
 	TURN_QUEUE_MINOR, USER_INPUT_MINOR, UTILITY_MINOR, VersionRange,
 	WORKSPACE_PROMOTION_MINOR, WORKSPACE_TERMINALS_MINOR, WORKSPACES_MINOR,
 };
+mod no_visa;
+pub use handshake::NO_VISA_MINOR;
+pub use no_visa::{
+	CraftRemoteTool, NoVisaOrigin, RemoteEnvironment, RemoteGitOperation,
+	RemoteToolAction, RemoteToolDecision, RemoteToolOutcome, RemoteToolRequest,
+	RemoteToolResult,
+};
+mod no_visa_run;
+pub use no_visa_run::{NoVisaDestination, NoVisaRunRequest, NoVisaSelection};
 mod visa;
 pub use handshake::VISA_RUNS_MINOR;
 pub use import::{

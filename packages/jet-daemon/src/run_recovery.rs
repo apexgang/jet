@@ -308,6 +308,8 @@ pub(crate) async fn connect(
 		return Err(RunRecoveryError::Unavailable);
 	}
 	Ok(Box::new(RunConnection {
+		broker: crate::no_visa_broker::Broker::prepare(processes, &plan, id)
+			.map_err(|_| RunRecoveryError::Unavailable)?,
 		craft_minor: contract.craft_protocol.minor,
 		reader: tokio::sync::Mutex::new(reader),
 		writer: tokio::sync::Mutex::new(writer),

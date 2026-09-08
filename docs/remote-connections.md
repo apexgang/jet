@@ -56,10 +56,10 @@ when a key is enabled again.
 creates a separate process group, requests SIGTERM on revocation, and forces
 SIGKILL after two seconds, with at most one more second awaiting reaping.
 Descendants receive the full grace period even if the leader exits early.
-Visa Runs do not use this
-connection-owned scope. Issue #32 will connect the file, Git, terminal, and
-process remote tools to this seam after validating registered roots and
-permissions; this change does not expose an unrestricted execution command.
+Visa Runs do not use this connection-owned scope. The destination tools described
+in [No-Visa execution](no-visa-execution.md) use it after validating registered
+roots, declarations, and exact-action review. Operations also have a sixty-second
+lifetime bound, followed by the same bounded stop.
 
 Securability notes: authenticity, accountability, and bounded process
 lifetime shape these interfaces. Relevant controls are ASVS 1.2.5, 6.3.4,

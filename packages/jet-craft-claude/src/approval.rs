@@ -103,7 +103,7 @@ impl Request {
 	}
 }
 
-fn tools() -> Value {
+pub(crate) fn tools() -> Value {
 	json!({
 		"tools": [{
 			"name": harness::TOOL,
@@ -122,7 +122,7 @@ fn tools() -> Value {
 }
 
 /// One answered JSON-RPC message, as the native line that delivers it.
-fn reply(request_id: &str, call: &Value, result: &Value) -> String {
+pub(crate) fn reply(request_id: &str, call: &Value, result: &Value) -> String {
 	harness::control_response(
 		request_id,
 		json!({

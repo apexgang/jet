@@ -8,13 +8,19 @@ export type PresentationBlock = RawJSON;
 
 export type BrokerPermission = "artifact_read" | "artifact_write" | "remote_tools";
 
+export type ConflictState = { conversation: Conversation; type: "conversation" } | { run: Run; type: "run" };
+
+export type Conversation = { conversation_id: string; created_at_unix_ms: number; name?: Name | null; origin?: ConversationOrigin | null; retention: RetentionPolicy; revision?: string | null; working_tree?: WorkingTree | null };
+
+export type ConversationOrigin = { kind: "new" } | { import_id: string; kind: "imported" } | { checkpoint_turn: number; kind: "forked"; source_conversation_id: string; source_run_id: string };
+
 export type CraftAction = { action_id: string; input: RawJSON; kind: "invoke" } | { decision: CraftApprovalDecision; kind: "approval"; request_id: string };
 
 export type CraftApprovalDecision = "allow_once" | "deny";
 
-export type CraftCommand = { checkpoint: string; helper_socket: string; id: string; kind: "recover"; source_offset: number } | { helper_socket: string; id: string; kind: "start"; text: string } | { kind: "acknowledge"; source_offset: number } | { id: string; kind: "turn"; text: string } | { id: string; kind: "interrupt" } | { action: CraftAction; id: string; kind: "action" } | { kind: "shutdown" };
+export type CraftCommand = { kind: "configure_remote_tools"; selection: NoVisaSelection } | { kind: "remote_tool_result"; operation_id: string; outcome: RemoteToolOutcome } | { checkpoint: string; helper_socket: string; id: string; kind: "recover"; source_offset: number } | { helper_socket: string; id: string; kind: "start"; text: string } | { kind: "acknowledge"; source_offset: number } | { id: string; kind: "turn"; text: string } | { id: string; kind: "interrupt" } | { action: CraftAction; id: string; kind: "action" } | { kind: "shutdown" };
 
-export type CraftEvent = { kind: "turn_started" } | { kind: "turn_ended"; outcome: TurnOutcome } | { change: CraftFileChange; kind: "file_changed" } | { kind: "conversation_title"; title: string } | { kind: "run_title"; title: string } | { kind: "process_title"; pid: number; title: string } | { kind: "run_launch_failed" } | { harness_pid: number; helper_pid: number; kind: "run_started" } | { activity: RunActivity; kind: "activity" } | { checkpoint?: string; kind: "progress"; source_offset: number } | { helper_pid: number; kind: "run_recovered"; source_offset: number } | { exit_code?: number | null; kind: "run_ended" } | { kind: "output"; native_event: RawJSON; presentation?: Array<PresentationBlock> } | { id: string; kind: "completed"; native_conversation: string };
+export type CraftEvent = { call: CraftRemoteTool; kind: "remote_tool" } | { kind: "turn_started" } | { kind: "turn_ended"; outcome: TurnOutcome } | { change: CraftFileChange; kind: "file_changed" } | { kind: "conversation_title"; title: string } | { kind: "run_title"; title: string } | { kind: "process_title"; pid: number; title: string } | { kind: "run_launch_failed" } | { harness_pid: number; helper_pid: number; kind: "run_started" } | { activity: RunActivity; kind: "activity" } | { checkpoint?: string; kind: "progress"; source_offset: number } | { helper_pid: number; kind: "run_recovered"; source_offset: number } | { exit_code?: number | null; kind: "run_ended" } | { kind: "output"; native_event: RawJSON; presentation?: Array<PresentationBlock> } | { id: string; kind: "completed"; native_conversation: string };
 
 export type CraftFeature = { name: string; required?: boolean };
 
@@ -27,6 +33,8 @@ export type CraftHello = { execution_id: string; fork?: CraftFork | null; protoc
 export type CraftHostAccess = { kind: "executable"; name: string } | { kind: "filesystem"; path: string } | { kind: "environment"; name: string } | { destination: string; kind: "network" };
 
 export type CraftReady = { enabled_features: Array<string>; protocol: NegotiatedProtocol; specification: CraftSpecification; specification_protocol: NegotiatedProtocol };
+
+export type CraftRemoteTool = { action: RemoteToolAction; destination_plane_id: string; operation_id: string; workspace_id: string };
 
 export type CraftResume = { native_conversation: string; version: ProtocolVersion };
 
@@ -42,7 +50,21 @@ export type CredentialItem = { account: string; service: string };
 
 export type CredentialReference = { item: CredentialItem; source: "platform_store" } | { helper: string; source: "external_helper" } | { source: "harness_native" } | { established_at_daemon_start: number; source: "session_only" };
 
+export type ErrorCategory = "invalid_input" | "unauthorized" | "conflict" | "unavailable" | "incompatible" | "rate_limited" | "not_found" | "outcome_unknown" | "internal";
+
+export type FileRevision = { mode: string; object: string };
+
+export type FileTarget = { kind: "project"; project_id: string } | { kind: "workspace"; workspace_id: string };
+
+export type Name = { source: NameSource; value: string };
+
+export type NameSource = "manual" | "utility" | "harness_native" | "deterministic";
+
 export type NegotiatedProtocol = { capabilities: Array<string>; family: ProtocolFamily; version: ProtocolVersion };
+
+export type NoVisaDestination = { plane_id: string; ssh_endpoint: string; workspace_id: string };
+
+export type NoVisaSelection = { account_binding_id: string; conversation_id: string; destinations: Array<NoVisaDestination>; jet_equivalent: Array<string>; native_unavailable: Array<string>; origin_plane_id: string };
 
 export type Presentation = { kind: "text"; text: string } | { kind: "markdown"; text: string } | { actions: Array<PresentationAction>; kind: "actions" };
 
@@ -54,8 +76,34 @@ export type ProtocolOffer = { capabilities?: Array<string>; family: ProtocolFami
 
 export type ProtocolVersion = { major: number; minor: number };
 
+export type RecoveryAction = { current_revision: FileRevision; path: string; target: FileTarget; type: "refresh_file" } | { conversation_id: string; type: "refresh_conversation" } | { run_id: string; type: "refresh_run" } | { after: string; type: "resume_events" };
+
+export type RemoteEnvironment = { name: string; value?: string | null };
+
+export type RemoteGitOperation = "status" | "diff";
+
+export type RemoteToolAction = { columns: number; directory: string; input: string; rows: number; type: "terminal" } | { arguments: Array<string>; directory: string; environment: Array<RemoteEnvironment>; type: "process" } | { operation: RemoteGitOperation; type: "git" } | { directory: string; environment: Array<RemoteEnvironment>; script: string; type: "shell" } | { content: string; path: string; type: "write_file" } | { path: string; type: "read_file" };
+
+export type RemoteToolOutcome = { result: RemoteToolResult; type: "completed" } | { error: WireError; type: "failed" };
+
+export type RemoteToolResult = { operation_id: string; type: "approval_required" } | { exit_code?: number | null; stderr: string; stdout: string; type: "process" } | { type: "written" } | { content: string; type: "file" };
+
+export type RestartMetadata = { current_snapshot_revision: string; minimum_available_cursor: string; reason: "cursor_expired" } | { current_snapshot_revision: string; reason: "cursor_ahead" } | { current_snapshot_revision: string; reason: "pagination_stale" };
+
+export type RetentionPolicy = "retain" | "forget_after_final_run";
+
+export type RevisionConflict = { current_revision: string; safe_state: ConflictState };
+
+export type Run = { conversation_id: string; created_at_unix_ms: number; ended_at_unix_ms?: number | null; lifecycle: RunLifecycle; name?: Name | null; revision: string; run_id: string };
+
 export type RunActivity = "working" | "waiting_for_user" | "waiting_for_approval" | "waiting_for_auth" | "waiting_for_quota" | "reconnecting";
+
+export type RunLifecycle = "created" | "starting" | "active" | "stopping" | "completed" | "failed" | "canceled" | "lost";
 
 export type TurnOutcome = "completed" | "interrupted";
 
 export type UtilityInput = { opening_context: string; purpose: "naming"; title: string } | { instructions: string; patch: string; purpose: "git_text" } | { prompt: string; purpose: "autodelete" };
+
+export type WireError = { category: ErrorCategory; code: string; message: string; recovery_actions?: Array<RecoveryAction>; restart?: RestartMetadata | null; retryable: boolean; revision_conflict?: RevisionConflict | null };
+
+export type WorkingTree = { kind: "no_project" } | { kind: "workspace"; project_id: string } | { kind: "local_checkout"; project_id: string };

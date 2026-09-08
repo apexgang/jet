@@ -101,6 +101,39 @@ struct WriteRequest {
 }
 
 impl Client {
+	/// Executes a bounded destination operation under this signed connection.
+	/// Preserve the operation identity on retry; a lost mutation reply is uncertain.
+	/// # Errors
+	/// Returns a destination refusal, incompatible minor, or transport failure.
+	pub async fn remote_tool(
+		&self,
+		request: jet_protocol::RemoteToolRequest,
+	) -> Result<jet_protocol::RemoteToolResult, ClientError> {
+		self.require_minor(jet_protocol::NO_VISA_MINOR)?;
+		let id = self.next_id();
+		let reply = self
+			.exchange(
+				self.request_stream(),
+				&ClientMessage::RemoteTool { id, request },
+			)
+			.await?;
+		match reply {
+			ServerMessage::RemoteToolResult {
+				id: reply_id,
+				result,
+			} => expect_reply_to(id, reply_id, result),
+			ServerMessage::Error {
+				id: reply_id,
+				error,
+			} => Err(remote_error(id, reply_id, error)),
+			other @ (ServerMessage::QueryResult { .. }
+			| ServerMessage::CommandResult { .. }
+			| ServerMessage::TerminalAttached { .. }
+			| ServerMessage::TerminalResized { .. }) => {
+				Err(ClientError::Unexpected(format!("{other:?}")))
+			}
+		}
+	}
 	/// Connects to the local `jetd` socket and completes the handshake as
 	/// the installation identified by `client_id`.
 	///
@@ -232,7 +265,8 @@ impl Client {
 			} => Err(remote_error(id, reply_id, error)),
 			other @ (ServerMessage::CommandResult { .. }
 			| ServerMessage::TerminalAttached { .. }
-			| ServerMessage::TerminalResized { .. }) => {
+			| ServerMessage::TerminalResized { .. }
+			| ServerMessage::RemoteToolResult { .. }) => {
 				Err(ClientError::Unexpected(format!("{other:?}")))
 			}
 		}
@@ -275,7 +309,8 @@ impl Client {
 			} => Err(remote_error(id, reply_id, error)),
 			other @ (ServerMessage::QueryResult { .. }
 			| ServerMessage::TerminalAttached { .. }
-			| ServerMessage::TerminalResized { .. }) => {
+			| ServerMessage::TerminalResized { .. }
+			| ServerMessage::RemoteToolResult { .. }) => {
 				Err(ClientError::Unexpected(format!("{other:?}")))
 			}
 		}

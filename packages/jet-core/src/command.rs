@@ -113,6 +113,15 @@ impl CommandEnvelope {
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
+	/// Reviews one immutable No-Visa action captured by the destination.
+	ReviewRemoteTool {
+		/// Paired installation that submitted the action.
+		client_id: ClientId,
+		/// Captured remote operation identity.
+		operation_id: Uuid,
+		/// Applies only to this exact stored action.
+		decision: crate::RemoteToolDecision,
+	},
 	/// Admit one bounded Utility request.
 	RequestUtility {
 		/// Purpose-specific input.
@@ -221,6 +230,8 @@ pub enum Command {
 	},
 	/// Start native execution using explicit destination-local selections.
 	StartVisaRun(crate::VisaRunRequest),
+	/// Starts a desktop origin Run with paired destination tools.
+	StartNoVisaRun(crate::NoVisaRunRequest),
 	/// Start a managed Run with one installed Craft and its initial input.
 	StartRun {
 		/// The Conversation whose registered working tree is used.
@@ -401,7 +412,8 @@ impl Command {
 	/// (ADR-0086).
 	pub(crate) fn required_capabilities(&self) -> &'static [Capability] {
 		match self {
-			Self::RequestUtility { .. }
+			Self::ReviewRemoteTool { .. }
+			| Self::RequestUtility { .. }
 			| Self::InstallCraft { .. }
 			| Self::CreateSchedule { .. }
 			| Self::CancelSchedule { .. }
@@ -411,7 +423,9 @@ impl Command {
 			| Self::SubmitReview { .. }
 			| Self::WithdrawTurn { .. }
 			| Self::ControlRun { .. } => &[],
-			Self::StartRun { .. } | Self::StartVisaRun(_) => GIT,
+			Self::StartRun { .. }
+			| Self::StartVisaRun(_)
+			| Self::StartNoVisaRun(_) => GIT,
 			Self::SetSetting {
 				key: SettingKey::GitAutoCommit,
 				value: SettingValue::Flag(true),
@@ -472,6 +486,11 @@ impl Command {
 /// The durable result of a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
+	/// The exact-action destination decision was recorded.
+	RemoteToolReviewed {
+		/// Reviewed operation identity.
+		operation_id: Uuid,
+	},
 	/// Durable Utility identity, resolved by a subsequent Query.
 	UtilityQueued {
 		/// Plane-assigned identity.
@@ -687,6 +706,10 @@ impl Core {
 					.as_ref()
 					.ok()
 					.and_then(crate::remote::invalidated_client);
+				if let Some(client_id) = invalidated_client {
+					tx.invalidate_remote_operations(&client_id.0.to_string())
+						.await?;
+				}
 				if let Err(error) = &result
 					&& !error.is_authoritative_result()
 				{
@@ -753,7 +776,8 @@ fn redacted_for_receipt(
 			})
 		}
 		Ok(
-			outcome @ (CommandOutcome::UtilityQueued { .. }
+			outcome @ (CommandOutcome::RemoteToolReviewed { .. }
+			| CommandOutcome::UtilityQueued { .. }
 			| CommandOutcome::CraftInstallationQueued { .. }
 			| CommandOutcome::UserEditApplied(_)
 			| CommandOutcome::ConversationNamed(_)
@@ -814,6 +838,21 @@ async fn execute_new(
 		workspace_home,
 	} = context;
 	match command {
+		Command::ReviewRemoteTool {
+			client_id,
+			operation_id,
+			decision,
+		} => {
+			crate::remote_review::review(
+				tx,
+				actor,
+				client_id,
+				operation_id,
+				decision,
+				now_unix_ms,
+			)
+			.await
+		}
 		Command::RequestUtility { request } => {
 			crate::utility_work::admit(tx, actor, command_id, request).await
 		}
@@ -984,6 +1023,10 @@ async fn execute_new(
 		Command::StartRun {
 			conversation_id, ..
 		}
+		| Command::StartNoVisaRun(crate::NoVisaRunRequest {
+			conversation_id,
+			..
+		})
 		| Command::StartVisaRun(crate::VisaRunRequest {
 			conversation_id,
 			..

@@ -12,6 +12,7 @@ rustix.workspace = true
 getrandom.workspace = true
 clap.workspace = true
 jet-core.workspace = true
+jet-client.workspace = true
 jet-protocol.workspace = true
 jet-runtime.workspace = true
 jet-store.workspace = true
@@ -24,7 +25,6 @@ uuid.workspace = true
 jet-craft-sdk.workspace = true
 sha2.workspace = true
 ed25519-dalek.workspace = true
-jet-client.workspace = true
 pretty_assertions.workspace = true
 tempfile.workspace = true
 

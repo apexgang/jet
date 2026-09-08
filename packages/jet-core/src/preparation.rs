@@ -126,6 +126,7 @@ impl Core {
 		now_unix_ms: i64,
 	) -> Result<Prepared, CoreError> {
 		match command {
+			Command::ReviewRemoteTool { .. } => Ok(Prepared::Nothing),
 			Command::InstallCraft { confirmation } => {
 				Ok(Prepared::CraftInstallation(
 					crate::craft_installation::prepare(self, confirmation)
@@ -174,6 +175,9 @@ impl Core {
 				self.prepare_execution_resolution(request).await?;
 				Ok(Prepared::Nothing)
 			}
+			Command::StartNoVisaRun(request) => Ok(Prepared::Run(
+				crate::no_visa_run::prepare(self, actor, request).await?,
+			)),
 			Command::StartVisaRun(request) => Ok(Prepared::Run(
 				crate::visa::prepare(self, actor, request).await?,
 			)),

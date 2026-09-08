@@ -176,6 +176,8 @@ async fn request(
 			input(writer, native).await?;
 			Ok(false)
 		}
+		CraftCommand::ConfigureRemoteTools { .. }
+		| CraftCommand::RemoteToolResult { .. } => Err(CraftError::InvalidMessage),
 		CraftCommand::Shutdown => {
 			ask(writer, &HelperCommand::CloseInput).await?;
 			Ok(true)

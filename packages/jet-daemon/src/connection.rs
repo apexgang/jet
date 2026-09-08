@@ -392,6 +392,10 @@ struct MinorRequirement {
 
 fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 	match query {
+		QueryRequest::RemoteToolReview { .. } => Some(MinorRequirement {
+			minor: jet_protocol::NO_VISA_MINOR,
+			feature: "No-Visa review",
+		}),
 		QueryRequest::Utility { .. } => Some(MinorRequirement {
 			minor: jet_protocol::UTILITY_MINOR,
 			feature: "Utility work",
@@ -501,6 +505,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 
 fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 	match command {
+		CommandRequest::ReviewRemoteTool { .. } => Some(MinorRequirement {
+			minor: jet_protocol::NO_VISA_MINOR,
+			feature: "No-Visa review",
+		}),
 		CommandRequest::RequestUtility { .. } => Some(MinorRequirement {
 			minor: jet_protocol::UTILITY_MINOR,
 			feature: "Utility work",
@@ -537,6 +545,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		| CommandRequest::WithdrawTurn { .. } => Some(MinorRequirement {
 			minor: jet_protocol::TURN_QUEUE_MINOR,
 			feature: "Turn queue",
+		}),
+		CommandRequest::StartNoVisaRun(_) => Some(MinorRequirement {
+			minor: jet_protocol::NO_VISA_MINOR,
+			feature: "No-Visa Runs",
 		}),
 		CommandRequest::StartVisaRun(_) => Some(MinorRequirement {
 			minor: jet_protocol::VISA_RUNS_MINOR,

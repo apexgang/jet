@@ -20,6 +20,8 @@ pub use ipc::{IpcError, LocalListener};
 pub use lock::{DaemonMetadata, InstallationChannel, LifetimeLock, LockError};
 pub use no_visa::NoVisaOperation;
 
+mod no_visa_terminal;
+pub use no_visa_terminal::no_visa_terminal;
 mod pty;
 pub use pty::{TerminalPipes, TerminalPty};
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE remote_operations SET state = 'expired', request = NULL, result = NULL WHERE recorded_at_unix_ms < ?1 AND state <> 'expired'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "a7caeb6d024972e5eb4b48088253b63fd82b55bcd97f93c46fee1b6e1fc57d8f"
+}

@@ -18,7 +18,8 @@ pub(crate) async fn snapshot(
 	let state: State = decode(&record.state)?;
 	let plan: crate::LaunchPlan = decode(&record.plan)?;
 	Ok(RunExecution {
-		visa: plan.visa,
+		visa: plan.visa.filter(|_| plan.no_visa.is_none()),
+		no_visa: plan.no_visa,
 		cursor: EventSequence(tx.event_cursor().await?),
 		run: run.into(),
 		activity: if state.disconnected {

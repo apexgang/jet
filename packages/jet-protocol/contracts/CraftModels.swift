@@ -12,6 +12,27 @@ public enum BrokerPermission: String {
     case `remote_tools` = "remote_tools"
 }
 
+public enum ConflictState {
+    case `conversation`(ConflictStateConversation)
+    case `run`(ConflictStateRun)
+}
+
+public struct Conversation {
+    public let `conversation_id`: String
+    public let `created_at_unix_ms`: Int64
+    public let `name`: Name?
+    public let `origin`: ConversationOrigin?
+    public let `retention`: RetentionPolicy
+    public let `revision`: String?
+    public let `working_tree`: WorkingTree?
+}
+
+public enum ConversationOrigin {
+    case `new`(ConversationOriginNew)
+    case `imported`(ConversationOriginImported)
+    case `forked`(ConversationOriginForked)
+}
+
 public enum CraftAction {
     case `invoke`(CraftActionInvoke)
     case `approval`(CraftActionApproval)
@@ -23,6 +44,8 @@ public enum CraftApprovalDecision: String {
 }
 
 public enum CraftCommand {
+    case `configure_remote_tools`(CraftCommandConfigureRemoteTools)
+    case `remote_tool_result`(CraftCommandRemoteToolResult)
     case `recover`(CraftCommandRecover)
     case `start`(CraftCommandStart)
     case `acknowledge`(CraftCommandAcknowledge)
@@ -33,6 +56,7 @@ public enum CraftCommand {
 }
 
 public enum CraftEvent {
+    case `remote_tool`(CraftEventRemoteTool)
     case `turn_started`(CraftEventTurnStarted)
     case `turn_ended`(CraftEventTurnEnded)
     case `file_changed`(CraftEventFileChanged)
@@ -94,6 +118,13 @@ public struct CraftReady {
     public let `specification_protocol`: NegotiatedProtocol
 }
 
+public struct CraftRemoteTool {
+    public let `action`: RemoteToolAction
+    public let `destination_plane_id`: String
+    public let `operation_id`: String
+    public let `workspace_id`: String
+}
+
 public struct CraftResume {
     public let `native_conversation`: String
     public let `version`: ProtocolVersion
@@ -140,10 +171,59 @@ public enum CredentialReference {
     case `session_only`(CredentialReferenceSessionOnly)
 }
 
+public enum ErrorCategory: String {
+    case `invalid_input` = "invalid_input"
+    case `unauthorized` = "unauthorized"
+    case `conflict` = "conflict"
+    case `unavailable` = "unavailable"
+    case `incompatible` = "incompatible"
+    case `rate_limited` = "rate_limited"
+    case `not_found` = "not_found"
+    case `outcome_unknown` = "outcome_unknown"
+    case `internal` = "internal"
+}
+
+public struct FileRevision {
+    public let `mode`: String
+    public let `object`: String
+}
+
+public enum FileTarget {
+    case `project`(FileTargetProject)
+    case `workspace`(FileTargetWorkspace)
+}
+
+public struct Name {
+    public let `source`: NameSource
+    public let `value`: String
+}
+
+public enum NameSource: String {
+    case `manual` = "manual"
+    case `utility` = "utility"
+    case `harness_native` = "harness_native"
+    case `deterministic` = "deterministic"
+}
+
 public struct NegotiatedProtocol {
     public let `capabilities`: [String]
     public let `family`: ProtocolFamily
     public let `version`: ProtocolVersion
+}
+
+public struct NoVisaDestination {
+    public let `plane_id`: String
+    public let `ssh_endpoint`: String
+    public let `workspace_id`: String
+}
+
+public struct NoVisaSelection {
+    public let `account_binding_id`: String
+    public let `conversation_id`: String
+    public let `destinations`: [NoVisaDestination]
+    public let `jet_equivalent`: [String]
+    public let `native_unavailable`: [String]
+    public let `origin_plane_id`: String
 }
 
 public enum Presentation {
@@ -175,6 +255,70 @@ public struct ProtocolVersion {
     public let `minor`: UInt32
 }
 
+public enum RecoveryAction {
+    case `refresh_file`(RecoveryActionRefreshFile)
+    case `refresh_conversation`(RecoveryActionRefreshConversation)
+    case `refresh_run`(RecoveryActionRefreshRun)
+    case `resume_events`(RecoveryActionResumeEvents)
+}
+
+public struct RemoteEnvironment {
+    public let `name`: String
+    public let `value`: String?
+}
+
+public enum RemoteGitOperation: String {
+    case `status` = "status"
+    case `diff` = "diff"
+}
+
+public enum RemoteToolAction {
+    case `terminal`(RemoteToolActionTerminal)
+    case `process`(RemoteToolActionProcess)
+    case `git`(RemoteToolActionGit)
+    case `shell`(RemoteToolActionShell)
+    case `write_file`(RemoteToolActionWriteFile)
+    case `read_file`(RemoteToolActionReadFile)
+}
+
+public enum RemoteToolOutcome {
+    case `completed`(RemoteToolOutcomeCompleted)
+    case `failed`(RemoteToolOutcomeFailed)
+}
+
+public enum RemoteToolResult {
+    case `approval_required`(RemoteToolResultApprovalRequired)
+    case `process`(RemoteToolResultProcess)
+    case `written`(RemoteToolResultWritten)
+    case `file`(RemoteToolResultFile)
+}
+
+public enum RestartMetadata {
+    case `cursor_expired`(RestartMetadataCursorExpired)
+    case `cursor_ahead`(RestartMetadataCursorAhead)
+    case `pagination_stale`(RestartMetadataPaginationStale)
+}
+
+public enum RetentionPolicy: String {
+    case `retain` = "retain"
+    case `forget_after_final_run` = "forget_after_final_run"
+}
+
+public struct RevisionConflict {
+    public let `current_revision`: String
+    public let `safe_state`: ConflictState
+}
+
+public struct Run {
+    public let `conversation_id`: String
+    public let `created_at_unix_ms`: Int64
+    public let `ended_at_unix_ms`: Int64?
+    public let `lifecycle`: RunLifecycle
+    public let `name`: Name?
+    public let `revision`: String
+    public let `run_id`: String
+}
+
 public enum RunActivity: String {
     case `working` = "working"
     case `waiting_for_user` = "waiting_for_user"
@@ -182,6 +326,17 @@ public enum RunActivity: String {
     case `waiting_for_auth` = "waiting_for_auth"
     case `waiting_for_quota` = "waiting_for_quota"
     case `reconnecting` = "reconnecting"
+}
+
+public enum RunLifecycle: String {
+    case `created` = "created"
+    case `starting` = "starting"
+    case `active` = "active"
+    case `stopping` = "stopping"
+    case `completed` = "completed"
+    case `failed` = "failed"
+    case `canceled` = "canceled"
+    case `lost` = "lost"
 }
 
 public enum TurnOutcome: String {
@@ -195,6 +350,44 @@ public enum UtilityInput {
     case `autodelete`(UtilityInputAutodelete)
 }
 
+public struct WireError {
+    public let `category`: ErrorCategory
+    public let `code`: String
+    public let `message`: String
+    public let `recovery_actions`: [RecoveryAction]?
+    public let `restart`: RestartMetadata?
+    public let `retryable`: Bool
+    public let `revision_conflict`: RevisionConflict?
+}
+
+public enum WorkingTree {
+    case `no_project`(WorkingTreeNoProject)
+    case `workspace`(WorkingTreeWorkspace)
+    case `local_checkout`(WorkingTreeLocalCheckout)
+}
+
+public struct ConflictStateConversation {
+    public let `conversation`: Conversation
+}
+
+public struct ConflictStateRun {
+    public let `run`: Run
+}
+
+public struct ConversationOriginNew {
+
+}
+
+public struct ConversationOriginImported {
+    public let `import_id`: String
+}
+
+public struct ConversationOriginForked {
+    public let `checkpoint_turn`: UInt32
+    public let `source_conversation_id`: String
+    public let `source_run_id`: String
+}
+
 public struct CraftActionInvoke {
     public let `action_id`: String
     public let `input`: RawJSON
@@ -203,6 +396,15 @@ public struct CraftActionInvoke {
 public struct CraftActionApproval {
     public let `decision`: CraftApprovalDecision
     public let `request_id`: String
+}
+
+public struct CraftCommandConfigureRemoteTools {
+    public let `selection`: NoVisaSelection
+}
+
+public struct CraftCommandRemoteToolResult {
+    public let `operation_id`: String
+    public let `outcome`: RemoteToolOutcome
 }
 
 public struct CraftCommandRecover {
@@ -238,6 +440,10 @@ public struct CraftCommandAction {
 
 public struct CraftCommandShutdown {
 
+}
+
+public struct CraftEventRemoteTool {
+    public let `call`: CraftRemoteTool
 }
 
 public struct CraftEventTurnStarted {
@@ -334,6 +540,14 @@ public struct CredentialReferenceSessionOnly {
     public let `established_at_daemon_start`: UInt64
 }
 
+public struct FileTargetProject {
+    public let `project_id`: String
+}
+
+public struct FileTargetWorkspace {
+    public let `workspace_id`: String
+}
+
 public struct PresentationText {
     public let `text`: String
 }
@@ -344,6 +558,95 @@ public struct PresentationMarkdown {
 
 public struct PresentationActions {
     public let `actions`: [PresentationAction]
+}
+
+public struct RecoveryActionRefreshFile {
+    public let `current_revision`: FileRevision
+    public let `path`: String
+    public let `target`: FileTarget
+}
+
+public struct RecoveryActionRefreshConversation {
+    public let `conversation_id`: String
+}
+
+public struct RecoveryActionRefreshRun {
+    public let `run_id`: String
+}
+
+public struct RecoveryActionResumeEvents {
+    public let `after`: String
+}
+
+public struct RemoteToolActionTerminal {
+    public let `columns`: Int64
+    public let `directory`: String
+    public let `input`: String
+    public let `rows`: Int64
+}
+
+public struct RemoteToolActionProcess {
+    public let `arguments`: [String]
+    public let `directory`: String
+    public let `environment`: [RemoteEnvironment]
+}
+
+public struct RemoteToolActionGit {
+    public let `operation`: RemoteGitOperation
+}
+
+public struct RemoteToolActionShell {
+    public let `directory`: String
+    public let `environment`: [RemoteEnvironment]
+    public let `script`: String
+}
+
+public struct RemoteToolActionWriteFile {
+    public let `content`: String
+    public let `path`: String
+}
+
+public struct RemoteToolActionReadFile {
+    public let `path`: String
+}
+
+public struct RemoteToolOutcomeCompleted {
+    public let `result`: RemoteToolResult
+}
+
+public struct RemoteToolOutcomeFailed {
+    public let `error`: WireError
+}
+
+public struct RemoteToolResultApprovalRequired {
+    public let `operation_id`: String
+}
+
+public struct RemoteToolResultProcess {
+    public let `exit_code`: Int32?
+    public let `stderr`: String
+    public let `stdout`: String
+}
+
+public struct RemoteToolResultWritten {
+
+}
+
+public struct RemoteToolResultFile {
+    public let `content`: String
+}
+
+public struct RestartMetadataCursorExpired {
+    public let `current_snapshot_revision`: String
+    public let `minimum_available_cursor`: String
+}
+
+public struct RestartMetadataCursorAhead {
+    public let `current_snapshot_revision`: String
+}
+
+public struct RestartMetadataPaginationStale {
+    public let `current_snapshot_revision`: String
 }
 
 public struct UtilityInputNaming {
@@ -358,4 +661,16 @@ public struct UtilityInputGitText {
 
 public struct UtilityInputAutodelete {
     public let `prompt`: String
+}
+
+public struct WorkingTreeNoProject {
+
+}
+
+public struct WorkingTreeWorkspace {
+    public let `project_id`: String
+}
+
+public struct WorkingTreeLocalCheckout {
+    public let `project_id`: String
 }

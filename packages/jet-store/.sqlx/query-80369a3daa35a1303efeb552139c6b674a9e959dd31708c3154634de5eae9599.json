@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE remote_operations SET state = ?4 WHERE client_id = ?1 AND operation_id = ?2 AND state = ?3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "80369a3daa35a1303efeb552139c6b674a9e959dd31708c3154634de5eae9599"
+}

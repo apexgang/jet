@@ -991,6 +991,31 @@
       "description": "Control message sent by a client.",
       "oneOf": [
         {
+          "description": "One bounded operation from an authenticated Home daemon.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "description": "Request correlation.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "remote_tool"
+            },
+            "request": {
+              "description": "Destination Workspace, origin, and declared permissions.",
+              "$ref": "#/$defs/RemoteToolRequest"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "request"
+          ]
+        },
+        {
           "description": "Bind this numbered stream to a terminal. Disconnecting leaves it alive.",
           "type": "object",
           "properties": {
@@ -1153,6 +1178,36 @@
     "CommandRequest": {
       "description": "Commands a client may execute.",
       "oneOf": [
+        {
+          "description": "Reviews one immutable No-Visa action captured by the destination.",
+          "type": "object",
+          "properties": {
+            "client_id": {
+              "description": "Paired installation that submitted the action.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "decision": {
+              "description": "Applies only to this exact stored action.",
+              "$ref": "#/$defs/RemoteToolDecision"
+            },
+            "operation_id": {
+              "description": "Captured remote operation identity.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "review_remote_tool"
+            }
+          },
+          "required": [
+            "type",
+            "client_id",
+            "operation_id",
+            "decision"
+          ]
+        },
         {
           "description": "Admit one bounded Utility request.",
           "type": "object",
@@ -1580,6 +1635,56 @@
             "account_binding_id",
             "craft",
             "prompt"
+          ]
+        },
+        {
+          "description": "Desktop-only origin execution through paired remote tools (1.26).",
+          "type": "object",
+          "properties": {
+            "account_binding_id": {
+              "description": "Origin-local native Account binding.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "conversation_id": {
+              "description": "Origin-owned Conversation.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "craft": {
+              "description": "Accepted installed Craft with remote_tools support.",
+              "type": "string"
+            },
+            "destinations": {
+              "description": "One to eight explicit destinations, pinned for this Run.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/NoVisaDestination"
+              }
+            },
+            "origin_plane_id": {
+              "description": "Expected Home Plane, where credentials and native processes stay.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "prompt": {
+              "description": "Initial input.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "start_no_visa_run"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "conversation_id",
+            "origin_plane_id",
+            "account_binding_id",
+            "craft",
+            "prompt",
+            "destinations"
           ]
         },
         {
@@ -2085,6 +2190,25 @@
     "CommandResponse": {
       "description": "Durable Command outcomes.",
       "oneOf": [
+        {
+          "description": "The exact-action destination decision was recorded.",
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "description": "Reviewed operation identity.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "remote_tool_reviewed"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id"
+          ]
+        },
         {
           "description": "Durable Utility admission; query for its result.",
           "type": "object",
@@ -4528,6 +4652,109 @@
         }
       ]
     },
+    "NoVisaDestination": {
+      "description": "One destination selected by the desktop, never by the Craft.",
+      "type": "object",
+      "properties": {
+        "plane_id": {
+          "description": "Expected paired Plane identity.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "ssh_endpoint": {
+          "description": "System SSH destination, resolved through the user's SSH configuration.",
+          "type": "string"
+        },
+        "workspace_id": {
+          "description": "Registered destination Workspace.",
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "plane_id",
+        "workspace_id",
+        "ssh_endpoint"
+      ]
+    },
+    "NoVisaOrigin": {
+      "description": "Origin retained separately from the paired installation's authentication.",
+      "type": "object",
+      "properties": {
+        "conversation_id": {
+          "description": "Originating Conversation.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "plane_id": {
+          "description": "Home Plane, which continues to own the Conversation.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "run_id": {
+          "description": "Originating Harness Run.",
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "plane_id",
+        "conversation_id",
+        "run_id"
+      ]
+    },
+    "NoVisaSelection": {
+      "description": "Immutable origin and destination selection retained with the execution.",
+      "type": "object",
+      "properties": {
+        "account_binding_id": {
+          "description": "Native authentication stays on this Plane.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "conversation_id": {
+          "description": "Authoritative Conversation on the origin.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "destinations": {
+          "description": "Destinations the broker may contact.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NoVisaDestination"
+          }
+        },
+        "jet_equivalent": {
+          "description": "Jet-provided equivalents, subject to destination authority and bounds.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "native_unavailable": {
+          "description": "Native remote behavior that this mode cannot promise.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "origin_plane_id": {
+          "description": "Native execution's Home Plane.",
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "jet_equivalent",
+        "native_unavailable",
+        "origin_plane_id",
+        "account_binding_id",
+        "conversation_id",
+        "destinations"
+      ]
+    },
     "OrphanedExecution": {
       "description": "A live execution recovery could not match safely.",
       "type": "object",
@@ -5307,6 +5534,31 @@
       "description": "Queries a client may run.",
       "oneOf": [
         {
+          "description": "Inspect the exact remote action awaiting a destination review.",
+          "type": "object",
+          "properties": {
+            "client_id": {
+              "description": "Paired installation that submitted it.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation_id": {
+              "description": "Remote operation identity.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "remote_tool_review"
+            }
+          },
+          "required": [
+            "type",
+            "client_id",
+            "operation_id"
+          ]
+        },
+        {
           "description": "Read a durable Utility result.",
           "type": "object",
           "properties": {
@@ -5823,6 +6075,56 @@
     "QueryResponse": {
       "description": "Query snapshots.",
       "oneOf": [
+        {
+          "description": "Exact remote action awaiting a destination review.",
+          "type": "object",
+          "properties": {
+            "action": {
+              "description": "Closed operation vocabulary; arbitrary Commands cannot be forwarded.",
+              "$ref": "#/$defs/RemoteToolAction"
+            },
+            "destination_plane_id": {
+              "description": "Expected destination, checked before accessing its state.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation_id": {
+              "description": "Stable identity; an uncertain mutation must never get a new identity automatically.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "origin": {
+              "description": "Actor provenance derived by the Home daemon from the accepted Run.",
+              "$ref": "#/$defs/NoVisaOrigin"
+            },
+            "permissions": {
+              "description": "Accepted Craft permissions, supplied by the Home daemon, never the Craft.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/BrokerPermission"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "remote_tool_review"
+            },
+            "workspace_id": {
+              "description": "Registered destination Workspace.",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "operation_id",
+            "origin",
+            "destination_plane_id",
+            "workspace_id",
+            "permissions",
+            "action"
+          ]
+        },
         {
           "description": "Attributed Utility result, with no execution authority.",
           "type": "object",
@@ -6371,6 +6673,42 @@
         }
       ]
     },
+    "RemoteEnvironment": {
+      "description": "Explicit destination environment change; absent values remove a variable.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Variable name, without equals signs or NULs.",
+          "type": "string"
+        },
+        "value": {
+          "description": "Explicit value or removal.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
+    "RemoteGitOperation": {
+      "description": "Read-only Git operations with bounded output.",
+      "oneOf": [
+        {
+          "description": "Porcelain v1 status, including untracked paths.",
+          "type": "string",
+          "const": "status"
+        },
+        {
+          "description": "Working-tree diff without external diff or text conversion commands.",
+          "type": "string",
+          "const": "diff"
+        }
+      ]
+    },
     "RemotePairingRequest": {
       "description": "The two enrollment operations available before remote authentication.",
       "oneOf": [
@@ -6504,6 +6842,326 @@
           "required": [
             "kind",
             "error"
+          ]
+        }
+      ]
+    },
+    "RemoteToolAction": {
+      "description": "Operations available through the remote broker.",
+      "oneOf": [
+        {
+          "description": "One reviewed input batch in a real PTY, closed after the batch exits.",
+          "type": "object",
+          "properties": {
+            "columns": {
+              "description": "Fixed terminal dimensions.",
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "directory": {
+              "description": "Workspace-relative cwd; empty selects its root.",
+              "type": "string"
+            },
+            "input": {
+              "description": "Exact terminal input, shown in destination review.",
+              "type": "string"
+            },
+            "rows": {
+              "description": "Fixed terminal dimensions.",
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "terminal"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "directory",
+            "input",
+            "rows",
+            "columns"
+          ]
+        },
+        {
+          "description": "Argument-array process invocation, reviewed exactly once at destination.",
+          "type": "object",
+          "properties": {
+            "arguments": {
+              "description": "Executable followed by literal arguments; never a shell command string.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "directory": {
+              "description": "Workspace-relative cwd; empty selects its root.",
+              "type": "string"
+            },
+            "environment": {
+              "description": "Explicit changes to a minimal environment.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RemoteEnvironment"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "process"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "arguments",
+            "directory",
+            "environment"
+          ]
+        },
+        {
+          "description": "Read-only Git inspection with fixed arguments and hooks disabled.",
+          "type": "object",
+          "properties": {
+            "operation": {
+              "description": "Closed inspection vocabulary.",
+              "$ref": "#/$defs/RemoteGitOperation"
+            },
+            "type": {
+              "type": "string",
+              "const": "git"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "operation"
+          ]
+        },
+        {
+          "description": "Visibly labelled shell syntax, requiring exact destination review.",
+          "type": "object",
+          "properties": {
+            "directory": {
+              "description": "Workspace-relative directory; empty selects the Workspace root.",
+              "type": "string"
+            },
+            "environment": {
+              "description": "Explicit environment changes, applied to a minimal environment.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RemoteEnvironment"
+              }
+            },
+            "script": {
+              "description": "Shell source, never interpolated into SSH or a process argument array.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "shell"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "directory",
+            "environment",
+            "script"
+          ]
+        },
+        {
+          "description": "Atomically replace at most 64 KiB inside the Workspace.",
+          "type": "object",
+          "properties": {
+            "content": {
+              "description": "New UTF-8 content.",
+              "type": "string"
+            },
+            "path": {
+              "description": "Workspace-relative file path.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "write_file"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "path",
+            "content"
+          ]
+        },
+        {
+          "description": "Read at most 64 KiB of UTF-8 file content.",
+          "type": "object",
+          "properties": {
+            "path": {
+              "description": "Validated Workspace-relative path.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "read_file"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "path"
+          ]
+        }
+      ]
+    },
+    "RemoteToolDecision": {
+      "description": "A user decision on one immutable remote action.",
+      "oneOf": [
+        {
+          "description": "Permit exactly this stored action once.",
+          "type": "string",
+          "const": "allow_once"
+        },
+        {
+          "description": "Refuse this action permanently.",
+          "type": "string",
+          "const": "deny"
+        }
+      ]
+    },
+    "RemoteToolRequest": {
+      "description": "One request from a trusted Home daemon over its paired connection.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Closed operation vocabulary; arbitrary Commands cannot be forwarded.",
+          "$ref": "#/$defs/RemoteToolAction"
+        },
+        "destination_plane_id": {
+          "description": "Expected destination, checked before accessing its state.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "operation_id": {
+          "description": "Stable identity; an uncertain mutation must never get a new identity automatically.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "origin": {
+          "description": "Actor provenance derived by the Home daemon from the accepted Run.",
+          "$ref": "#/$defs/NoVisaOrigin"
+        },
+        "permissions": {
+          "description": "Accepted Craft permissions, supplied by the Home daemon, never the Craft.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BrokerPermission"
+          }
+        },
+        "workspace_id": {
+          "description": "Registered destination Workspace.",
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "origin",
+        "destination_plane_id",
+        "workspace_id",
+        "permissions",
+        "action"
+      ]
+    },
+    "RemoteToolResult": {
+      "description": "Bounded response from one destination operation.",
+      "oneOf": [
+        {
+          "description": "This action has not executed and needs a destination user decision.",
+          "type": "object",
+          "properties": {
+            "operation_id": {
+              "description": "Stable identity of the action to inspect and review.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "approval_required"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id"
+          ]
+        },
+        {
+          "description": "Bounded process output after native exit.",
+          "type": "object",
+          "properties": {
+            "exit_code": {
+              "description": "Native exit status, absent when terminated by a signal.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            },
+            "stderr": {
+              "description": "At most 64 KiB, rendered with replacement for invalid UTF-8.",
+              "type": "string"
+            },
+            "stdout": {
+              "description": "At most 64 KiB, rendered with replacement for invalid UTF-8.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "process"
+            }
+          },
+          "required": [
+            "type",
+            "stdout",
+            "stderr"
+          ]
+        },
+        {
+          "description": "The file replacement and directory sync completed.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "written"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "UTF-8 content inside the selected Workspace.",
+          "type": "object",
+          "properties": {
+            "content": {
+              "description": "At most 64 KiB.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "file"
+            }
+          },
+          "required": [
+            "type",
+            "content"
           ]
         }
       ]
@@ -6828,6 +7486,17 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "no_visa": {
+          "description": "Explicit No-Visa execution selection, absent for Visa Runs.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NoVisaSelection"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "processes": {
@@ -7336,6 +8005,31 @@
     "ServerMessage": {
       "description": "Control message sent by `jetd`.",
       "oneOf": [
+        {
+          "description": "Outcome of one No-Visa operation.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "description": "Request correlation.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "remote_tool_result"
+            },
+            "result": {
+              "description": "Bounded destination result.",
+              "$ref": "#/$defs/RemoteToolResult"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "result"
+          ]
+        },
         {
           "description": "The numbered stream now accepts terminal input and receives output.",
           "type": "object",

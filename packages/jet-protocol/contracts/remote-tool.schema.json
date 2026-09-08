@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CraftRemoteTool",
+  "description": "A Craft can select only a pinned destination and action, never authority.",
+  "type": "object",
+  "properties": {
+    "action": {
+      "description": "Exact requested operation.",
+      "$ref": "#/$defs/RemoteToolAction"
+    },
+    "destination_plane_id": {
+      "description": "Selected destination.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "operation_id": {
+      "description": "Stable identity retained across Craft source replay.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "workspace_id": {
+      "description": "Selected registered Workspace.",
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "destination_plane_id",
+    "workspace_id",
+    "action"
+  ],
+  "$defs": {
+    "RemoteEnvironment": {
+      "description": "Explicit destination environment change; absent values remove a variable.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Variable name, without equals signs or NULs.",
+          "type": "string"
+        },
+        "value": {
+          "description": "Explicit value or removal.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
+    "RemoteGitOperation": {
+      "description": "Read-only Git operations with bounded output.",
+      "oneOf": [
+        {
+          "description": "Porcelain v1 status, including untracked paths.",
+          "type": "string",
+          "const": "status"
+        },
+        {
+          "description": "Working-tree diff without external diff or text conversion commands.",
+          "type": "string",
+          "const": "diff"
+        }
+      ]
+    },
+    "RemoteToolAction": {
+      "description": "Operations available through the remote broker.",
+      "oneOf": [
+        {
+          "description": "One reviewed input batch in a real PTY, closed after the batch exits.",
+          "type": "object",
+          "properties": {
+            "columns": {
+              "description": "Fixed terminal dimensions.",
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "directory": {
+              "description": "Workspace-relative cwd; empty selects its root.",
+              "type": "string"
+            },
+            "input": {
+              "description": "Exact terminal input, shown in destination review.",
+              "type": "string"
+            },
+            "rows": {
+              "description": "Fixed terminal dimensions.",
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "terminal"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "directory",
+            "input",
+            "rows",
+            "columns"
+          ]
+        },
+        {
+          "description": "Argument-array process invocation, reviewed exactly once at destination.",
+          "type": "object",
+          "properties": {
+            "arguments": {
+              "description": "Executable followed by literal arguments; never a shell command string.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "directory": {
+              "description": "Workspace-relative cwd; empty selects its root.",
+              "type": "string"
+            },
+            "environment": {
+              "description": "Explicit changes to a minimal environment.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RemoteEnvironment"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "process"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "arguments",
+            "directory",
+            "environment"
+          ]
+        },
+        {
+          "description": "Read-only Git inspection with fixed arguments and hooks disabled.",
+          "type": "object",
+          "properties": {
+            "operation": {
+              "description": "Closed inspection vocabulary.",
+              "$ref": "#/$defs/RemoteGitOperation"
+            },
+            "type": {
+              "type": "string",
+              "const": "git"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "operation"
+          ]
+        },
+        {
+          "description": "Visibly labelled shell syntax, requiring exact destination review.",
+          "type": "object",
+          "properties": {
+            "directory": {
+              "description": "Workspace-relative directory; empty selects the Workspace root.",
+              "type": "string"
+            },
+            "environment": {
+              "description": "Explicit environment changes, applied to a minimal environment.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RemoteEnvironment"
+              }
+            },
+            "script": {
+              "description": "Shell source, never interpolated into SSH or a process argument array.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "shell"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "directory",
+            "environment",
+            "script"
+          ]
+        },
+        {
+          "description": "Atomically replace at most 64 KiB inside the Workspace.",
+          "type": "object",
+          "properties": {
+            "content": {
+              "description": "New UTF-8 content.",
+              "type": "string"
+            },
+            "path": {
+              "description": "Workspace-relative file path.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "write_file"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "path",
+            "content"
+          ]
+        },
+        {
+          "description": "Read at most 64 KiB of UTF-8 file content.",
+          "type": "object",
+          "properties": {
+            "path": {
+              "description": "Validated Workspace-relative path.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "read_file"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "path"
+          ]
+        }
+      ]
+    }
+  }
+}

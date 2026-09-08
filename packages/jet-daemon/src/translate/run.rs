@@ -7,6 +7,10 @@ pub(super) fn execution(
 	minor: u32,
 ) -> wire::RunExecution {
 	wire::RunExecution {
+		no_visa: value
+			.no_visa
+			.filter(|_| minor >= wire::NO_VISA_MINOR)
+			.map(crate::no_visa_broker::selection),
 		visa: value.visa.filter(|_| minor >= wire::VISA_RUNS_MINOR).map(
 			|selection| wire::VisaSelection {
 				plane_id: selection.plane_id.0,
