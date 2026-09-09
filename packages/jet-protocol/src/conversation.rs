@@ -166,6 +166,13 @@ pub enum CommandRequest {
 		request: crate::UtilityRequest,
 	},
 	/// Install only the exact Craft proposal returned by discovery.
+	DisableCraft {
+		/// Installed Craft identity, never an executable path.
+		craft_id: String,
+		/// Wait for pinned Runs or stop their Craft immediately.
+		mode: crate::CraftDisableMode,
+	},
+	/// Install a confirmed Artifact as the default for subsequent Runs.
 	InstallCraft {
 		/// Repository, provenance, Artifact, authority, and trust acceptance.
 		confirmation: crate::CraftInstallationConfirmation,
@@ -482,6 +489,13 @@ pub enum CommandResponse {
 		job_id: Uuid,
 	},
 	/// Durable publication work accepted for one verified Craft Artifact.
+	CraftDisabled {
+		/// Disabled Craft identity.
+		craft_id: String,
+		/// Applied disable behavior.
+		mode: crate::CraftDisableMode,
+	},
+	/// A verified Artifact was accepted for publication.
 	CraftInstallationQueued(crate::CraftInstallationQueued),
 	/// Enabled daily schedule.
 	ScheduleCreated {

@@ -372,6 +372,11 @@ pub(super) async fn execute(
 	{
 		eprintln!("jetd: cannot publish accepted Craft installation: {error}");
 	}
+	if matches!(&outcome, Ok(CommandOutcome::CraftDisabled { .. }))
+		&& let Err(error) = core.reconcile_crafts().await
+	{
+		eprintln!("jetd: cannot apply Craft disable: {error}");
+	}
 	match outcome {
 		Ok(outcome) => ServerMessage::CommandResult {
 			id,
@@ -512,6 +517,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		CommandRequest::RequestUtility { .. } => Some(MinorRequirement {
 			minor: jet_protocol::UTILITY_MINOR,
 			feature: "Utility work",
+		}),
+		CommandRequest::DisableCraft { .. } => Some(MinorRequirement {
+			minor: jet_protocol::CRAFT_LIFECYCLE_MINOR,
+			feature: "Craft lifecycle controls",
 		}),
 		CommandRequest::InstallCraft { .. } => Some(MinorRequirement {
 			minor: jet_protocol::CRAFT_INSTALLATION_MINOR,

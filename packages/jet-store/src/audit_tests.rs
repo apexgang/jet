@@ -4,7 +4,7 @@ use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
 use crate::{
-	ActorRecord, AuditBreach, AuditGap, AuditHead, AuditIntegrity,
+	AuditActorRecord, AuditBreach, AuditGap, AuditHead, AuditIntegrity,
 	AuditIntegrityFailure, AuditOutcome, AuditRecord, AuditRisk,
 	NewAuditRecord, Store, StoreError, audit_head_path,
 };
@@ -20,7 +20,7 @@ fn decision_about(target_id: &str, recorded_at_unix_ms: i64) -> NewAuditRecord {
 	NewAuditRecord {
 		record_id: Uuid::now_v7(),
 		recorded_at_unix_ms,
-		actor: ActorRecord::InteractiveClient {
+		actor: AuditActorRecord::InteractiveClient {
 			client_id: Uuid::nil(),
 		},
 		target_kind: "account_binding".into(),

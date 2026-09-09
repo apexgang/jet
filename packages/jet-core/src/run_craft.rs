@@ -10,6 +10,9 @@ use std::{
 /// The accepted Craft artifact and Adapter-owned execution contract.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PinnedCraft {
+	/// Installed Craft identity; absent in execution plans written before lifecycle controls.
+	#[serde(default, skip_serializing_if = "String::is_empty")]
+	pub id: String,
 	/// Canonical executable selected by the owner, never by peer traffic.
 	pub executable: PathBuf,
 	/// SHA-256 of the exact accepted artifact.

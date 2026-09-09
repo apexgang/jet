@@ -177,6 +177,43 @@
         }
       ]
     },
+    "AuditActor": {
+      "description": "The origin of a Security-audit decision, independent of Command authority.",
+      "oneOf": [
+        {
+          "description": "An authenticated interactive GUI client.",
+          "type": "object",
+          "properties": {
+            "client_id": {
+              "description": "The client's durable identity.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "interactive_client"
+            }
+          },
+          "required": [
+            "type",
+            "client_id"
+          ]
+        },
+        {
+          "description": "Jet applied signed release revocations on this Plane.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "craft_revocation"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
     "AuditBreach": {
       "description": "How the Security audit failed to validate. It names positions and\nhashes and quotes no record content, because the audit holds none.",
       "oneOf": [
@@ -264,8 +301,8 @@
       "type": "object",
       "properties": {
         "actor": {
-          "description": "The authenticated Actor it is attributed to.",
-          "$ref": "#/$defs/Actor"
+          "description": "The responsible origin, which grants no Command authority.",
+          "$ref": "#/$defs/AuditActor"
         },
         "decision": {
           "description": "What was decided, such as `account.bound`.",
@@ -1228,6 +1265,29 @@
         },
         {
           "description": "Install only the exact Craft proposal returned by discovery.",
+          "type": "object",
+          "properties": {
+            "craft_id": {
+              "description": "Installed Craft identity, never an executable path.",
+              "type": "string"
+            },
+            "mode": {
+              "description": "Wait for pinned Runs or stop their Craft immediately.",
+              "$ref": "#/$defs/CraftDisableMode"
+            },
+            "type": {
+              "type": "string",
+              "const": "disable_craft"
+            }
+          },
+          "required": [
+            "type",
+            "craft_id",
+            "mode"
+          ]
+        },
+        {
+          "description": "Install a confirmed Artifact as the default for subsequent Runs.",
           "type": "object",
           "properties": {
             "confirmation": {
@@ -2232,6 +2292,29 @@
           "description": "Durable publication work accepted for one verified Craft Artifact.",
           "type": "object",
           "properties": {
+            "craft_id": {
+              "description": "Disabled Craft identity.",
+              "type": "string"
+            },
+            "mode": {
+              "description": "Applied disable behavior.",
+              "$ref": "#/$defs/CraftDisableMode"
+            },
+            "type": {
+              "type": "string",
+              "const": "craft_disabled"
+            }
+          },
+          "required": [
+            "type",
+            "craft_id",
+            "mode"
+          ]
+        },
+        {
+          "description": "A verified Artifact was accepted for publication.",
+          "type": "object",
+          "properties": {
             "type": {
               "type": "string",
               "const": "craft_installation_queued"
@@ -3048,6 +3131,21 @@
         "cursor",
         "conversation",
         "runs"
+      ]
+    },
+    "CraftDisableMode": {
+      "description": "How an interactive disable handles already accepted Runs.",
+      "oneOf": [
+        {
+          "description": "Block new Runs and let pinned Runs finish.",
+          "type": "string",
+          "const": "wait"
+        },
+        {
+          "description": "Stop the Craft while leaving its Harnesses under their helpers.",
+          "type": "string",
+          "const": "force"
+        }
       ]
     },
     "CraftHostAccess": {
@@ -7487,6 +7585,10 @@
             "string",
             "null"
           ]
+        },
+        "needs_attention": {
+          "description": "The live execution requires an interactive recovery decision.",
+          "type": "boolean"
         },
         "no_visa": {
           "description": "Explicit No-Visa execution selection, absent for Visa Runs.",

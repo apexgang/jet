@@ -8,7 +8,19 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::event::Actor;
+/// The origin of a Security-audit decision, independent of Command authority.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AuditActor {
+	/// An authenticated interactive GUI client.
+	InteractiveClient {
+		/// The client's durable identity.
+		client_id: Uuid,
+	},
+	/// Jet applied signed release revocations on this Plane.
+	CraftRevocation,
+}
 
 /// How much a decision could cost if it was not the one the owner intended,
 /// as the Plane judged it when the decision was made.
@@ -75,8 +87,8 @@ pub struct AuditEntry {
 	pub recorded_at_unix_ms: i64,
 	/// The Plane that made it.
 	pub plane_id: Uuid,
-	/// The authenticated Actor it is attributed to.
-	pub actor: Actor,
+	/// The responsible origin, which grants no Command authority.
+	pub actor: AuditActor,
 	/// What it was about.
 	pub target: AuditTarget,
 	/// What was decided, such as `account.bound`.

@@ -249,6 +249,7 @@ impl Client {
 			CommandResponse::AuditEpochBegun { epoch } => Ok(epoch),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -386,6 +387,7 @@ impl Client {
 			}
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -441,6 +443,7 @@ impl Client {
 			CommandResponse::RunCreated(run) => Ok(run),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -503,6 +506,7 @@ impl Client {
 			CommandResponse::RunTransitioned(run) => Ok(run),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -609,6 +613,7 @@ impl Client {
 			CommandResponse::SettingSet { value, .. } => Ok(value),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -666,6 +671,7 @@ impl Client {
 			CommandResponse::SettingCleared { .. } => Ok(()),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -837,6 +843,7 @@ impl Client {
 			CommandResponse::AccountBound(binding) => Ok(binding),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -898,6 +905,7 @@ impl Client {
 			} => Ok(credential_reference),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }

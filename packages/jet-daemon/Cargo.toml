@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+ed25519-dalek.workspace = true
 rustix.workspace = true
 getrandom.workspace = true
 clap.workspace = true
@@ -22,6 +23,7 @@ tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 jet-craft-sdk.workspace = true
 sha2.workspace = true
 ed25519-dalek.workspace = true

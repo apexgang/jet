@@ -25,7 +25,10 @@ mod conversation;
 mod craft;
 mod craft_change;
 mod craft_installation;
+mod craft_lifecycle;
 pub use craft_change::CraftFileChange;
+pub use craft_lifecycle::CraftDisableMode;
+pub use handshake::CRAFT_LIFECYCLE_MINOR;
 mod craft_handshake;
 mod craft_spec;
 mod decimal;
@@ -90,8 +93,8 @@ pub use artifact::{
 	ArtifactError, ArtifactVerifier, DigestError, Sha256Digest,
 };
 pub use audit::{
-	AuditBreach, AuditEntry, AuditHead, AuditOutcome, AuditRisk, AuditTarget,
-	SecurityAudit, SecurityState,
+	AuditActor, AuditBreach, AuditEntry, AuditHead, AuditOutcome, AuditRisk,
+	AuditTarget, SecurityAudit, SecurityState,
 };
 pub use capability::{
 	CapabilityObservation, CapabilitySnapshot, CredentialStoreKind,

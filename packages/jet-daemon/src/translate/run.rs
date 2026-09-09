@@ -7,6 +7,8 @@ pub(super) fn execution(
 	minor: u32,
 ) -> wire::RunExecution {
 	wire::RunExecution {
+		needs_attention: minor >= wire::CRAFT_LIFECYCLE_MINOR
+			&& value.needs_attention,
 		no_visa: value
 			.no_visa
 			.filter(|_| minor >= wire::NO_VISA_MINOR)

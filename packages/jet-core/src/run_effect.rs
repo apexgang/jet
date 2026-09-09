@@ -48,7 +48,8 @@ impl EffectAdapter for Runs<'_> {
 			Ok(plan) => plan,
 			Err(_) => return EffectResult::Unknown,
 		};
-		if plan.revalidate().await.is_err()
+		if self.0.craft_recovery_allowed(&plan.craft).await.is_err()
+			|| plan.revalidate().await.is_err()
 			|| self.0.revalidate_visa(&plan).await.is_err()
 		{
 			return EffectResult::Failed;

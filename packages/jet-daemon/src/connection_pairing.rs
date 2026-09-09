@@ -75,6 +75,7 @@ async fn apply(
 		CommandOutcome::RemoteToolReviewed { .. }
 		| CommandOutcome::UserEditApplied(_)
 		| CommandOutcome::UtilityQueued { .. }
+		| CommandOutcome::CraftDisabled { .. }
 		| CommandOutcome::CraftInstallationQueued { .. }
 		| CommandOutcome::ScheduleCreated(_)
 		| CommandOutcome::ScheduleCanceled { .. }

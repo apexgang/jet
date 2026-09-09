@@ -82,6 +82,7 @@ impl Client {
 			CommandResponse::PairingGateSet { gate } => Ok(gate),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -144,6 +145,7 @@ impl Client {
 			} => Ok((pending, disclosure)),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -212,6 +214,7 @@ impl Client {
 			}
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -278,6 +281,7 @@ impl Client {
 			CommandResponse::PairingConfirmed { pending } => Ok(pending),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -340,6 +344,7 @@ impl Client {
 			CommandResponse::PairingCompleted { client } => Ok(client),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -401,6 +406,7 @@ impl Client {
 			CommandResponse::PairedClientAccessSet { client } => Ok(client),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
@@ -460,6 +466,7 @@ impl Client {
 			CommandResponse::PairedClientRevoked { client_id } => Ok(client_id),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }

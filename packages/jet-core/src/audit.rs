@@ -123,6 +123,8 @@ pub enum AuditDecision {
 	ProjectRegistered,
 	/// An owner accepted one third-party Craft's exact executable authority.
 	CraftInstallationApproved,
+	/// An interactive user disabled a Craft.
+	CraftDisabled,
 	/// The Plane began accepting unverified local or source-built Crafts.
 	DeveloperModeEnabled,
 	/// The Plane stopped accepting new unverified Craft installations.
@@ -212,8 +214,8 @@ pub struct AuditEntry {
 	pub recorded_at: SystemTime,
 	/// The Plane that made it.
 	pub plane_id: PlaneId,
-	/// The authenticated Actor it is attributed to.
-	pub actor: Actor,
+	/// The responsible origin, which grants no Command authority.
+	pub actor: crate::AuditActor,
 	/// What it was about.
 	pub target: AuditTarget,
 	/// The durable spelling of what was decided, such as `account.bound`.
@@ -269,6 +271,7 @@ impl AuditDecision {
 			Self::PairedClientRevoked => "pairing.client_revoked",
 			Self::ProjectRegistered => "project.registered",
 			Self::CraftInstallationApproved => "craft.installation_approved",
+			Self::CraftDisabled => "craft.disabled",
 			Self::DeveloperModeEnabled => "craft.developer_mode_enabled",
 			Self::DeveloperModeDisabled => "craft.developer_mode_disabled",
 			Self::DeveloperModeCleared => "craft.developer_mode_cleared",
@@ -308,7 +311,8 @@ impl AuditDecision {
 			// A Path grant is the one way a directory comes under Jet's
 			// management, and everything a Run does there follows from it.
 			| Self::ProjectRegistered
-			| Self::CraftInstallationApproved
+			| Self::CraftDisabled
+ | Self::CraftInstallationApproved
 			| Self::DeveloperModeEnabled => AuditRisk::Elevated,
 			// Revoking destroys the key the pairing was, and no part of Jet
 			// can put it back: the installation pairs again or it does not
@@ -382,6 +386,7 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::ReviewRemoteTool { .. } => {
 			Some(AuditDecision::RemoteToolReviewed)
 		}
+		Command::DisableCraft { .. } => Some(AuditDecision::CraftDisabled),
 		Command::InstallCraft { .. } => {
 			Some(AuditDecision::CraftInstallationApproved)
 		}
@@ -444,6 +449,9 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 fn refused_subject(command: &Command) -> AuditSubject {
 	match command {
 		Command::ReviewRemoteTool { .. } => AuditSubject::Plane,
+		Command::DisableCraft { craft_id, .. } => {
+			AuditSubject::Craft(craft_id.clone())
+		}
 		Command::InstallCraft { confirmation } => {
 			AuditSubject::Craft(refused_craft_identity(confirmation))
 		}
@@ -703,7 +711,7 @@ pub(crate) async fn record(
 	tx.append_audit_record(NewAuditRecord {
 		record_id: Uuid::now_v7(),
 		recorded_at_unix_ms: now_unix_ms,
-		actor: actor.record(),
+		actor: actor.record().into(),
 		target_kind: decision.subject.kind().into(),
 		target_id: decision.subject.identity(),
 		decision: decision.decision.as_str().into(),
@@ -711,6 +719,32 @@ pub(crate) async fn record(
 		outcome: decision.outcome,
 	})
 	.await?;
+	Ok(())
+}
+
+/// Accepts a verified digest revocation and its audit evidence atomically.
+pub(crate) async fn record_craft_revocation(
+	tx: &mut WriteTransaction,
+	digest: &str,
+	now_unix_ms: i64,
+) -> Result<(), CoreError> {
+	if tx.craft_revoked(digest).await? {
+		return Ok(());
+	}
+	// ASVS 16.2.1, 16.3.3: internal attribution and the exact revoked digest
+	// commit with the admission barrier, once even when metadata is replayed.
+	tx.append_audit_record(NewAuditRecord {
+		record_id: Uuid::now_v7(),
+		recorded_at_unix_ms: now_unix_ms,
+		actor: jet_store::AuditActorRecord::CraftRevocation,
+		target_kind: "craft_digest".into(),
+		target_id: Some(digest.into()),
+		decision: "craft.digest_revoked".into(),
+		risk: AuditRisk::Elevated,
+		outcome: AuditOutcome::Succeeded,
+	})
+	.await?;
+	tx.revoke_craft_digest(digest).await?;
 	Ok(())
 }
 
@@ -722,7 +756,7 @@ impl From<AuditRecord> for AuditEntry {
 			record_id: AuditRecordId(record.record_id),
 			recorded_at: system_time(record.recorded_at_unix_ms),
 			plane_id: PlaneId(record.plane_id),
-			actor: Actor::from_record(record.actor),
+			actor: record.actor.into(),
 			target: AuditTarget {
 				kind: record.target_kind,
 				reference: record.target_reference,

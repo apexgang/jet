@@ -127,6 +127,7 @@ impl Core {
 	) -> Result<Prepared, CoreError> {
 		match command {
 			Command::ReviewRemoteTool { .. } => Ok(Prepared::Nothing),
+			Command::DisableCraft { .. } => Ok(Prepared::Nothing),
 			Command::InstallCraft { confirmation } => {
 				Ok(Prepared::CraftInstallation(
 					crate::craft_installation::prepare(self, confirmation)

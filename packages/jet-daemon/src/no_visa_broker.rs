@@ -21,7 +21,7 @@ impl Broker {
 		let Some(selection) = &plan.no_visa else {
 			return Ok(None);
 		};
-		let identity = processes.1.as_ref().filter(|id| id.client_id == plan.client_id.0 && id.executable.is_absolute() && id.executable.is_file())
+		let identity = processes.identity.as_ref().filter(|id| id.client_id == plan.client_id.0 && id.executable.is_absolute() && id.executable.is_file())
             .ok_or_else(|| conflict("no_visa.signer_unavailable", "the origin desktop installation's platform credential signer is unavailable"))?;
 		let contract = Contract::of(&plan.craft)?;
 		if contract.craft_protocol.minor < 6

@@ -27,6 +27,7 @@ pub(crate) fn invalidated_client(
 		CommandOutcome::RemoteToolReviewed { .. }
 		| CommandOutcome::UserEditApplied(_)
 		| CommandOutcome::UtilityQueued { .. }
+		| CommandOutcome::CraftDisabled { .. }
 		| CommandOutcome::CraftInstallationQueued { .. }
 		| CommandOutcome::ScheduleCreated(_)
 		| CommandOutcome::ScheduleCanceled { .. }

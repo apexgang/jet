@@ -11,7 +11,6 @@ use jet_protocol::{
 };
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::{
-	collections::HashMap,
 	path::{Path, PathBuf},
 	process::Stdio,
 	time::Duration,
@@ -22,30 +21,14 @@ use tokio::{
 		UnixStream,
 		unix::{OwnedReadHalf, OwnedWriteHalf},
 	},
-	process::{Child, Command},
+	process::Command,
 	sync::Mutex,
 	time::timeout,
 };
 use uuid::Uuid;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
-#[derive(Debug, Default)]
-pub(crate) struct CraftProcesses(
-	Mutex<HashMap<String, CraftProcess>>,
-	pub(crate) Option<crate::installation_identity::Identity>,
-);
-impl CraftProcesses {
-	pub(crate) fn new(
-		identity: Option<crate::installation_identity::Identity>,
-	) -> Self {
-		Self(Mutex::new(HashMap::new()), identity)
-	}
-}
-#[derive(Debug)]
-struct CraftProcess {
-	child: Child,
-	socket: PathBuf,
-}
+pub(crate) use crate::craft_processes::CraftProcesses;
 
 pub(crate) struct RunConnection {
 	pub(crate) broker: Option<crate::no_visa_broker::Broker>,
@@ -242,6 +225,47 @@ impl jet_core::RunConnection for RunConnection {
 	}
 }
 impl RunHost for CraftProcesses {
+	fn revoked_craft_digests(
+		&self,
+	) -> RunFuture<'_, Result<Vec<String>, CoreError>> {
+		let key = self.release_key;
+		let path = self.home.join("crafts/revocations.json");
+		Box::pin(async move {
+			let Some(key) = key else {
+				return Ok(vec![]);
+			};
+			filesystem::blocking(move || {
+				match crate::craft_revocation::load(&path, &key) {
+					Ok(digests) => digests,
+					Err(error) => {
+						eprintln!(
+							"jetd: ignored Craft revocation metadata: {error}"
+						);
+						vec![]
+					}
+				}
+			})
+			.await
+		})
+	}
+
+	fn craft_id(&self, pin: &PinnedCraft) -> Result<String, CoreError> {
+		Ok(jet_protocol::decode_control::<Contract>(
+			pin.adapter_state.as_bytes(),
+		)
+		.map_err(failed)?
+		.specification
+		.id)
+	}
+	fn maintain_crafts(
+		&self,
+		active: Vec<PinnedCraft>,
+		stopped: Vec<String>,
+		force_disabled: Vec<String>,
+	) -> RunFuture<'_, Result<(), CoreError>> {
+		Box::pin(self.maintain(active, stopped, force_disabled))
+	}
+
 	fn validate_no_visa(&self, plan: &LaunchPlan) -> Result<(), CoreError> {
 		crate::no_visa_broker::Broker::prepare(self, plan, RunId(Uuid::nil()))
 			.map(|_| ())
@@ -266,7 +290,7 @@ impl RunHost for CraftProcesses {
 		&self,
 		plan: LaunchPlan,
 	) -> RunFuture<'_, Result<LaunchPlan, CoreError>> {
-		Box::pin(run_craft::prepare_next_run(plan))
+		Box::pin(run_craft::prepare_next_run(&self.home, plan))
 	}
 	fn prepare_fork(
 		&self,
@@ -514,42 +538,6 @@ pub(crate) async fn craft_connection(
 	Ok((reader, writer))
 }
 
-impl CraftProcesses {
-	#[expect(
-		clippy::await_holding_invalid_type,
-		reason = "the async gate spans process startup so concurrent Runs cannot spawn duplicate Crafts for one digest (ADR-0018)"
-	)]
-	async fn connect(
-		&self,
-		runtime: &Path,
-		pin: &PinnedCraft,
-	) -> Result<UnixStream, CoreError> {
-		let mut processes = self.0.lock().await;
-		if let Some(process) = processes.get_mut(&pin.sha256)
-			&& process.child.try_wait().map_err(failed)?.is_none()
-		{
-			return connect(&process.socket).await;
-		}
-		let socket =
-			runtime.join(format!("c-{}.sock", Uuid::new_v4().simple()));
-		pin.verify().await?;
-		// ASVS 1.2.5: the installed executable receives a private endpoint,
-		// never a client-supplied command line. One process multiplexes its Runs.
-		let child = Command::new(&pin.executable)
-			.arg("--socket")
-			.arg(&socket)
-			.stdin(Stdio::null())
-			.stdout(Stdio::null())
-			.stderr(Stdio::null())
-			.kill_on_drop(true)
-			.spawn()
-			.map_err(failed)?;
-		let stream = connect(&socket).await?;
-		processes.insert(pin.sha256.clone(), CraftProcess { child, socket });
-		Ok(stream)
-	}
-}
-
 async fn helper(
 	runtime: &Path,
 	run_id: RunId,
@@ -640,7 +628,7 @@ async fn private_directory(path: PathBuf) -> Result<(), CoreError> {
 	.await?
 	.map_err(failed)
 }
-async fn connect(path: &Path) -> Result<UnixStream, CoreError> {
+pub(crate) async fn connect(path: &Path) -> Result<UnixStream, CoreError> {
 	timeout(TIMEOUT, async {
 		loop {
 			match UnixStream::connect(path).await {

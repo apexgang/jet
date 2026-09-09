@@ -97,7 +97,9 @@ async fn binding_an_account_is_recorded_as_an_elevated_decision() {
 				record_id: entry.record_id,
 				recorded_at: UNIX_EPOCH + NOW,
 				plane_id: PlaneId(plane_id.0),
-				actor: actor(),
+				actor: crate::AuditActor::InteractiveClient {
+					client_id: actor().client_id(),
+				},
 				target: AuditTarget {
 					kind: "account_binding".into(),
 					reference: entry.target.reference,
@@ -266,7 +268,12 @@ async fn an_actor_is_recorded_with_the_decision_it_made() {
 	bind(&core, "Work account").await;
 
 	let page = audit(&core, AuditSequence(0)).await;
-	assert_eq!(page.entries[0].actor, client);
+	assert_eq!(
+		page.entries[0].actor,
+		crate::AuditActor::InteractiveClient {
+			client_id: client.client_id(),
+		}
+	);
 }
 
 /// The clock a Command reads once is the clock the audit records, so a

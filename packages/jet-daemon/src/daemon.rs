@@ -28,6 +28,7 @@ const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) async fn run(
 	home: JetHome,
 	channel: InstallationChannel,
+	release_key: Option<ed25519_dalek::VerifyingKey>,
 	identity: Option<crate::installation_identity::Identity>,
 ) -> ExitCode {
 	if let Err(error) = home.prepare() {
@@ -76,6 +77,8 @@ pub(crate) async fn run(
 				)
 				.with_run_host(Arc::new(crate::run_host::CraftProcesses::new(
 					identity,
+					home.root().to_path_buf(),
+					release_key,
 				)))
 				.with_utility_host(Arc::new(crate::utility_host::Utilities {
 					home: home.root().to_path_buf(),
@@ -87,6 +90,9 @@ pub(crate) async fn run(
 				return ExitCode::from(EXIT_FAILURE);
 			}
 		};
+	if let Err(error) = core.reconcile_crafts().await {
+		eprintln!("jetd: cannot reconcile Crafts: {error}");
+	}
 	// A direct edit that reached its atomic replacement before an interruption
 	// is reconciled from its durable intent before clients can retry it.
 	if let Err(error) = core.perform_user_edits().await {
@@ -148,6 +154,10 @@ pub(crate) async fn run(
 	let recovery = tokio::spawn(async move {
 		loop {
 			tokio::time::sleep(Duration::from_secs(1)).await;
+			if let Err(error) = recovery_core.reconcile_crafts().await {
+				eprintln!("jetd: cannot reconcile Crafts: {error}");
+			}
+
 			if let Err(error) =
 				recovery_core.perform_craft_installations().await
 			{

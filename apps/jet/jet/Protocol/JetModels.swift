@@ -33,6 +33,11 @@ public enum ArtifactAvailability: String {
     case `artifact_size_exceeded` = "artifact_size_exceeded"
 }
 
+public enum AuditActor {
+    case `interactive_client`(AuditActorInteractiveClient)
+    case `craft_revocation`(AuditActorCraftRevocation)
+}
+
 public enum AuditBreach {
     case `head_missing`(AuditBreachHeadMissing)
     case `head_not_in_store`(AuditBreachHeadNotInStore)
@@ -42,7 +47,7 @@ public enum AuditBreach {
 }
 
 public struct AuditEntry {
-    public let `actor`: Actor
+    public let `actor`: AuditActor
     public let `decision`: String
     public let `epoch`: String
     public let `outcome`: AuditOutcome
@@ -198,6 +203,7 @@ public struct ClientPublicKey {
 public enum CommandRequest {
     case `review_remote_tool`(CommandRequestReviewRemoteTool)
     case `request_utility`(CommandRequestRequestUtility)
+    case `disable_craft`(CommandRequestDisableCraft)
     case `install_craft`(CommandRequestInstallCraft)
     case `create_schedule`(CommandRequestCreateSchedule)
     case `cancel_schedule`(CommandRequestCancelSchedule)
@@ -241,6 +247,7 @@ public enum CommandRequest {
 public enum CommandResponse {
     case `remote_tool_reviewed`(CommandResponseRemoteToolReviewed)
     case `utility_queued`(CommandResponseUtilityQueued)
+    case `craft_disabled`(CommandResponseCraftDisabled)
     case `craft_installation_queued`(CommandResponseCraftInstallationQueued)
     case `schedule_created`(CommandResponseScheduleCreated)
     case `schedule_canceled`(CommandResponseScheduleCanceled)
@@ -314,6 +321,11 @@ public struct ConversationSnapshot {
     public let `cursor`: String
     public let `runs`: [Run]
     public let `workspace`: Workspace?
+}
+
+public enum CraftDisableMode: String {
+    case `wait` = "wait"
+    case `force` = "force"
 }
 
 public enum CraftHostAccess {
@@ -948,6 +960,7 @@ public struct RunExecution {
     public let `cursor`: String
     public let `exit_code`: Int32?
     public let `native_conversation`: String?
+    public let `needs_attention`: Bool?
     public let `no_visa`: NoVisaSelection?
     public let `processes`: [ManagedProcess]
     public let `run`: Run
@@ -1261,6 +1274,14 @@ public struct ActorInteractiveClient {
     public let `client_id`: String
 }
 
+public struct AuditActorInteractiveClient {
+    public let `client_id`: String
+}
+
+public struct AuditActorCraftRevocation {
+
+}
+
 public struct AuditBreachHeadMissing {
 
 }
@@ -1355,6 +1376,11 @@ public struct CommandRequestReviewRemoteTool {
 
 public struct CommandRequestRequestUtility {
     public let `request`: UtilityRequest
+}
+
+public struct CommandRequestDisableCraft {
+    public let `craft_id`: String
+    public let `mode`: CraftDisableMode
 }
 
 public struct CommandRequestInstallCraft {
@@ -1565,6 +1591,11 @@ public struct CommandResponseRemoteToolReviewed {
 
 public struct CommandResponseUtilityQueued {
     public let `job_id`: String
+}
+
+public struct CommandResponseCraftDisabled {
+    public let `craft_id`: String
+    public let `mode`: CraftDisableMode
 }
 
 public struct CommandResponseCraftInstallationQueued {
@@ -2201,6 +2232,7 @@ public struct QueryResponseRunExecution {
     public let `cursor`: String
     public let `exit_code`: Int32?
     public let `native_conversation`: String?
+    public let `needs_attention`: Bool?
     public let `no_visa`: NoVisaSelection?
     public let `processes`: [ManagedProcess]
     public let `run`: Run

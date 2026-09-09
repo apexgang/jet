@@ -388,5 +388,35 @@
     "schema": "ServerMessage",
     "valid": true,
     "payload": "{\"kind\":\"query_result\",\"id\":2,\"result\":{\"type\":\"run_execution\",\"cursor\":\"10\",\"run\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96502\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"revision\":\"3\",\"lifecycle\":\"active\",\"created_at_unix_ms\":1788876430000,\"ended_at_unix_ms\":null},\"activity\":\"waiting_for_auth\",\"processes\":[],\"native_conversation\":null,\"exit_code\":null,\"no_visa\":{\"origin_plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"account_binding_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"conversation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"destinations\":[{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"workspace_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"ssh_endpoint\":\"paired-host\"}],\"jet_equivalent\":[\"files\",\"git\",\"processes\",\"bounded_terminals\"],\"native_unavailable\":[\"remote_checkpoints\",\"tool_discovery\",\"extensions\",\"sandbox_internals\",\"persistent_terminals\"]}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"command\":{\"type\":\"disable_craft\",\"craft_id\":\"codex\",\"mode\":\"wait\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"command\":{\"type\":\"disable_craft\",\"craft_id\":\"codex\",\"mode\":\"force\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"command\":{\"type\":\"disable_craft\",\"craft_id\":\"codex\",\"mode\":\"future\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":1,\"result\":{\"type\":\"craft_disabled\",\"craft_id\":\"codex\",\"mode\":\"force\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":2,\"result\":{\"type\":\"run_execution\",\"cursor\":\"10\",\"run\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96502\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"revision\":\"3\",\"lifecycle\":\"active\",\"created_at_unix_ms\":1788876430000,\"ended_at_unix_ms\":null},\"activity\":\"waiting_for_auth\",\"processes\":[],\"native_conversation\":null,\"exit_code\":null,\"visa\":{\"plane_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96500\",\"account_binding_id\":\"6f9619ff-8b86-d011-b42d-00c04fc96501\"},\"needs_attention\":true}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":7,\"result\":{\"type\":\"security_audit\",\"cursor\":\"1\",\"entries\":[{\"sequence\":\"1\",\"epoch\":\"1\",\"record_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"recorded_at_unix_ms\":1700000000000,\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"actor\":{\"type\":\"craft_revocation\"},\"target\":{\"kind\":\"craft_digest\",\"reference\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"identity\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"decision\":\"craft.digest_revoked\",\"risk\":\"elevated\",\"outcome\":\"succeeded\"}]}}"
   }
 ]

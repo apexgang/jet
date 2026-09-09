@@ -10,6 +10,8 @@
 
 mod account;
 mod audit;
+mod audit_actor;
+pub use audit_actor::AuditActorRecord;
 mod audit_chain;
 mod audit_epoch;
 mod audit_head;
@@ -21,6 +23,8 @@ mod command;
 mod conversation;
 mod conversation_fork;
 mod craft_installation;
+mod craft_lifecycle;
+pub use craft_lifecycle::CraftDisableMode;
 mod effect;
 mod execution_recovery;
 mod import;

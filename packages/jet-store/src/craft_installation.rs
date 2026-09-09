@@ -5,6 +5,17 @@ use uuid::Uuid;
 use crate::{ReadTransaction, StoreError, WriteTransaction};
 
 impl ReadTransaction {
+	/// Reads the last accepted publication and its settlement state.
+	/// # Errors
+	/// Returns a store error when SQLite cannot answer.
+	pub async fn latest_craft_installation(
+		&mut self,
+		id: &str,
+	) -> Result<Option<(String, String)>, StoreError> {
+		Ok(sqlx::query!("SELECT p.plan, e.state FROM craft_installation_plans p JOIN effects e USING (effect_id) WHERE p.craft_id = ?1 AND e.state <> 'failed' ORDER BY p.rowid DESC LIMIT 1", id)
+            .fetch_optional(self.connection()).await?.map(|row| (row.plan, row.state)))
+	}
+
 	/// Reads the bounded private plan owned by one Craft-install Effect.
 	///
 	/// # Errors

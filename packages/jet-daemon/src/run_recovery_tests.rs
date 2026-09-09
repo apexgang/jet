@@ -21,6 +21,7 @@ async fn a_changed_boot_proves_loss_even_when_the_previous_pid_is_live() {
 		root: home.path().into(),
 		project_root: home.path().into(),
 		craft: PinnedCraft {
+			id: "fake".into(),
 			executable: home.path().join("craft"),
 			sha256: String::new(),
 			adapter_state: json!({

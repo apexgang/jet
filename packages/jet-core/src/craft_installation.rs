@@ -132,6 +132,8 @@ pub struct CraftInstallationPreview {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct InstallationPlan {
+	#[serde(default)]
+	pub(crate) previous_sha256: Option<String>,
 	pub(crate) craft_id: String,
 	pub(crate) version: String,
 	pub(crate) artifact_sha256: String,
@@ -211,19 +213,6 @@ pub(crate) async fn prepare(
 			"the Craft release changed since it was previewed; review it again",
 		));
 	}
-	if core
-		.capabilities
-		.read()
-		.await
-		.crafts
-		.iter()
-		.any(|installed| installed.craft.0 == preview.craft_id)
-	{
-		return Err(CoreError::conflict(
-			"craft.already_installed",
-			"a Craft with this identity is already installed",
-		));
-	}
 	let effect_id = Uuid::now_v7();
 	let craft_home = core.run_home().join("crafts");
 	let _artifact_guard = core.craft_artifact_publication.lock().await;
@@ -233,7 +222,7 @@ pub(crate) async fn prepare(
 		core.clock.now(),
 	)
 	.await?;
-	crate::craft_publication::ensure_not_installed(
+	let previous_sha256 = crate::craft_publication::installed_digest(
 		craft_home.clone(),
 		preview.craft_id.clone(),
 	)
@@ -270,6 +259,7 @@ pub(crate) async fn prepare(
 	Ok(PreparedCraftInstallation {
 		effect_id,
 		plan: InstallationPlan {
+			previous_sha256,
 			craft_id: preview.craft_id,
 			version: preview.version,
 			artifact_sha256: confirmation.artifact_sha256.clone(),
@@ -291,6 +281,24 @@ pub(crate) async fn record(
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
 	let PreparedCraftInstallation { effect_id, plan } = prepared;
+	if tx.craft_revoked(&plan.artifact_sha256).await? {
+		return Err(crate::craft_lifecycle::revoked());
+	}
+	if let Some((previous, state)) =
+		tx.latest_craft_installation(&plan.craft_id).await?
+	{
+		let previous: InstallationPlan = serde_json::from_str(&previous)
+			.map_err(|_| crate::craft_publication::installation_failed())?;
+		// ASVS 15.4.2: compare the durable predecessor in the admission transaction.
+		if state != "completed"
+			|| plan.previous_sha256.as_ref() != Some(&previous.artifact_sha256)
+		{
+			return Err(CoreError::conflict(
+				"craft.update_pending",
+				"the previous Craft publication must settle before this update; preview it again",
+			));
+		}
+	}
 	if plan.trust == CraftTrust::DeveloperSource {
 		let developer_mode =
 			crate::setting::resolve_plane(tx, crate::SettingKey::DeveloperMode)

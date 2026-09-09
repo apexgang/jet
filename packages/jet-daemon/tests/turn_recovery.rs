@@ -71,7 +71,9 @@ async fn pending_input_continues_a_legacy_run_after_boot_loss_with_partial_sourc
         assert_eq!(renewed["boot_identity"], jet_runtime::execution_boot_identity().unwrap());
         renewed["boot_identity"] = contract["boot_identity"].clone();
         actual["craft"]["adapter_state"] = json!(renewed.to_string());
-        assert_eq!(actual["craft"], plan["craft"]);
+        let mut expected = plan["craft"].clone();
+        expected["id"] = json!("fake");
+        assert_eq!(actual["craft"], expected);
         store.close().await;
     }).await.unwrap();
 }
@@ -94,7 +96,7 @@ async fn an_unavailable_queued_craft_does_not_block_another_conversation() {
             conversations.push(client.create_conversation_in(Uuid::now_v7(), jet_protocol::RetentionPolicy::Retain, jet_protocol::WorkingTreeRequest::LocalCheckout { project_id: project.project_id }).await.unwrap().conversation_id);
         }
         for (index, id) in conversations.iter().enumerate() {
-            wire.send(&json!({"kind":"command","id":1,"command_id":Uuid::now_v7(),"command":{"type":"start_run","conversation_id":id,"craft":"fake","prompt":"Make a change"}})).await;
+            wire.send(&json!({"kind":"command","id":1,"command_id":Uuid::now_v7(),"command":{"type":"start_run","conversation_id":id,"craft":if index == 0 { "fake" } else { "other" },"prompt":"Make a change"}})).await;
             assert_eq!(wire.receive::<Value>().await["kind"], "command_result");
             loop {
                 let snapshot = client.conversation(*id).await.unwrap();
@@ -102,12 +104,16 @@ async fn an_unavailable_queued_craft_does_not_block_another_conversation() {
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
             if index == 0 {
-                // The owner installs a new artifact under the same Craft name;
-                // existing executions retain the unavailable accepted digest/path.
+                // The first Craft becomes unavailable; a different installed Craft
+                // must still serve another Conversation.
                 std::fs::remove_file(home.join("crafts/fake-craft")).unwrap();
                 let replacement = dir.path().join("replacement");
                 fixture::install(&replacement);
-                std::fs::copy(replacement.join("crafts/fake.json"), home.join("crafts/fake.json")).unwrap();
+                let path = replacement.join("crafts/fake.json");
+                let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                manifest["specification"]["id"] = json!("other");
+                std::fs::write(&path, manifest.to_string()).unwrap();
+                std::fs::copy(path, home.join("crafts/other.json")).unwrap();
                 wire.send(&json!({"kind":"command","id":1,"command_id":Uuid::now_v7(),"command":{"type":"submit_turn","conversation_id":id,"source":"schedule","prompt":"Keep pending"}})).await;
                 assert_eq!(wire.receive::<Value>().await["kind"], "command_result");
             }
