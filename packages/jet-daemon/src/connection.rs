@@ -405,6 +405,12 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::UTILITY_MINOR,
 			feature: "Utility work",
 		}),
+		QueryRequest::InspectExtension { .. }
+		| QueryRequest::ExtensionCatalog { .. }
+		| QueryRequest::ExtensionChange { .. } => Some(MinorRequirement {
+			minor: jet_protocol::EXTENSIONS_MINOR,
+			feature: "Harness extensions",
+		}),
 		QueryRequest::DiscoverCraft { .. } => Some(MinorRequirement {
 			minor: jet_protocol::CRAFT_INSTALLATION_MINOR,
 			feature: "third-party Craft discovery",
@@ -521,6 +527,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		CommandRequest::DisableCraft { .. } => Some(MinorRequirement {
 			minor: jet_protocol::CRAFT_LIFECYCLE_MINOR,
 			feature: "Craft lifecycle controls",
+		}),
+		CommandRequest::ChangeExtension { .. } => Some(MinorRequirement {
+			minor: jet_protocol::EXTENSIONS_MINOR,
+			feature: "Harness extensions",
 		}),
 		CommandRequest::InstallCraft { .. } => Some(MinorRequirement {
 			minor: jet_protocol::CRAFT_INSTALLATION_MINOR,

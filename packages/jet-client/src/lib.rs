@@ -27,3 +27,5 @@ pub use handshake::ClientIdentity;
 pub use ssh::SshEndpoint;
 
 mod utility_requests;
+
+mod extension_requests;

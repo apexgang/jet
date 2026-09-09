@@ -205,3 +205,12 @@ mod craft_utility;
 pub use craft_utility::{
 	CraftUtilityModel, CraftUtilityReply, CraftUtilityRequest, UtilityInput,
 };
+
+mod extension;
+pub use extension::{
+	CraftExtensionReply, CraftExtensionRequest, ExtensionAction,
+	ExtensionCatalog, ExtensionChange, ExtensionChangeState,
+	ExtensionConfirmation, ExtensionScope, ExtensionTrust,
+};
+
+pub use handshake::EXTENSIONS_MINOR;

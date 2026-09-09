@@ -418,5 +418,40 @@
     "schema": "ServerMessage",
     "valid": true,
     "payload": "{\"kind\":\"query_result\",\"id\":7,\"result\":{\"type\":\"security_audit\",\"cursor\":\"1\",\"entries\":[{\"sequence\":\"1\",\"epoch\":\"1\",\"record_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"recorded_at_unix_ms\":1700000000000,\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"actor\":{\"type\":\"craft_revocation\"},\"target\":{\"kind\":\"craft_digest\",\"reference\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"identity\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"decision\":\"craft.digest_revoked\",\"risk\":\"elevated\",\"outcome\":\"succeeded\"}]}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":1,\"query\":{\"type\":\"extension_catalog\",\"craft_id\":\"codex\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":2,\"query\":{\"type\":\"inspect_extension\",\"craft_id\":\"codex\",\"extension_id\":\"skill:review@/native/checkout/review\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":3,\"query\":{\"type\":\"extension_change\",\"change_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":4,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"command\":{\"type\":\"change_extension\",\"confirmation\":{\"catalog\":{\"craft_id\":\"codex\",\"harness\":\"codex\",\"native_metadata\":\"{\\\"source\\\":\\\"native\\\",\\\"files\\\":[]}\"},\"extension_id\":\"skill:review@/native/checkout/review\",\"action\":\"install\",\"scope\":\"user\",\"trust\":\"same_user_executable\"}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":2,\"result\":{\"type\":\"extension_catalog\",\"craft_id\":\"codex\",\"harness\":\"codex\",\"native_metadata\":\"{\\\"source\\\":\\\"native\\\",\\\"files\\\":[]}\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":3,\"result\":{\"type\":\"extension_change\",\"change_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"craft_id\":\"codex\",\"extension_id\":\"skill:review@/native/checkout/review\",\"action\":\"install\",\"state\":\"outcome_unknown\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":4,\"result\":{\"type\":\"extension_change_queued\",\"change_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"}}"
   }
 ]

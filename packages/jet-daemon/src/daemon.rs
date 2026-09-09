@@ -69,27 +69,31 @@ pub(crate) async fn run(
 		}
 	};
 	// The start is recorded only once the daemon can actually serve.
-	let core =
-		match Core::start(store, WorkspaceHome(home.workspaces_dir())).await {
-			Ok(core) => Arc::new(
-				core.with_remote_worker(
-					std::env::current_exe().expect("jetd executable path"),
-				)
-				.with_run_host(Arc::new(crate::run_host::CraftProcesses::new(
-					identity,
-					home.root().to_path_buf(),
-					release_key,
-				)))
-				.with_utility_host(Arc::new(crate::utility_host::Utilities {
-					home: home.root().to_path_buf(),
-				}))
-				.with_terminal_host(Arc::new(crate::terminal_host::Terminals)),
-			),
-			Err(error) => {
-				eprintln!("jetd: cannot start the core: {error}");
-				return ExitCode::from(EXIT_FAILURE);
-			}
-		};
+	let core = match Core::start(store, WorkspaceHome(home.workspaces_dir()))
+		.await
+	{
+		Ok(core) => Arc::new(
+			core.with_remote_worker(
+				std::env::current_exe().expect("jetd executable path"),
+			)
+			.with_run_host(Arc::new(crate::run_host::CraftProcesses::new(
+				identity,
+				home.root().to_path_buf(),
+				release_key,
+			)))
+			.with_extension_host(Arc::new(crate::extension_host::Extensions {
+				home: home.root().to_path_buf(),
+			}))
+			.with_utility_host(Arc::new(crate::utility_host::Utilities {
+				home: home.root().to_path_buf(),
+			}))
+			.with_terminal_host(Arc::new(crate::terminal_host::Terminals)),
+		),
+		Err(error) => {
+			eprintln!("jetd: cannot start the core: {error}");
+			return ExitCode::from(EXIT_FAILURE);
+		}
+	};
 	if let Err(error) = core.reconcile_crafts().await {
 		eprintln!("jetd: cannot reconcile Crafts: {error}");
 	}
@@ -163,6 +167,12 @@ pub(crate) async fn run(
 			{
 				eprintln!(
 					"jetd: cannot reconcile Craft installations: {error}"
+				);
+			}
+			if let Err(error) = recovery_core.perform_extension_changes().await
+			{
+				eprintln!(
+					"jetd: cannot apply native extension changes: {error}"
 				);
 			}
 			if let Err(error) = recovery_core.perform_schedules().await {

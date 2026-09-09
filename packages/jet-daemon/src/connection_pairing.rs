@@ -76,6 +76,7 @@ async fn apply(
 		| CommandOutcome::UserEditApplied(_)
 		| CommandOutcome::UtilityQueued { .. }
 		| CommandOutcome::CraftDisabled { .. }
+		| CommandOutcome::ExtensionChangeQueued { .. }
 		| CommandOutcome::CraftInstallationQueued { .. }
 		| CommandOutcome::ScheduleCreated(_)
 		| CommandOutcome::ScheduleCanceled { .. }

@@ -22,6 +22,10 @@ export type CraftCommand = { kind: "configure_remote_tools"; selection: NoVisaSe
 
 export type CraftEvent = { call: CraftRemoteTool; kind: "remote_tool" } | { kind: "turn_started" } | { kind: "turn_ended"; outcome: TurnOutcome } | { change: CraftFileChange; kind: "file_changed" } | { kind: "conversation_title"; title: string } | { kind: "run_title"; title: string } | { kind: "process_title"; pid: number; title: string } | { kind: "run_launch_failed" } | { harness_pid: number; helper_pid: number; kind: "run_started" } | { activity: RunActivity; kind: "activity" } | { checkpoint?: string; kind: "progress"; source_offset: number } | { helper_pid: number; kind: "run_recovered"; source_offset: number } | { exit_code?: number | null; kind: "run_ended" } | { kind: "output"; native_event: RawJSON; presentation?: Array<PresentationBlock> } | { id: string; kind: "completed"; native_conversation: string };
 
+export type CraftExtensionReply = { catalog: ExtensionCatalog; kind: "catalog" } | { kind: "applied" } | { kind: "refused" };
+
+export type CraftExtensionRequest = { kind: "catalog" } | { extension_id: string; kind: "inspect" } | { confirmation: ExtensionConfirmation; kind: "apply" };
+
 export type CraftFeature = { name: string; required?: boolean };
 
 export type CraftFileChange = { activity_id: string; after_mode: string; after_object: string; before_mode: string; before_object: string; path: string };
@@ -51,6 +55,16 @@ export type CredentialItem = { account: string; service: string };
 export type CredentialReference = { item: CredentialItem; source: "platform_store" } | { helper: string; source: "external_helper" } | { source: "harness_native" } | { established_at_daemon_start: number; source: "session_only" };
 
 export type ErrorCategory = "invalid_input" | "unauthorized" | "conflict" | "unavailable" | "incompatible" | "rate_limited" | "not_found" | "outcome_unknown" | "internal";
+
+export type ExtensionAction = "install" | "update" | "disable" | "remove";
+
+export type ExtensionCatalog = { craft_id: string; harness: string; native_metadata: string };
+
+export type ExtensionConfirmation = { action: ExtensionAction; catalog: ExtensionCatalog; extension_id: string; scope: ExtensionScope; trust: ExtensionTrust };
+
+export type ExtensionScope = "user";
+
+export type ExtensionTrust = "same_user_executable";
 
 export type FileRevision = { mode: string; object: string };
 

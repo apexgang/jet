@@ -1216,6 +1216,24 @@
       "description": "Commands a client may execute.",
       "oneOf": [
         {
+          "description": "Stage one native extension mutation for subsequent Runs (Jet 1.28).",
+          "type": "object",
+          "properties": {
+            "confirmation": {
+              "description": "Complete native consent snapshot.",
+              "$ref": "#/$defs/ExtensionConfirmation"
+            },
+            "type": {
+              "type": "string",
+              "const": "change_extension"
+            }
+          },
+          "required": [
+            "type",
+            "confirmation"
+          ]
+        },
+        {
           "description": "Reviews one immutable No-Visa action captured by the destination.",
           "type": "object",
           "properties": {
@@ -2250,6 +2268,25 @@
     "CommandResponse": {
       "description": "Durable Command outcomes.",
       "oneOf": [
+        {
+          "description": "Native lifecycle request was durably staged.",
+          "type": "object",
+          "properties": {
+            "change_id": {
+              "description": "Identity for reading progress.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "extension_change_queued"
+            }
+          },
+          "required": [
+            "type",
+            "change_id"
+          ]
+        },
         {
           "description": "The exact-action destination decision was recorded.",
           "type": "object",
@@ -4236,6 +4273,168 @@
         }
       ]
     },
+    "ExtensionAction": {
+      "description": "Operations supported by the responsible native adapter.",
+      "oneOf": [
+        {
+          "description": "Install a native extension.",
+          "type": "string",
+          "const": "install"
+        },
+        {
+          "description": "Update a native extension.",
+          "type": "string",
+          "const": "update"
+        },
+        {
+          "description": "Stop loading a native extension.",
+          "type": "string",
+          "const": "disable"
+        },
+        {
+          "description": "Remove a native extension.",
+          "type": "string",
+          "const": "remove"
+        }
+      ]
+    },
+    "ExtensionCatalog": {
+      "description": "Native catalog data, interpreted by its Craft and rendered as data by clients.",
+      "type": "object",
+      "properties": {
+        "craft_id": {
+          "description": "Installed Craft identity.",
+          "type": "string"
+        },
+        "harness": {
+          "description": "Harness whose native formats this catalog describes.",
+          "type": "string"
+        },
+        "native_metadata": {
+          "description": "Bounded native JSON containing sources, versions, publishers and components.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "craft_id",
+        "harness",
+        "native_metadata"
+      ]
+    },
+    "ExtensionChange": {
+      "description": "Inspectable, content-free lifecycle progress.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Requested operation.",
+          "$ref": "#/$defs/ExtensionAction"
+        },
+        "change_id": {
+          "description": "Durable operation identity.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "craft_id": {
+          "description": "Responsible Craft.",
+          "type": "string"
+        },
+        "extension_id": {
+          "description": "Native extension identity.",
+          "type": "string"
+        },
+        "state": {
+          "description": "Execution outcome.",
+          "$ref": "#/$defs/ExtensionChangeState"
+        }
+      },
+      "required": [
+        "change_id",
+        "craft_id",
+        "extension_id",
+        "action",
+        "state"
+      ]
+    },
+    "ExtensionChangeState": {
+      "description": "Durable outcome, separate from acceptance of the initiating Command.",
+      "oneOf": [
+        {
+          "description": "Waiting for existing managed Runs to finish.",
+          "type": "string",
+          "const": "staged"
+        },
+        {
+          "description": "Native lifecycle operation completed for subsequent Runs.",
+          "type": "string",
+          "const": "applied"
+        },
+        {
+          "description": "Validation refused the mutation before execution.",
+          "type": "string",
+          "const": "refused"
+        },
+        {
+          "description": "Execution began but its complete outcome cannot be established. Never retried.",
+          "type": "string",
+          "const": "outcome_unknown"
+        }
+      ]
+    },
+    "ExtensionConfirmation": {
+      "description": "Exact native metadata and authority shown before any lifecycle mutation.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Exactly one lifecycle operation.",
+          "$ref": "#/$defs/ExtensionAction"
+        },
+        "catalog": {
+          "description": "Catalog snapshot which the Craft must revalidate before execution.",
+          "$ref": "#/$defs/ExtensionCatalog"
+        },
+        "extension_id": {
+          "description": "Native identity, for example plugin@marketplace.",
+          "type": "string"
+        },
+        "scope": {
+          "description": "Native installation scope.",
+          "$ref": "#/$defs/ExtensionScope"
+        },
+        "trust": {
+          "description": "Same-user executable access accepted by the interactive client.",
+          "$ref": "#/$defs/ExtensionTrust"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "catalog",
+        "extension_id",
+        "action",
+        "scope",
+        "trust"
+      ]
+    },
+    "ExtensionScope": {
+      "description": "Native scopes currently admitted by the Plane.",
+      "oneOf": [
+        {
+          "description": "The native Harness's user configuration on the selected Plane.",
+          "type": "string",
+          "const": "user"
+        }
+      ]
+    },
+    "ExtensionTrust": {
+      "description": "Explicit consent to the native executable boundary, never GUI code.",
+      "oneOf": [
+        {
+          "description": "Skills may direct tools; hooks, MCP servers and plugins execute as the user.",
+          "type": "string",
+          "const": "same_user_executable"
+        }
+      ]
+    },
     "ExternalConversation": {
       "description": "One Harness-native Conversation the Plane can see outside its\nmanagement.",
       "type": "object",
@@ -5632,6 +5831,66 @@
       "description": "Queries a client may run.",
       "oneOf": [
         {
+          "description": "Inspect native source, components and requested access before a mutation.",
+          "type": "object",
+          "properties": {
+            "craft_id": {
+              "description": "Accepted Craft identity.",
+              "type": "string"
+            },
+            "extension_id": {
+              "description": "Exact native target.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "inspect_extension"
+            }
+          },
+          "required": [
+            "type",
+            "craft_id",
+            "extension_id"
+          ]
+        },
+        {
+          "description": "Discover extensions in native sources through the responsible Craft.",
+          "type": "object",
+          "properties": {
+            "craft_id": {
+              "description": "Accepted Craft identity.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "extension_catalog"
+            }
+          },
+          "required": [
+            "type",
+            "craft_id"
+          ]
+        },
+        {
+          "description": "Inspect a staged extension mutation.",
+          "type": "object",
+          "properties": {
+            "change_id": {
+              "description": "Durable operation identity.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "extension_change"
+            }
+          },
+          "required": [
+            "type",
+            "change_id"
+          ]
+        },
+        {
           "description": "Inspect the exact remote action awaiting a destination review.",
           "type": "object",
           "properties": {
@@ -6173,6 +6432,49 @@
     "QueryResponse": {
       "description": "Query snapshots.",
       "oneOf": [
+        {
+          "description": "Unconverted native catalog and metadata.",
+          "type": "object",
+          "properties": {
+            "craft_id": {
+              "description": "Installed Craft identity.",
+              "type": "string"
+            },
+            "harness": {
+              "description": "Harness whose native formats this catalog describes.",
+              "type": "string"
+            },
+            "native_metadata": {
+              "description": "Bounded native JSON containing sources, versions, publishers and components.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "extension_catalog"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "craft_id",
+            "harness",
+            "native_metadata"
+          ]
+        },
+        {
+          "description": "Deferred native mutation outcome.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "extension_change"
+            }
+          },
+          "$ref": "#/$defs/ExtensionChange",
+          "required": [
+            "type"
+          ]
+        },
         {
           "description": "Exact remote action awaiting a destination review.",
           "type": "object",

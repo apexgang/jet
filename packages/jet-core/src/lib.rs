@@ -315,6 +315,7 @@ impl Actor {
 /// One running core bound to one Plane store.
 #[derive(Debug)]
 pub struct Core {
+	extension_host: Option<Arc<dyn ExtensionHost>>,
 	remote_worker: Option<std::path::PathBuf>,
 	remote_tool_slots: tokio::sync::Semaphore,
 	utility_host: Option<Arc<dyn UtilityHost>>,
@@ -436,6 +437,7 @@ impl Core {
 		let core = Self {
 			remote_worker: None,
 			remote_tool_slots: tokio::sync::Semaphore::new(32),
+			extension_host: None,
 			utility_host: None,
 			utility_work: tokio::sync::Mutex::new(()),
 			run_work: tokio::sync::Notify::new(),
@@ -593,3 +595,14 @@ pub use utility::UtilityPolicy;
 pub use utility_host::{UtilityHost, UtilityInput, UtilityModel, UtilityReply};
 mod utility_input;
 mod utility_output;
+
+#[cfg(test)]
+#[path = "extension_tests.rs"]
+mod extension_tests;
+
+mod extension;
+mod extension_work;
+pub use extension::{
+	ExtensionAction, ExtensionCatalog, ExtensionChange, ExtensionChangeState,
+	ExtensionConfirmation, ExtensionHost, ExtensionScope, ExtensionTrust,
+};

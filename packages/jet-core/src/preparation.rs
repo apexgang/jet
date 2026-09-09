@@ -83,7 +83,9 @@ impl Core {
 		}
 		if matches!(
 			command,
-			Command::ApplyUserEdit { .. } | Command::InstallCraft { .. }
+			Command::ApplyUserEdit { .. }
+				| Command::InstallCraft { .. }
+				| Command::ChangeExtension { .. }
 		) {
 			security.admit(command.security_class())?;
 		}
@@ -127,6 +129,10 @@ impl Core {
 	) -> Result<Prepared, CoreError> {
 		match command {
 			Command::ReviewRemoteTool { .. } => Ok(Prepared::Nothing),
+			Command::ChangeExtension { confirmation } => {
+				crate::extension_work::validate(self, confirmation).await?;
+				Ok(Prepared::Nothing)
+			}
 			Command::DisableCraft { .. } => Ok(Prepared::Nothing),
 			Command::InstallCraft { confirmation } => {
 				Ok(Prepared::CraftInstallation(

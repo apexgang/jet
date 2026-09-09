@@ -151,6 +151,11 @@ pub struct ConversationSnapshot {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandRequest {
+	/// Stage one native extension mutation for subsequent Runs (Jet 1.28).
+	ChangeExtension {
+		/// Complete native consent snapshot.
+		confirmation: crate::ExtensionConfirmation,
+	},
 	/// Reviews one immutable No-Visa action captured by the destination.
 	ReviewRemoteTool {
 		/// Paired installation that submitted the action.
@@ -478,6 +483,11 @@ pub enum CommandRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResponse {
+	/// Native lifecycle request was durably staged.
+	ExtensionChangeQueued {
+		/// Identity for reading progress.
+		change_id: Uuid,
+	},
 	/// The exact-action destination decision was recorded.
 	RemoteToolReviewed {
 		/// Reviewed operation identity.

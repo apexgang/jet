@@ -23,6 +23,8 @@ const CRAFT_INSTALLATION_OUTCOME_VERSION: u32 = 5;
 const REMOTE_REVIEW_OUTCOME_VERSION: u32 = 6;
 /// Lifecycle controls cannot be replayed by a release that lacks disable barriers.
 const CRAFT_LIFECYCLE_OUTCOME_VERSION: u32 = 7;
+/// Native extension changes introduced a durable staged result.
+const EXTENSION_OUTCOME_VERSION: u32 = 8;
 
 /// Uses the rollback release's encoding whenever that release can understand
 /// the result. Version 2 is reserved for name-only variants introduced here;
@@ -32,6 +34,9 @@ pub(crate) fn outcome_version(
 	result: &Result<CommandOutcome, CoreError>,
 ) -> u32 {
 	match result {
+		Ok(CommandOutcome::ExtensionChangeQueued { .. }) => {
+			EXTENSION_OUTCOME_VERSION
+		}
 		Ok(CommandOutcome::CraftDisabled { .. }) => {
 			CRAFT_LIFECYCLE_OUTCOME_VERSION
 		}
@@ -132,7 +137,8 @@ pub(crate) fn replay(
 		| UTILITY_OUTCOME_VERSION
 		| CRAFT_INSTALLATION_OUTCOME_VERSION
 		| REMOTE_REVIEW_OUTCOME_VERSION
-		| CRAFT_LIFECYCLE_OUTCOME_VERSION => decode_result(&outcome),
+		| CRAFT_LIFECYCLE_OUTCOME_VERSION
+		| EXTENSION_OUTCOME_VERSION => decode_result(&outcome),
 		PREVIOUS_OUTCOME_VERSION => decode_previous_result(&outcome),
 		_ => Ok(Err(CoreError::incompatible(
 			"command.outcome_incompatible",

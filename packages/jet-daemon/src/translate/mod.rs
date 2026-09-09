@@ -9,6 +9,7 @@ mod capability;
 mod checkpoint;
 mod craft_installation;
 mod execution_control;
+pub(crate) mod extension;
 mod import;
 mod name;
 mod pairing;
@@ -62,6 +63,23 @@ pub(crate) fn query(
 			client_id: ClientId(*client_id),
 			operation_id: *operation_id,
 		},
+		wire::QueryRequest::InspectExtension {
+			craft_id,
+			extension_id,
+		} => Query::InspectExtension {
+			craft_id: craft_id.clone(),
+			extension_id: extension_id.clone(),
+		},
+		wire::QueryRequest::ExtensionCatalog { craft_id } => {
+			Query::ExtensionCatalog {
+				craft_id: craft_id.clone(),
+			}
+		}
+		wire::QueryRequest::ExtensionChange { change_id } => {
+			Query::ExtensionChange {
+				change_id: *change_id,
+			}
+		}
 		wire::QueryRequest::DiscoverCraft { source } => Query::DiscoverCraft {
 			source: craft_installation::source_from_wire(source),
 		},
@@ -200,6 +218,12 @@ pub(crate) fn query_result(
 				request,
 			))
 		}
+		QueryResult::ExtensionCatalog(catalog) => {
+			wire::QueryResponse::ExtensionCatalog(extension::catalog(catalog))
+		}
+		QueryResult::ExtensionChange(change) => {
+			wire::QueryResponse::ExtensionChange(extension::change(change))
+		}
 		QueryResult::CraftInstallationPreview(preview) => {
 			wire::QueryResponse::CraftInstallationPreview(
 				craft_installation::preview(*preview),
@@ -330,6 +354,13 @@ pub(crate) fn command(
 						jet_core::CraftDisableMode::Force
 					}
 				},
+			}
+		}
+		wire::CommandRequest::ChangeExtension { confirmation } => {
+			Command::ChangeExtension {
+				confirmation: extension::confirmation_from_wire(
+					confirmation.clone(),
+				),
 			}
 		}
 		wire::CommandRequest::InstallCraft { confirmation } => {
@@ -677,6 +708,9 @@ pub(crate) fn command_outcome(
 					}
 				},
 			}
+		}
+		CommandOutcome::ExtensionChangeQueued { change_id } => {
+			wire::CommandResponse::ExtensionChangeQueued { change_id }
 		}
 		CommandOutcome::CraftInstallationQueued {
 			craft_id,

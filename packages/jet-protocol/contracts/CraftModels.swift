@@ -73,6 +73,18 @@ public enum CraftEvent {
     case `completed`(CraftEventCompleted)
 }
 
+public enum CraftExtensionReply {
+    case `catalog`(CraftExtensionReplyCatalog)
+    case `applied`(CraftExtensionReplyApplied)
+    case `refused`(CraftExtensionReplyRefused)
+}
+
+public enum CraftExtensionRequest {
+    case `catalog`(CraftExtensionRequestCatalog)
+    case `inspect`(CraftExtensionRequestInspect)
+    case `apply`(CraftExtensionRequestApply)
+}
+
 public struct CraftFeature {
     public let `name`: String
     public let `required`: Bool?
@@ -181,6 +193,35 @@ public enum ErrorCategory: String {
     case `not_found` = "not_found"
     case `outcome_unknown` = "outcome_unknown"
     case `internal` = "internal"
+}
+
+public enum ExtensionAction: String {
+    case `install` = "install"
+    case `update` = "update"
+    case `disable` = "disable"
+    case `remove` = "remove"
+}
+
+public struct ExtensionCatalog {
+    public let `craft_id`: String
+    public let `harness`: String
+    public let `native_metadata`: String
+}
+
+public struct ExtensionConfirmation {
+    public let `action`: ExtensionAction
+    public let `catalog`: ExtensionCatalog
+    public let `extension_id`: String
+    public let `scope`: ExtensionScope
+    public let `trust`: ExtensionTrust
+}
+
+public enum ExtensionScope: String {
+    case `user` = "user"
+}
+
+public enum ExtensionTrust: String {
+    case `same_user_executable` = "same_user_executable"
 }
 
 public struct FileRevision {
@@ -506,6 +547,30 @@ public struct CraftEventOutput {
 public struct CraftEventCompleted {
     public let `id`: String
     public let `native_conversation`: String
+}
+
+public struct CraftExtensionReplyCatalog {
+    public let `catalog`: ExtensionCatalog
+}
+
+public struct CraftExtensionReplyApplied {
+
+}
+
+public struct CraftExtensionReplyRefused {
+
+}
+
+public struct CraftExtensionRequestCatalog {
+
+}
+
+public struct CraftExtensionRequestInspect {
+    public let `extension_id`: String
+}
+
+public struct CraftExtensionRequestApply {
+    public let `confirmation`: ExtensionConfirmation
 }
 
 public struct CraftHostAccessExecutable {

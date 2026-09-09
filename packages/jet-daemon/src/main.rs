@@ -16,6 +16,7 @@ mod craft_supervisor;
 mod daemon;
 mod execution_signal;
 mod execution_termination;
+mod extension_host;
 mod installation_identity;
 mod no_visa_broker;
 mod remote_tool;

@@ -311,6 +311,7 @@ pub(crate) async fn record(
 	mut plan: LaunchPlan,
 	now: i64,
 ) -> Result<CommandOutcome, CoreError> {
+	crate::extension_work::admit_run(tx).await?;
 	crate::craft_lifecycle::admit(tx, &plan.craft).await?;
 	// Preparation runs outside the write lock. Recheck consumption in this
 	// transaction so concurrent StartRun commands cannot reissue the fork.

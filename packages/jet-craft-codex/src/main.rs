@@ -1,6 +1,7 @@
 //! Bundled Jet Craft for the Codex Harness (ADR-0046, ADR-0060).
 mod approval;
 mod execution;
+mod extensions;
 mod harness;
 mod presentation;
 mod specification;
@@ -10,8 +11,11 @@ use clap::Parser;
 #[derive(Parser)]
 #[command(version, about)]
 struct Arguments {
+	/// Execute one isolated Craft extension v1 operation.
+	#[arg(long, conflicts_with_all = ["socket", "utility", "utility_model"])]
+	extensions_v1: bool,
 	/// Private, owner-only endpoint provisioned by the host.
-	#[arg(long, required_unless_present_any = ["utility", "utility_model"])]
+	#[arg(long, required_unless_present_any = ["utility", "utility_model", "extensions_v1"])]
 	socket: Option<std::path::PathBuf>,
 	/// Execute exactly one isolated Utility v1 request on stdin/stdout.
 	#[arg(long, conflicts_with_all = ["socket", "utility_model"])]
@@ -24,6 +28,16 @@ struct Arguments {
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
 	let arguments = Arguments::parse();
+	if arguments.extensions_v1 {
+		return if jet_craft_sdk::serve_extensions(extensions::handle)
+			.await
+			.is_ok()
+		{
+			std::process::ExitCode::SUCCESS
+		} else {
+			std::process::ExitCode::FAILURE
+		};
+	}
 	if arguments.utility || arguments.utility_model {
 		let result = if arguments.utility {
 			jet_craft_sdk::serve_utility(jet_craft_sdk::UtilityProvider::OpenAi)
