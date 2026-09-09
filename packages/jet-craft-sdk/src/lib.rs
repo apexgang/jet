@@ -14,9 +14,13 @@ pub use jet_protocol::{
 };
 pub use specification::parse_specification;
 
+mod review;
 mod utility;
 mod utility_credentials;
 mod utility_http;
+pub use review::{
+	ONE_SHOT_FLAGS, OneShot, approval_action, review_model, serve_review,
+};
 pub use utility::{UtilityProvider, serve_utility, utility_model};
 
 mod extensions;

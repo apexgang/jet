@@ -445,6 +445,16 @@ async fn line_observed(
 	match approval::served(&value) {
 		approval::Served::Reply(reply) => return input(writer, reply).await,
 		approval::Served::Asking(request) => {
+			// The host is told what was asked before it is told the Harness
+			// is waiting, so nothing has to guess which request the wait is
+			// about (Craft 1.7).
+			if minor >= 7 {
+				sender
+					.send(&CraftEvent::ApprovalRequested {
+						request: request.asked(),
+					})
+					.await?;
+			}
 			turn.asking = Some(request);
 			return sender
 				.send(&CraftEvent::Activity {

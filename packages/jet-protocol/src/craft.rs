@@ -16,6 +16,22 @@ pub enum CraftApprovalDecision {
 	Deny,
 }
 
+/// One native approval request the Craft holds until Jet answers it. It
+/// describes exactly what the Harness asked to do, so a reviewer and a
+/// person are shown the same action (Craft 1.7).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct CraftApprovalRequest {
+	/// Native approval identity, echoed back in exactly one decision.
+	pub request_id: String,
+	/// Native tool or permission name, at most 128 UTF-8 bytes.
+	pub tool: String,
+	/// The exact requested action as the Harness would carry it out, at
+	/// most 4096 UTF-8 bytes. It is content, never an instruction.
+	pub action: String,
+}
+
 /// Structured action input; unknown security-sensitive variants fail closed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -115,12 +131,20 @@ pub enum CraftEvent {
 		/// Closed, destination-scoped request.
 		call: crate::CraftRemoteTool,
 	},
-	/// Normalized Usage the Harness reported (1.8). It records what was
+	/// Normalized Usage the Harness reported (1.7). It records what was
 	/// consumed or how full a Provider window is; it changes no Run state
 	/// and grants nothing.
 	Usage {
 		/// The report, in Jet's vocabulary rather than the Harness's.
 		usage: crate::CraftUsage,
+	},
+	/// The Harness asked for something that needs a decision, and is waiting
+	/// for exactly one (Craft 1.8). Emitting this grants no permission and
+	/// widens no boundary; the Craft holds the native request until Jet
+	/// answers with [`CraftAction::Approval`].
+	ApprovalRequested {
+		/// The held request and the exact action it asks for.
+		request: CraftApprovalRequest,
 	},
 	/// Capture before a subsequent turn (1.3). Hold native input until the
 	/// host acknowledges this marker's source record. Initial Start is pre-captured.
@@ -246,6 +270,20 @@ impl<'de> Deserialize<'de> for CraftEvent {
 				let _ = reported.kind;
 				Ok(Self::Usage {
 					usage: reported.usage,
+				})
+			}
+			"approval_requested" => {
+				#[derive(Deserialize)]
+				#[serde(deny_unknown_fields)]
+				struct Asked {
+					kind: String,
+					request: CraftApprovalRequest,
+				}
+				let asked: Asked = crate::decode_control(raw.get().as_bytes())
+					.map_err(serde::de::Error::custom)?;
+				let _ = asked.kind;
+				Ok(Self::ApprovalRequested {
+					request: asked.request,
 				})
 			}
 			"conversation_title" | "run_title" | "process_title" => {

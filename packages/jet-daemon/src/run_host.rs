@@ -104,6 +104,13 @@ impl jet_core::RunConnection for RunConnection {
 			{
 				return Err(failed("Usage records require Craft 1.7"));
 			}
+			if self.craft_minor < 8
+				&& matches!(&event, CraftEvent::ApprovalRequested { .. })
+			{
+				return Err(failed(
+					"structured approval requests require Craft 1.8",
+				));
+			}
 			Ok(match event {
 				CraftEvent::RemoteTool { .. } => unreachable!("handled above"),
 				CraftEvent::Usage { usage } => RunObservation::Usage(
@@ -117,6 +124,15 @@ impl jet_core::RunConnection for RunConnection {
 				}
 				CraftEvent::ProcessTitle { pid, title } => {
 					RunObservation::ProcessTitle { pid, title }
+				}
+				CraftEvent::ApprovalRequested { request } => {
+					RunObservation::ApprovalRequested(
+						jet_core::ApprovalRequest {
+							request_id: request.request_id,
+							tool: request.tool,
+							action: request.action,
+						},
+					)
 				}
 				CraftEvent::TurnStarted => RunObservation::TurnStarted,
 				CraftEvent::TurnEnded { outcome } => {
@@ -209,6 +225,35 @@ impl jet_core::RunConnection for RunConnection {
 				&mut *self.writer.lock().await,
 				&CraftCommand::Interrupt {
 					id: turn_id.to_string(),
+				},
+			)
+			.await
+		})
+	}
+	fn decide_approval<'a>(
+		&'a self,
+		request_id: &'a str,
+		decision: jet_core::ReviewDecision,
+	) -> RunFuture<'a, Result<(), CoreError>> {
+		Box::pin(async move {
+			// ASVS 8.3.1: exactly the request Core decided on, and only
+			// once. There is no blanket answer to send, because the wire
+			// has none to say (ADR-0012).
+			send(
+				&mut *self.writer.lock().await,
+				&CraftCommand::Action {
+					id: Uuid::now_v7().to_string(),
+					action: jet_protocol::CraftAction::Approval {
+						request_id: request_id.to_owned(),
+						decision: match decision {
+							jet_core::ReviewDecision::Allow => {
+								jet_protocol::CraftApprovalDecision::AllowOnce
+							}
+							jet_core::ReviewDecision::Deny => {
+								jet_protocol::CraftApprovalDecision::Deny
+							}
+						},
+					},
 				},
 			)
 			.await

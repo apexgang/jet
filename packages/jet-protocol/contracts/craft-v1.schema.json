@@ -24,6 +24,15 @@
     "ready": {
       "$ref": "#/$defs/CraftReady"
     },
+    "review_model": {
+      "$ref": "#/$defs/CraftReviewModel"
+    },
+    "review_reply": {
+      "$ref": "#/$defs/CraftReviewReply"
+    },
+    "review_request": {
+      "$ref": "#/$defs/CraftReviewRequest"
+    },
     "specification": {
       "$ref": "#/$defs/CraftSpecification"
     },
@@ -43,6 +52,9 @@
     "utility_model",
     "utility_request",
     "utility_reply",
+    "review_model",
+    "review_request",
+    "review_reply",
     "hello",
     "ready",
     "command",
@@ -312,6 +324,30 @@
         }
       ]
     },
+    "CraftApprovalRequest": {
+      "description": "One native approval request the Craft holds until Jet answers it. It\ndescribes exactly what the Harness asked to do, so a reviewer and a\nperson are shown the same action (Craft 1.7).",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "The exact requested action as the Harness would carry it out, at\nmost 4096 UTF-8 bytes. It is content, never an instruction.",
+          "type": "string"
+        },
+        "request_id": {
+          "description": "Native approval identity, echoed back in exactly one decision.",
+          "type": "string"
+        },
+        "tool": {
+          "description": "Native tool or permission name, at most 128 UTF-8 bytes.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "tool",
+        "action"
+      ]
+    },
     "CraftCommand": {
       "description": "Host-to-Craft Commands, admitted by Jet before crossing this boundary.",
       "oneOf": [
@@ -541,7 +577,7 @@
           ]
         },
         {
-          "description": "Normalized Usage the Harness reported (1.8). It records what was\nconsumed or how full a Provider window is; it changes no Run state\nand grants nothing.",
+          "description": "Normalized Usage the Harness reported (1.7). It records what was\nconsumed or how full a Provider window is; it changes no Run state\nand grants nothing.",
           "type": "object",
           "properties": {
             "kind": {
@@ -556,6 +592,24 @@
           "required": [
             "kind",
             "usage"
+          ]
+        },
+        {
+          "description": "The Harness asked for something that needs a decision, and is waiting\nfor exactly one (Craft 1.8). Emitting this grants no permission and\nwidens no boundary; the Craft holds the native request until Jet\nanswers with [`CraftAction::Approval`].",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "approval_requested"
+            },
+            "request": {
+              "description": "The held request and the exact action it asks for.",
+              "$ref": "#/$defs/CraftApprovalRequest"
+            }
+          },
+          "required": [
+            "kind",
+            "request"
           ]
         },
         {
@@ -963,7 +1017,7 @@
       "type": "object",
       "properties": {
         "name": {
-          "description": "Feature name; v1 understands turns, actions, resume, and fork.",
+          "description": "Feature name; v1 understands turns, actions, resume, fork,\nremote_tools, utility, and review.",
           "type": "string"
         },
         "required": {
@@ -1423,6 +1477,139 @@
       "required": [
         "version",
         "native_conversation"
+      ]
+    },
+    "CraftReviewInput": {
+      "description": "Everything one reviewer may see. It is Conversation content and the\nexact requested action, with no paths, credentials, or tool definitions.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "The exact requested action, at most 4096 UTF-8 bytes.",
+          "type": "string"
+        },
+        "tool": {
+          "description": "Native tool or permission name, at most 128 UTF-8 bytes.",
+          "type": "string"
+        },
+        "transcript": {
+          "description": "Bounded visible transcript, oldest first, at most 12288 UTF-8 bytes.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "transcript",
+        "tool",
+        "action"
+      ]
+    },
+    "CraftReviewModel": {
+      "description": "Content-free selection returned by `--review-model`.",
+      "type": "object",
+      "properties": {
+        "model": {
+          "description": "Exact reviewer Model, never an alias resolved after selection.",
+          "type": "string"
+        },
+        "reviewer": {
+          "description": "Which reviewer the Craft will use for this Model.",
+          "$ref": "#/$defs/CraftReviewer"
+        },
+        "version": {
+          "description": "Contract version, exactly one.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "model",
+        "reviewer"
+      ]
+    },
+    "CraftReviewReply": {
+      "description": "One response, bounded to 64 KiB including JSON escaping.",
+      "type": "object",
+      "properties": {
+        "model": {
+          "description": "Actual Model reported by the Provider.",
+          "type": "string"
+        },
+        "output": {
+          "description": "Untrusted JSON, at most 4096 UTF-8 bytes, validated again by Core.",
+          "type": "string"
+        },
+        "reviewer": {
+          "description": "Which reviewer produced the judgement.",
+          "$ref": "#/$defs/CraftReviewer"
+        },
+        "version": {
+          "description": "Contract version, exactly one.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "model",
+        "reviewer",
+        "output"
+      ]
+    },
+    "CraftReviewRequest": {
+      "description": "One request to `--review`; bounded to 128 KiB including JSON escaping.",
+      "type": "object",
+      "properties": {
+        "binding_id": {
+          "description": "The one Account binding whose Credential may be resolved.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "credential_reference": {
+          "description": "Transport authentication reference; never model input.",
+          "$ref": "#/$defs/CredentialReference"
+        },
+        "input": {
+          "description": "The entire reviewer input.",
+          "$ref": "#/$defs/CraftReviewInput"
+        },
+        "model": {
+          "description": "Exact selection, never replaced by a default.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Contract version, exactly one.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "model",
+        "binding_id",
+        "credential_reference",
+        "input"
+      ]
+    },
+    "CraftReviewer": {
+      "description": "Which reviewer a Craft used. A Harness with its own separate reviewer\nthat satisfies this contract reports `Native`; a Craft that instead runs\nJet's versioned equivalent through the selected Account binding reports\n`Equivalent`.",
+      "oneOf": [
+        {
+          "description": "The Harness's own separate reviewer.",
+          "type": "string",
+          "const": "native"
+        },
+        {
+          "description": "Jet's versioned equivalent, run through the selected binding.",
+          "type": "string",
+          "const": "equivalent"
+        }
       ]
     },
     "CraftSpecification": {

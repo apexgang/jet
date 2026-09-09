@@ -89,6 +89,17 @@ mod relative_path;
 mod remote;
 mod remote_pairing;
 mod repository;
+mod review;
+mod review_input;
+mod review_output;
+mod review_policy;
+mod review_work;
+pub use review::{
+	ApprovalRequest, ApprovalReview, AutomaticReviewPolicy,
+	ReviewAuthorization, ReviewDecision, ReviewHost, ReviewInput,
+	ReviewOutcome, ReviewReply, ReviewRisk, ReviewVerdict, Reviewer,
+	ReviewerSelection,
+};
 mod run;
 mod run_command;
 mod run_craft;
@@ -158,6 +169,10 @@ mod run_tests;
 #[cfg(test)]
 #[path = "checkpoint_tests.rs"]
 mod checkpoint_tests;
+
+#[cfg(test)]
+#[path = "review_tests.rs"]
+mod review_tests;
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -328,6 +343,7 @@ pub struct Core {
 	remote_worker: Option<std::path::PathBuf>,
 	remote_tool_slots: tokio::sync::Semaphore,
 	utility_host: Option<Arc<dyn UtilityHost>>,
+	review_host: Option<Arc<dyn ReviewHost>>,
 	utility_work: tokio::sync::Mutex<()>,
 	run_work: tokio::sync::Notify,
 	utility_wake: tokio::sync::Notify,
@@ -448,6 +464,7 @@ impl Core {
 			remote_tool_slots: tokio::sync::Semaphore::new(32),
 			extension_host: None,
 			utility_host: None,
+			review_host: None,
 			utility_work: tokio::sync::Mutex::new(()),
 			run_work: tokio::sync::Notify::new(),
 			utility_wake: tokio::sync::Notify::new(),

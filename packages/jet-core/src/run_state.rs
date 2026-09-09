@@ -148,6 +148,7 @@ async fn record(
 		| Observation::NativeConversation(_)
 		| Observation::ConversationTitle(_)
 		| Observation::RunTitle(_)
+		| Observation::ApprovalRequested(_)
 		| Observation::ProcessTitle { .. } => crate::EventActor::Harness {
 			run_id,
 			authorized_by,
@@ -232,6 +233,7 @@ async fn record(
 		| Observation::ProcessTitle { .. }
 		| Observation::ConversationTitle(_)
 		| Observation::RunTitle(_)
+		| Observation::ApprovalRequested(_)
 		| Observation::Progress { .. } => None,
 	};
 	let (lifecycle, events) = apply(run.lifecycle, &mut state, observation)?;
@@ -371,6 +373,12 @@ fn apply(
 		Observation::Activity(reason) if executing(lifecycle) => {
 			activity(state, Some(reason), &mut events)
 		}
+		// Recording the request grants nothing: the Craft is still holding
+		// it, and only a decision Core sends back releases it (ADR-0012).
+		Observation::ApprovalRequested(request) if executing(lifecycle) => {
+			request.validate()?;
+			events.push(EventKind::ApprovalRequested { request });
+		}
 		Observation::ProcessTitle { pid, title } if executing(lifecycle) => {
 			let label = crate::Name::process_label(title)?;
 			let Some(process) = state
@@ -467,6 +475,7 @@ fn apply(
 		| Observation::ProcessTitle { .. }
 		| Observation::ConversationTitle(_)
 		| Observation::RunTitle(_)
+		| Observation::ApprovalRequested(_)
 		| Observation::Ended(_)
 		| Observation::LaunchFailed
 		| Observation::Disconnected => return Err(invalid()),

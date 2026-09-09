@@ -201,6 +201,34 @@ async fn a_conversation_uses_codex_native_events_through_the_craft_contract() {
 				},
 			],
 		);
+		// The host was told exactly what the Harness asked to do before it
+		// was told the Harness was waiting, and the decision it sent back
+		// answers that one request (ADR-0012).
+		assert_eq!(
+			events
+				.iter()
+				.filter_map(|event| match event {
+					CraftEvent::ApprovalRequested { request } =>
+						Some(request.clone()),
+					_ => None,
+				})
+				.map(|request| (
+					request.request_id,
+					request.tool,
+					request.action
+				))
+				.collect::<Vec<_>>(),
+			vec![(
+				"approval-1".into(),
+				"item/commandExecution/requestApproval".into(),
+				json!({
+					"command": "touch note.txt", "itemId": "command-1",
+					"startedAtMs": 1, "threadId": "thread-native-1",
+					"turnId": "native-write",
+				})
+				.to_string()
+			)]
+		);
 		assert_eq!(
 			std::fs::read_to_string(root.join("decision.json")).unwrap(),
 			json!({"decision": "accept"}).to_string(),
@@ -402,7 +430,7 @@ async fn accept_craft(socket: &Path, run: Uuid) -> (Reader, Writer) {
 	let ready: CraftReady = decode_control(&payload).unwrap();
 	assert_eq!(
 		ready.protocol.version,
-		ProtocolVersion { major: 1, minor: 7 }
+		ProtocolVersion { major: 1, minor: 8 }
 	);
 	reader.enable_multiplexing();
 	writer.enable_multiplexing();

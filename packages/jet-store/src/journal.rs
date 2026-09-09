@@ -16,6 +16,9 @@ pub const EVENT_COMPACTION_BATCH_LIMIT: usize = 256;
 /// Most semantic transcript Events copied into a Conversation fork.
 const FORK_CONTEXT_EVENT_LIMIT: usize = 256;
 
+/// Most visible transcript Events one Automatic review is shown (ADR-0012).
+const REVIEW_TRANSCRIPT_EVENT_LIMIT: usize = 64;
+
 /// A bounded semantic Event slice for building a fork's launch context.
 pub struct ForkContextEvents {
 	/// Newest transcript Events through the selected checkpoint, in order.
@@ -130,6 +133,37 @@ impl ReadTransaction {
 			checkpoint_counts,
 			earlier_events_omitted,
 		})
+	}
+
+	/// The newest bounded slice of one Conversation's visible transcript.
+	///
+	/// # Errors
+	/// Returns a [`StoreError`] when the rows cannot be read.
+	pub async fn review_transcript_events(
+		&mut self,
+		conversation_id: uuid::Uuid,
+	) -> Result<Vec<EventRecord>, StoreError> {
+		let conversation_id = conversation_id.to_string();
+		let limit =
+			i64::try_from(REVIEW_TRANSCRIPT_EVENT_LIMIT).unwrap_or(i64::MAX);
+		// ASVS 1.2.4/2.2.2: the identity and the fixed allocation bound are
+		// both parameters, and only human-visible kinds are selected.
+		let mut rows = sqlx::query_as!(
+			Row,
+			r#"SELECT sequence AS "sequence!", event_id, actor_kind,
+				actor_id, recorded_at_unix_ms, conversation_id, run_id, kind,
+				payload_version, payload
+			 FROM events
+			 WHERE conversation_id = ?1
+				AND kind IN ('turn.input', 'run.output')
+			 ORDER BY sequence DESC LIMIT ?2"#,
+			conversation_id,
+			limit,
+		)
+		.fetch_all(self.connection())
+		.await?;
+		rows.reverse();
+		rows.into_iter().map(read_event_row).collect()
 	}
 
 	/// Up to `limit` Events strictly after `cursor`, in sequence order.

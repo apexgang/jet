@@ -1177,6 +1177,9 @@ public enum SettingKey: String {
     case `git.message_instructions` = "git.message_instructions"
     case `security.audit_retention_days` = "security.audit_retention_days"
     case `craft.developer_mode` = "craft.developer_mode"
+    case `review.automatic` = "review.automatic"
+    case `review.account_binding` = "review.account_binding"
+    case `review.cross_provider_consent` = "review.cross_provider_consent"
 }
 
 public enum SettingScope {

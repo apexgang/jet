@@ -35,6 +35,31 @@ pub(crate) fn actor() -> Actor {
 	}
 }
 
+/// One Account binding for `provider`, authenticated the way a Harness
+/// authenticates itself, which is the one source a Visa Run accepts.
+pub(crate) async fn bind_native_account(
+	core: &Core,
+	provider: crate::ProviderId,
+) -> crate::AccountBindingId {
+	let label = format!("{} account", provider.0);
+	let CommandOutcome::AccountBound(binding) = core
+		.execute(
+			&actor(),
+			request(Command::BindAccount {
+				provider,
+				label,
+				provider_account: None,
+				credential_source: crate::CredentialSource::HarnessNative,
+			}),
+		)
+		.await
+		.expect("the account binds")
+	else {
+		panic!("binding")
+	};
+	binding.binding_id
+}
+
 /// Starts a core over a fresh or existing store at `path`, on a Plane that
 /// has everything. Tests observe a fixed Plane rather than the machine they
 /// run on, so no test depends on which tools the host installed. Workspaces

@@ -124,7 +124,10 @@ pub use conversation::{
 	ConversationList, ConversationSnapshot, PageCursor, RetentionPolicy,
 	RevisionConflict, Run, RunLifecycle,
 };
-pub use craft::{CraftAction, CraftApprovalDecision, CraftCommand, CraftEvent};
+pub use craft::{
+	CraftAction, CraftApprovalDecision, CraftApprovalRequest, CraftCommand,
+	CraftEvent,
+};
 pub use craft_handshake::{CraftFork, CraftHello, CraftReady, CraftResume};
 pub use craft_installation::{
 	CraftInstallationConfirmation, CraftInstallationPreview,
@@ -158,7 +161,7 @@ pub use usage::{
 	UsageFreshness, UsageSelection, UsageTokens,
 };
 mod no_visa;
-pub use handshake::NO_VISA_MINOR;
+pub use handshake::{AUTOMATIC_REVIEW_MINOR, NO_VISA_MINOR};
 pub use no_visa::{
 	CraftRemoteTool, NoVisaOrigin, RemoteEnvironment, RemoteGitOperation,
 	RemoteToolAction, RemoteToolDecision, RemoteToolOutcome, RemoteToolRequest,
@@ -217,6 +220,11 @@ pub use utility::{
 mod craft_utility;
 pub use craft_utility::{
 	CraftUtilityModel, CraftUtilityReply, CraftUtilityRequest, UtilityInput,
+};
+mod craft_review;
+pub use craft_review::{
+	CraftReviewInput, CraftReviewModel, CraftReviewReply, CraftReviewRequest,
+	CraftReviewer,
 };
 
 mod extension;

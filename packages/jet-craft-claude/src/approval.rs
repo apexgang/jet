@@ -27,6 +27,8 @@ pub(crate) enum Served {
 pub(crate) struct Request {
 	/// The identity Jet answers with, and the one this Craft replies to.
 	pub(crate) id: String,
+	/// Native tool the Harness asked to use.
+	pub(crate) tool: String,
 	/// JSON-RPC correlation inside the held request.
 	call: Value,
 	/// Native tool input, returned unchanged when the decision allows it.
@@ -67,6 +69,11 @@ pub(crate) fn served(event: &Value) -> Served {
 		{
 			Served::Asking(Request {
 				id: id.to_owned(),
+				tool: message
+					.pointer("/params/arguments/tool_name")
+					.and_then(Value::as_str)
+					.unwrap_or(harness::TOOL)
+					.to_owned(),
 				call,
 				input: message
 					.pointer("/params/arguments/input")
@@ -81,6 +88,17 @@ pub(crate) fn served(event: &Value) -> Served {
 }
 
 impl Request {
+	/// Describe the held request for the host, which shows it to a person or
+	/// a reviewer. The input travels as it arrived, bounded but never
+	/// rewritten: what is decided about has to be what was asked for.
+	pub(crate) fn asked(&self) -> jet_protocol::CraftApprovalRequest {
+		jet_protocol::CraftApprovalRequest {
+			request_id: self.id.clone(),
+			tool: self.tool.clone(),
+			action: jet_craft_sdk::approval_action(&self.input),
+		}
+	}
+
 	/// Turn Jet's decision into the answer the Harness waits for. An allowed
 	/// call keeps its original input: this Craft never edits work it merely
 	/// carried, and an approval is for exactly what was shown.

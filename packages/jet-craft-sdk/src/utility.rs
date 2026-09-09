@@ -21,6 +21,15 @@ impl UtilityProvider {
 			Self::Anthropic => "claude-haiku-4-5-20251001",
 		}
 	}
+	/// The Provider's fastest suitable low-effort reviewer Model. It is
+	/// selected separately from the Utility Model so a Provider can change
+	/// one without moving the other (ADR-0012).
+	pub(crate) fn reviewer_model(self) -> &'static str {
+		match self {
+			Self::OpenAi => "gpt-5.4-nano-2026-03-17",
+			Self::Anthropic => "claude-haiku-4-5-20251001",
+		}
+	}
 	pub(crate) fn name(self) -> &'static str {
 		match self {
 			Self::OpenAi => "openai",
@@ -59,12 +68,19 @@ pub async fn serve_utility(
 	let request: CraftUtilityRequest =
 		serde_json::from_slice(&bytes).map_err(|_| invalid())?;
 	let body = body(provider, &request)?;
-	let key = crate::utility_credentials::resolve(provider, &request).await?;
+	let key = crate::utility_credentials::resolve(
+		provider,
+		&request.credential_reference,
+		&request.binding_id.to_string(),
+	)
+	.await?;
 	let bytes = crate::utility_http::request(provider, &key, &body).await?;
 	let reply = reply(provider, &bytes)?;
 	write(&reply).await
 }
-async fn write(value: &impl serde::Serialize) -> Result<(), CraftError> {
+pub(crate) async fn write(
+	value: &impl serde::Serialize,
+) -> Result<(), CraftError> {
 	let bytes = serde_json::to_vec(value).map_err(|_| invalid())?;
 	tokio::io::stdout()
 		.write_all(&bytes)
@@ -133,8 +149,23 @@ pub(crate) fn reply(
 	provider: UtilityProvider,
 	bytes: &[u8],
 ) -> Result<CraftUtilityReply, CraftError> {
+	let text = output_text(provider, provider.model(), bytes, 8192)?;
+	Ok(CraftUtilityReply {
+		version: 1,
+		model: provider.model().into(),
+		output: text,
+	})
+}
+
+/// The single assistant text one bounded, tool-free request returns.
+pub(crate) fn output_text(
+	provider: UtilityProvider,
+	model: &str,
+	bytes: &[u8],
+	limit: usize,
+) -> Result<String, CraftError> {
 	let value: Value = serde_json::from_slice(bytes).map_err(|_| invalid())?;
-	if value["model"] != provider.model() {
+	if value["model"] != model {
 		return Err(invalid());
 	}
 	let text = match provider {
@@ -170,12 +201,8 @@ pub(crate) fn reply(
 			content[0]["text"].as_str().ok_or_else(invalid)?
 		}
 	};
-	if text.len() > 8192 {
+	if text.len() > limit {
 		return Err(invalid());
 	}
-	Ok(CraftUtilityReply {
-		version: 1,
-		model: provider.model().into(),
-		output: text.into(),
-	})
+	Ok(text.into())
 }

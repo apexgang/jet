@@ -4,13 +4,17 @@ use crate::{
 	utility::{UtilityProvider, invalid},
 	utility_http::run,
 };
-use jet_protocol::{CraftUtilityRequest, CredentialReference};
+use jet_protocol::CredentialReference;
 use tokio::process::Command;
+
+/// Resolve the one Credential the host selected for this request. The
+/// binding names the item, so no request can reach another account's key.
 pub(crate) async fn resolve(
 	provider: UtilityProvider,
-	request: &CraftUtilityRequest,
+	reference: &CredentialReference,
+	binding_id: &str,
 ) -> Result<String, CraftError> {
-	let bytes = match &request.credential_reference {
+	let bytes = match reference {
 		CredentialReference::HarnessNative => std::env::var(match provider {
 			UtilityProvider::OpenAi => "OPENAI_API_KEY",
 			UtilityProvider::Anthropic => "ANTHROPIC_API_KEY",
@@ -19,17 +23,13 @@ pub(crate) async fn resolve(
 		.into_bytes(),
 		CredentialReference::ExternalHelper { helper } => {
 			let mut command = Command::new(helper);
-			command.args([
-				"jet-utility-api-key",
-				provider.name(),
-				&request.binding_id.to_string(),
-			]);
+			command.args(["jet-utility-api-key", provider.name(), binding_id]);
 			run(&mut command, &[], 4096).await?
 		}
 		CredentialReference::PlatformStore { item } => {
 			// The binding owns its item; clients cannot choose another account's key.
 			if item.service != "me.heeka.jet.credential"
-				|| item.account != request.binding_id.to_string()
+				|| item.account != binding_id
 			{
 				return Err(invalid());
 			}

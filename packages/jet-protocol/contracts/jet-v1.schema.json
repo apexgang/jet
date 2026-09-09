@@ -8940,6 +8940,21 @@
           "description": "Whether local and source-built third-party Crafts may be installed.",
           "type": "string",
           "const": "craft.developer_mode"
+        },
+        {
+          "description": "Whether this Plane reviews eligible approval requests automatically.",
+          "type": "string",
+          "const": "review.automatic"
+        },
+        {
+          "description": "Plane-wide review.account_binding reviewer selection.",
+          "type": "string",
+          "const": "review.account_binding"
+        },
+        {
+          "description": "Persistent consent to review through a binding outside the Run's own\nProvider.",
+          "type": "string",
+          "const": "review.cross_provider_consent"
         }
       ]
     },

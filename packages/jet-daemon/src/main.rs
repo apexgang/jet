@@ -20,6 +20,7 @@ mod extension_host;
 mod installation_identity;
 mod no_visa_broker;
 mod remote_tool;
+mod review_host;
 mod run_craft;
 mod run_host;
 mod run_recovery;

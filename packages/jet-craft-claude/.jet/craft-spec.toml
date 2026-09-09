@@ -18,6 +18,7 @@ features = [
     { name = "extensions" },
     { name = "remote_tools" },
     { name = "utility" },
+    { name = "review" },
 	{ name = "turns", required = true },
 	{ name = "actions", required = true },
 	{ name = "resume" },
@@ -25,5 +26,5 @@ features = [
 
 [protocol]
 family = "craft"
-versions = [{ major = 1, minor = 7 }]
+versions = [{ major = 1, minor = 8 }]
 capabilities = ["runs", "resume", "actions"]

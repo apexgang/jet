@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CraftFeature {
-	/// Feature name; v1 understands turns, actions, resume, and fork.
+	/// Feature name; v1 understands turns, actions, resume, fork,
+	/// remote_tools, utility, and review.
 	pub name: String,
 	/// Whether installation must reject an unrecognized feature.
 	#[serde(default)]
@@ -108,6 +109,7 @@ impl CraftSpecification {
 				"remote_tools",
 				"utility",
 				"extensions",
+				"review",
 			]
 			.contains(&feature.name.as_str())
 			{

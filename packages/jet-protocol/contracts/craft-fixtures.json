@@ -153,5 +153,45 @@
     "schema": "CraftEvent",
     "valid": false,
     "payload": "{\"kind\":\"usage\",\"usage\":{\"source\":\"billing\",\"amount_usd\":\"12.50\"}}"
+  },
+  {
+    "schema": "CraftEvent",
+    "valid": true,
+    "payload": "{\"kind\":\"approval_requested\",\"request\":{\"request_id\":\"r1\",\"tool\":\"Bash\",\"action\":\"{\\\"command\\\":\\\"cargo test\\\"}\"}}"
+  },
+  {
+    "schema": "CraftEvent",
+    "valid": false,
+    "payload": "{\"kind\":\"approval_requested\"}"
+  },
+  {
+    "schema": "CraftEvent",
+    "valid": false,
+    "payload": "{\"kind\":\"approval_requested\",\"request\":{\"request_id\":\"r1\",\"tool\":\"Bash\",\"action\":\"x\",\"always_allow\":true}}"
+  },
+  {
+    "schema": "CraftReviewModel",
+    "valid": true,
+    "payload": "{\"version\":1,\"model\":\"pinned-reviewer\",\"reviewer\":\"equivalent\"}"
+  },
+  {
+    "schema": "CraftReviewModel",
+    "valid": false,
+    "payload": "{\"version\":1,\"model\":\"pinned-reviewer\",\"reviewer\":\"future\"}"
+  },
+  {
+    "schema": "CraftReviewRequest",
+    "valid": true,
+    "payload": "{\"version\":1,\"model\":\"pinned-reviewer\",\"binding_id\":\"00000000-0000-0000-0000-000000000039\",\"credential_reference\":{\"source\":\"harness_native\"},\"input\":{\"transcript\":\"user: run the tests\",\"tool\":\"Bash\",\"action\":\"{\\\"command\\\":\\\"cargo test\\\"}\"}}"
+  },
+  {
+    "schema": "CraftReviewRequest",
+    "valid": false,
+    "payload": "{\"version\":1,\"model\":\"pinned-reviewer\",\"binding_id\":\"00000000-0000-0000-0000-000000000039\",\"credential_reference\":{\"source\":\"harness_native\"},\"input\":{\"transcript\":\"\",\"tool\":\"Bash\",\"action\":\"x\",\"workspace_root\":\"/tmp\"}}"
+  },
+  {
+    "schema": "CraftReviewReply",
+    "valid": true,
+    "payload": "{\"version\":1,\"model\":\"pinned-reviewer\",\"reviewer\":\"equivalent\",\"output\":\"{\\\"risk\\\":\\\"low\\\",\\\"authorization\\\":\\\"sufficient\\\",\\\"decision\\\":\\\"allow\\\",\\\"rationale\\\":\\\"Asked for.\\\"}\"}"
   }
 ]

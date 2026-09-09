@@ -153,7 +153,7 @@ pub(crate) fn spawn_monitor(
 }
 
 async fn monitor(
-	core: &Core,
+	core: &Arc<Core>,
 	run_id: RunId,
 	connection: &dyn crate::RunConnection,
 	initial: Vec<Observation>,
@@ -243,6 +243,10 @@ async fn monitor(
 					}
 					| Observation::Completed(value) => value.len(),
 					Observation::ProcessTitle { title, .. } => title.len(),
+					Observation::ApprovalRequested(request) => {
+						request.request_id.len()
+							+ request.tool.len() + request.action.len()
+					}
 					Observation::FileChanged(value) => {
 						serde_json::to_vec(value)
 							.map_err(crate::change_artifact::failed)?
@@ -266,7 +270,29 @@ async fn monitor(
 				}
 				bytes += size;
 				events += count;
+				// A held request commits on its own boundary before any
+				// reviewer sees it, and its review runs beside this loop so
+				// the Craft keeps being read while the Harness waits.
+				let review = match &observation {
+					Observation::ApprovalRequested(request) => {
+						Some(request.clone())
+					}
+					_ => None,
+				};
 				pending.push(observation);
+				if let Some(request) = review {
+					core.commit_run_source(
+						run_id,
+						std::mem::take(&mut pending),
+						run_state::SourceBoundary::Pending,
+					)
+					.await?;
+					bytes = 0;
+					events = 0;
+					deadline = None;
+					core.begin_automatic_review(run_id, request);
+					continue;
+				}
 				deadline.get_or_insert_with(|| {
 					tokio::time::Instant::now() + Duration::from_millis(50)
 				});
@@ -299,6 +325,7 @@ fn event_count(observation: &Observation) -> usize {
 		| Observation::RunTitle(_)
 		| Observation::ProcessTitle { .. }
 		| Observation::TurnCompleted { .. }
+		| Observation::ApprovalRequested(_)
 		| Observation::LaunchFailed
 		| Observation::Disconnected
 		| Observation::Reconnected => 1,

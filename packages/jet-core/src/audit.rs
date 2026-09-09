@@ -139,6 +139,12 @@ pub enum AuditDecision {
 	DeveloperModeDisabled,
 	/// The Plane returned Developer Mode to its disabled built-in default.
 	DeveloperModeCleared,
+	/// Automatic review answered exactly one Harness approval request that
+	/// would otherwise have waited for a person (ADR-0012).
+	ApprovalReviewed,
+	/// The owner changed whether, or through which binding, this Plane
+	/// reviews approval requests automatically.
+	ReviewPolicyChanged,
 }
 
 /// What a decision is about. The core turns each one into the durable kind
@@ -289,6 +295,8 @@ impl AuditDecision {
 			Self::DeveloperModeEnabled => "craft.developer_mode_enabled",
 			Self::DeveloperModeDisabled => "craft.developer_mode_disabled",
 			Self::DeveloperModeCleared => "craft.developer_mode_cleared",
+			Self::ApprovalReviewed => "approval.reviewed",
+			Self::ReviewPolicyChanged => "policy.review_changed",
 		}
 	}
 
@@ -300,10 +308,15 @@ impl AuditDecision {
 	/// one a later release would assign.
 	fn risk(self) -> AuditRisk {
 		match self {
-			Self::RemoteToolReviewed => AuditRisk::Elevated,
+			// Answering for a person is exactly what a review does, so
+			// every one of them is worth the same attention as the remote
+			// action a person reviews by hand.
+			Self::RemoteToolReviewed | Self::ApprovalReviewed => AuditRisk::Elevated,
             Self::ExecutionResolutionRequested => AuditRisk::Destructive,
 			Self::TerminalOpened | Self::TerminalClosed | Self::TerminalInput | Self::ConnectionAuthenticated => AuditRisk::Routine,
-			Self::UtilityPolicyChanged | Self::AccountBound
+			Self::UtilityPolicyChanged
+			| Self::ReviewPolicyChanged
+			| Self::AccountBound
 			| Self::AccountUnbound
 			| Self::GitAutomationEnabled
 			// Unpinning a policy hands the choice back to the scope above,
@@ -603,6 +616,12 @@ pub(crate) fn stored_setting(
 			| SettingKey::UtilityAutodeleteCompilation,
 			_,
 		) => Some(AuditDecision::UtilityPolicyChanged),
+		(
+			SettingKey::AutomaticReview
+			| SettingKey::AutomaticReviewBinding
+			| SettingKey::AutomaticReviewConsent,
+			_,
+		) => Some(AuditDecision::ReviewPolicyChanged),
 		(SettingKey::GitAutoCommit, SettingValue::Flag(true)) => {
 			Some(AuditDecision::GitAutomationEnabled)
 		}
@@ -643,6 +662,11 @@ pub(crate) fn cleared_setting(key: SettingKey) -> Option<AuditDecision> {
 		| SettingKey::UtilityAccountBinding
 		| SettingKey::UtilityAutodeleteCompilation => {
 			Some(AuditDecision::UtilityPolicyChanged)
+		}
+		SettingKey::AutomaticReview
+		| SettingKey::AutomaticReviewBinding
+		| SettingKey::AutomaticReviewConsent => {
+			Some(AuditDecision::ReviewPolicyChanged)
 		}
 		SettingKey::GitAutoCommit => Some(AuditDecision::GitAutomationCleared),
 		SettingKey::SecurityAuditRetentionDays => {

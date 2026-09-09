@@ -356,6 +356,20 @@ pub enum EventKind {
 		/// The request and the step that answered it.
 		termination: crate::RunTermination,
 	},
+	/// A Harness asked for something that needs a decision and is waiting
+	/// for exactly one. Recording it grants nothing (ADR-0012).
+	#[serde(rename = "approval.requested")]
+	ApprovalRequested {
+		/// The exact request, as the Craft is holding it.
+		request: crate::ApprovalRequest,
+	},
+	/// How Automatic review answered one held request, including a review
+	/// that could not happen and left the request for a person.
+	#[serde(rename = "approval.reviewed")]
+	ApprovalReviewed {
+		/// The review, its routing, and the decision the core made.
+		review: Box<crate::ApprovalReview>,
+	},
 	/// An active Run began working or waiting for a specific reason.
 	#[serde(rename = "run.activity_changed")]
 	RunActivityChanged {
@@ -652,6 +666,8 @@ impl EventKind {
 			| Self::RunTerminated { .. }
 			| Self::RunActivityChanged { .. }
 			| Self::RunProcessesChanged { .. }
+			| Self::ApprovalRequested { .. }
+			| Self::ApprovalReviewed { .. }
 			| Self::RunOutput { .. }
 			| Self::RunNativeConversation { .. }
 			| Self::ConversationImported { .. }
