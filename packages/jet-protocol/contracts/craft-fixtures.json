@@ -138,5 +138,35 @@
     "schema": "CraftCommand",
     "valid": true,
     "payload": "{\"kind\":\"remote_tool_result\",\"operation_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"outcome\":{\"type\":\"failed\",\"error\":{\"category\":\"conflict\",\"code\":\"no_visa.destination_unavailable\",\"message\":\"The destination operation could not be confirmed\",\"retryable\":false}}}"
+  },
+  {
+    "schema": "CraftExtensionRequest",
+    "valid": true,
+    "payload": "{\"kind\":\"catalog\"}"
+  },
+  {
+    "schema": "CraftExtensionReply",
+    "valid": true,
+    "payload": "{\"kind\":\"catalog\",\"catalog\":{\"craft_id\":\"codex\",\"harness\":\"codex\",\"native_metadata\":\"{\\\"marketplaces\\\":[]}\"}}"
+  },
+  {
+    "schema": "CraftExtensionRequest",
+    "valid": true,
+    "payload": "{\"kind\":\"apply\",\"confirmation\":{\"catalog\":{\"craft_id\":\"codex\",\"harness\":\"codex\",\"native_metadata\":\"{\\\"marketplaces\\\":[]}\"},\"extension_id\":\"inspect@official\",\"action\":\"install\",\"scope\":\"user\",\"trust\":\"same_user_executable\"}}"
+  },
+  {
+    "schema": "CraftExtensionRequest",
+    "valid": false,
+    "payload": "{\"kind\":\"apply\",\"confirmation\":{\"catalog\":{\"craft_id\":\"codex\",\"harness\":\"codex\",\"native_metadata\":\"{\\\"marketplaces\\\":[]}\"},\"extension_id\":\"inspect@official\",\"action\":\"install\",\"scope\":\"gui\",\"trust\":\"same_user_executable\"}}"
+  },
+  {
+    "schema": "CraftExtensionRequest",
+    "valid": false,
+    "payload": "{\"kind\":\"apply\",\"confirmation\":{\"catalog\":{\"craft_id\":\"codex\",\"harness\":\"codex\",\"native_metadata\":\"{\\\"marketplaces\\\":[]}\"},\"extension_id\":\"inspect@official\",\"action\":\"reload_now\",\"scope\":\"user\",\"trust\":\"same_user_executable\"}}"
+  },
+  {
+    "schema": "CraftExtensionRequest",
+    "valid": true,
+    "payload": "{\"kind\":\"inspect\",\"extension_id\":\"tool@official\"}"
   }
 ]

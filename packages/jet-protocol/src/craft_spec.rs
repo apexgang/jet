@@ -107,6 +107,7 @@ impl CraftSpecification {
 				"fork",
 				"remote_tools",
 				"utility",
+				"extensions",
 			]
 			.contains(&feature.name.as_str())
 			{

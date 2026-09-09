@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT document FROM extension_changes WHERE change_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "document",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "extension_changes",
+            "name": "document"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d2654b7eddf456fcee0c99ec8566b890dfdc47cedcb068a89fc925e9359c3cf4"
+}

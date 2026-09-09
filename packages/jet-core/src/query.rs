@@ -28,6 +28,23 @@ use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
+	/// Inspect native source, components and requested access before a mutation.
+	InspectExtension {
+		/// Accepted Craft identity.
+		craft_id: String,
+		/// Exact native target.
+		extension_id: String,
+	},
+	/// Discover native extensions through an accepted Craft.
+	ExtensionCatalog {
+		/// Craft identity.
+		craft_id: String,
+	},
+	/// Inspect a staged native lifecycle operation.
+	ExtensionChange {
+		/// Durable operation identity.
+		change_id: uuid::Uuid,
+	},
 	/// Inspect the exact remote action awaiting a destination review.
 	RemoteToolReview {
 		/// Paired installation that submitted it.
@@ -199,6 +216,10 @@ pub enum Query {
 /// Snapshots returned by [`Core::query`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult {
+	/// Unconverted native inventory.
+	ExtensionCatalog(crate::ExtensionCatalog),
+	/// Durable lifecycle outcome.
+	ExtensionChange(crate::ExtensionChange),
 	/// Exact remote action awaiting a destination review.
 	RemoteToolReview(crate::RemoteToolRequest),
 	/// Durable Utility result.
@@ -295,6 +316,24 @@ impl Core {
 				})
 				.await
 				.map(QueryResult::RemoteToolReview),
+			Query::InspectExtension {
+				craft_id,
+				extension_id,
+			} => crate::extension_work::inspect(self, &craft_id, &extension_id)
+				.await
+				.map(QueryResult::ExtensionCatalog),
+			Query::ExtensionCatalog { craft_id } => {
+				crate::extension_work::catalog(self, &craft_id)
+					.await
+					.map(QueryResult::ExtensionCatalog)
+			}
+			Query::ExtensionChange { change_id } => self
+				.store
+				.read(async |tx| {
+					crate::extension_work::query(tx, change_id).await
+				})
+				.await
+				.map(QueryResult::ExtensionChange),
 			Query::DiscoverCraft { source } => {
 				crate::craft_installation::discover(self, source)
 					.await

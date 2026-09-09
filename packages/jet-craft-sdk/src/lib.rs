@@ -18,3 +18,19 @@ mod utility;
 mod utility_credentials;
 mod utility_http;
 pub use utility::{UtilityProvider, serve_utility, utility_model};
+
+mod extensions;
+pub use extensions::{extension_error, serve_extensions};
+
+mod extension_inventory;
+pub use extension_inventory::{
+	ExtensionFile, extension_file_identity, extension_files,
+	extension_host_access, extension_review_complete,
+};
+
+mod native_config;
+mod standalone_extensions;
+pub use native_config::{NativeConfig, NativeConfigFormat};
+pub use standalone_extensions::StandaloneExtensions;
+
+mod native_validation;

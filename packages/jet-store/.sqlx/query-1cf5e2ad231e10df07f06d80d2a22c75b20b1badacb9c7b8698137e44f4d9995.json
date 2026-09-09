@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO extension_changes (change_id, document) VALUES (?1, ?2) ON CONFLICT(change_id) DO UPDATE SET document = excluded.document",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "1cf5e2ad231e10df07f06d80d2a22c75b20b1badacb9c7b8698137e44f4d9995"
+}

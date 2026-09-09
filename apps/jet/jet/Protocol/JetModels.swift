@@ -201,6 +201,7 @@ public struct ClientPublicKey {
 }
 
 public enum CommandRequest {
+    case `change_extension`(CommandRequestChangeExtension)
     case `review_remote_tool`(CommandRequestReviewRemoteTool)
     case `request_utility`(CommandRequestRequestUtility)
     case `disable_craft`(CommandRequestDisableCraft)
@@ -245,6 +246,7 @@ public enum CommandRequest {
 }
 
 public enum CommandResponse {
+    case `extension_change_queued`(CommandResponseExtensionChangeQueued)
     case `remote_tool_reviewed`(CommandResponseRemoteToolReviewed)
     case `utility_queued`(CommandResponseUtilityQueued)
     case `craft_disabled`(CommandResponseCraftDisabled)
@@ -489,6 +491,50 @@ public struct ExecutionMetadata {
 public enum ExecutionRole: String {
     case `run` = "run"
     case `terminal` = "terminal"
+}
+
+public enum ExtensionAction: String {
+    case `install` = "install"
+    case `update` = "update"
+    case `disable` = "disable"
+    case `remove` = "remove"
+}
+
+public struct ExtensionCatalog {
+    public let `craft_id`: String
+    public let `harness`: String
+    public let `native_metadata`: String
+}
+
+public struct ExtensionChange {
+    public let `action`: ExtensionAction
+    public let `change_id`: String
+    public let `craft_id`: String
+    public let `extension_id`: String
+    public let `state`: ExtensionChangeState
+}
+
+public enum ExtensionChangeState: String {
+    case `staged` = "staged"
+    case `applied` = "applied"
+    case `refused` = "refused"
+    case `outcome_unknown` = "outcome_unknown"
+}
+
+public struct ExtensionConfirmation {
+    public let `action`: ExtensionAction
+    public let `catalog`: ExtensionCatalog
+    public let `extension_id`: String
+    public let `scope`: ExtensionScope
+    public let `trust`: ExtensionTrust
+}
+
+public enum ExtensionScope: String {
+    case `user` = "user"
+}
+
+public enum ExtensionTrust: String {
+    case `same_user_executable` = "same_user_executable"
 }
 
 public struct ExternalConversation {
@@ -770,6 +816,9 @@ public enum PromotionState: String {
 }
 
 public enum QueryRequest {
+    case `inspect_extension`(QueryRequestInspectExtension)
+    case `extension_catalog`(QueryRequestExtensionCatalog)
+    case `extension_change`(QueryRequestExtensionChange)
     case `remote_tool_review`(QueryRequestRemoteToolReview)
     case `utility`(QueryRequestUtility)
     case `discover_craft`(QueryRequestDiscoverCraft)
@@ -801,6 +850,8 @@ public enum QueryRequest {
 }
 
 public enum QueryResponse {
+    case `extension_catalog`(QueryResponseExtensionCatalog)
+    case `extension_change`(QueryResponseExtensionChange)
     case `remote_tool_review`(QueryResponseRemoteToolReview)
     case `utility`(QueryResponseUtility)
     case `craft_installation_preview`(QueryResponseCraftInstallationPreview)
@@ -1368,6 +1419,10 @@ public struct ClientMessageCommand {
     public let `id`: UInt64
 }
 
+public struct CommandRequestChangeExtension {
+    public let `confirmation`: ExtensionConfirmation
+}
+
 public struct CommandRequestReviewRemoteTool {
     public let `client_id`: String
     public let `decision`: RemoteToolDecision
@@ -1583,6 +1638,10 @@ public struct CommandRequestResumeImportedConversation {
     public let `import_id`: String
     public let `retention`: RetentionPolicy?
     public let `working_tree`: WorkingTreeRequest
+}
+
+public struct CommandResponseExtensionChangeQueued {
+    public let `change_id`: String
 }
 
 public struct CommandResponseRemoteToolReviewed {
@@ -2028,6 +2087,19 @@ public struct PromotionDestinationBranch {
     public let `name`: String
 }
 
+public struct QueryRequestInspectExtension {
+    public let `craft_id`: String
+    public let `extension_id`: String
+}
+
+public struct QueryRequestExtensionCatalog {
+    public let `craft_id`: String
+}
+
+public struct QueryRequestExtensionChange {
+    public let `change_id`: String
+}
+
 public struct QueryRequestRemoteToolReview {
     public let `client_id`: String
     public let `operation_id`: String
@@ -2146,6 +2218,20 @@ public struct QueryRequestSearch {
 
 public struct QueryRequestExternalConversations {
 
+}
+
+public struct QueryResponseExtensionCatalog {
+    public let `craft_id`: String
+    public let `harness`: String
+    public let `native_metadata`: String
+}
+
+public struct QueryResponseExtensionChange {
+    public let `action`: ExtensionAction
+    public let `change_id`: String
+    public let `craft_id`: String
+    public let `extension_id`: String
+    public let `state`: ExtensionChangeState
 }
 
 public struct QueryResponseRemoteToolReview {

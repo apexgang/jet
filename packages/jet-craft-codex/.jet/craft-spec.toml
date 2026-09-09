@@ -6,12 +6,17 @@ harness = "codex"
 schema = { major = 1, minor = 0 }
 broker_permissions = []
 host_access = [
+    { kind = "filesystem", path = "Harness-native user extension configuration, caches, and explicitly selected native source checkouts" },
+    { kind = "network", destination = "Harness-native configured extension sources" },
+	# Run launch uses the first executable as the Harness program.
 	{ kind = "executable", name = "codex" },
+	{ kind = "executable", name = "git" },
 	{ kind = "executable", name = "curl" },
 	{ kind = "network", destination = "api.openai.com" },
 	{ kind = "network", destination = "chatgpt.com" },
 ]
 features = [
+    { name = "extensions" },
     { name = "utility" },
 	{ name = "turns", required = true },
 	{ name = "actions", required = true },

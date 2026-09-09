@@ -14,7 +14,9 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 27;
+pub const PROTOCOL_MINOR: u32 = 28;
+/// Harness-native extension discovery and deferred lifecycle Commands.
+pub const EXTENSIONS_MINOR: u32 = 28;
 
 /// Staged Craft updates and durable disable controls.
 pub const CRAFT_LIFECYCLE_MINOR: u32 = 27;

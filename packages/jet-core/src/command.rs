@@ -113,6 +113,11 @@ impl CommandEnvelope {
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
+	/// Stage a confirmed native extension change for subsequent Runs.
+	ChangeExtension {
+		/// Exact native metadata and accepted same-user authority.
+		confirmation: crate::ExtensionConfirmation,
+	},
 	/// Reviews one immutable No-Visa action captured by the destination.
 	ReviewRemoteTool {
 		/// Paired installation that submitted the action.
@@ -421,6 +426,7 @@ impl Command {
 		match self {
 			Self::ReviewRemoteTool { .. }
 			| Self::RequestUtility { .. }
+			| Self::ChangeExtension { .. }
 			| Self::InstallCraft { .. }
 			| Self::DisableCraft { .. }
 			| Self::CreateSchedule { .. }
@@ -494,6 +500,11 @@ impl Command {
 /// The durable result of a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
+	/// A native mutation was durably staged.
+	ExtensionChangeQueued {
+		/// Identity for querying execution progress.
+		change_id: Uuid,
+	},
 	/// The exact-action destination decision was recorded.
 	RemoteToolReviewed {
 		/// Reviewed operation identity.
@@ -793,6 +804,7 @@ fn redacted_for_receipt(
 		Ok(
 			outcome @ (CommandOutcome::RemoteToolReviewed { .. }
 			| CommandOutcome::UtilityQueued { .. }
+			| CommandOutcome::ExtensionChangeQueued { .. }
 			| CommandOutcome::CraftInstallationQueued { .. }
 			| CommandOutcome::CraftDisabled { .. }
 			| CommandOutcome::UserEditApplied(_)
@@ -871,6 +883,16 @@ async fn execute_new(
 		}
 		Command::RequestUtility { request } => {
 			crate::utility_work::admit(tx, actor, command_id, request).await
+		}
+		Command::ChangeExtension { confirmation } => {
+			crate::extension_work::admit(
+				tx,
+				actor,
+				command_id,
+				confirmation,
+				now_unix_ms,
+			)
+			.await
 		}
 		Command::DisableCraft { craft_id, mode } => {
 			crate::craft_lifecycle::record(

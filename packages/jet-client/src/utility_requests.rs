@@ -16,7 +16,9 @@ impl Client {
 		self.require_minor(jet_protocol::UTILITY_MINOR)?;
 		match self.query(QueryRequest::Utility { job_id }).await? {
 			QueryResponse::Utility(job) => Ok(job),
-			other @ (QueryResponse::RemoteToolReview(_)
+			other @ (QueryResponse::ExtensionCatalog(_)
+			| QueryResponse::ExtensionChange(_)
+			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::TurnQueue(_)
 			| QueryResponse::ScheduledTasks(_)

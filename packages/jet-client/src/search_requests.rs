@@ -29,7 +29,9 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Search(result) => Ok(result),
-			other @ (QueryResponse::RemoteToolReview(_)
+			other @ (QueryResponse::ExtensionCatalog(_)
+			| QueryResponse::ExtensionChange(_)
+			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)

@@ -127,6 +127,7 @@ async fn prepare(
 	mut plan: LaunchPlan,
 	now: i64,
 ) -> Result<(), CoreError> {
+	crate::extension_work::admit_run(tx).await?;
 	crate::craft_lifecycle::admit(tx, &plan.craft).await?;
 	if let Some(selection) = plan.visa {
 		selection.binding(tx).await?;

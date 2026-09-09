@@ -6,11 +6,16 @@ harness = "claude-code"
 schema = { major = 1, minor = 0 }
 broker_permissions = ["remote_tools"]
 host_access = [
+    { kind = "filesystem", path = "Harness-native user extension configuration, caches, and explicitly selected native source checkouts" },
+    { kind = "network", destination = "Harness-native configured extension sources" },
+	# Run launch uses the first executable as the Harness program.
 	{ kind = "executable", name = "claude" },
+	{ kind = "executable", name = "git" },
 	{ kind = "executable", name = "curl" },
 	{ kind = "network", destination = "api.anthropic.com" },
 ]
 features = [
+    { name = "extensions" },
     { name = "remote_tools" },
     { name = "utility" },
 	{ name = "turns", required = true },

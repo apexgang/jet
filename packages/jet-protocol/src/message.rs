@@ -155,6 +155,23 @@ pub enum ServerMessage {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryRequest {
+	/// Inspect native source, components and requested access before a mutation.
+	InspectExtension {
+		/// Accepted Craft identity.
+		craft_id: String,
+		/// Exact native target.
+		extension_id: String,
+	},
+	/// Discover extensions in native sources through the responsible Craft.
+	ExtensionCatalog {
+		/// Accepted Craft identity.
+		craft_id: String,
+	},
+	/// Inspect a staged extension mutation.
+	ExtensionChange {
+		/// Durable operation identity.
+		change_id: Uuid,
+	},
 	/// Inspect the exact remote action awaiting a destination review.
 	RemoteToolReview {
 		/// Paired installation that submitted it.
@@ -326,6 +343,10 @@ pub enum QueryRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryResponse {
+	/// Unconverted native catalog and metadata.
+	ExtensionCatalog(crate::ExtensionCatalog),
+	/// Deferred native mutation outcome.
+	ExtensionChange(crate::ExtensionChange),
 	/// Exact remote action awaiting a destination review.
 	RemoteToolReview(crate::RemoteToolRequest),
 	/// Attributed Utility result, with no execution authority.

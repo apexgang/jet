@@ -32,7 +32,9 @@ impl Client {
 				))
 			}
 			QueryResponse::Status(status) => Ok(status),
-			other @ (QueryResponse::RemoteToolReview(_)
+			other @ (QueryResponse::ExtensionCatalog(_)
+			| QueryResponse::ExtensionChange(_)
+			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
@@ -70,7 +72,9 @@ impl Client {
 	pub async fn conversations(&self) -> Result<ConversationList, ClientError> {
 		match self.query(QueryRequest::Conversations).await? {
 			QueryResponse::Conversations(list) => Ok(list),
-			other @ (QueryResponse::RemoteToolReview(_)
+			other @ (QueryResponse::ExtensionCatalog(_)
+			| QueryResponse::ExtensionChange(_)
+			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
@@ -115,7 +119,9 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Conversations(list) => Ok(list),
-			other @ (QueryResponse::RemoteToolReview(_)
+			other @ (QueryResponse::ExtensionCatalog(_)
+			| QueryResponse::ExtensionChange(_)
+			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
@@ -160,7 +166,9 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Conversation(snapshot) => Ok(*snapshot),
-			other @ (QueryResponse::RemoteToolReview(_)
+			other @ (QueryResponse::ExtensionCatalog(_)
+			| QueryResponse::ExtensionChange(_)
+			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
@@ -202,7 +210,9 @@ impl Client {
 	) -> Result<EventPage, ClientError> {
 		match self.query(QueryRequest::Events { after: sequence }).await? {
 			QueryResponse::Events(page) => Ok(page),
-			other @ (QueryResponse::RemoteToolReview(_)
+			other @ (QueryResponse::ExtensionCatalog(_)
+			| QueryResponse::ExtensionChange(_)
+			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
@@ -249,6 +259,7 @@ impl Client {
 			CommandResponse::AuditEpochBegun { epoch } => Ok(epoch),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
@@ -300,7 +311,9 @@ impl Client {
 			.await?
 		{
 			QueryResponse::SecurityAudit(page) => Ok(page),
-			other @ (QueryResponse::RemoteToolReview(_)
+			other @ (QueryResponse::ExtensionCatalog(_)
+			| QueryResponse::ExtensionChange(_)
+			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
@@ -387,6 +400,7 @@ impl Client {
 			}
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
@@ -443,6 +457,7 @@ impl Client {
 			CommandResponse::RunCreated(run) => Ok(run),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
@@ -506,6 +521,7 @@ impl Client {
 			CommandResponse::RunTransitioned(run) => Ok(run),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
@@ -559,7 +575,9 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Settings(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::RemoteToolReview(_)
+			other @ (QueryResponse::ExtensionCatalog(_)
+			| QueryResponse::ExtensionChange(_)
+			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
@@ -613,6 +631,7 @@ impl Client {
 			CommandResponse::SettingSet { value, .. } => Ok(value),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
@@ -671,6 +690,7 @@ impl Client {
 			CommandResponse::SettingCleared { .. } => Ok(()),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
@@ -726,7 +746,9 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Capabilities(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::RemoteToolReview(_)
+			other @ (QueryResponse::ExtensionCatalog(_)
+			| QueryResponse::ExtensionChange(_)
+			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
@@ -778,7 +800,9 @@ impl Client {
 			.await?
 		{
 			QueryResponse::AccountBindings(list) => Ok(list),
-			other @ (QueryResponse::RemoteToolReview(_)
+			other @ (QueryResponse::ExtensionCatalog(_)
+			| QueryResponse::ExtensionChange(_)
+			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::ScheduledTasks(_)
@@ -843,6 +867,7 @@ impl Client {
 			CommandResponse::AccountBound(binding) => Ok(binding),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
@@ -905,6 +930,7 @@ impl Client {
 			} => Ok(credential_reference),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }

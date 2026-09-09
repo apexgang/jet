@@ -123,6 +123,14 @@ pub enum AuditDecision {
 	ProjectRegistered,
 	/// An owner accepted one third-party Craft's exact executable authority.
 	CraftInstallationApproved,
+	/// Native extension lifecycle request or outcome.
+	ExtensionInstall,
+	/// Native extension update.
+	ExtensionUpdate,
+	/// Native extension disable.
+	ExtensionDisable,
+	/// Native extension removal.
+	ExtensionRemove,
 	/// An interactive user disabled a Craft.
 	CraftDisabled,
 	/// The Plane began accepting unverified local or source-built Crafts.
@@ -137,6 +145,8 @@ pub enum AuditDecision {
 /// and identity the store keeps.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AuditSubject {
+	/// One staged native extension mutation.
+	Extension(uuid::Uuid),
 	/// One installed or proposed third-party Craft.
 	Craft(String),
 	Terminal(crate::TerminalId),
@@ -271,6 +281,10 @@ impl AuditDecision {
 			Self::PairedClientRevoked => "pairing.client_revoked",
 			Self::ProjectRegistered => "project.registered",
 			Self::CraftInstallationApproved => "craft.installation_approved",
+			Self::ExtensionInstall => "extension.install",
+			Self::ExtensionUpdate => "extension.update",
+			Self::ExtensionDisable => "extension.disable",
+			Self::ExtensionRemove => "extension.remove",
 			Self::CraftDisabled => "craft.disabled",
 			Self::DeveloperModeEnabled => "craft.developer_mode_enabled",
 			Self::DeveloperModeDisabled => "craft.developer_mode_disabled",
@@ -312,6 +326,7 @@ impl AuditDecision {
 			// management, and everything a Run does there follows from it.
 			| Self::ProjectRegistered
 			| Self::CraftDisabled
+ | Self::ExtensionInstall | Self::ExtensionUpdate | Self::ExtensionDisable | Self::ExtensionRemove
  | Self::CraftInstallationApproved
 			| Self::DeveloperModeEnabled => AuditRisk::Elevated,
 			// Revoking destroys the key the pairing was, and no part of Jet
@@ -349,6 +364,7 @@ impl AuditSubject {
 
 	fn kind(&self) -> &'static str {
 		match self {
+			Self::Extension(_) => "extension_change",
 			Self::Craft(_) => "craft",
 			Self::Terminal(_) => "terminal",
 			Self::Execution(_) => "execution",
@@ -363,6 +379,7 @@ impl AuditSubject {
 
 	fn identity(&self) -> Option<String> {
 		match self {
+			Self::Extension(id) => Some(id.to_string()),
 			Self::Craft(id) => Some(id.clone()),
 			Self::Terminal(crate::TerminalId(id)) => Some(id.to_string()),
 			Self::Execution(crate::RunId(id)) => Some(id.to_string()),
@@ -385,6 +402,9 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 	match command {
 		Command::ReviewRemoteTool { .. } => {
 			Some(AuditDecision::RemoteToolReviewed)
+		}
+		Command::ChangeExtension { confirmation } => {
+			Some(crate::extension_work::decision(confirmation.action))
 		}
 		Command::DisableCraft { .. } => Some(AuditDecision::CraftDisabled),
 		Command::InstallCraft { .. } => {
@@ -449,6 +469,7 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 fn refused_subject(command: &Command) -> AuditSubject {
 	match command {
 		Command::ReviewRemoteTool { .. } => AuditSubject::Plane,
+		Command::ChangeExtension { .. } => AuditSubject::Plane,
 		Command::DisableCraft { craft_id, .. } => {
 			AuditSubject::Craft(craft_id.clone())
 		}

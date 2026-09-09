@@ -10,6 +10,8 @@ use crate::{CommandId, Core, CoreError, PromotionId, RunId, promotion_effect};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum EffectKind {
+	/// Deferred native extension mutation.
+	ChangeExtension,
 	Utility,
 	StartTerminal {
 		terminal_id: crate::TerminalId,
@@ -214,7 +216,7 @@ async fn settle(
 		EffectKind::PromoteWorkspace { promotion_id } => {
 			promotion_effect::settle(tx, promotion_id, state, now_unix_ms).await
 		}
-		EffectKind::InstallCraft => Ok(()),
+		EffectKind::ChangeExtension | EffectKind::InstallCraft => Ok(()),
 	}
 }
 
@@ -263,6 +265,7 @@ impl TryFrom<EffectRecord> for Effect {
 					)?),
 				}
 			}
+			EffectKindRecord::ChangeExtension => EffectKind::ChangeExtension,
 			EffectKindRecord::InstallCraft => EffectKind::InstallCraft,
 		};
 		Ok(Self {

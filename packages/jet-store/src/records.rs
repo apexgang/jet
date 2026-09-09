@@ -235,6 +235,8 @@ pub struct UserEditIntentRecord {
 /// Closed durable spelling of external work understood by this release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectKindRecord {
+	/// Apply a deferred Harness-native extension operation.
+	ChangeExtension,
 	/// One bounded Utility inference request.
 	Utility,
 	/// Start a Workspace terminal.
@@ -257,6 +259,7 @@ pub enum EffectKindRecord {
 impl EffectKindRecord {
 	pub(crate) fn as_str(self) -> &'static str {
 		match self {
+			Self::ChangeExtension => "extension.change",
 			Self::Utility => "utility.infer",
 			Self::StartTerminal => "terminal.start",
 			Self::CloseTerminal => "terminal.close",
@@ -270,6 +273,7 @@ impl EffectKindRecord {
 
 	pub(crate) fn parse(text: &str) -> Option<Self> {
 		match text {
+			"extension.change" => Some(Self::ChangeExtension),
 			"utility.infer" => Some(Self::Utility),
 			"terminal.start" => Some(Self::StartTerminal),
 			"terminal.close" => Some(Self::CloseTerminal),

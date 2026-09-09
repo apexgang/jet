@@ -9,6 +9,12 @@
     "event": {
       "$ref": "#/$defs/CraftEvent"
     },
+    "extension_reply": {
+      "$ref": "#/$defs/CraftExtensionReply"
+    },
+    "extension_request": {
+      "$ref": "#/$defs/CraftExtensionRequest"
+    },
     "hello": {
       "$ref": "#/$defs/CraftHello"
     },
@@ -32,6 +38,8 @@
     }
   },
   "required": [
+    "extension_request",
+    "extension_reply",
     "utility_model",
     "utility_request",
     "utility_reply",
@@ -823,6 +831,115 @@
         }
       ]
     },
+    "CraftExtensionReply": {
+      "description": "Bounded reply from the responsible Craft. Native errors never cross this boundary.",
+      "oneOf": [
+        {
+          "description": "Native metadata, never executable GUI customization.",
+          "type": "object",
+          "properties": {
+            "catalog": {
+              "description": "Unconverted native inventory.",
+              "$ref": "#/$defs/ExtensionCatalog"
+            },
+            "kind": {
+              "type": "string",
+              "const": "catalog"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "catalog"
+          ]
+        },
+        {
+          "description": "The native operation completed.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "applied"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "No native mutation was attempted.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        }
+      ]
+    },
+    "CraftExtensionRequest": {
+      "description": "One-shot Craft extension v1 request on owner-only stdin/stdout.",
+      "oneOf": [
+        {
+          "description": "Discover a native catalog.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "catalog"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "Inspect one native target before accepting executable access.",
+          "type": "object",
+          "properties": {
+            "extension_id": {
+              "description": "Exact native target.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "inspect"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "extension_id"
+          ]
+        },
+        {
+          "description": "Perform one admitted lifecycle operation after Runs have finished.",
+          "type": "object",
+          "properties": {
+            "confirmation": {
+              "description": "Exact native metadata and accepted access.",
+              "$ref": "#/$defs/ExtensionConfirmation"
+            },
+            "kind": {
+              "type": "string",
+              "const": "apply"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "confirmation"
+          ]
+        }
+      ]
+    },
     "CraftFeature": {
       "description": "A supported Harness feature. Unknown optional features are disabled.",
       "type": "object",
@@ -1402,6 +1519,109 @@
           "description": "An unexpected internal failure.",
           "type": "string",
           "const": "internal"
+        }
+      ]
+    },
+    "ExtensionAction": {
+      "description": "Operations supported by the responsible native adapter.",
+      "oneOf": [
+        {
+          "description": "Install a native extension.",
+          "type": "string",
+          "const": "install"
+        },
+        {
+          "description": "Update a native extension.",
+          "type": "string",
+          "const": "update"
+        },
+        {
+          "description": "Stop loading a native extension.",
+          "type": "string",
+          "const": "disable"
+        },
+        {
+          "description": "Remove a native extension.",
+          "type": "string",
+          "const": "remove"
+        }
+      ]
+    },
+    "ExtensionCatalog": {
+      "description": "Native catalog data, interpreted by its Craft and rendered as data by clients.",
+      "type": "object",
+      "properties": {
+        "craft_id": {
+          "description": "Installed Craft identity.",
+          "type": "string"
+        },
+        "harness": {
+          "description": "Harness whose native formats this catalog describes.",
+          "type": "string"
+        },
+        "native_metadata": {
+          "description": "Bounded native JSON containing sources, versions, publishers and components.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "craft_id",
+        "harness",
+        "native_metadata"
+      ]
+    },
+    "ExtensionConfirmation": {
+      "description": "Exact native metadata and authority shown before any lifecycle mutation.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Exactly one lifecycle operation.",
+          "$ref": "#/$defs/ExtensionAction"
+        },
+        "catalog": {
+          "description": "Catalog snapshot which the Craft must revalidate before execution.",
+          "$ref": "#/$defs/ExtensionCatalog"
+        },
+        "extension_id": {
+          "description": "Native identity, for example plugin@marketplace.",
+          "type": "string"
+        },
+        "scope": {
+          "description": "Native installation scope.",
+          "$ref": "#/$defs/ExtensionScope"
+        },
+        "trust": {
+          "description": "Same-user executable access accepted by the interactive client.",
+          "$ref": "#/$defs/ExtensionTrust"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "catalog",
+        "extension_id",
+        "action",
+        "scope",
+        "trust"
+      ]
+    },
+    "ExtensionScope": {
+      "description": "Native scopes currently admitted by the Plane.",
+      "oneOf": [
+        {
+          "description": "The native Harness's user configuration on the selected Plane.",
+          "type": "string",
+          "const": "user"
+        }
+      ]
+    },
+    "ExtensionTrust": {
+      "description": "Explicit consent to the native executable boundary, never GUI code.",
+      "oneOf": [
+        {
+          "description": "Skills may direct tools; hooks, MCP servers and plugins execute as the user.",
+          "type": "string",
+          "const": "same_user_executable"
         }
       ]
     },
