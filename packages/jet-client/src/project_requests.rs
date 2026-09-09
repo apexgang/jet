@@ -96,6 +96,7 @@ impl Client {
 			CommandResponse::ProjectRegistered(project) => Ok(project),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::CraftInstallationQueued(_)
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }

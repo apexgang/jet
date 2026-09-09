@@ -11,6 +11,29 @@ use crate::connection::{Client, ClientError};
 use crate::requests::unexpected;
 
 impl Client {
+	/// Disables new Runs and optionally stops the Craft, preserving its helpers.
+	/// # Errors
+	/// Returns a compatibility, admission, or transport error.
+	pub async fn disable_craft(
+		&self,
+		command_id: Uuid,
+		craft_id: String,
+		mode: jet_protocol::CraftDisableMode,
+	) -> Result<(), ClientError> {
+		self.require_minor(jet_protocol::CRAFT_LIFECYCLE_MINOR)?;
+		let reply = self
+			.execute_command(
+				command_id,
+				CommandRequest::DisableCraft { craft_id, mode },
+			)
+			.await?;
+		if matches!(reply, CommandResponse::CraftDisabled { .. }) {
+			Ok(())
+		} else {
+			Err(unexpected(&reply))
+		}
+	}
+
 	/// Verifies `source` and returns the exact consent surface without
 	/// changing Plane state.
 	///
@@ -75,6 +98,7 @@ impl Client {
 		{
 			CommandResponse::CraftInstallationQueued(queued) => Ok(queued),
 			other @ (CommandResponse::RemoteToolReviewed { .. }
+			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }

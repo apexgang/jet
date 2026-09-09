@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO craft_disables (craft_id, force) VALUES (?1, ?2) ON CONFLICT(craft_id) DO UPDATE SET force = MAX(force, excluded.force)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "c7e1c01f5759ff27cfb17f5643803784e7ea06e74e1e121d1da43760fa32bf0e"
+}

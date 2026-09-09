@@ -715,6 +715,7 @@ fn fake_harness_process() {
 		"{{ \"text\": \"Finished\", \"native_integer\": 9007199254740993 }}"
 	);
 	std::io::stdout().flush().unwrap();
+	std::fs::write("harness-finished", "done").unwrap();
 }
 
 fn file_object(path: &str) -> String {

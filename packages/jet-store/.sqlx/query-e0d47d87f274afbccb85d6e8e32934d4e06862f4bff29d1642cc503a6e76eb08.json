@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO craft_revocations (sha256) VALUES (?1) ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "e0d47d87f274afbccb85d6e8e32934d4e06862f4bff29d1642cc503a6e76eb08"
+}

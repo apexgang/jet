@@ -255,6 +255,7 @@ impl crate::RunHost for AdmissionHost {
 			)
 			.unwrap();
 			Ok(crate::PinnedCraft {
+				id: "fake".into(),
 				executable: value["executable"].as_str().unwrap().into(),
 				sha256: value["sha256"].as_str().unwrap().into(),
 				adapter_state: "fixture-v1".into(),

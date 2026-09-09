@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT force AS \"force!: bool\" FROM craft_disables WHERE craft_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "force!: bool",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "craft_disables",
+            "name": "force"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a4e8eca48250d89740551106905ab74a04f5c8b9d79a837b3071424890167ba9"
+}

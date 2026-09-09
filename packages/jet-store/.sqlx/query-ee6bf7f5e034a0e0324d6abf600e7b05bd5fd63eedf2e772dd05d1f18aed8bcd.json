@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS(SELECT 1 FROM craft_revocations WHERE sha256 = ?1) AS \"revoked!: bool\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "revoked!: bool",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ee6bf7f5e034a0e0324d6abf600e7b05bd5fd63eedf2e772dd05d1f18aed8bcd"
+}

@@ -412,7 +412,7 @@ fn the_security_audit_query_and_page_have_the_agreed_wire_shape() {
 				record_id: Uuid::nil(),
 				recorded_at_unix_ms: 1_700_000_000_000,
 				plane_id: Uuid::nil(),
-				actor: Actor::InteractiveClient {
+				actor: crate::AuditActor::InteractiveClient {
 					client_id: Uuid::nil(),
 				},
 				target: AuditTarget {

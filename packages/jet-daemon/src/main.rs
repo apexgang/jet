@@ -10,6 +10,9 @@
 mod connection;
 mod connection_pairing;
 mod connection_session;
+mod craft_processes;
+mod craft_revocation;
+mod craft_supervisor;
 mod daemon;
 mod execution_signal;
 mod execution_termination;
@@ -40,6 +43,16 @@ struct Cli {
 /// an authenticated state change.
 #[derive(clap::Subcommand)]
 enum Subcommand {
+	/// Supervise one accepted Craft over a private lifetime pipe.
+	#[command(hide = true)]
+	CraftSupervisor {
+		#[arg(long)]
+		executable: PathBuf,
+		#[arg(long)]
+		socket: PathBuf,
+		#[arg(long)]
+		digest: String,
+	},
 	/// Execute one private, preauthorized bounded operation on standard I/O.
 	#[command(hide = true)]
 	RemoteWorker,
@@ -66,6 +79,9 @@ enum Subcommand {
 		/// Installation identity whose private key stays in platform storage.
 		#[arg(long, requires = "identity_signer")]
 		identity_client_id: Option<uuid::Uuid>,
+		/// Trusted Jet release Ed25519 public key file, exactly 32 raw bytes.
+		#[arg(long)]
+		release_verification_key: Option<PathBuf>,
 	},
 }
 
@@ -90,6 +106,17 @@ impl From<Channel> for InstallationChannel {
 async fn main() -> ExitCode {
 	let Cli { subcommand } = Cli::parse();
 	match subcommand {
+		Subcommand::CraftSupervisor {
+			executable,
+			socket,
+			digest,
+		} => match craft_supervisor::run(&executable, &socket, &digest).await {
+			Ok(()) => ExitCode::SUCCESS,
+			Err(error) => {
+				eprintln!("jetd: Craft supervisor failed: {error}");
+				ExitCode::FAILURE
+			}
+		},
 		Subcommand::RemoteWorker => remote_tool::worker().await,
 		Subcommand::Connect { home, .. } => {
 			let Some(home) =
@@ -113,6 +140,7 @@ async fn main() -> ExitCode {
 			channel,
 			identity_signer,
 			identity_client_id,
+			release_verification_key,
 		} => {
 			let Some(home) =
 				home.map(JetHome::at).or_else(JetHome::for_current_user)
@@ -120,9 +148,23 @@ async fn main() -> ExitCode {
 				eprintln!("jetd: no --home given and HOME is not set");
 				return ExitCode::from(1);
 			};
+			let release_key = match release_verification_key
+				.as_deref()
+				.map(craft_revocation::key)
+				.transpose()
+			{
+				Ok(key) => key,
+				Err(error) => {
+					eprintln!(
+						"jetd: cannot load release verification key: {error}"
+					);
+					return ExitCode::from(1);
+				}
+			};
 			daemon::run(
 				home,
 				channel.into(),
+				release_key,
 				identity_signer.zip(identity_client_id).map(
 					|(executable, client_id)| installation_identity::Identity {
 						executable,

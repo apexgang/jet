@@ -103,6 +103,37 @@ sha256 = "{sha256}"
 			.iter()
 			.any(|entry| entry.decision == "craft.installation_approved")
 	);
+	let updated_artifact = b"updated third-party Craft";
+	let updated_digest = format!("{:x}", Sha256::digest(updated_artifact));
+	tokio::fs::write(&artifact_path, updated_artifact)
+		.await
+		.unwrap();
+	let specification = tokio::fs::read_to_string(&specification_path)
+		.await
+		.unwrap();
+	tokio::fs::write(
+		&specification_path,
+		specification
+			.replace("1.0.0", "2.0.0")
+			.replace(&sha256, &updated_digest),
+	)
+	.await
+	.unwrap();
+	let update = client
+		.discover_craft(CraftSource::Local {
+			specification: specification_path.display().to_string(),
+			artifact: artifact_path.display().to_string(),
+		})
+		.await
+		.unwrap();
+	let updated = client
+		.install_craft(Uuid::now_v7(), update.confirmation)
+		.await
+		.unwrap();
+	assert_eq!(
+		(updated.version.as_str(), updated.artifact_sha256.as_str()),
+		("2.0.0", updated_digest.as_str())
+	);
 	first.child.kill().await.unwrap();
 
 	let second = start_jetd(&home).await;
@@ -115,6 +146,6 @@ sha256 = "{sha256}"
 		capabilities
 			.crafts
 			.iter()
-			.any(|craft| craft.craft_id == "demo")
+			.any(|craft| craft.craft_id == "demo" && craft.version == "2.0.0")
 	);
 }

@@ -14,13 +14,13 @@
 
 use uuid::Uuid;
 
+use crate::AuditActorRecord;
 use crate::StoreError;
 use crate::audit_chain::{
 	AuditEntryHash, AuditTargetRef, ChainedFields, entry_hash, target_reference,
 };
 use crate::audit_epoch::{counter_column, parse_counter};
 use crate::audit_head::AuditHead;
-use crate::records::ActorRecord;
 use crate::transaction::WriteTransaction;
 
 /// Most records one audit page returns. The audit records decisions rather
@@ -59,8 +59,8 @@ pub struct NewAuditRecord {
 	pub record_id: Uuid,
 	/// When the decision was made.
 	pub recorded_at_unix_ms: i64,
-	/// The authenticated Actor the decision is attributed to.
-	pub actor: ActorRecord,
+	/// The responsible origin, which grants no Command authority.
+	pub actor: AuditActorRecord,
 	/// The durable kind spelling of what the decision was about, such as
 	/// `account_binding`.
 	pub target_kind: String,
@@ -89,8 +89,8 @@ pub struct AuditRecord {
 	pub recorded_at_unix_ms: i64,
 	/// The Plane that made it.
 	pub plane_id: Uuid,
-	/// The authenticated Actor it is attributed to.
-	pub actor: ActorRecord,
+	/// The responsible origin, which grants no Command authority.
+	pub actor: AuditActorRecord,
 	/// The durable kind spelling of what it was about.
 	pub target_kind: String,
 	/// The opaque identifier of that target, which the chain covers and

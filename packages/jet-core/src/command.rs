@@ -129,6 +129,13 @@ pub enum Command {
 	},
 	/// Install only the exact Craft release whose complete consent surface
 	/// was returned by a preceding discovery Query.
+	DisableCraft {
+		/// Installed Craft identity, never an executable path.
+		craft_id: String,
+		/// Wait for pinned Runs or stop their Craft immediately.
+		mode: crate::CraftDisableMode,
+	},
+	/// Install a confirmed Artifact as the default for subsequent Runs.
 	InstallCraft {
 		/// Repository, provenance, Artifact, authority, and trust acceptance.
 		confirmation: crate::CraftInstallationConfirmation,
@@ -415,6 +422,7 @@ impl Command {
 			Self::ReviewRemoteTool { .. }
 			| Self::RequestUtility { .. }
 			| Self::InstallCraft { .. }
+			| Self::DisableCraft { .. }
 			| Self::CreateSchedule { .. }
 			| Self::CancelSchedule { .. }
 			| Self::SetConversationName { .. }
@@ -497,6 +505,13 @@ pub enum CommandOutcome {
 		job_id: Uuid,
 	},
 	/// Durable publication work accepted for one verified Craft Artifact.
+	CraftDisabled {
+		/// Disabled Craft identity.
+		craft_id: String,
+		/// Applied disable behavior.
+		mode: crate::CraftDisableMode,
+	},
+	/// A verified Artifact was accepted for publication.
 	CraftInstallationQueued {
 		/// Stable Craft identity.
 		craft_id: String,
@@ -779,6 +794,7 @@ fn redacted_for_receipt(
 			outcome @ (CommandOutcome::RemoteToolReviewed { .. }
 			| CommandOutcome::UtilityQueued { .. }
 			| CommandOutcome::CraftInstallationQueued { .. }
+			| CommandOutcome::CraftDisabled { .. }
 			| CommandOutcome::UserEditApplied(_)
 			| CommandOutcome::ConversationNamed(_)
 			| CommandOutcome::RunNamed(_)
@@ -855,6 +871,16 @@ async fn execute_new(
 		}
 		Command::RequestUtility { request } => {
 			crate::utility_work::admit(tx, actor, command_id, request).await
+		}
+		Command::DisableCraft { craft_id, mode } => {
+			crate::craft_lifecycle::record(
+				tx,
+				actor,
+				craft_id,
+				mode,
+				now_unix_ms,
+			)
+			.await
 		}
 		Command::InstallCraft { .. } => {
 			let Prepared::CraftInstallation(prepared) = prepared else {

@@ -47,6 +47,9 @@ pub struct ManagedProcess {
 /// Durable execution projection, fenced with the Event journal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunExecution {
+	/// The live execution requires an interactive recovery decision.
+	#[serde(default)]
+	pub needs_attention: bool,
 	/// Explicit No-Visa execution selection, absent for Visa Runs.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub no_visa: Option<crate::NoVisaSelection>,

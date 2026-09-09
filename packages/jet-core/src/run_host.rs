@@ -30,6 +30,27 @@ pub trait RunHost: std::fmt::Debug + Send + Sync {
 			"the selected Harness's native Provider is unavailable",
 		))
 	}
+	/// Reads the Craft identity, including legacy opaque execution pins.
+	fn craft_id(&self, pin: &PinnedCraft) -> Result<String, CoreError> {
+		Ok(pin.id.clone())
+	}
+	/// Returns only revocations verified with the installation's Jet release key.
+	/// Missing or invalid downloaded metadata must never authorize a revocation.
+	fn revoked_craft_digests(
+		&self,
+	) -> RunFuture<'_, Result<Vec<String>, CoreError>> {
+		Box::pin(async { Ok(vec![]) })
+	}
+	/// Reconciles active pins, revoked digests, and force-disabled Craft identities.
+	/// Implementations must never signal the independently owned Harness helpers.
+	fn maintain_crafts(
+		&self,
+		_active: Vec<PinnedCraft>,
+		_stopped: Vec<String>,
+		_force_disabled: Vec<String>,
+	) -> RunFuture<'_, Result<(), CoreError>> {
+		Box::pin(async { Ok(()) })
+	}
 	/// Resolves an installed identity and pins its accepted execution contract.
 	fn pin(
 		&self,
@@ -44,7 +65,8 @@ pub trait RunHost: std::fmt::Debug + Send + Sync {
 			"this Run host cannot validate Handoffs",
 		))
 	}
-	/// Refreshes metadata for a new Run without selecting a different artifact.
+	/// Selects the current compatible default for a subsequent Run. Existing
+	/// executions recover through their immutable pin instead.
 	fn prepare_next_run(
 		&self,
 		plan: LaunchPlan,

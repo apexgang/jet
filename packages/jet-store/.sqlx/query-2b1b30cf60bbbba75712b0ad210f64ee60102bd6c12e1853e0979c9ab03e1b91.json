@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT p.plan, e.state FROM craft_installation_plans p JOIN effects e USING (effect_id) WHERE p.craft_id = ?1 AND e.state <> 'failed' ORDER BY p.rowid DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "plan",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "craft_installation_plans",
+            "name": "plan"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "effects",
+            "name": "state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "2b1b30cf60bbbba75712b0ad210f64ee60102bd6c12e1853e0979c9ab03e1b91"
+}

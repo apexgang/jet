@@ -30,16 +30,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::path::PathBuf;
 
 use jet_core::{
-	AccountBindingId, Actor, AuditSequence, AuthenticationString,
-	BaseSelection, ClientId, Command, CommandOutcome, ConflictState,
-	Conversation, ConversationId, ConversationList, ConversationOrigin,
-	ConversationSnapshot, CoreError, ErrorCategory, Event, EventPayload,
-	EventSequence, FileRevision, FileTarget, HarnessId, ImportId,
-	NativeConversationId, PairingOfferId, PairingSecret, PairingSignature,
-	PathGrant, PlaneStatus, ProjectId, ProviderId, Query, QueryResult,
-	RecoveryAction, RelativePath, RetentionPolicy, Revision, RevisionConflict,
-	Run, RunId, RunLifecycle, SearchTerms, SeedSelection, WorkingTree,
-	WorkingTreeRequest, Workspace, WorkspaceBase, WorkspaceId,
+	AccountBindingId, AuditSequence, AuthenticationString, BaseSelection,
+	ClientId, Command, CommandOutcome, ConflictState, Conversation,
+	ConversationId, ConversationList, ConversationOrigin, ConversationSnapshot,
+	CoreError, ErrorCategory, Event, EventPayload, EventSequence, FileRevision,
+	FileTarget, HarnessId, ImportId, NativeConversationId, PairingOfferId,
+	PairingSecret, PairingSignature, PathGrant, PlaneStatus, ProjectId,
+	ProviderId, Query, QueryResult, RecoveryAction, RelativePath,
+	RetentionPolicy, Revision, RevisionConflict, Run, RunId, RunLifecycle,
+	SearchTerms, SeedSelection, WorkingTree, WorkingTreeRequest, Workspace,
+	WorkspaceBase, WorkspaceId,
 };
 use jet_protocol as wire;
 
@@ -283,7 +283,7 @@ pub(crate) fn query_result(
 			wire::QueryResponse::Pairing(pairing::snapshot(snapshot))
 		}
 		QueryResult::SecurityAudit(page) => {
-			wire::QueryResponse::SecurityAudit(audit::page(page))
+			wire::QueryResponse::SecurityAudit(audit::page(page, minor)?)
 		}
 		QueryResult::Projects(list) => {
 			wire::QueryResponse::Projects(project::list(list))
@@ -319,6 +319,19 @@ pub(crate) fn command(
 	request: &wire::CommandRequest,
 ) -> Result<Command, CoreError> {
 	Ok(match request {
+		wire::CommandRequest::DisableCraft { craft_id, mode } => {
+			Command::DisableCraft {
+				craft_id: craft_id.clone(),
+				mode: match mode {
+					wire::CraftDisableMode::Wait => {
+						jet_core::CraftDisableMode::Wait
+					}
+					wire::CraftDisableMode::Force => {
+						jet_core::CraftDisableMode::Force
+					}
+				},
+			}
+		}
 		wire::CommandRequest::InstallCraft { confirmation } => {
 			Command::InstallCraft {
 				confirmation: craft_installation::confirmation_from_wire(
@@ -651,6 +664,19 @@ pub(crate) fn command_outcome(
 	match outcome {
 		CommandOutcome::UtilityQueued { job_id } => {
 			wire::CommandResponse::UtilityQueued { job_id }
+		}
+		CommandOutcome::CraftDisabled { craft_id, mode } => {
+			wire::CommandResponse::CraftDisabled {
+				craft_id,
+				mode: match mode {
+					jet_core::CraftDisableMode::Wait => {
+						wire::CraftDisableMode::Wait
+					}
+					jet_core::CraftDisableMode::Force => {
+						wire::CraftDisableMode::Force
+					}
+				},
+			}
 		}
 		CommandOutcome::CraftInstallationQueued {
 			craft_id,
@@ -1055,10 +1081,6 @@ fn event(event: &Event, minor: u32) -> Result<wire::Event, CoreError> {
 		payload_version,
 		payload,
 	})
-}
-
-pub(super) fn actor(actor: &Actor) -> wire::Actor {
-	actor_of(actor.client_id())
 }
 
 /// The wire attribution of the Client identity an Actor acted through.

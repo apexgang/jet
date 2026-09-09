@@ -18,6 +18,7 @@ pub(crate) async fn snapshot(
 	let state: State = decode(&record.state)?;
 	let plan: crate::LaunchPlan = decode(&record.plan)?;
 	Ok(RunExecution {
+		needs_attention: tx.orphaned_execution(run_id.0).await?.is_some(),
 		visa: plan.visa.filter(|_| plan.no_visa.is_none()),
 		no_visa: plan.no_visa,
 		cursor: EventSequence(tx.event_cursor().await?),

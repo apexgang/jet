@@ -1,18 +1,37 @@
 //! The Security audit half of the translation seam (ADR-0049, ADR-0105).
 
 use jet_core::{
-	AuditBreach, AuditEntry, AuditHead, AuditOutcome, AuditPage, AuditRisk,
-	AuditTarget, SecurityDegradation, SecurityState,
+	AuditActor, AuditBreach, AuditEntry, AuditHead, AuditOutcome, AuditPage,
+	AuditRisk, AuditTarget, SecurityDegradation, SecurityState,
 };
 use jet_protocol as wire;
 
-use super::{actor, unix_ms};
+use super::unix_ms;
 
-pub(super) fn page(page: AuditPage) -> wire::SecurityAudit {
-	wire::SecurityAudit {
+pub(super) fn page(
+	page: AuditPage,
+	minor: u32,
+) -> Result<wire::SecurityAudit, jet_core::CoreError> {
+	if minor < wire::CRAFT_LIFECYCLE_MINOR
+		&& page
+			.entries
+			.iter()
+			.any(|entry| entry.actor == AuditActor::CraftRevocation)
+	{
+		return Err(jet_core::CoreError {
+            category: jet_core::ErrorCategory::Incompatible,
+            code: "audit.actor_incompatible".into(),
+            retryable: false,
+            message: "this audit page includes internal Craft revocations; upgrade the client to read it".into(),
+            detail: None,
+            revision_conflict: None,
+            recovery_actions: vec![],
+        });
+	}
+	Ok(wire::SecurityAudit {
 		cursor: page.cursor.0,
 		entries: page.entries.into_iter().map(entry).collect(),
-	}
+	})
 }
 
 fn entry(entry: AuditEntry) -> wire::AuditEntry {
@@ -22,7 +41,14 @@ fn entry(entry: AuditEntry) -> wire::AuditEntry {
 		record_id: entry.record_id.0,
 		recorded_at_unix_ms: unix_ms(entry.recorded_at),
 		plane_id: entry.plane_id.0,
-		actor: actor(&entry.actor),
+		actor: match entry.actor {
+			AuditActor::InteractiveClient { client_id } => {
+				wire::AuditActor::InteractiveClient {
+					client_id: client_id.0,
+				}
+			}
+			AuditActor::CraftRevocation => wire::AuditActor::CraftRevocation,
+		},
 		target: target(entry.target),
 		decision: entry.decision,
 		risk: risk(entry.risk),

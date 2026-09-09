@@ -75,18 +75,19 @@ async fn load_plan(core: &Core, effect_id: Uuid) -> Option<InstallationPlan> {
 	serde_json::from_str(&encoded).ok()
 }
 
-pub(crate) async fn ensure_not_installed(
+pub(crate) async fn installed_digest(
 	home: PathBuf,
 	craft_id: String,
-) -> Result<(), CoreError> {
+) -> Result<Option<String>, CoreError> {
 	crate::filesystem::blocking(move || {
-		if home.join(format!("{craft_id}.json")).exists() {
-			return Err(CoreError::conflict(
-				"craft.already_installed",
-				"the Craft is already installed",
-			));
+		let path = home.join(format!("{craft_id}.json"));
+		match read_manifest(&path) {
+			Ok(manifest) => Ok(Some(manifest.sha256)),
+			Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+				Ok(None)
+			}
+			Err(_) => Err(installation_failed()),
 		}
-		Ok(())
 	})
 	.await?
 }
@@ -212,7 +213,13 @@ fn publish(
 		artifact_size: plan.artifact_size,
 		specification: plan.specification.clone(),
 	};
-	publish_manifest(home, effect_id, &plan.craft_id, &manifest)
+	publish_manifest(
+		home,
+		effect_id,
+		&plan.craft_id,
+		&manifest,
+		plan.previous_sha256.as_deref(),
+	)
 }
 
 fn publish_manifest(
@@ -220,13 +227,26 @@ fn publish_manifest(
 	effect_id: Uuid,
 	craft_id: &str,
 	manifest: &InstallationManifest,
+	previous_sha256: Option<&str>,
 ) -> std::io::Result<()> {
 	let encoded =
 		serde_json::to_vec(manifest).map_err(std::io::Error::other)?;
 	let temporary = home.join(format!(".{effect_id}.json"));
 	let destination = home.join(format!("{craft_id}.json"));
 	if destination.exists() {
-		return exact_manifest(&destination, manifest);
+		let current = read_manifest(&destination)?;
+		if current == *manifest {
+			return Ok(());
+		}
+		if previous_sha256 != Some(current.sha256.as_str()) {
+			return Err(std::io::Error::other(
+				"Craft changed since update preparation",
+			));
+		}
+	} else if previous_sha256.is_some() {
+		return Err(std::io::Error::other(
+			"Craft disappeared since update preparation",
+		));
 	}
 	match fs::symlink_metadata(&temporary) {
 		Ok(metadata) if metadata.file_type().is_file() => {
@@ -246,6 +266,12 @@ fn publish_manifest(
 	file.write_all(&encoded)?;
 	file.sync_all()?;
 	drop(file);
+	if previous_sha256.is_some() {
+		// ASVS 15.4.2: serialized Effects replace only the expected default;
+		// active executions retain their immutable content-addressed Artifact.
+		fs::rename(&temporary, &destination)?;
+		return sync_directory(home);
+	}
 	// ASVS 5.3.2: the destination name is derived from a validated Craft id;
 	// hard-linking provides create-if-absent semantics and never overwrites.
 	let linked = fs::hard_link(&temporary, &destination);

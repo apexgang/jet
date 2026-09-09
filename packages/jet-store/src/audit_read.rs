@@ -5,6 +5,7 @@
 //! reads one epoch at a time, because an epoch is exactly the stretch of
 //! audit the Plane still vouches for.
 
+use crate::AuditActorRecord;
 use crate::StoreError;
 use crate::audit::{
 	AUDIT_PAGE_LIMIT, AuditOutcome, AuditRecord, AuditRisk, AuditTip,
@@ -12,7 +13,7 @@ use crate::audit::{
 };
 use crate::audit_chain::{AuditEntryHash, AuditTargetRef};
 use crate::audit_epoch::{counter_column, parse_counter};
-use crate::records::{ActorRecord, parse_uuid};
+use crate::records::parse_uuid;
 use crate::transaction::ReadTransaction;
 
 /// One `security_audit` row as SQLite stores it.
@@ -183,7 +184,7 @@ fn read_row(row: Row) -> Result<AuditRecord, StoreError> {
 		record_id: parse_uuid("record_id", &row.record_id)?,
 		recorded_at_unix_ms: row.recorded_at_unix_ms,
 		plane_id: parse_uuid("plane_id", &row.plane_id)?,
-		actor: ActorRecord::parse(&row.actor_kind, &row.actor_id)?,
+		actor: AuditActorRecord::parse(&row.actor_kind, &row.actor_id)?,
 		target_kind: row.target_kind,
 		target_reference: AuditTargetRef::from_column(&row.target_reference)?,
 		target_id: row.target_id,

@@ -21,6 +21,8 @@ const UTILITY_OUTCOME_VERSION: u32 = 4;
 const CRAFT_INSTALLATION_OUTCOME_VERSION: u32 = 5;
 /// Exact remote action reviews require a new receipt vocabulary.
 const REMOTE_REVIEW_OUTCOME_VERSION: u32 = 6;
+/// Lifecycle controls cannot be replayed by a release that lacks disable barriers.
+const CRAFT_LIFECYCLE_OUTCOME_VERSION: u32 = 7;
 
 /// Uses the rollback release's encoding whenever that release can understand
 /// the result. Version 2 is reserved for name-only variants introduced here;
@@ -30,6 +32,9 @@ pub(crate) fn outcome_version(
 	result: &Result<CommandOutcome, CoreError>,
 ) -> u32 {
 	match result {
+		Ok(CommandOutcome::CraftDisabled { .. }) => {
+			CRAFT_LIFECYCLE_OUTCOME_VERSION
+		}
 		Ok(CommandOutcome::RemoteToolReviewed { .. }) => {
 			REMOTE_REVIEW_OUTCOME_VERSION
 		}
@@ -126,7 +131,8 @@ pub(crate) fn replay(
 		| SCHEDULE_OUTCOME_VERSION
 		| UTILITY_OUTCOME_VERSION
 		| CRAFT_INSTALLATION_OUTCOME_VERSION
-		| REMOTE_REVIEW_OUTCOME_VERSION => decode_result(&outcome),
+		| REMOTE_REVIEW_OUTCOME_VERSION
+		| CRAFT_LIFECYCLE_OUTCOME_VERSION => decode_result(&outcome),
 		PREVIOUS_OUTCOME_VERSION => decode_previous_result(&outcome),
 		_ => Ok(Err(CoreError::incompatible(
 			"command.outcome_incompatible",

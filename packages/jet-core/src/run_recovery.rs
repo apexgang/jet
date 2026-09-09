@@ -260,6 +260,9 @@ impl Core {
 		id: RunId,
 	) -> Result<(), RunRecoveryError> {
 		let (plan, cursor, terminal) = self.recovery_context(id).await?;
+		self.craft_recovery_allowed(&plan.craft)
+			.await
+			.map_err(|_| RunRecoveryError::Unsafe)?;
 		let connection = self
 			.run_host
 			.as_ref()

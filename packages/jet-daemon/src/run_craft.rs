@@ -100,6 +100,7 @@ pub(crate) async fn load(
 		return Err(unavailable());
 	}
 	let pin = PinnedCraft {
+		id: id.into(),
 		executable: craft.executable,
 		sha256: craft.sha256,
 		adapter_state: serde_json::to_string(&Contract {
@@ -165,11 +166,22 @@ pub(crate) async fn prepare_fork(
 	Ok(plan)
 }
 
-/// A later Run retains its accepted artifact and protocol, with fresh boot evidence.
+/// A later Run selects the installed default; only active Runs retain old pins.
 pub(crate) async fn prepare_next_run(
+	home: &Path,
 	mut plan: jet_core::LaunchPlan,
 ) -> Result<jet_core::LaunchPlan, CoreError> {
 	let mut contract = Contract::of(&plan.craft)?;
+	let current = load(home, &contract.specification.id).await?;
+	if current.sha256 != plan.craft.sha256 {
+		let updated = Contract::of(&current)?;
+		if updated.specification.harness != contract.specification.harness {
+			return Err(unavailable());
+		}
+		plan.craft = current;
+		contract = updated;
+	}
+	plan.craft.id = contract.specification.id.clone();
 	if plan.native_conversation.is_some()
 		&& (!contract
 			.specification

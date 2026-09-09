@@ -376,7 +376,7 @@ pub(crate) async fn audit(
 	tx.append_audit_record(jet_store::NewAuditRecord {
 		record_id: uuid::Uuid::now_v7(),
 		recorded_at_unix_ms: now,
-		actor: actor.record(),
+		actor: actor.record().into(),
 		target_kind: "remote_operation".into(),
 		target_id: Some(format!(
 			"{}/{}",
