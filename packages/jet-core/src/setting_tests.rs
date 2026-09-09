@@ -293,6 +293,16 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 					SettingValue::Text(String::new()),
 					SettingSource::BuiltIn
 				),
+				resolved(
+					SettingKey::ArtifactMaxMiB,
+					SettingValue::Count(512),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::ArtifactRunMiB,
+					SettingValue::Count(2048),
+					SettingSource::BuiltIn
+				),
 			],
 			vec![
 				resolved(
@@ -355,6 +365,16 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 				resolved(
 					SettingKey::AutomaticReviewConsent,
 					SettingValue::Text(String::new()),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::ArtifactMaxMiB,
+					SettingValue::Count(512),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::ArtifactRunMiB,
+					SettingValue::Count(2048),
 					SettingSource::BuiltIn
 				),
 			]

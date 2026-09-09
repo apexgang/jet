@@ -9,6 +9,7 @@
 //! typed records and stable errors.
 
 mod account;
+mod artifact;
 mod audit;
 mod audit_actor;
 pub use audit_actor::AuditActorRecord;

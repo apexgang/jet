@@ -9,19 +9,19 @@ use std::{
 	io::{Read, Write},
 };
 
-const RUN_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
-
-pub(crate) fn publish(
+pub(crate) fn publish_with_limit(
 	pending: Pending,
 	run_id: RunId,
 	target: &str,
 	size: u64,
+	run_limit: u64,
+	budget: File,
 ) -> Result<ArtifactAvailability, CoreError> {
 	let directory = &pending.directory;
 	// One descriptor lock covers deduplication, reservation and publication across
 	// concurrent queries and daemon instances. No database lock is acquired here.
 	let lock: File = openat(
-		directory,
+		&budget,
 		".ingest-lock",
 		OFlags::RDWR
 			| OFlags::CREATE
@@ -43,18 +43,21 @@ pub(crate) fn publish(
 		Mode::empty(),
 	) {
 		Ok(file) => {
-			let metadata = File::from(file).metadata().map_err(failed)?;
-			if metadata.is_file() && metadata.len() == size {
-				return Ok(ArtifactAvailability::Stored);
-			}
-			return Err(failed("existing Artifact size changed"));
+			crate::artifact_files::verify(
+				&mut File::from(file),
+				&crate::ArtifactDescriptor {
+					sha256: target.into(),
+					size,
+				},
+			)?;
+			return Ok(ArtifactAvailability::Stored);
 		}
 		Err(rustix::io::Errno::NOENT) => {}
 		Err(error) => return Err(failed(error)),
 	}
 	let name = format!(".run-{}.budget", run_id.0);
 	let used = match openat(
-		directory,
+		&budget,
 		name.as_str(),
 		OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
 		Mode::empty(),
@@ -73,16 +76,16 @@ pub(crate) fn publish(
 		Err(error) => return Err(failed(error)),
 	};
 	let Some(total) =
-		used.checked_add(size).filter(|total| *total <= RUN_LIMIT)
+		used.checked_add(size).filter(|total| *total <= run_limit)
 	else {
 		return Ok(ArtifactAvailability::RunBudgetExceeded);
 	};
 	let reservation = Pending {
-		directory: directory.try_clone().map_err(failed)?,
+		directory: budget.try_clone().map_err(failed)?,
 		name: format!(".pending-{}", uuid::Uuid::new_v4()),
 	};
 	let mut file: File = openat(
-		directory,
+		&budget,
 		reservation.name.as_str(),
 		OFlags::WRONLY
 			| OFlags::CREATE
@@ -96,13 +99,13 @@ pub(crate) fn publish(
 	file.write_all(&total.to_be_bytes()).map_err(failed)?;
 	file.sync_all().map_err(failed)?;
 	rustix::fs::renameat(
-		directory,
+		&budget,
 		reservation.name.as_str(),
-		directory,
+		&budget,
 		name.as_str(),
 	)
 	.map_err(failed)?;
-	directory.sync_all().map_err(failed)?;
+	budget.sync_all().map_err(failed)?;
 	// A crash after reservation can overcount, never replenish an exhausted
 	// budget. Existing hashes cost no new bytes; failed temporaries are unlinked.
 	rustix::fs::renameat(directory, pending.name.as_str(), directory, target)

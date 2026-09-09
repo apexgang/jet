@@ -109,6 +109,10 @@ impl SettingScopeKind {
 /// A Setting this core understands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SettingKey {
+	/// Maximum ingested Artifact size in MiB.
+	ArtifactMaxMiB,
+	/// Newly ingested Artifact bytes per Run in MiB.
+	ArtifactRunMiB,
 	/// Enable Utility Git text independently of automatic committing.
 	UtilityGitText,
 	/// Persist disclosure and consent for sending Conversation content to this exact Utility binding.
@@ -169,7 +173,7 @@ struct Catalog {
 }
 
 /// Every Setting this core resolves, in the order a snapshot reports them.
-const CATALOG: [Catalog; 12] = [
+const CATALOG: [Catalog; 14] = [
 	Catalog {
 		key: SettingKey::UtilityAutomaticNaming,
 		spelling: "utility.automatic_naming",
@@ -255,6 +259,18 @@ const CATALOG: [Catalog; 12] = [
 		spelling: "review.cross_provider_consent",
 		scopes: &[SettingScopeKind::Plane],
 		built_in: BuiltIn::Text(""),
+	},
+	Catalog {
+		key: SettingKey::ArtifactMaxMiB,
+		spelling: "artifact.max_mib",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Count(512),
+	},
+	Catalog {
+		key: SettingKey::ArtifactRunMiB,
+		spelling: "artifact.run_mib",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Count(2048),
 	},
 ];
 

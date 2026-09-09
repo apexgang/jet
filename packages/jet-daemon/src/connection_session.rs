@@ -21,6 +21,10 @@ const MAX_PENDING_REQUESTS: usize = 16;
 const MAX_PENDING_REPLIES: usize = 16;
 
 enum Request {
+	Artifact {
+		stream_id: StreamId,
+		control: jet_protocol::ArtifactControl,
+	},
 	Control {
 		stream_id: StreamId,
 		payload: Vec<u8>,
@@ -134,6 +138,18 @@ async fn read_requests(
 				"requests must use a numbered application stream".into(),
 			)));
 		}
+		if let Ok(control) =
+			decode_control::<jet_protocol::ArtifactControl>(&payload)
+		{
+			if requests
+				.send(Request::Artifact { stream_id, control })
+				.await
+				.is_err()
+			{
+				return Stop::Disconnected;
+			}
+			continue;
+		}
 		let message =
 			match decode_control(&payload) {
 				Ok(message) => message,
@@ -187,14 +203,63 @@ async fn process_requests(
 	data_limit: u32,
 ) {
 	let mut terminals = crate::terminal_stream::Terminals::new(data_limit);
-	while let Some(request) = requests.recv().await {
+	let mut artifacts = crate::artifact_stream::Artifacts::new(data_limit);
+	loop {
+		let download = artifacts.next_download();
+		let publishing = artifacts.has_publication();
+		let request = tokio::select! {
+			biased;
+			request = requests.recv() => match request { Some(request) => request, None => break },
+			publication = artifacts.publication(), if publishing => {
+				let Ok(publication) = publication else { return; };
+				let stream = publication.0;
+				if let Err(error) = artifacts.finish_publication(publication, &replies).await {
+					send_stream_error(&replies, stream, error).await;
+				}
+				continue;
+			}
+			() = std::future::ready(()), if download.is_some() => {
+				let stream = download.expect("ready download");
+				if let Err(error) = artifacts.write_download_chunk(stream, minor, &replies).await {
+					artifacts.discard(stream);
+					send_stream_error(&replies, stream, error).await;
+				}
+				continue;
+			}
+		};
 		let (stream_id, payload, message) = match request {
+			Request::Artifact { stream_id, control } => {
+				let result = if terminals.contains(stream_id) {
+					Err(crate::artifact_stream::invalid())
+				} else {
+					artifacts
+						.control(
+							stream_id, control, &core, &actor, minor, &replies,
+						)
+						.await
+				};
+				if let Err(error) = result {
+					artifacts.discard(stream_id);
+					send_stream_error(&replies, stream_id, error).await;
+				}
+				continue;
+			}
 			Request::Control {
 				stream_id,
 				payload,
 				message,
 			} => (stream_id, payload, *message),
 			Request::Data { stream_id, payload } => {
+				if artifacts.contains(stream_id) {
+					if let Err(error) = artifacts
+						.input(stream_id, &payload, minor, &replies)
+						.await
+					{
+						artifacts.discard(stream_id);
+						send_stream_error(&replies, stream_id, error).await;
+					}
+					continue;
+				}
 				if let Err(error) = terminals
 					.input(stream_id, payload, &core, &actor, minor)
 					.await
@@ -210,6 +275,13 @@ async fn process_requests(
 				continue;
 			}
 			Request::Credit { stream_id, bytes } => {
+				if artifacts.contains(stream_id) {
+					if let Err(error) = artifacts.credit(stream_id, bytes) {
+						artifacts.discard(stream_id);
+						send_stream_error(&replies, stream_id, error).await;
+					}
+					continue;
+				}
 				if let Err(error) = terminals.credit(stream_id, bytes) {
 					if let Ok(payload) = encode_control(&ServerMessage::Error {
 						id: None,
@@ -224,6 +296,16 @@ async fn process_requests(
 				continue;
 			}
 		};
+		if artifacts.contains(stream_id) {
+			artifacts.discard(stream_id);
+			send_stream_error(
+				&replies,
+				stream_id,
+				crate::artifact_stream::invalid(),
+			)
+			.await;
+			continue;
+		}
 		if let Some(reply) = terminals
 			.control(stream_id, &message, &core, &actor, minor, &replies)
 			.await
@@ -344,6 +426,18 @@ async fn reply_to(
 	}
 }
 
+async fn send_stream_error(
+	replies: &mpsc::Sender<Frame>,
+	stream: StreamId,
+	error: WireError,
+) {
+	if let Ok(payload) =
+		encode_control(&ServerMessage::Error { id: None, error })
+	{
+		let _ = replies.send(Frame::stream_control(stream, payload)).await;
+	}
+}
+
 /// Answers a Query under the client's own relative bound.
 ///
 /// A Query is a non-durable read, so giving up on one changes nothing on
@@ -430,14 +524,20 @@ fn queue_reply(
 		Frame::Data { .. } => true,
 		Frame::Control { payload, .. } => {
 			matches!(
-				decode_control::<StreamControl>(payload),
-				Ok(StreamControl::TerminalGap { .. }
-					| StreamControl::TerminalFinished { .. })
-			) || matches!(
+				decode_control::<ServerMessage>(payload),
+				Ok(ServerMessage::Error { id: None, .. })
+			) && !frame.stream_id().is_connection()
+				|| matches!(
+					decode_control::<StreamControl>(payload),
+					Ok(StreamControl::TerminalGap { .. }
+						| StreamControl::TerminalFinished { .. }
+						| StreamControl::ArtifactFinished { .. })
+				) || matches!(
 				decode_control::<ServerMessage>(payload),
 				Ok(ServerMessage::TerminalAttached { .. }
 					| ServerMessage::TerminalResized { .. })
-			)
+			) || decode_control::<jet_protocol::ArtifactControl>(payload)
+				.is_ok()
 		}
 	};
 	if ordered {

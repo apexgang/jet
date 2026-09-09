@@ -15,6 +15,7 @@ pub(crate) async fn query(
 	scope: DiffScope,
 	start: crate::checkpoint_pages::Start,
 ) -> Result<QueryResult, CoreError> {
+	let limits = core.artifact_policy().await?;
 	let (mut diff, root, checkpoints, tracking) = core
 		.store
 		.read(async |tx| {
@@ -137,6 +138,7 @@ pub(crate) async fn query(
 			&root,
 			run_id,
 			checkpoint_capture::Retention::Current,
+			limits,
 		)
 		.await?;
 	}
@@ -212,6 +214,7 @@ pub(crate) async fn query(
 			run_id,
 			&diff.before.tree,
 			&diff.after.tree,
+			limits,
 		)
 		.await?;
 	}

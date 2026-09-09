@@ -27,6 +27,9 @@ pub(super) fn snapshot(
 /// The protocol minor that first named each Setting.
 fn introduced_in(key: SettingKey) -> u32 {
 	match key {
+		SettingKey::ArtifactMaxMiB | SettingKey::ArtifactRunMiB => {
+			wire::ARTIFACTS_MINOR
+		}
 		SettingKey::UtilityAccountBinding => wire::UTILITY_MINOR,
 		SettingKey::UtilityContentConsent => wire::UTILITY_MINOR,
 		SettingKey::UtilityAutodeleteCompilation => wire::UTILITY_MINOR,
@@ -58,6 +61,8 @@ fn resolved_setting(resolved: ResolvedSetting) -> wire::ResolvedSetting {
 
 pub(super) fn key(key: SettingKey) -> wire::SettingKey {
 	match key {
+		SettingKey::ArtifactMaxMiB => wire::SettingKey::ArtifactMaxMiB,
+		SettingKey::ArtifactRunMiB => wire::SettingKey::ArtifactRunMiB,
 		SettingKey::UtilityAccountBinding => {
 			wire::SettingKey::UtilityAccountBinding
 		}
@@ -92,6 +97,8 @@ pub(super) fn key(key: SettingKey) -> wire::SettingKey {
 
 pub(super) fn key_from_wire(key: wire::SettingKey) -> SettingKey {
 	match key {
+		wire::SettingKey::ArtifactMaxMiB => SettingKey::ArtifactMaxMiB,
+		wire::SettingKey::ArtifactRunMiB => SettingKey::ArtifactRunMiB,
 		wire::SettingKey::UtilityAccountBinding => {
 			SettingKey::UtilityAccountBinding
 		}

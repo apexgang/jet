@@ -29,6 +29,12 @@ pub enum SettingScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum SettingKey {
+	/// Plane-wide maximum ingested Artifact size in MiB.
+	#[serde(rename = "artifact.max_mib")]
+	ArtifactMaxMiB,
+	/// Plane-wide newly ingested bytes per Run in MiB.
+	#[serde(rename = "artifact.run_mib")]
+	ArtifactRunMiB,
 	/// Plane-wide utility.account_binding policy (Utility minor).
 	#[serde(rename = "utility.account_binding")]
 	UtilityAccountBinding,

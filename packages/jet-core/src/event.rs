@@ -328,6 +328,12 @@ pub enum EventKind {
 		/// Immutable turn patch.
 		artifact: crate::ChangeArtifact,
 	},
+	/// Verified immutable content became a durable Run reference.
+	#[serde(rename = "artifact.published")]
+	ArtifactPublished {
+		/// Content address and exact byte count; payload bytes stay outside SQLite.
+		artifact: crate::ArtifactDescriptor,
+	},
 	/// One bounded UTF-8 segment of admitted input; concatenate in Event order.
 	#[serde(rename = "turn.input")]
 	TurnInput {
@@ -657,6 +663,7 @@ impl EventKind {
 			| Self::RunNameChanged { .. }
 			| Self::ChangeEvidenceRecorded { .. }
 			| Self::ChangeCheckpointRecorded { .. }
+			| Self::ArtifactPublished { .. }
 			| Self::TurnInput { .. }
 			| Self::TurnChanged { .. }
 			| Self::HandoffCreated { .. }

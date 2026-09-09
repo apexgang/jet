@@ -8,6 +8,7 @@ use std::{fs::File, os::unix::fs::PermissionsExt, path::Path};
 
 pub(crate) async fn inspect(
 	root: &Path,
+	artifact_limit: u64,
 ) -> Result<Vec<OmittedFile>, CoreError> {
 	let output = repository::git(
 		root,
@@ -43,7 +44,7 @@ pub(crate) async fn inspect(
 			if let Some(metadata) =
 				metadata(&root, path).map_err(change_artifact::failed)?
 				&& metadata.is_file()
-				&& metadata.len() > change_artifact::LIMIT
+				&& metadata.len() > artifact_limit
 			{
 				omitted.push(OmittedFile {
 					path: path.to_owned(),

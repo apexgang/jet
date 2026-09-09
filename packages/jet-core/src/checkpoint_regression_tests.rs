@@ -179,10 +179,18 @@ async fn artifact_reservations_deduplicate_and_enforce_the_run_budget_across_res
 	);
 	assert_eq!(wait_diff(&core, run_id, DiffScope::Current).await, first);
 	assert_eq!(std::fs::read(&budget).unwrap(), reserved);
-	// Seed a durable almost-exhausted reservation, as after earlier large
-	// ingestions. This exercises the real query without allocating 2 GiB.
-	std::fs::write(&budget, (2_u64 * 1024 * 1024 * 1024 - 1).to_be_bytes())
-		.unwrap();
+	// Lower the durable policy through Core; checkpoint queries and completed
+	// turns must honor it, including while using their existing store transaction.
+	core.execute(
+		&actor(),
+		request(Command::SetSetting {
+			key: SettingKey::ArtifactRunMiB,
+			scope: SettingScope::Plane,
+			value: SettingValue::Count(0),
+		}),
+	)
+	.await
+	.unwrap();
 	std::fs::write(root.join("README.md"), "Another distinct patch\n").unwrap();
 	let limited = wait_diff(&core, run_id, DiffScope::Current).await;
 	assert_eq!(
@@ -239,9 +247,19 @@ async fn oversized_files_keep_metadata_without_entering_git_or_blocking_turns()
 {
 	let dir = tempfile::tempdir().unwrap();
 	let (core, sender) = start(dir.path()).await;
+	core.execute(
+		&actor(),
+		request(Command::SetSetting {
+			key: SettingKey::ArtifactMaxMiB,
+			scope: SettingScope::Plane,
+			value: SettingValue::Count(1),
+		}),
+	)
+	.await
+	.unwrap();
 	let root = dir.path().join("repo");
 	let run_id = active_run(&core, &root).await;
-	let size = 513_u64 * 1024 * 1024;
+	let size = 2_u64 * 1024 * 1024;
 	std::fs::File::create(root.join("large.bin"))
 		.unwrap()
 		.set_len(size)

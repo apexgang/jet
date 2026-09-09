@@ -403,5 +403,65 @@
     "schema": "ServerMessage",
     "valid": false,
     "payload": "{\"kind\":\"query_result\",\"id\":1,\"result\":{\"type\":\"usage\",\"cursor\":12,\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"quota_windows\":[],\"consumption\":{\"tokens\":{\"input\":0,\"cached_input\":0,\"output\":0,\"reasoning\":0},\"measurements\":0,\"estimated\":0,\"interim\":0,\"models\":[]}}}"
+  },
+  {
+    "schema": "ArtifactControl",
+    "valid": true,
+    "payload": "{\"type\":\"artifact_upload\",\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"artifact\":{\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\"size\":\"3\"}}"
+  },
+  {
+    "schema": "ArtifactControl",
+    "valid": true,
+    "payload": "{\"type\":\"artifact_download\",\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"}"
+  },
+  {
+    "schema": "ArtifactControl",
+    "valid": true,
+    "payload": "{\"type\":\"artifact_downloading\",\"artifact\":{\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\"size\":\"3\"}}"
+  },
+  {
+    "schema": "ArtifactControl",
+    "valid": true,
+    "payload": "{\"type\":\"artifact_commit\"}"
+  },
+  {
+    "schema": "ArtifactControl",
+    "valid": true,
+    "payload": "{\"type\":\"artifact_published\",\"artifact\":{\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\"size\":\"3\"}}"
+  },
+  {
+    "schema": "ArtifactControl",
+    "valid": true,
+    "payload": "{\"type\":\"artifact_cancel\"}"
+  },
+  {
+    "schema": "ArtifactControl",
+    "valid": true,
+    "payload": "{\"type\":\"artifact_canceled\"}"
+  },
+  {
+    "schema": "ArtifactControl",
+    "valid": true,
+    "payload": "{\"type\":\"artifact_collect\"}"
+  },
+  {
+    "schema": "ArtifactControl",
+    "valid": true,
+    "payload": "{\"type\":\"artifact_collected\",\"removed\":0}"
+  },
+  {
+    "schema": "ArtifactControl",
+    "valid": false,
+    "payload": "{\"type\":\"artifact_download\",\"sha256\":\"../not-a-hash\"}"
+  },
+  {
+    "schema": "ArtifactControl",
+    "valid": false,
+    "payload": "{\"type\":\"artifact_upload\",\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"artifact\":{\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\"size\":3}}"
+  },
+  {
+    "schema": "ArtifactControl",
+    "valid": false,
+    "payload": "{\"type\":\"artifact_download\",\"sha256\":\"BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD\"}"
   }
 ]

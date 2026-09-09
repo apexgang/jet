@@ -11,6 +11,9 @@
 
 mod account;
 mod artifact;
+mod artifact_transfer;
+pub use artifact_transfer::{ArtifactControl, ArtifactDescriptor};
+pub use handshake::ARTIFACTS_MINOR;
 mod audit;
 mod checkpoint;
 pub use checkpoint::{
