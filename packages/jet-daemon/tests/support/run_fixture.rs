@@ -470,7 +470,7 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 								.unwrap();
 						}
 					}
-					if craft_minor >= 8
+					if craft_minor >= 7
 						&& let Some(usage) = native.get("usage").cloned()
 						&& let Ok(usage) =
 							serde_json::from_value::<CraftUsage>(usage)

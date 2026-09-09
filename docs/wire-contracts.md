@@ -42,11 +42,10 @@ decimal strings, and hexadecimal of the wrong width or case (ADR-0094).
 
 ## Usage negotiation
 
-Jet 1.28 adds the `usage` Query and its Plane-local snapshot; minor 27 is
-left to the Automatic review work in flight beside it. Craft 1.8 adds the
-`usage` event, and 1.7 is left to that same work. Neither needs a new
-Craft feature or broker permission: a Usage report grants nothing and
-changes no Run state. See [Usage records](usage-records.md).
+Jet 1.29 adds the `usage` Query and its Plane-local snapshot, and Craft
+1.7 adds the `usage` event. Neither needs a new Craft feature or broker
+permission: a Usage report grants nothing and changes no Run state. See
+[Usage records](usage-records.md).
 
 ## No-Visa negotiation
 

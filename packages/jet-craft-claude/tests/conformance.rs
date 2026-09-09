@@ -30,7 +30,7 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 			accept_craft(&craft_socket, run).await;
 		assert_eq!(
 			ready.protocol.version,
-			ProtocolVersion { major: 1, minor: 8 }
+			ProtocolVersion { major: 1, minor: 7 }
 		);
 
 		command(

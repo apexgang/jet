@@ -22,7 +22,7 @@ use uuid::Uuid;
 /// The bundled fake Craft, declared at the minor that reports Usage and
 /// under a Harness whose native Provider a Visa Run can select.
 fn install(home: &Path) {
-	fixture::install_at_minor(home, 8);
+	fixture::install_at_minor(home, 7);
 	let path = home.join("crafts/fake.json");
 	let mut manifest: Value =
 		serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();

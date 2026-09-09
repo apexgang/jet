@@ -417,7 +417,7 @@ async fn line_observed(
 			native_event,
 		})
 		.await?;
-	if minor >= 8 {
+	if minor >= 7 {
 		for usage in crate::usage::reports(
 			&value,
 			&turn.id,

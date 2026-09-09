@@ -1,8 +1,8 @@
 # Usage records
 
 Issue #41 implements ADR-0023 through durable Usage records and one
-`usage` Query (Jet protocol 1.28). A Craft reports what its Harness said
-about consumption and about the Provider's quota windows (Craft 1.8); the
+`usage` Query (Jet protocol 1.29). A Craft reports what its Harness said
+about consumption and about the Provider's quota windows (Craft 1.7); the
 Plane stores the report beside the native event it came from, in the same
 transaction as the rest of that turn's source.
 
@@ -135,8 +135,8 @@ send would fail that batch and take the Run down with it.
 The change is two stages. The first is durable state and its Query: the
 `usage_observations`, `usage_quota_snapshots`, and `usage_provider_reach`
 tables, the core that writes them under the counting rules above, and the
-Jet 1.28 `usage` Query with its translation and client helper. The second
-is reporting: the Craft 1.8 `usage` event, the SDK gate, and the two
+Jet 1.29 `usage` Query with its translation and client helper. The second
+is reporting: the Craft 1.7 `usage` event, the SDK gate, and the two
 bundled Crafts reading their Harness's own accounting. Generated schema
 and GUI model updates are mechanical.
 

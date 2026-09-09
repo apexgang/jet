@@ -1,4 +1,4 @@
-//! Normalized Usage a Craft reports for its execution (Craft 1.8,
+//! Normalized Usage a Craft reports for its execution (Craft 1.7,
 //! ADR-0023). The Craft says what the Harness reported in Jet's
 //! vocabulary; the complete native event still travels beside it.
 
@@ -154,7 +154,7 @@ pub struct CraftQuotaWindow {
 	pub finality: CraftUsageFinality,
 }
 
-/// One normalized Usage report (Craft 1.8). Reporting it grants nothing
+/// One normalized Usage report (Craft 1.7). Reporting it grants nothing
 /// and changes no Run state; it is what the Harness said about what it
 /// used.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

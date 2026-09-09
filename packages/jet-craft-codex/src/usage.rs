@@ -1,5 +1,5 @@
 //! Codex's own token and rate-limit accounting, in Jet's vocabulary
-//! (Craft 1.8, ADR-0023). The complete native event still travels beside
+//! (Craft 1.7, ADR-0023). The complete native event still travels beside
 //! every report.
 
 use jet_protocol::{

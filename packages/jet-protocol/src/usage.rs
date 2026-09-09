@@ -1,4 +1,4 @@
-//! Usage record wire types (Jet 1.28, ADR-0023).
+//! Usage record wire types (Jet 1.29, ADR-0023).
 //!
 //! A snapshot says which Plane it came from and how far each Provider
 //! response can be trusted, because no Plane can answer for a Provider

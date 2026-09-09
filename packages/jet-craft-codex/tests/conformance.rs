@@ -402,7 +402,7 @@ async fn accept_craft(socket: &Path, run: Uuid) -> (Reader, Writer) {
 	let ready: CraftReady = decode_control(&payload).unwrap();
 	assert_eq!(
 		ready.protocol.version,
-		ProtocolVersion { major: 1, minor: 8 }
+		ProtocolVersion { major: 1, minor: 7 }
 	);
 	reader.enable_multiplexing();
 	writer.enable_multiplexing();

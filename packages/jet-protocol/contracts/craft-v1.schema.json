@@ -1478,7 +1478,7 @@
       ]
     },
     "CraftUsage": {
-      "description": "One normalized Usage report (Craft 1.8). Reporting it grants nothing\nand changes no Run state; it is what the Harness said about what it\nused.",
+      "description": "One normalized Usage report (Craft 1.7). Reporting it grants nothing\nand changes no Run state; it is what the Harness said about what it\nused.",
       "oneOf": [
         {
           "description": "Consumption the Harness reported.",

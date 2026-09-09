@@ -374,7 +374,7 @@ async fn line_observed(
 			Ok(())
 		}
 		Some("thread/tokenUsage/updated") => {
-			if minor >= 8 {
+			if minor >= 7 {
 				let finality = if run.in_flight {
 					jet_protocol::CraftUsageFinality::Interim
 				} else {
