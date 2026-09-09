@@ -19,6 +19,7 @@ use crate::project::{ProjectEntry, ProjectList, ProjectPreview};
 use crate::promotion::{PromotionDestination, PromotionPreview};
 use crate::search::SearchResult;
 use crate::setting::{SettingScope, SettingSelection, SettingSnapshot};
+use crate::usage::{PlaneUsage, UsageSelection};
 
 /// Correlates a client request with its server reply.
 pub type RequestId = u64;
@@ -269,6 +270,12 @@ pub enum QueryRequest {
 		/// Plane or a new one, taken now.
 		observation: CapabilityObservation,
 	},
+	/// The Usage records the Plane holds for one scope, with the freshness
+	/// and estimation each of them carries.
+	Usage {
+		/// What the answer covers.
+		selection: UsageSelection,
+	},
 	/// Settings resolved for one scope.
 	Settings {
 		/// The scope to resolve for; its own values win over the Plane's.
@@ -387,6 +394,9 @@ pub enum QueryResponse {
 	Capabilities(CapabilitySnapshot),
 	/// Every Account binding on the Plane.
 	AccountBindings(AccountBindingList),
+	/// What one Plane knows about Usage for the selected scope. Boxed: it
+	/// carries the Plane's quota windows beside its per-Model totals.
+	Usage(Box<PlaneUsage>),
 	/// Settings resolved for one scope.
 	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.

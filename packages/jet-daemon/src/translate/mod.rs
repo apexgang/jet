@@ -21,6 +21,7 @@ mod search;
 mod setting;
 mod terminal;
 mod turn;
+pub(crate) mod usage;
 pub(crate) mod utility;
 
 pub(crate) use capability::snapshot as capabilities;
@@ -150,6 +151,9 @@ pub(crate) fn query(
 				observation: capability::observation(*observation),
 			}
 		}
+		wire::QueryRequest::Usage { selection } => Query::Usage {
+			selection: usage::selection(*selection),
+		},
 		wire::QueryRequest::AccountBindings { observation } => {
 			Query::AccountBindings {
 				observation: capability::observation(*observation),
@@ -296,6 +300,9 @@ pub(crate) fn query_result(
 		}
 		QueryResult::AccountBindings(bindings) => {
 			wire::QueryResponse::AccountBindings(account::list(bindings))
+		}
+		QueryResult::Usage(snapshot) => {
+			wire::QueryResponse::Usage(Box::new(usage::plane(*snapshot)))
 		}
 		QueryResult::Settings(snapshot) => {
 			wire::QueryResponse::Settings(setting::snapshot(snapshot, minor))

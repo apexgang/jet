@@ -19,6 +19,7 @@ mod requests;
 mod search_requests;
 mod ssh;
 mod turn_requests;
+mod usage_requests;
 mod user_input_requests;
 mod visa_requests;
 

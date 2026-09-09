@@ -70,6 +70,9 @@ pub enum Observation {
 	},
 	/// An active Harness began working or waiting.
 	Activity(RunActivity),
+	/// What the Harness reported about its own consumption, or about a
+	/// Provider quota window, normalized by its Craft (ADR-0023).
+	Usage(crate::UsageReport),
 	/// Lossless native JSON and its portable views.
 	Output {
 		/// Original native JSON bytes.

@@ -30,7 +30,7 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 			accept_craft(&craft_socket, run).await;
 		assert_eq!(
 			ready.protocol.version,
-			ProtocolVersion { major: 1, minor: 4 }
+			ProtocolVersion { major: 1, minor: 7 }
 		);
 
 		command(
@@ -188,6 +188,50 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 				RunActivity::Working,
 			]
 		);
+		// Consumption is reported per Model where the Harness breaks it
+		// down, under an identity that makes a repeat replace it rather
+		// than add to it (ADR-0023).
+		assert_eq!(
+			reported(&events).first(),
+			Some(&CraftUsage::Observed {
+				observed: CraftObservedUsage {
+					measurement: CraftUsageMeasurement::Turn {
+						turn: run.to_string(),
+						native_usage_id: Some(format!("{run}:claude-opus-5")),
+					},
+					model: Some("claude-opus-5".into()),
+					estimation: CraftUsageEstimation::Measured,
+					finality: CraftUsageFinality::Final,
+					tokens: CraftUsageTokens {
+						input: 14,
+						cached_input: 6,
+						output: 90,
+						reasoning: 0,
+					},
+				},
+			})
+		);
+		// A rate-limit event states how full the unified window is, whether
+		// or not the Harness could still proceed under it.
+		assert_eq!(
+			reported(&events)
+				.into_iter()
+				.filter(|usage| matches!(usage, CraftUsage::Quota { .. }))
+				.collect::<Vec<_>>(),
+			vec![CraftUsage::Quota {
+				quota: CraftQuotaWindow {
+					window: "unified".into(),
+					scope: CraftQuotaScope::ProviderAccount,
+					unit: CraftQuotaUnit::Share,
+					used: 10_000,
+					limit: Some(10_000),
+					window_seconds: None,
+					resets_in_seconds: None,
+					estimation: CraftUsageEstimation::Measured,
+					finality: CraftUsageFinality::Interim,
+				},
+			}]
+		);
 		// The decision reached the Harness as its own answer, carrying the
 		// input it was shown rather than one this Craft edited.
 		assert_eq!(
@@ -281,6 +325,16 @@ fn outcomes(events: &[CraftEvent]) -> Vec<TurnOutcome> {
 		.iter()
 		.filter_map(|event| match event {
 			CraftEvent::TurnEnded { outcome } => Some(*outcome),
+			_ => None,
+		})
+		.collect()
+}
+
+fn reported(events: &[CraftEvent]) -> Vec<CraftUsage> {
+	events
+		.iter()
+		.filter_map(|event| match event {
+			CraftEvent::Usage { usage } => Some(usage.clone()),
 			_ => None,
 		})
 		.collect()
@@ -400,7 +454,7 @@ fn start_craft(
 			"broker_permissions = [\"remote_tools\"]",
 		)
 		.replace("features = [", "features = [{ name = \"remote_tools\" }, ")
-		.replace("minor = 4", "minor = 6");
+		.replace("minor = 4", "minor = 8");
 	std::fs::write(
 		installed.with_file_name(".jet").join("craft-spec.toml"),
 		declaration,
@@ -420,7 +474,7 @@ async fn accept_craft(
 	socket: &Path,
 	run: Uuid,
 ) -> (Reader, Writer, CraftReady) {
-	accept_craft_at_minor(socket, run, 4).await
+	accept_craft_at_minor(socket, run, 8).await
 }
 async fn accept_craft_at_minor(
 	socket: &Path,
@@ -671,7 +725,10 @@ fn result(session: &str) -> String {
 	json!({
 		"type": "result", "subtype": "success", "session_id": session,
 		"total_cost_usd": 0.01, "num_turns": 1,
-		"usage": {"input_tokens": 10, "output_tokens": 90},
+		"usage": {"input_tokens": 10, "output_tokens": 90,
+			"cache_creation_input_tokens": 4, "cache_read_input_tokens": 6},
+		"modelUsage": {"claude-opus-5": {"inputTokens": 10, "outputTokens": 90,
+			"cacheCreationInputTokens": 4, "cacheReadInputTokens": 6}},
 	})
 	.to_string()
 }

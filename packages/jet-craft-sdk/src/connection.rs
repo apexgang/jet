@@ -206,6 +206,9 @@ impl<W: AsyncWrite + Unpin> CraftSender<W> {
 	/// # Errors
 	/// Rejects oversized or malformed output and closes on a slow/disconnected peer.
 	pub async fn send(&mut self, event: &CraftEvent) -> Result<(), CraftError> {
+		if self.minor < 7 && matches!(event, CraftEvent::Usage { .. }) {
+			return Err(CraftError::InvalidMessage);
+		}
 		if self.minor < 6 && matches!(event, CraftEvent::RemoteTool { .. }) {
 			return Err(CraftError::InvalidMessage);
 		}
@@ -259,7 +262,7 @@ async fn handshake<R: AsyncRead + Unpin>(
 	// ASVS 2.3.1: a specification cannot make this SDK speak a new codec major.
 	let sdk = ProtocolOffer {
 		family: ProtocolFamily::Craft,
-		versions: vec![ProtocolVersion { major: 1, minor: 6 }],
+		versions: vec![ProtocolVersion { major: 1, minor: 7 }],
 		capabilities: vec![
 			"actions".into(),
 			"fork".into(),

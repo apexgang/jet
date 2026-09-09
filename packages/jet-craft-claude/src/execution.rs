@@ -417,6 +417,15 @@ async fn line_observed(
 			native_event,
 		})
 		.await?;
+	if minor >= 7 {
+		for usage in crate::usage::reports(
+			&value,
+			&turn.id,
+			std::time::SystemTime::now(),
+		) {
+			sender.send(&CraftEvent::Usage { usage }).await?;
+		}
+	}
 	// A message for this Craft's own MCP server is answered here, except
 	// the one that asks permission: the Harness waits for Jet on that.
 	if let Some(observed) = turn

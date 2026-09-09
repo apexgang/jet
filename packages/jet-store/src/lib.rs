@@ -47,6 +47,8 @@ mod setting;
 mod terminal;
 mod transaction;
 mod turn_queue;
+mod usage;
+mod usage_quota;
 mod user_edit_intent;
 mod workspace;
 pub use terminal::TerminalRecord;
@@ -107,6 +109,16 @@ pub use search::{
 	SEARCH_INDEX_BATCH_LIMIT, SearchHitRecord,
 };
 pub use transaction::{ReadTransaction, WriteTransaction};
+pub use usage::{
+	NewUsageObservation, UsageEstimationRecord, UsageFinalityRecord,
+	UsageScopeRecord, UsageSelectionRecord, UsageTokensRecord,
+	UsageTotalRecord,
+};
+pub use usage_quota::{
+	ProviderReachRecord, QuotaScopeRecord, QuotaUnitRecord,
+	UsageProviderReachRecord, UsageQuotaHeartbeatRecord,
+	UsageQuotaSnapshotRecord,
+};
 pub use workspace::{NewWorkspace, WorkspaceRecord, WorkspaceSeedRecord};
 
 /// Failure inside the store, without native SQLite strings in the category.

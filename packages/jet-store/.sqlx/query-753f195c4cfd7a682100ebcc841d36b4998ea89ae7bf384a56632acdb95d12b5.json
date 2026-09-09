@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE usage_quota_snapshots\n\t\t\t    SET answered_at_unix_ms = ?2\n\t\t\t  WHERE snapshot_id = ?1 AND answered_at_unix_ms <= ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "753f195c4cfd7a682100ebcc841d36b4998ea89ae7bf384a56632acdb95d12b5"
+}

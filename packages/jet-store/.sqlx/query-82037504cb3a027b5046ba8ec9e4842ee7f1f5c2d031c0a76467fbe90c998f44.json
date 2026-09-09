@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO usage_observations\n\t\t\t\t(observation_id, conversation_id, run_id, measurement,\n\t\t\t\t native_usage_id, binding_id, provider, model, scope,\n\t\t\t\t estimation, finality, input_tokens, cached_input_tokens,\n\t\t\t\t output_tokens, reasoning_tokens, observed_at_unix_ms)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,\n\t\t\t\t ?14, ?15, ?16)\n\t\t\t ON CONFLICT (run_id, measurement) DO UPDATE SET\n\t\t\t\tnative_usage_id = excluded.native_usage_id,\n\t\t\t\tbinding_id = excluded.binding_id,\n\t\t\t\tprovider = excluded.provider,\n\t\t\t\tmodel = excluded.model,\n\t\t\t\tscope = excluded.scope,\n\t\t\t\testimation = excluded.estimation,\n\t\t\t\tfinality = excluded.finality,\n\t\t\t\tinput_tokens = excluded.input_tokens,\n\t\t\t\tcached_input_tokens = excluded.cached_input_tokens,\n\t\t\t\toutput_tokens = excluded.output_tokens,\n\t\t\t\treasoning_tokens = excluded.reasoning_tokens,\n\t\t\t\tobserved_at_unix_ms = excluded.observed_at_unix_ms\n\t\t\t WHERE excluded.observed_at_unix_ms\n\t\t\t\t>= usage_observations.observed_at_unix_ms",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 16
+    },
+    "nullable": []
+  },
+  "hash": "82037504cb3a027b5046ba8ec9e4842ee7f1f5c2d031c0a76467fbe90c998f44"
+}

@@ -292,6 +292,7 @@ fn event_count(observation: &Observation) -> usize {
 		| Observation::TurnEnded(_)
 		| Observation::Completed(_)
 		| Observation::Activity(_)
+		| Observation::Usage(_)
 		| Observation::Output { .. }
 		| Observation::NativeConversation(_)
 		| Observation::ConversationTitle(_)

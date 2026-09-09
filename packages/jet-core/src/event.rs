@@ -505,6 +505,18 @@ pub enum EventKind {
 		/// The backend that resolves its Credential.
 		credential_source: CredentialSource,
 	},
+	/// A normalized Usage record was stored for this Plane (ADR-0023).
+	/// The Event names what was recorded so a client knows to read the
+	/// Usage Query again; the numbers stay in that Query, which reports
+	/// their freshness and estimation with them.
+	#[serde(rename = "usage.recorded")]
+	UsageRecorded {
+		/// Where the measurement came from.
+		source: crate::UsageSource,
+		/// The Account binding it belongs to, when the Run named one.
+		#[serde(default, skip_serializing_if = "Option::is_none")]
+		binding_id: Option<AccountBindingId>,
+	},
 	/// An Account binding was removed from this Plane.
 	#[serde(rename = "account.unbound")]
 	AccountUnbound {
@@ -649,6 +661,7 @@ impl EventKind {
 			| Self::SettingCleared { .. }
 			| Self::AccountBound { .. }
 			| Self::AccountUnbound { .. }
+			| Self::UsageRecorded { .. }
 			| Self::AuditEpochBegun { .. }
 			| Self::PairingGateChanged { .. }
 			| Self::PairingOffered { .. }

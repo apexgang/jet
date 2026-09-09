@@ -13,6 +13,7 @@ mod native;
 mod presentation;
 mod remote_tools;
 mod specification;
+mod usage;
 
 use clap::Parser;
 

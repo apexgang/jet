@@ -541,6 +541,24 @@
           ]
         },
         {
+          "description": "Normalized Usage the Harness reported (1.8). It records what was\nconsumed or how full a Provider window is; it changes no Run state\nand grants nothing.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "usage"
+            },
+            "usage": {
+              "description": "The report, in Jet's vocabulary rather than the Harness's.",
+              "$ref": "#/$defs/CraftUsage"
+            }
+          },
+          "required": [
+            "kind",
+            "usage"
+          ]
+        },
+        {
           "description": "Capture before a subsequent turn (1.3). Hold native input until the\nhost acknowledges this marker's source record. Initial Start is pre-captured.",
           "type": "object",
           "properties": {
@@ -1163,6 +1181,169 @@
         }
       ]
     },
+    "CraftObservedUsage": {
+      "description": "What the Harness reported it consumed.",
+      "type": "object",
+      "properties": {
+        "estimation": {
+          "description": "Whether the Harness stated the counts or the Craft derived them.",
+          "$ref": "#/$defs/CraftUsageEstimation"
+        },
+        "finality": {
+          "description": "Whether the counts can still change.",
+          "$ref": "#/$defs/CraftUsageFinality"
+        },
+        "measurement": {
+          "description": "What it covers and what identifies it.",
+          "$ref": "#/$defs/CraftUsageMeasurement"
+        },
+        "model": {
+          "description": "The Model that did the work, when the Harness names one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokens": {
+          "description": "The counts themselves.",
+          "$ref": "#/$defs/CraftUsageTokens"
+        }
+      },
+      "required": [
+        "measurement",
+        "estimation",
+        "finality",
+        "tokens"
+      ]
+    },
+    "CraftQuotaScope": {
+      "description": "What one Provider-reported quota window covers.",
+      "oneOf": [
+        {
+          "description": "The Provider account as a whole.",
+          "type": "object",
+          "properties": {
+            "covers": {
+              "type": "string",
+              "const": "provider_account"
+            }
+          },
+          "required": [
+            "covers"
+          ]
+        },
+        {
+          "description": "One Model of that account.",
+          "type": "object",
+          "properties": {
+            "covers": {
+              "type": "string",
+              "const": "model"
+            },
+            "model": {
+              "description": "The Model the window limits.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "covers",
+            "model"
+          ]
+        }
+      ]
+    },
+    "CraftQuotaUnit": {
+      "description": "The unit a Provider stated one window in.",
+      "oneOf": [
+        {
+          "description": "Inference tokens.",
+          "type": "string",
+          "const": "tokens"
+        },
+        {
+          "description": "Requests.",
+          "type": "string",
+          "const": "requests"
+        },
+        {
+          "description": "Provider-defined credits.",
+          "type": "string",
+          "const": "credits"
+        },
+        {
+          "description": "Hundredths of a percent of the window, out of 10,000, for a\nProvider that reports a filled fraction rather than a limit.",
+          "type": "string",
+          "const": "share"
+        }
+      ]
+    },
+    "CraftQuotaWindow": {
+      "description": "One quota window exactly as the Provider reported it.",
+      "type": "object",
+      "properties": {
+        "estimation": {
+          "description": "Whether the Provider stated the numbers or the Craft derived them.",
+          "$ref": "#/$defs/CraftUsageEstimation"
+        },
+        "finality": {
+          "description": "Whether the window has closed.",
+          "$ref": "#/$defs/CraftUsageFinality"
+        },
+        "limit": {
+          "description": "The limit the Provider stated, where it stated one.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "resets_in_seconds": {
+          "description": "How long until it refills, where the Provider stated it. A Craft\nreports the remaining time rather than an instant, so the host\nconverts it with the Plane's own clock.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "scope": {
+          "description": "What the window covers.",
+          "$ref": "#/$defs/CraftQuotaScope"
+        },
+        "unit": {
+          "description": "The unit the Provider stated it in.",
+          "$ref": "#/$defs/CraftQuotaUnit"
+        },
+        "used": {
+          "description": "How much of the window the Provider reported as consumed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "window": {
+          "description": "The Provider's own name for the window, such as its five-hour or\nweekly limit. The host keeps windows apart and never sums them.",
+          "type": "string"
+        },
+        "window_seconds": {
+          "description": "How long the window lasts, where the Provider stated it.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "window",
+        "scope",
+        "unit",
+        "used",
+        "estimation",
+        "finality"
+      ]
+    },
     "CraftReady": {
       "description": "Successful negotiation; the host persists the version with the execution.",
       "type": "object",
@@ -1295,6 +1476,179 @@
         "harness",
         "protocol"
       ]
+    },
+    "CraftUsage": {
+      "description": "One normalized Usage report (Craft 1.7). Reporting it grants nothing\nand changes no Run state; it is what the Harness said about what it\nused.",
+      "oneOf": [
+        {
+          "description": "Consumption the Harness reported.",
+          "type": "object",
+          "properties": {
+            "observed": {
+              "description": "What it consumed.",
+              "$ref": "#/$defs/CraftObservedUsage"
+            },
+            "source": {
+              "type": "string",
+              "const": "observed"
+            }
+          },
+          "required": [
+            "source",
+            "observed"
+          ]
+        },
+        {
+          "description": "A quota window the Provider reported.",
+          "type": "object",
+          "properties": {
+            "quota": {
+              "description": "The window as reported.",
+              "$ref": "#/$defs/CraftQuotaWindow"
+            },
+            "source": {
+              "type": "string",
+              "const": "quota"
+            }
+          },
+          "required": [
+            "source",
+            "quota"
+          ]
+        },
+        {
+          "description": "A Provider that would not report its windows, so the host says so\nrather than presenting the windows it last saw as current.",
+          "type": "object",
+          "properties": {
+            "reason": {
+              "description": "Bounded, non-secret text naming why, at most 256 characters.",
+              "type": "string"
+            },
+            "source": {
+              "type": "string",
+              "const": "unreachable"
+            }
+          },
+          "required": [
+            "source",
+            "reason"
+          ]
+        }
+      ]
+    },
+    "CraftUsageEstimation": {
+      "description": "Whether the Harness or Provider stated the numbers, or the Craft\nderived them.",
+      "oneOf": [
+        {
+          "description": "Stated by the Harness or the Provider.",
+          "type": "string",
+          "const": "measured"
+        },
+        {
+          "description": "Derived by the Craft, and never presented as a Provider's own\naccounting.",
+          "type": "string",
+          "const": "estimated"
+        }
+      ]
+    },
+    "CraftUsageFinality": {
+      "description": "Whether the numbers can still change.",
+      "oneOf": [
+        {
+          "description": "The work the numbers cover had not finished.",
+          "type": "string",
+          "const": "interim"
+        },
+        {
+          "description": "The work is over and the numbers no longer move.",
+          "type": "string",
+          "const": "final"
+        }
+      ]
+    },
+    "CraftUsageMeasurement": {
+      "description": "What one consumption measurement covers, and what makes it one\nmeasurement rather than another. The host replaces a repeated\nmeasurement instead of adding it to the total (ADR-0023).",
+      "oneOf": [
+        {
+          "description": "One turn, named by the identity the host delivered with it.",
+          "type": "object",
+          "properties": {
+            "covers": {
+              "type": "string",
+              "const": "turn"
+            },
+            "native_usage_id": {
+              "description": "The Harness's or Provider's own identity for the measurement.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "turn": {
+              "description": "Correlation identity of the turn the numbers cover.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "covers",
+            "turn"
+          ]
+        },
+        {
+          "description": "The Run so far, as a cumulative total the Harness restates. A Run\nreporting these does not also have its turns counted.",
+          "type": "object",
+          "properties": {
+            "covers": {
+              "type": "string",
+              "const": "run"
+            },
+            "native_usage_id": {
+              "description": "The Harness's or Provider's own identity for the measurement.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "covers"
+          ]
+        }
+      ]
+    },
+    "CraftUsageTokens": {
+      "description": "The token counts one measurement carries. Tokens a Provider wrote to\nits cache count as input; an absent count is zero.",
+      "type": "object",
+      "properties": {
+        "cached_input": {
+          "description": "Tokens served from the Provider's cache.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 0,
+          "minimum": 0
+        },
+        "input": {
+          "description": "Tokens sent.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 0,
+          "minimum": 0
+        },
+        "output": {
+          "description": "Tokens generated.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 0,
+          "minimum": 0
+        },
+        "reasoning": {
+          "description": "Tokens spent on reasoning, where the Provider counts them apart.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 0,
+          "minimum": 0
+        }
+      }
     },
     "CraftUtilityModel": {
       "description": "Content-free selection returned by `--utility-model`.",

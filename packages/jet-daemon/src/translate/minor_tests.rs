@@ -14,7 +14,7 @@ use jet_protocol as wire;
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
-use super::{capability, plane_status, setting};
+use super::{capability, name, plane_status, setting};
 
 fn degraded() -> PlaneStatus {
 	PlaneStatus {
@@ -189,5 +189,23 @@ fn developer_mode_is_reported_only_to_the_installation_minor() {
 				wire::SettingKey::DeveloperMode,
 			],
 		)
+	);
+}
+
+/// An Event kind is not a field an older reader can skip, so a Usage
+/// record is left out of the page of a minor that never learned it
+/// (ADR-0019, ADR-0023).
+#[test]
+fn a_usage_event_reaches_only_a_minor_that_names_it() {
+	let recorded = jet_core::EventKind::UsageRecorded {
+		source: jet_core::UsageSource::JetObserved,
+		binding_id: None,
+	};
+	assert_eq!(
+		(
+			name::named(&recorded, wire::USAGE_RECORDS_MINOR - 1),
+			name::named(&recorded, wire::USAGE_RECORDS_MINOR),
+		),
+		(false, true)
 	);
 }

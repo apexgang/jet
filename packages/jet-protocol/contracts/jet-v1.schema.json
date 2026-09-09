@@ -4906,6 +4906,53 @@
         }
       ]
     },
+    "ModelConsumption": {
+      "description": "Deduplicated consumption for one Model.",
+      "type": "object",
+      "properties": {
+        "estimated": {
+          "description": "How many of them Jet estimated rather than measured.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "interim": {
+          "description": "How many of them can still change.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "last_observed_at_unix_ms": {
+          "description": "When the newest contributing measurement was observed.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "measurements": {
+          "description": "How many deduplicated measurements contributed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "model": {
+          "description": "The Model, absent where the Harness named none.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokens": {
+          "description": "The counts.",
+          "$ref": "#/$defs/UsageTokens"
+        }
+      },
+      "required": [
+        "tokens",
+        "measurements",
+        "estimated",
+        "interim",
+        "last_observed_at_unix_ms"
+      ]
+    },
     "Name": {
       "description": "One resolved user-facing name and its authority.",
       "type": "object",
@@ -5050,6 +5097,56 @@
         "account_binding_id",
         "conversation_id",
         "destinations"
+      ]
+    },
+    "ObservedConsumption": {
+      "description": "Deduplicated Jet-observed consumption, with the uncertainty in it left\nvisible rather than folded into the total.",
+      "type": "object",
+      "properties": {
+        "estimated": {
+          "description": "How many of them Jet estimated rather than measured.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "interim": {
+          "description": "How many of them can still change.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "last_observed_at_unix_ms": {
+          "description": "When the newest contributing measurement was observed.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "measurements": {
+          "description": "How many deduplicated measurements contributed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "models": {
+          "description": "The same consumption per Model.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelConsumption"
+          }
+        },
+        "tokens": {
+          "description": "The counts across every Model in the selection.",
+          "$ref": "#/$defs/UsageTokens"
+        }
+      },
+      "required": [
+        "tokens",
+        "measurements",
+        "estimated",
+        "interim",
+        "models"
       ]
     },
     "OrphanedExecution": {
@@ -5508,6 +5605,39 @@
         "daemon_starts",
         "started_at_unix_ms",
         "core_version"
+      ]
+    },
+    "PlaneUsage": {
+      "description": "What one Plane knows about Usage for the selected scope.",
+      "type": "object",
+      "properties": {
+        "consumption": {
+          "description": "Deduplicated Jet-observed consumption for the selection.",
+          "$ref": "#/$defs/ObservedConsumption"
+        },
+        "cursor": {
+          "description": "Newest Event sequence visible when the snapshot was read, carried\nas a decimal string (ADR-0089).",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "plane_id": {
+          "description": "The Plane every record here was observed on. A total covers this\nPlane alone (ADR-0016).",
+          "type": "string",
+          "format": "uuid"
+        },
+        "quota_windows": {
+          "description": "The freshest Provider response about each window of each selected\nAccount binding.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QuotaWindow"
+          }
+        }
+      },
+      "required": [
+        "cursor",
+        "plane_id",
+        "quota_windows",
+        "consumption"
       ]
     },
     "Platform": {
@@ -6239,6 +6369,24 @@
           ]
         },
         {
+          "description": "The Usage records the Plane holds for one scope, with the freshness\nand estimation each of them carries.",
+          "type": "object",
+          "properties": {
+            "selection": {
+              "description": "What the answer covers.",
+              "$ref": "#/$defs/UsageSelection"
+            },
+            "type": {
+              "type": "string",
+              "const": "usage"
+            }
+          },
+          "required": [
+            "type",
+            "selection"
+          ]
+        },
+        {
           "description": "Settings resolved for one scope.",
           "type": "object",
           "properties": {
@@ -6749,6 +6897,20 @@
           ]
         },
         {
+          "description": "What one Plane knows about Usage for the selected scope. Boxed: it\ncarries the Plane's quota windows beside its per-Model totals.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "usage"
+            }
+          },
+          "$ref": "#/$defs/PlaneUsage",
+          "required": [
+            "type"
+          ]
+        },
+        {
           "description": "Settings resolved for one scope.",
           "type": "object",
           "properties": {
@@ -6888,6 +7050,184 @@
             "type"
           ]
         }
+      ]
+    },
+    "QuotaMeasure": {
+      "description": "How full a Provider says one window is.",
+      "type": "object",
+      "properties": {
+        "limit": {
+          "description": "The limit it stated, where it stated one.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "unit": {
+          "description": "The unit the Provider stated it in.",
+          "$ref": "#/$defs/QuotaUnit"
+        },
+        "used": {
+          "description": "How much of the window it reported as consumed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "unit",
+        "used"
+      ]
+    },
+    "QuotaScope": {
+      "description": "What one Provider-reported quota window covers.",
+      "oneOf": [
+        {
+          "description": "The Provider account as a whole.",
+          "type": "object",
+          "properties": {
+            "covers": {
+              "type": "string",
+              "const": "provider_account"
+            }
+          },
+          "required": [
+            "covers"
+          ]
+        },
+        {
+          "description": "One Model of that account.",
+          "type": "object",
+          "properties": {
+            "covers": {
+              "type": "string",
+              "const": "model"
+            },
+            "model": {
+              "description": "The Model the window limits.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "covers",
+            "model"
+          ]
+        }
+      ]
+    },
+    "QuotaUnit": {
+      "description": "The unit a Provider stated one window in.",
+      "oneOf": [
+        {
+          "description": "Inference tokens.",
+          "type": "string",
+          "const": "tokens"
+        },
+        {
+          "description": "Requests.",
+          "type": "string",
+          "const": "requests"
+        },
+        {
+          "description": "Provider-defined credits.",
+          "type": "string",
+          "const": "credits"
+        },
+        {
+          "description": "Hundredths of a percent of the window, out of 10,000.",
+          "type": "string",
+          "const": "share"
+        }
+      ]
+    },
+    "QuotaWindow": {
+      "description": "The freshest Provider response about one quota window. Windows are\nreported one by one and are never added together.",
+      "type": "object",
+      "properties": {
+        "binding_id": {
+          "description": "The Plane-local Account binding it belongs to.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "conversation_id": {
+          "description": "The Conversation the response was observed in.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "estimation": {
+          "description": "Whether the Provider measured it or Jet derived it.",
+          "$ref": "#/$defs/UsageEstimation"
+        },
+        "finality": {
+          "description": "Whether the window has closed.",
+          "$ref": "#/$defs/UsageFinality"
+        },
+        "freshness": {
+          "description": "Whether it still stands for what the Provider would say now.",
+          "$ref": "#/$defs/UsageFreshness"
+        },
+        "measure": {
+          "description": "How full the Provider said it was.",
+          "$ref": "#/$defs/QuotaMeasure"
+        },
+        "observed_at_unix_ms": {
+          "description": "When the Plane observed the response.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "provider": {
+          "description": "The Provider that reported it.",
+          "type": "string"
+        },
+        "resets_at_unix_ms": {
+          "description": "When it refills, where the Provider stated it.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "run_id": {
+          "description": "The Run the response was observed in.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "scope": {
+          "description": "What the window covers.",
+          "$ref": "#/$defs/QuotaScope"
+        },
+        "window": {
+          "description": "The Provider's own name for the window.",
+          "type": "string"
+        },
+        "window_seconds": {
+          "description": "How long the window lasts, where the Provider stated it.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "binding_id",
+        "provider",
+        "window",
+        "scope",
+        "measure",
+        "estimation",
+        "finality",
+        "observed_at_unix_ms",
+        "freshness"
       ]
     },
     "RecoveryAction": {
@@ -9153,6 +9493,196 @@
           "type": "string",
           "const": "outcome_unknown"
         }
+      ]
+    },
+    "UsageEstimation": {
+      "description": "Whether Jet measured a record's numbers or derived them.",
+      "oneOf": [
+        {
+          "description": "Reported by the Harness or the Provider.",
+          "type": "string",
+          "const": "measured"
+        },
+        {
+          "description": "Derived by Jet, and never a Provider's own accounting.",
+          "type": "string",
+          "const": "estimated"
+        }
+      ]
+    },
+    "UsageFinality": {
+      "description": "Whether a record's numbers can still change.",
+      "oneOf": [
+        {
+          "description": "The work it covers had not finished when it was reported.",
+          "type": "string",
+          "const": "interim"
+        },
+        {
+          "description": "The work it covers is over.",
+          "type": "string",
+          "const": "final"
+        }
+      ]
+    },
+    "UsageFreshness": {
+      "description": "Whether a Provider-reported window still stands for what the Provider\nwould say now.",
+      "oneOf": [
+        {
+          "description": "Read recently enough to stand for the Provider's current state.",
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "fresh"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        },
+        {
+          "description": "Older than the interval a Plane refreshes on; it is history rather\nthan a current reading (ADR-0045).",
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "stale"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        },
+        {
+          "description": "The Provider did not answer the last time the Plane asked.",
+          "type": "object",
+          "properties": {
+            "reason": {
+              "description": "Why it did not answer.",
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "const": "unreachable"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ]
+        }
+      ]
+    },
+    "UsageSelection": {
+      "description": "What a Usage Query covers.",
+      "oneOf": [
+        {
+          "description": "Every Account binding and Conversation on the Plane.",
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "const": "plane"
+            }
+          },
+          "required": [
+            "scope"
+          ]
+        },
+        {
+          "description": "One Plane-local Account binding.",
+          "type": "object",
+          "properties": {
+            "binding_id": {
+              "description": "The binding.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "scope": {
+              "type": "string",
+              "const": "binding"
+            }
+          },
+          "required": [
+            "scope",
+            "binding_id"
+          ]
+        },
+        {
+          "description": "One Conversation. Quota windows belong to an Account binding rather\nthan to a Conversation, so this answers with consumption alone.",
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "description": "The Conversation.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "scope": {
+              "type": "string",
+              "const": "conversation"
+            }
+          },
+          "required": [
+            "scope",
+            "conversation_id"
+          ]
+        },
+        {
+          "description": "One Run, answered the same way as its Conversation.",
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "description": "The Run.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "scope": {
+              "type": "string",
+              "const": "run"
+            }
+          },
+          "required": [
+            "scope",
+            "run_id"
+          ]
+        }
+      ]
+    },
+    "UsageTokens": {
+      "description": "The token counts one total carries.",
+      "type": "object",
+      "properties": {
+        "cached_input": {
+          "description": "Tokens served from the Provider's cache.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "input": {
+          "description": "Tokens sent.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "output": {
+          "description": "Tokens generated.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "reasoning": {
+          "description": "Tokens spent on reasoning, where the Provider counts them apart.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "input",
+        "cached_input",
+        "output",
+        "reasoning"
       ]
     },
     "UtilityJob": {

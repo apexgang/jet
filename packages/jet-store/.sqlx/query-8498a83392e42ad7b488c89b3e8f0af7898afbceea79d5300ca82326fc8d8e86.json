@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO usage_provider_reach\n\t\t\t\t(binding_id, state, reason, observed_at_unix_ms)\n\t\t\t VALUES (?1, ?2, ?3, ?4)\n\t\t\t ON CONFLICT (binding_id) DO UPDATE SET\n\t\t\t\tstate = excluded.state,\n\t\t\t\treason = excluded.reason,\n\t\t\t\tobserved_at_unix_ms = excluded.observed_at_unix_ms\n\t\t\t WHERE excluded.observed_at_unix_ms\n\t\t\t\t>= usage_provider_reach.observed_at_unix_ms",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "8498a83392e42ad7b488c89b3e8f0af7898afbceea79d5300ca82326fc8d8e86"
+}

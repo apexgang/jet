@@ -144,6 +144,7 @@ async fn record(
 		| Observation::Activity(_)
 		| Observation::TurnCompleted { .. }
 		| Observation::Output { .. }
+		| Observation::Usage(_)
 		| Observation::NativeConversation(_)
 		| Observation::ConversationTitle(_)
 		| Observation::RunTitle(_)
@@ -180,6 +181,21 @@ async fn record(
 				.await?;
 			return Ok(());
 		}
+		// A Usage record is durable Plane state of its own rather than
+		// execution state, so it is written beside the Run instead of
+		// changing its lifecycle (ADR-0023).
+		Observation::Usage(report) => {
+			crate::usage_record::record(
+				tx,
+				&actor,
+				&run.clone().into(),
+				plan.visa.map(|selection| selection.account_binding_id),
+				report,
+				now,
+			)
+			.await?;
+			return Ok(());
+		}
 		other => other,
 	};
 	let settlement = match &observation {
@@ -212,6 +228,7 @@ async fn record(
 		| Observation::TurnEnded(_)
 		| Observation::Activity(_)
 		| Observation::Output { .. }
+		| Observation::Usage(_)
 		| Observation::ProcessTitle { .. }
 		| Observation::ConversationTitle(_)
 		| Observation::RunTitle(_)
@@ -445,6 +462,7 @@ fn apply(
 		| Observation::Activity(_)
 		| Observation::TurnCompleted { .. }
 		| Observation::Output { .. }
+		| Observation::Usage(_)
 		| Observation::NativeConversation(_)
 		| Observation::ProcessTitle { .. }
 		| Observation::ConversationTitle(_)

@@ -40,6 +40,13 @@ they cover optional fields an older reader ignores, rejected unknown message
 kinds, duplicate discriminators a dictionary would discard, non-canonical
 decimal strings, and hexadecimal of the wrong width or case (ADR-0094).
 
+## Usage negotiation
+
+Jet 1.29 adds the `usage` Query and its Plane-local snapshot, and Craft
+1.7 adds the `usage` event. Neither needs a new Craft feature or broker
+permission: a Usage report grants nothing and changes no Run state. See
+[Usage records](usage-records.md).
+
 ## No-Visa negotiation
 
 Jet 1.26 adds `start_no_visa_run`, `remote_tool`, exact remote-action review,
