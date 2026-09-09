@@ -115,6 +115,7 @@ pub(crate) async fn prepare(
 		&launch.root,
 		request.source_run_id,
 		checkpoint_capture::Retention::Current,
+		core.artifact_policy().await?,
 	)
 	.await?;
 	if !snapshot.omitted_files.is_empty()

@@ -32,11 +32,13 @@ impl Core {
 		run_id: RunId,
 		plan: &crate::LaunchPlan,
 	) -> Result<(), CoreError> {
+		let limits = self.artifact_policy().await?;
 		let before = checkpoint_capture::snapshot(
 			self,
 			&plan.root,
 			run_id,
 			checkpoint_capture::Retention::Durable,
+			limits,
 		)
 		.await?;
 		self.store
@@ -70,6 +72,7 @@ pub(crate) async fn observe(
 	run_id: RunId,
 	observation: &Observation,
 ) -> Result<(), CoreError> {
+	let limits = core.artifact_policy_in(tx).await?;
 	if let Observation::FileChanged(evidence) = observation {
 		if evidence.origin != (crate::ChangeOrigin::Harness { run_id }) {
 			return Err(change_artifact::failed(
@@ -101,6 +104,7 @@ pub(crate) async fn observe(
 				&plan.root,
 				run_id,
 				checkpoint_capture::Retention::Durable,
+				limits,
 			)
 			.await?,
 		);
@@ -134,6 +138,7 @@ pub(crate) async fn observe(
 					&plan.root,
 					run_id,
 					checkpoint_capture::Retention::Durable,
+					limits,
 				)
 				.await?,
 			);
@@ -146,6 +151,7 @@ pub(crate) async fn observe(
 		&plan.root,
 		run_id,
 		checkpoint_capture::Retention::Durable,
+		limits,
 	)
 	.await?;
 	let mut files =
@@ -162,6 +168,7 @@ pub(crate) async fn observe(
 		run_id,
 		&before.tree,
 		&after.tree,
+		limits,
 	)
 	.await?;
 	let run = tx.run(run_id.0).await?.ok_or_else(missing)?;

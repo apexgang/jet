@@ -81,6 +81,9 @@ fn shared_client_contract_fixtures_match_the_wire_decoder() {
 				decode_control::<ConnectionProof>(payload).is_ok()
 			}
 			"StreamControl" => decode_control::<StreamControl>(payload).is_ok(),
+			"ArtifactControl" => {
+				decode_control::<jet_protocol::ArtifactControl>(payload).is_ok()
+			}
 			"Event" => decode_control::<Event>(payload).is_ok(),
 			"PlaneStatus" => decode_control::<PlaneStatus>(payload).is_ok(),
 			_ => panic!("unknown fixture schema"),

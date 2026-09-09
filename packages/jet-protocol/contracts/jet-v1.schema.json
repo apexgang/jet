@@ -3,6 +3,9 @@
   "title": "JetContracts",
   "type": "object",
   "properties": {
+    "artifact_control": {
+      "$ref": "#/$defs/ArtifactControl"
+    },
     "client_hello": {
       "$ref": "#/$defs/ClientHello"
     },
@@ -38,6 +41,7 @@
     }
   },
   "required": [
+    "artifact_control",
     "client_hello",
     "server_hello",
     "connection_proof",
@@ -175,6 +179,180 @@
           "type": "string",
           "const": "artifact_size_exceeded"
         }
+      ]
+    },
+    "ArtifactControl": {
+      "description": "Artifact stream requests and replies, available from minor 31.",
+      "oneOf": [
+        {
+          "description": "Begin a private upload. The server responds with byte credit.",
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "description": "Declaration that all incoming bytes must satisfy.",
+              "$ref": "#/$defs/ArtifactDescriptor"
+            },
+            "run_id": {
+              "description": "Run that will own the committed reference.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "artifact_upload"
+            }
+          },
+          "required": [
+            "type",
+            "run_id",
+            "artifact"
+          ]
+        },
+        {
+          "description": "Commit a completely received and verified upload.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "artifact_commit"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Successful durable publication. Retrying a Run/hash is idempotent.",
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "description": "Verified content identity.",
+              "$ref": "#/$defs/ArtifactDescriptor"
+            },
+            "type": {
+              "type": "string",
+              "const": "artifact_published"
+            }
+          },
+          "required": [
+            "type",
+            "artifact"
+          ]
+        },
+        {
+          "description": "Request published content. Grant Credit after receiving its declaration.",
+          "type": "object",
+          "properties": {
+            "sha256": {
+              "description": "Content address to retrieve.",
+              "$ref": "#/$defs/Sha256Digest"
+            },
+            "type": {
+              "type": "string",
+              "const": "artifact_download"
+            }
+          },
+          "required": [
+            "type",
+            "sha256"
+          ]
+        },
+        {
+          "description": "Declaration preceding a download's data and ArtifactFinished control.",
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "description": "Exact size and integrity contract.",
+              "$ref": "#/$defs/ArtifactDescriptor"
+            },
+            "type": {
+              "type": "string",
+              "const": "artifact_downloading"
+            }
+          },
+          "required": [
+            "type",
+            "artifact"
+          ]
+        },
+        {
+          "description": "Discard staging or stop delivery. A previously requested commit may finish.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "artifact_cancel"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Delivery stopped. A previously requested commit may still become durable.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "artifact_canceled"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Collect abandoned payloads past their 24-hour grace period.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "artifact_collect"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Collection finished, including an explicit no-op result.",
+          "type": "object",
+          "properties": {
+            "removed": {
+              "description": "Number of unreferenced files removed in this bounded batch.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "artifact_collected"
+            }
+          },
+          "required": [
+            "type",
+            "removed"
+          ]
+        }
+      ]
+    },
+    "ArtifactDescriptor": {
+      "description": "Immutable Artifact declaration, sent before content bytes.",
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "description": "Content address verified at publication and download completion.",
+          "$ref": "#/$defs/Sha256Digest"
+        },
+        "size": {
+          "description": "Exact byte count.",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        }
+      },
+      "required": [
+        "sha256",
+        "size"
       ]
     },
     "AuditActor": {
@@ -8896,6 +9074,16 @@
     "SettingKey": {
       "description": "A Setting this protocol minor names. A spelling it does not name is\nrefused rather than guessed (ADR-0094).",
       "oneOf": [
+        {
+          "description": "Plane-wide maximum ingested Artifact size in MiB.",
+          "type": "string",
+          "const": "artifact.max_mib"
+        },
+        {
+          "description": "Plane-wide newly ingested bytes per Run in MiB.",
+          "type": "string",
+          "const": "artifact.run_mib"
+        },
         {
           "description": "Plane-wide utility.account_binding policy (Utility minor).",
           "type": "string",

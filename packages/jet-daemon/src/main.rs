@@ -7,6 +7,7 @@
 //! Exit codes: `0` after a clean shutdown, `2` when another live `jetd`
 //! already owns the Plane, `1` for any other failure.
 
+mod artifact_stream;
 mod connection;
 mod connection_pairing;
 mod connection_session;

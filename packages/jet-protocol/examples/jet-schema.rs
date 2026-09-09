@@ -8,6 +8,7 @@ use jet_protocol::{
 #[derive(schemars::JsonSchema)]
 #[expect(dead_code, reason = "schema roots, not instantiated runtime data")]
 struct JetContracts {
+	artifact_control: jet_protocol::ArtifactControl,
 	client_hello: ClientHello,
 	server_hello: ServerHello,
 	connection_proof: ConnectionProof,

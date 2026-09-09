@@ -9,7 +9,6 @@ use std::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-pub(crate) const LIMIT: u64 = 512 * 1024 * 1024;
 pub(crate) const PREVIEW_LIMIT: usize = 128 * 1024;
 
 pub(super) struct Pending {
@@ -25,14 +24,16 @@ impl Drop for Pending {
 		);
 	}
 }
-fn directory(home: &Path) -> std::io::Result<File> {
+pub(crate) fn directory(home: &Path) -> std::io::Result<File> {
 	// ASVS 5.3.2, 15.4.2: resolve internal names relative to pinned directory
 	// handles; neither an Artifact nor its directory can redirect through a link.
 	let flags =
 		OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
 	let home = open(home, flags, Mode::empty())?;
 	match rustix::fs::mkdirat(&home, "artifacts", Mode::from_raw_mode(0o700)) {
-		Ok(()) => {}
+		Ok(()) => {
+			rustix::fs::fsync(&home)?;
+		}
 		Err(rustix::io::Errno::EXIST) => {}
 		Err(error) => return Err(error.into()),
 	}
@@ -42,6 +43,7 @@ pub(crate) async fn publish(
 	home: PathBuf,
 	run_id: crate::RunId,
 	mut command: tokio::process::Command,
+	limits: crate::ArtifactLimits,
 ) -> Result<ChangeArtifact, CoreError> {
 	let (pending, file) = filesystem::blocking(move || {
 		let directory = directory(&home)?;
@@ -78,7 +80,16 @@ pub(crate) async fn publish(
 		}
 		size += read as u64;
 		hash.update(&chunk[..read]);
-		if size <= LIMIT {
+		if size <= limits.artifact_bytes {
+			let directory = pending.directory.try_clone().map_err(failed)?;
+			filesystem::blocking(move || {
+				crate::artifact_files::reserve(
+					&directory,
+					read as u64,
+					limits.free_reserve_bytes,
+				)
+			})
+			.await??;
 			file.write_all(&chunk[..read]).await.map_err(failed)?;
 		}
 	}
@@ -89,12 +100,18 @@ pub(crate) async fn publish(
 	drop(file);
 	let sha256 = format!("{:x}", hash.finalize());
 	let target = sha256.clone();
-	let availability = if size > LIMIT {
+	let availability = if size > limits.artifact_bytes {
 		ArtifactAvailability::ArtifactSizeExceeded
 	} else {
 		filesystem::blocking(move || {
-			crate::change_artifact_budget::publish(
-				pending, run_id, &target, size,
+			let budget = pending.directory.try_clone().map_err(failed)?;
+			crate::change_artifact_budget::publish_with_limit(
+				pending,
+				run_id,
+				&target,
+				size,
+				limits.run_bytes,
+				budget,
 			)
 		})
 		.await??
@@ -123,7 +140,7 @@ fn open_artifact(home: &Path, sha256: &str) -> Result<File, CoreError> {
 	.map_err(failed)?
 	.into();
 	let metadata = file.metadata().map_err(failed)?;
-	if !metadata.is_file() || metadata.len() > LIMIT {
+	if !metadata.is_file() {
 		return Err(failed("invalid Artifact file"));
 	}
 	Ok(file)

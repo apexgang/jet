@@ -16,6 +16,7 @@ pub(crate) async fn snapshot(
 	root: &Path,
 	run_id: RunId,
 	retention: Retention,
+	limits: crate::ArtifactLimits,
 ) -> Result<ChangeSnapshot, CoreError> {
 	tokio::time::timeout(
 		std::time::Duration::from_secs(300),
@@ -41,8 +42,11 @@ pub(crate) async fn snapshot(
 					change_artifact::failed,
 				);
 				index.copy_from_checkout().await?;
-				let omitted_files =
-					crate::checkpoint_omissions::inspect(root).await?;
+				let omitted_files = crate::checkpoint_omissions::inspect(
+					root,
+					limits.artifact_bytes,
+				)
+				.await?;
 				let excluded: Vec<_> = omitted_files
 					.iter()
 					.map(|file| file.path.as_str())
@@ -55,7 +59,7 @@ pub(crate) async fn snapshot(
 					));
 				}
 				let uncommitted =
-					patch(core, root, run_id, &commit, &tree).await?;
+					patch(core, root, run_id, &commit, &tree, limits).await?;
 				// Keep rewritten commits and uncommitted tree objects reachable across
 				// restart and Git GC. These refs create no commits or user-branch changes.
 				let prefix = format!("refs/jet/checkpoints/{}", run_id.0);
@@ -98,6 +102,7 @@ pub(crate) async fn patch(
 	run_id: RunId,
 	before: &str,
 	after: &str,
+	limits: crate::ArtifactLimits,
 ) -> Result<ChangeArtifact, CoreError> {
 	let mut command = repository::command(root);
 	// ASVS 1.2.5: fixed flags, immutable object names, no shell or external
@@ -116,7 +121,7 @@ pub(crate) async fn patch(
 		after,
 		"--",
 	]);
-	change_artifact::publish(core.run_home(), run_id, command).await
+	change_artifact::publish(core.run_home(), run_id, command, limits).await
 }
 pub(crate) async fn files(
 	root: &Path,

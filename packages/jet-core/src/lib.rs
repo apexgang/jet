@@ -9,6 +9,16 @@
 //! translates at the transport seam.
 
 mod account;
+mod artifact;
+mod artifact_collection;
+mod artifact_files;
+mod artifact_policy;
+pub use artifact::{
+	ArtifactDescriptor, ArtifactDownload, ArtifactLimits, ArtifactUpload,
+};
+#[cfg(test)]
+#[path = "artifact_tests.rs"]
+mod artifact_tests;
 mod remote_review;
 mod remote_tool;
 mod remote_tool_types;
@@ -339,6 +349,8 @@ impl Actor {
 /// One running core bound to one Plane store.
 #[derive(Debug)]
 pub struct Core {
+	artifact_limits: ArtifactLimits,
+	artifact_publication: tokio::sync::Mutex<artifact_collection::Publication>,
 	extension_host: Option<Arc<dyn ExtensionHost>>,
 	remote_worker: Option<std::path::PathBuf>,
 	remote_tool_slots: tokio::sync::Semaphore,
@@ -460,6 +472,8 @@ impl Core {
 		let capabilities =
 			CapabilitySnapshot::from_observation(observed, started_at);
 		let core = Self {
+			artifact_limits: ArtifactLimits::default(),
+			artifact_publication: tokio::sync::Mutex::default(),
 			remote_worker: None,
 			remote_tool_slots: tokio::sync::Semaphore::new(32),
 			extension_host: None,

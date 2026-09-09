@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO artifact_references (run_id, sha256, size) VALUES (?1, ?2, ?3) ON CONFLICT (run_id, sha256) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "9557862b93d03bdac12eb4f1ee0c89c70d1a84decfb91349f5b3b81a17074de0"
+}

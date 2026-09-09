@@ -18,6 +18,9 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+#[path = "artifact_client.rs"]
+mod artifact_client;
+
 /// Keeps one client from allocating an unbounded pending-reply registry.
 const MAX_IN_FLIGHT_REQUESTS: usize = 256;
 
@@ -75,6 +78,8 @@ pub enum ClientError {
 /// A connected, handshaken Jet protocol client.
 #[derive(Debug)]
 pub struct Client {
+	transfers: artifact_client::Transfers,
+	data_limit: usize,
 	pub(crate) ssh: Option<tokio::process::Child>,
 	outbound: mpsc::Sender<WriteRequest>,
 	pending: PendingReplies,
@@ -196,11 +201,18 @@ impl Client {
 					writer.enable_multiplexing();
 				}
 				let pending = PendingReplies::default();
+				let transfers = artifact_client::Transfers::default();
+				let data_limit = writer.limits().data;
 				let (outbound, writes) = mpsc::channel(MAX_IN_FLIGHT_REQUESTS);
-				let reader_task =
-					tokio::spawn(read_replies(reader, Arc::clone(&pending)));
+				let reader_task = tokio::spawn(read_replies(
+					reader,
+					Arc::clone(&pending),
+					Arc::clone(&transfers),
+				));
 				let writer_task = tokio::spawn(write_frames(writer, writes));
 				Ok(Self {
+					transfers,
+					data_limit,
 					ssh: None,
 					outbound,
 					pending,
@@ -393,6 +405,10 @@ impl Client {
 		message: &T,
 	) -> Result<(), ClientError> {
 		let frame = Frame::stream_control(stream_id, encode_control(message)?);
+		self.send_frame(frame).await
+	}
+
+	async fn send_frame(&self, frame: Frame) -> Result<(), ClientError> {
 		let (finished, written) = oneshot::channel();
 		self.outbound
 			.send(WriteRequest { frame, finished })
@@ -413,12 +429,19 @@ impl Drop for Client {
 async fn read_replies<R: AsyncRead + Unpin>(
 	mut reader: FrameReader<R>,
 	pending: PendingReplies,
+	transfers: artifact_client::Transfers,
 ) {
 	loop {
-		let Frame::Control { stream_id, payload } = (match reader.read().await {
+		let frame = match reader.read().await {
 			Ok(frame) => frame,
 			Err(_) => break,
-		}) else {
+		};
+		match artifact_client::route(&transfers, &frame) {
+			Ok(true) => continue,
+			Ok(false) => {}
+			Err(()) => break,
+		}
+		let Frame::Control { stream_id, payload } = frame else {
 			break;
 		};
 		let Ok(reply) = decode_control::<ServerMessage>(&payload) else {
@@ -451,6 +474,7 @@ async fn read_replies<R: AsyncRead + Unpin>(
 		.lock()
 		.expect("the pending-reply registry must not be poisoned")
 		.clear();
+	transfers.lock().expect("Artifact replies").clear();
 }
 
 async fn write_frames<W: AsyncWrite + Unpin>(

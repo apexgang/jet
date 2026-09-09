@@ -463,6 +463,18 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::UTILITY_MINOR,
 			feature: "Utility policy",
 		}),
+		QueryRequest::Settings {
+			selection:
+				jet_protocol::SettingSelection::Key {
+					key:
+						jet_protocol::SettingKey::ArtifactMaxMiB
+						| jet_protocol::SettingKey::ArtifactRunMiB,
+				},
+			..
+		} => Some(MinorRequirement {
+			minor: jet_protocol::ARTIFACTS_MINOR,
+			feature: "Artifact policy",
+		}),
 		QueryRequest::Settings { .. } => Some(MinorRequirement {
 			minor: jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR,
 			feature: "Setting Queries",
@@ -604,6 +616,21 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		} => Some(MinorRequirement {
 			minor: jet_protocol::UTILITY_MINOR,
 			feature: "Utility policy",
+		}),
+		CommandRequest::SetSetting {
+			key:
+				jet_protocol::SettingKey::ArtifactMaxMiB
+				| jet_protocol::SettingKey::ArtifactRunMiB,
+			..
+		}
+		| CommandRequest::ClearSetting {
+			key:
+				jet_protocol::SettingKey::ArtifactMaxMiB
+				| jet_protocol::SettingKey::ArtifactRunMiB,
+			..
+		} => Some(MinorRequirement {
+			minor: jet_protocol::ARTIFACTS_MINOR,
+			feature: "Artifact policy",
 		}),
 		CommandRequest::SetSetting { .. }
 		| CommandRequest::ClearSetting { .. } => Some(MinorRequirement {

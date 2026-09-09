@@ -33,6 +33,23 @@ public enum ArtifactAvailability: String {
     case `artifact_size_exceeded` = "artifact_size_exceeded"
 }
 
+public enum ArtifactControl {
+    case `artifact_upload`(ArtifactControlArtifactUpload)
+    case `artifact_commit`(ArtifactControlArtifactCommit)
+    case `artifact_published`(ArtifactControlArtifactPublished)
+    case `artifact_download`(ArtifactControlArtifactDownload)
+    case `artifact_downloading`(ArtifactControlArtifactDownloading)
+    case `artifact_cancel`(ArtifactControlArtifactCancel)
+    case `artifact_canceled`(ArtifactControlArtifactCanceled)
+    case `artifact_collect`(ArtifactControlArtifactCollect)
+    case `artifact_collected`(ArtifactControlArtifactCollected)
+}
+
+public struct ArtifactDescriptor {
+    public let `sha256`: Sha256Digest
+    public let `size`: String
+}
+
 public enum AuditActor {
     case `interactive_client`(AuditActorInteractiveClient)
     case `craft_revocation`(AuditActorCraftRevocation)
@@ -1168,6 +1185,8 @@ public enum ServerMessage {
 }
 
 public enum SettingKey: String {
+    case `artifact.max_mib` = "artifact.max_mib"
+    case `artifact.run_mib` = "artifact.run_mib"
     case `utility.account_binding` = "utility.account_binding"
     case `utility.content_consent` = "utility.content_consent"
     case `utility.autodelete_compilation` = "utility.autodelete_compilation"
@@ -1417,6 +1436,43 @@ public enum Worktree {
 
 public struct ActorInteractiveClient {
     public let `client_id`: String
+}
+
+public struct ArtifactControlArtifactUpload {
+    public let `artifact`: ArtifactDescriptor
+    public let `run_id`: String
+}
+
+public struct ArtifactControlArtifactCommit {
+
+}
+
+public struct ArtifactControlArtifactPublished {
+    public let `artifact`: ArtifactDescriptor
+}
+
+public struct ArtifactControlArtifactDownload {
+    public let `sha256`: Sha256Digest
+}
+
+public struct ArtifactControlArtifactDownloading {
+    public let `artifact`: ArtifactDescriptor
+}
+
+public struct ArtifactControlArtifactCancel {
+
+}
+
+public struct ArtifactControlArtifactCanceled {
+
+}
+
+public struct ArtifactControlArtifactCollect {
+
+}
+
+public struct ArtifactControlArtifactCollected {
+    public let `removed`: UInt32
 }
 
 public struct AuditActorInteractiveClient {

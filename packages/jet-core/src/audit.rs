@@ -650,6 +650,7 @@ pub(crate) fn stored_setting(
 			SettingValue::Text(_) | SettingValue::Count(_),
 		)
 		| (SettingKey::UtilityAutomaticNaming, _)
+		| (SettingKey::ArtifactMaxMiB | SettingKey::ArtifactRunMiB, _)
 		| (SettingKey::GitMessageInstructions, _) => None,
 	}
 }
@@ -674,6 +675,8 @@ pub(crate) fn cleared_setting(key: SettingKey) -> Option<AuditDecision> {
 		}
 		SettingKey::DeveloperMode => Some(AuditDecision::DeveloperModeCleared),
 		SettingKey::UtilityAutomaticNaming
+		| SettingKey::ArtifactMaxMiB
+		| SettingKey::ArtifactRunMiB
 		| SettingKey::GitMessageInstructions => None,
 	}
 }

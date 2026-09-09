@@ -14,6 +14,10 @@ export type Actor = { client_id: string; type: "interactive_client" };
 
 export type ArtifactAvailability = "stored" | "run_budget_exceeded" | "artifact_size_exceeded";
 
+export type ArtifactControl = { artifact: ArtifactDescriptor; run_id: string; type: "artifact_upload" } | { type: "artifact_commit" } | { artifact: ArtifactDescriptor; type: "artifact_published" } | { sha256: Sha256Digest; type: "artifact_download" } | { artifact: ArtifactDescriptor; type: "artifact_downloading" } | { type: "artifact_cancel" } | { type: "artifact_canceled" } | { type: "artifact_collect" } | { removed: number; type: "artifact_collected" };
+
+export type ArtifactDescriptor = { sha256: Sha256Digest; size: string };
+
 export type AuditActor = { client_id: string; type: "interactive_client" } | { type: "craft_revocation" };
 
 export type AuditBreach = { breach: "head_missing" } | { breach: "head_not_in_store" } | { breach: "head_diverged" } | { breach: "record_altered"; sequence: string } | { breach: "target_altered"; sequence: string };
@@ -310,7 +314,7 @@ export type ServerHello = { kind: "challenge"; nonce: string } | { capabilities?
 
 export type ServerMessage = { id: number; kind: "remote_tool_result"; result: RemoteToolResult } | { id: number; kind: "terminal_attached" } | { id: number; kind: "terminal_resized" } | { id: number; kind: "query_result"; result: QueryResponse } | { id: number; kind: "command_result"; result: CommandResponse } | { error: WireError; id?: number | null; kind: "error" };
 
-export type SettingKey = "utility.account_binding" | "utility.content_consent" | "utility.autodelete_compilation" | "utility.git_text" | "utility.automatic_naming" | "git.auto_commit" | "git.message_instructions" | "security.audit_retention_days" | "craft.developer_mode" | "review.automatic" | "review.account_binding" | "review.cross_provider_consent";
+export type SettingKey = "artifact.max_mib" | "artifact.run_mib" | "utility.account_binding" | "utility.content_consent" | "utility.autodelete_compilation" | "utility.git_text" | "utility.automatic_naming" | "git.auto_commit" | "git.message_instructions" | "security.audit_retention_days" | "craft.developer_mode" | "review.automatic" | "review.account_binding" | "review.cross_provider_consent";
 
 export type SettingScope = { type: "plane" } | { project_id: string; type: "project" } | { conversation_id: string; type: "conversation" };
 

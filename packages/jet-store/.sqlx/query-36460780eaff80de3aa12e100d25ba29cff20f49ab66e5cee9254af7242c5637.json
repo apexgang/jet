@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT size FROM artifact_references WHERE sha256 = ?1 LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "size",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "artifact_references",
+            "name": "size"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "36460780eaff80de3aa12e100d25ba29cff20f49ab66e5cee9254af7242c5637"
+}
