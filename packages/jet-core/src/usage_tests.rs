@@ -144,12 +144,21 @@ fn observed(turn: &str, tokens: UsageTokens) -> UsageReport {
 }
 
 fn window(used: u64) -> UsageReport {
-	window_resetting_in(used, 3_600)
+	UsageReport::ProviderQuota(reported("five_hour", used, 3_600))
+}
+
+fn window_named(name: &str, used: u64) -> UsageReport {
+	UsageReport::ProviderQuota(reported(name, used, 3_600))
 }
 
 fn window_resetting_in(used: u64, seconds: u64) -> UsageReport {
-	UsageReport::ProviderQuota(QuotaReport {
-		window: "five_hour".into(),
+	UsageReport::ProviderQuota(reported("five_hour", used, seconds))
+}
+
+/// One Provider-reported window, as a Craft states it.
+fn reported(window: &str, used: u64, resets_in_seconds: u64) -> QuotaReport {
+	QuotaReport {
+		window: window.into(),
 		scope: QuotaScope::ProviderAccount,
 		measure: QuotaMeasure {
 			unit: QuotaUnit::Share,
@@ -157,10 +166,10 @@ fn window_resetting_in(used: u64, seconds: u64) -> UsageReport {
 			limit: None,
 		},
 		window_seconds: Some(18_000),
-		resets_in_seconds: Some(seconds),
+		resets_in_seconds: Some(resets_in_seconds),
 		estimation: UsageEstimation::Measured,
 		finality: UsageFinality::Interim,
-	})
+	}
 }
 
 fn tokens(input: u64, output: u64) -> UsageTokens {
@@ -285,6 +294,67 @@ async fn a_repeated_answer_keeps_its_window_fresh() {
 	assert_eq!(
 		(usage.quota_windows.len(), window.freshness.clone()),
 		(1, UsageFreshness::Fresh)
+	);
+}
+
+/// A window is confirmed by an answer about that window. A Provider that
+/// repeats one of its limits has said nothing about the others, and they
+/// go stale on their own (ADR-0023).
+#[tokio::test]
+async fn one_window_answering_does_not_refresh_another() {
+	let dir = tempfile::tempdir().unwrap();
+	let (core, clock) = start(&dir).await;
+	let run = run(&core).await;
+	let binding = bind(&core).await;
+	record(&core, &run, Some(binding), window(2_500)).await;
+	record(&core, &run, Some(binding), window_named("weekly", 4_000)).await;
+	// The Provider repeats its five-hour limit alone. The repeat is a
+	// heartbeat rather than a snapshot, and it confirms that window only.
+	clock.advance(Duration::from_secs(10 * 60));
+	record(&core, &run, Some(binding), window(2_500)).await;
+	clock.advance(Duration::from_secs(8 * 60));
+	let usage = usage(&core, UsageSelection::Binding(binding)).await;
+	assert_eq!(
+		usage
+			.quota_windows
+			.into_iter()
+			.map(|window| (window.window, window.freshness))
+			.collect::<Vec<_>>(),
+		vec![
+			("five_hour".to_owned(), UsageFreshness::Fresh),
+			("weekly".to_owned(), UsageFreshness::Stale)
+		]
+	);
+}
+
+/// A Provider may state a window length of zero, which the Craft protocol
+/// allows and which no clock can mean. It is recorded as the absent length
+/// it is: refusing it would fail the whole source batch the report arrived
+/// in and take its Run down with it.
+#[tokio::test]
+async fn a_window_of_no_stated_length_is_recorded_without_one() {
+	let dir = tempfile::tempdir().unwrap();
+	let (core, _clock) = start(&dir).await;
+	let run = run(&core).await;
+	let binding = bind(&core).await;
+	record(
+		&core,
+		&run,
+		Some(binding),
+		UsageReport::ProviderQuota(QuotaReport {
+			window_seconds: Some(0),
+			..reported("five_hour", 2_500, 3_600)
+		}),
+	)
+	.await;
+	let usage = usage(&core, UsageSelection::Binding(binding)).await;
+	assert_eq!(
+		usage
+			.quota_windows
+			.into_iter()
+			.map(|window| (window.window, window.window_seconds))
+			.collect::<Vec<_>>(),
+		vec![("five_hour".to_owned(), None)]
 	);
 }
 

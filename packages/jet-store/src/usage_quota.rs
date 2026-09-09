@@ -3,9 +3,11 @@
 //!
 //! Reads select the freshest snapshot of each window: two windows of one
 //! Account binding are separate limits and are never summed into one
-//! another. Whether the Provider answered at all is recorded beside them,
-//! so a Query can say `unreachable` instead of presenting an old window as
-//! current.
+//! another. Each window also carries when its Provider last confirmed it,
+//! so a repeated answer keeps that window fresh without keeping the rest
+//! fresh with it. Whether the Provider answered at all is recorded beside
+//! them, so a Query can say `unreachable` instead of presenting an old
+//! window as current.
 
 use uuid::Uuid;
 
@@ -87,6 +89,9 @@ pub struct UsageQuotaSnapshotRecord {
 	pub finality: UsageFinalityRecord,
 	/// When the Plane observed the response.
 	pub observed_at_unix_ms: i64,
+	/// When the Provider last confirmed this window, which is the last
+	/// time it answered about this window rather than about another one.
+	pub answered_at_unix_ms: i64,
 	/// Digest of the reported content, so an unchanged response is a
 	/// heartbeat rather than another row.
 	pub digest: [u8; 32],
@@ -95,6 +100,8 @@ pub struct UsageQuotaSnapshotRecord {
 /// The newest snapshot of one window, reduced to what deduplication needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UsageQuotaHeartbeatRecord {
+	/// The row it read, so a repeat can confirm the window it belongs to.
+	pub snapshot_id: Uuid,
 	/// Digest of the content that snapshot reported.
 	pub digest: [u8; 32],
 	/// When it was observed.
@@ -187,7 +194,8 @@ impl ReadTransaction {
 				s.provider, s.window_id, s.scope, s.model,
 				s.conversation_id, s.run_id, s.unit, s.used, s.limit_amount,
 				s.window_seconds, s.resets_at_unix_ms, s.estimation,
-				s.finality, s.observed_at_unix_ms, s.digest
+				s.finality, s.observed_at_unix_ms, s.answered_at_unix_ms,
+				s.digest
 			 FROM usage_quota_snapshots s
 			 WHERE (?1 IS NULL OR s.binding_id = ?1)
 			   AND s.rowid = (
@@ -247,6 +255,7 @@ impl ReadTransaction {
 					estimation: estimation(&row.estimation)?,
 					finality: finality(&row.finality)?,
 					observed_at_unix_ms: row.observed_at_unix_ms,
+					answered_at_unix_ms: row.answered_at_unix_ms,
 					digest: parse_bytes("digest", row.digest)?,
 				})
 			})
@@ -269,7 +278,7 @@ impl ReadTransaction {
 	) -> Result<Option<UsageQuotaHeartbeatRecord>, StoreError> {
 		let binding_id = binding_id.to_string();
 		let row = sqlx::query!(
-			"SELECT digest, observed_at_unix_ms
+			"SELECT snapshot_id, digest, observed_at_unix_ms
 			 FROM usage_quota_snapshots
 			 WHERE binding_id = ?1 AND window_id = ?2 AND model IS ?3
 			 ORDER BY observed_at_unix_ms DESC, rowid DESC
@@ -282,6 +291,7 @@ impl ReadTransaction {
 		.await?;
 		row.map(|row| {
 			Ok(UsageQuotaHeartbeatRecord {
+				snapshot_id: parse_uuid("snapshot_id", &row.snapshot_id)?,
 				digest: parse_bytes("digest", row.digest)?,
 				observed_at_unix_ms: row.observed_at_unix_ms,
 			})
@@ -357,9 +367,9 @@ impl WriteTransaction {
 				(snapshot_id, binding_id, provider, window_id, scope, model,
 				 conversation_id, run_id, unit, used, limit_amount,
 				 window_seconds, resets_at_unix_ms, estimation, finality,
-				 observed_at_unix_ms, digest)
+				 observed_at_unix_ms, answered_at_unix_ms, digest)
 			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-				 ?14, ?15, ?16, ?17)",
+				 ?14, ?15, ?16, ?17, ?18)",
 			snapshot_id,
 			binding_id,
 			snapshot.provider,
@@ -376,7 +386,34 @@ impl WriteTransaction {
 			estimation,
 			finality,
 			snapshot.observed_at_unix_ms,
+			snapshot.answered_at_unix_ms,
 			digest
+		)
+		.execute(self.connection())
+		.await?;
+		Ok(())
+	}
+
+	/// Record that the Provider confirmed one stored window again. An
+	/// unchanged response is a heartbeat rather than another snapshot, and
+	/// this is what lets it count as an answer about the window it repeats,
+	/// and about no other one (ADR-0045).
+	///
+	/// # Errors
+	///
+	/// Returns a store error when the write fails.
+	pub async fn record_usage_quota_answer(
+		&mut self,
+		snapshot_id: Uuid,
+		answered_at_unix_ms: i64,
+	) -> Result<(), StoreError> {
+		let snapshot_id = snapshot_id.to_string();
+		sqlx::query!(
+			"UPDATE usage_quota_snapshots
+			    SET answered_at_unix_ms = ?2
+			  WHERE snapshot_id = ?1 AND answered_at_unix_ms <= ?2",
+			snapshot_id,
+			answered_at_unix_ms
 		)
 		.execute(self.connection())
 		.await?;

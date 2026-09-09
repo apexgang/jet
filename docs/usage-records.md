@@ -59,11 +59,14 @@ because it moves on its own.
 
 `usage` reports what the Plane can vouch for:
 
-- A window whose Provider has not answered within 15 minutes — the
-  interval ADR-0045 bounds an idle refresh by — is **stale**: history, not
-  a current reading. Freshness follows the last time the Provider
-  answered, not the last time its answer changed, because an unchanged
-  answer is stored as a heartbeat and is still an answer.
+- A window whose Provider has not answered **about that window** within 15
+  minutes — the interval ADR-0045 bounds an idle refresh by — is **stale**:
+  history, not a current reading. Freshness follows the last answer about
+  the window itself. Not the last time that answer changed, because an
+  unchanged answer is a heartbeat against the window it repeats and is
+  still an answer; and not the last time the Provider said anything at
+  all, because a five-hour limit reported again says nothing about the
+  weekly one beside it.
 - A window whose own reset has passed is **stale** too. It describes a
   window that has already rolled over.
 - A Provider that refused after a window was read is **unreachable**, with
@@ -119,6 +122,13 @@ characters and hold no control characters, and an unreachable reason is at
 most 256. A report that is not that is refused rather than truncated
 (ASVS 1.5.2, 2.2.1, 5.3.1). A Craft asserts no time, no Account binding,
 and no Plane: the host stamps all three.
+
+A number the Craft protocol permits is never a refusal. A window's stated
+length is a duration or nothing, so a Provider reporting zero seconds — or
+a length no clock could mean — has stated none, and the record says so
+rather than rejecting the report. A Usage report arrives inside its Run's
+own source batch, and refusing a value a conformant Craft is entitled to
+send would fail that batch and take the Run down with it.
 
 ## Review stages
 

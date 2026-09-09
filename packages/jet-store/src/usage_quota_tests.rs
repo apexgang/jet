@@ -39,6 +39,7 @@ fn snapshot(
 		estimation: UsageEstimationRecord::Measured,
 		finality: UsageFinalityRecord::Interim,
 		observed_at_unix_ms,
+		answered_at_unix_ms: observed_at_unix_ms,
 		digest: [u8::try_from(used % 256).unwrap_or_default(); 32],
 	}
 }
@@ -105,6 +106,7 @@ async fn a_window_heartbeat_reads_its_newest_snapshot() {
 	let dir = tempfile::tempdir().unwrap();
 	let store = open(&dir).await;
 	let binding_id = Uuid::now_v7();
+	let newest = snapshot(binding_id, "five_hour", 42, NOW_UNIX_MS + 1_000);
 	let heartbeat = store
 		.write(async |tx| {
 			tx.record_usage_quota_snapshot(&snapshot(
@@ -114,13 +116,7 @@ async fn a_window_heartbeat_reads_its_newest_snapshot() {
 				NOW_UNIX_MS,
 			))
 			.await?;
-			tx.record_usage_quota_snapshot(&snapshot(
-				binding_id,
-				"five_hour",
-				42,
-				NOW_UNIX_MS + 1_000,
-			))
-			.await?;
+			tx.record_usage_quota_snapshot(&newest).await?;
 			tx.usage_quota_heartbeat(binding_id, "five_hour", None)
 				.await
 		})
@@ -129,9 +125,52 @@ async fn a_window_heartbeat_reads_its_newest_snapshot() {
 	assert_eq!(
 		heartbeat,
 		Some(UsageQuotaHeartbeatRecord {
+			snapshot_id: newest.snapshot_id,
 			digest: [42; 32],
 			observed_at_unix_ms: NOW_UNIX_MS + 1_000,
 		})
+	);
+}
+
+/// A repeated answer confirms the window it repeats without storing
+/// another snapshot of it, and without confirming any other window
+/// (ADR-0045).
+#[tokio::test]
+async fn an_answer_confirms_one_window_without_adding_a_snapshot() {
+	let dir = tempfile::tempdir().unwrap();
+	let store = open(&dir).await;
+	let binding_id = Uuid::now_v7();
+	let five_hour = snapshot(binding_id, "five_hour", 4_200, NOW_UNIX_MS);
+	let weekly = snapshot(binding_id, "weekly", 1_000, NOW_UNIX_MS);
+	let windows = store
+		.write(async |tx| {
+			tx.record_usage_quota_snapshot(&five_hour).await?;
+			tx.record_usage_quota_snapshot(&weekly).await?;
+			tx.record_usage_quota_answer(
+				five_hour.snapshot_id,
+				NOW_UNIX_MS + 60_000,
+			)
+			.await?;
+			// An answer older than the one already recorded never moves it
+			// backwards.
+			tx.record_usage_quota_answer(
+				five_hour.snapshot_id,
+				NOW_UNIX_MS - 1,
+			)
+			.await?;
+			tx.usage_quota_windows(Some(binding_id)).await
+		})
+		.await
+		.unwrap();
+	assert_eq!(
+		windows,
+		vec![
+			UsageQuotaSnapshotRecord {
+				answered_at_unix_ms: NOW_UNIX_MS + 60_000,
+				..five_hour
+			},
+			weekly
+		]
 	);
 }
 

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT s.snapshot_id AS \"snapshot_id!\", s.binding_id,\n\t\t\t\ts.provider, s.window_id, s.scope, s.model,\n\t\t\t\ts.conversation_id, s.run_id, s.unit, s.used, s.limit_amount,\n\t\t\t\ts.window_seconds, s.resets_at_unix_ms, s.estimation,\n\t\t\t\ts.finality, s.observed_at_unix_ms, s.digest\n\t\t\t FROM usage_quota_snapshots s\n\t\t\t WHERE (?1 IS NULL OR s.binding_id = ?1)\n\t\t\t   AND s.rowid = (\n\t\t\t\t SELECT t.rowid FROM usage_quota_snapshots t\n\t\t\t\t  WHERE t.binding_id = s.binding_id\n\t\t\t\t    AND t.window_id = s.window_id\n\t\t\t\t    AND t.model IS s.model\n\t\t\t\t  ORDER BY t.observed_at_unix_ms DESC, t.rowid DESC\n\t\t\t\t  LIMIT 1)\n\t\t\t ORDER BY s.binding_id, s.window_id, s.model",
+  "query": "SELECT s.snapshot_id AS \"snapshot_id!\", s.binding_id,\n\t\t\t\ts.provider, s.window_id, s.scope, s.model,\n\t\t\t\ts.conversation_id, s.run_id, s.unit, s.used, s.limit_amount,\n\t\t\t\ts.window_seconds, s.resets_at_unix_ms, s.estimation,\n\t\t\t\ts.finality, s.observed_at_unix_ms, s.answered_at_unix_ms,\n\t\t\t\ts.digest\n\t\t\t FROM usage_quota_snapshots s\n\t\t\t WHERE (?1 IS NULL OR s.binding_id = ?1)\n\t\t\t   AND s.rowid = (\n\t\t\t\t SELECT t.rowid FROM usage_quota_snapshots t\n\t\t\t\t  WHERE t.binding_id = s.binding_id\n\t\t\t\t    AND t.window_id = s.window_id\n\t\t\t\t    AND t.model IS s.model\n\t\t\t\t  ORDER BY t.observed_at_unix_ms DESC, t.rowid DESC\n\t\t\t\t  LIMIT 1)\n\t\t\t ORDER BY s.binding_id, s.window_id, s.model",
   "describe": {
     "columns": [
       {
@@ -180,8 +180,19 @@
         }
       },
       {
-        "name": "digest",
+        "name": "answered_at_unix_ms",
         "ordinal": 16,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "usage_quota_snapshots",
+            "name": "answered_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "digest",
+        "ordinal": 17,
         "type_info": "Blob",
         "origin": {
           "Table": {
@@ -211,8 +222,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "22c253d71069170d2dba01f127a7a327e3e60348b2a16424b79bcf296b1a7af5"
+  "hash": "832187634c8a17006948913b938e2cc9360df69593d5de8e1503e58ae50d3b24"
 }

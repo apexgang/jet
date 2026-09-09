@@ -44,7 +44,8 @@ CREATE INDEX usage_observations_by_conversation ON usage_observations (conversat
 -- by the Provider's own name for it, and reads select the freshest snapshot
 -- per window: separate windows are never summed into one another.
 -- `digest` covers the reported content alone, so an unchanged response
--- becomes a heartbeat rather than another row.
+-- becomes a heartbeat rather than another row, and moves the answer time
+-- of the row it repeats instead of adding one.
 CREATE TABLE usage_quota_snapshots (
     snapshot_id TEXT PRIMARY KEY NOT NULL CHECK (length(snapshot_id) = 36),
     binding_id TEXT NOT NULL CHECK (length(binding_id) = 36),
@@ -66,6 +67,12 @@ CREATE TABLE usage_quota_snapshots (
     estimation TEXT NOT NULL CHECK (estimation IN ('measured', 'estimated')),
     finality TEXT NOT NULL CHECK (finality IN ('interim', 'final')),
     observed_at_unix_ms INTEGER NOT NULL,
+    -- When the Provider last confirmed this window, which is what a Query
+    -- calls fresh. An unchanged response is a heartbeat that stores no new
+    -- row, so it moves this instead: a window is confirmed by an answer
+    -- about that window and never by an answer about another one of the
+    -- same binding (ADR-0023, ADR-0045).
+    answered_at_unix_ms INTEGER NOT NULL CHECK (answered_at_unix_ms >= observed_at_unix_ms),
     digest BLOB NOT NULL CHECK (length(digest) = 32),
     CHECK (unit <> 'share' OR (limit_amount = 10000 AND used <= 10000))
 );

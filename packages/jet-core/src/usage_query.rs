@@ -142,35 +142,29 @@ fn quota(
 /// Three things can make it not. A Provider that refused after the window
 /// was read is unreachable rather than current. A window whose own reset
 /// has passed describes a window that has already rolled over. And a
-/// Provider that has not answered within the interval an idle Plane
-/// refreshes on is history (ADR-0023, ADR-0045). Freshness follows the
-/// last time the Provider *answered*, not the last time its answer
-/// changed: an unchanged answer is stored as a heartbeat, and it is still
-/// an answer.
+/// window the Provider has not confirmed within the interval an idle
+/// Plane refreshes on is history (ADR-0023, ADR-0045).
+///
+/// Freshness follows the last time the Provider answered *about this
+/// window*, not the last time its answer changed and not the last time it
+/// answered about another window of the same binding. An unchanged answer
+/// is stored as a heartbeat against the window it repeats, and it is still
+/// an answer; an answer about a five-hour limit says nothing about a
+/// weekly one.
 fn freshness(
 	reach: Option<&UsageProviderReachRecord>,
 	snapshot: &UsageQuotaSnapshotRecord,
 	now_unix_ms: i64,
 ) -> UsageFreshness {
-	let answered_at = match reach {
-		Some(record) => match &record.reach {
-			ProviderReachRecord::Unreachable { reason }
-				if record.observed_at_unix_ms
-					>= snapshot.observed_at_unix_ms =>
-			{
-				return UsageFreshness::Unreachable {
-					reason: reason.clone(),
-				};
-			}
-			ProviderReachRecord::Unreachable { .. } => {
-				snapshot.observed_at_unix_ms
-			}
-			ProviderReachRecord::Reachable => {
-				snapshot.observed_at_unix_ms.max(record.observed_at_unix_ms)
-			}
-		},
-		None => snapshot.observed_at_unix_ms,
-	};
+	let answered_at = snapshot.answered_at_unix_ms;
+	if let Some(record) = reach
+		&& let ProviderReachRecord::Unreachable { reason } = &record.reach
+		&& record.observed_at_unix_ms >= answered_at
+	{
+		return UsageFreshness::Unreachable {
+			reason: reason.clone(),
+		};
+	}
 	let rolled_over = snapshot
 		.resets_at_unix_ms
 		.is_some_and(|resets_at| resets_at <= now_unix_ms);

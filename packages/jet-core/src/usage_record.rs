@@ -139,9 +139,10 @@ async fn window(
 	tx: &mut WriteTransaction,
 	run: &Run,
 	binding: Option<AccountBindingId>,
-	report: QuotaReport,
+	mut report: QuotaReport,
 	now_unix_ms: i64,
 ) -> Result<Option<UsageSource>, CoreError> {
+	report.window_seconds = window_length(report.window_seconds);
 	require_text(
 		"usage.window_unsupported",
 		"a Provider window name",
@@ -180,6 +181,12 @@ async fn window(
 		&& now_unix_ms.saturating_sub(previous.observed_at_unix_ms)
 			< USAGE_REFRESH_MS
 	{
+		// The Provider said the same thing again. That is not a new
+		// snapshot, but it is an answer, and it answers about this window
+		// alone: the other windows of this binding were not confirmed by
+		// it and go stale on their own.
+		tx.record_usage_quota_answer(previous.snapshot_id, now_unix_ms)
+			.await?;
 		return Ok(None);
 	}
 	let scope = match report.scope {
@@ -207,6 +214,7 @@ async fn window(
 		estimation: estimation_record(report.estimation),
 		finality: finality_record(report.finality),
 		observed_at_unix_ms: now_unix_ms,
+		answered_at_unix_ms: now_unix_ms,
 		digest,
 	})
 	.await?;
@@ -287,6 +295,15 @@ fn content_digest(
 	hash.update([u8::from(report.estimation == UsageEstimation::Estimated)]);
 	hash.update([u8::from(report.finality == UsageFinality::Final)]);
 	hash.finalize().into()
+}
+
+/// How long the window lasts, as a length a record can carry. A Provider
+/// that states zero seconds, or a number no clock could mean, has stated
+/// no length, and is recorded as having stated none. The Craft protocol
+/// allows it to send either, so refusing one here would fail the whole
+/// source batch the report arrived in and take its Run down with it.
+fn window_length(seconds: Option<u64>) -> Option<u64> {
+	seconds.filter(|seconds| *seconds > 0 && i64::try_from(*seconds).is_ok())
 }
 
 /// Refuses a measure a Provider cannot have reported, and fixes the fixed
