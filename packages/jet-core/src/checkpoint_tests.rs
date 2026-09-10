@@ -65,7 +65,10 @@ async fn completed_turn_preserves_its_diff_after_later_edits_and_restart() {
 		panic!("Diff")
 	};
 	assert_eq!((&diff.before.commit, &diff.after.commit), (&head, &head));
-	assert!(diff.patch.contains("-# Jet\n+Turn one\n"), "{}", diff.patch);
+	assert!(
+		diff.patch.contains("-# Jet\n+Turn one\n"),
+		"checkpoint diff must contain the first turn's edit"
+	);
 	assert_eq!(
 		diff.files
 			.iter()

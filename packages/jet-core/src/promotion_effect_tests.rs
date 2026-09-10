@@ -33,7 +33,7 @@ async fn promote(
 		.await
 		.unwrap();
 	let CommandOutcome::WorkspacePromotionRecorded(promotion) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::WorkspacePromotionRecorded");
 	};
 	promotion
 }

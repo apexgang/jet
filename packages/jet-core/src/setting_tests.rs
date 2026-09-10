@@ -25,7 +25,7 @@ async fn conversation(core: &Core) -> SettingScope {
 		.await
 		.unwrap();
 	let CommandOutcome::ConversationCreated(conversation) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::ConversationCreated");
 	};
 	SettingScope::Conversation {
 		conversation_id: conversation.conversation_id,
@@ -60,7 +60,7 @@ async fn resolve(
 		.query(&actor(), Query::Settings { scope, selection })
 		.await?;
 	let QueryResult::Settings(snapshot) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Settings");
 	};
 	assert_eq!(snapshot.scope, scope);
 	Ok(snapshot.settings)
@@ -71,11 +71,11 @@ async fn resolve_one(
 	scope: SettingScope,
 	key: SettingKey,
 ) -> ResolvedSetting {
-	let mut settings = resolve(core, scope, SettingSelection::Key(key))
+	let settings = resolve(core, scope, SettingSelection::Key(key))
 		.await
 		.unwrap();
 	assert_eq!(settings.len(), 1);
-	settings.remove(0)
+	settings.into_iter().next().expect("one resolved setting")
 }
 
 fn resolved(
@@ -519,7 +519,7 @@ async fn setting_changes_reach_the_event_journal() {
 		.await
 		.unwrap();
 	let QueryResult::Events(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Events");
 	};
 	assert_eq!(
 		page.events

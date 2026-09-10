@@ -42,7 +42,7 @@ async fn register_as(
 		)
 		.await?;
 	let CommandOutcome::ProjectRegistered(project) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::ProjectRegistered");
 	};
 	Ok(project)
 }
@@ -55,7 +55,7 @@ async fn refusal(core: &Core, path: &Path) -> (ErrorCategory, String) {
 async fn projects(core: &Core) -> Vec<Project> {
 	let result = core.query(&actor(), Query::Projects).await.unwrap();
 	let QueryResult::Projects(list) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Projects");
 	};
 	list.projects
 }
@@ -71,7 +71,7 @@ async fn events(core: &Core) -> Vec<EventKind> {
 		.await
 		.unwrap();
 	let QueryResult::Events(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Events");
 	};
 	page.events.into_iter().map(|event| event.kind).collect()
 }
@@ -87,7 +87,7 @@ async fn audit(core: &Core) -> Vec<(String, String, AuditRisk, AuditOutcome)> {
 		.await
 		.unwrap();
 	let QueryResult::SecurityAudit(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::SecurityAudit");
 	};
 	page.entries
 		.into_iter()
@@ -389,7 +389,7 @@ async fn preview(
 		)
 		.await?;
 	let QueryResult::ProjectPreview(preview) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::ProjectPreview");
 	};
 	Ok(preview)
 }

@@ -254,8 +254,9 @@ async fn serve(listener: LocalListener, core: &Arc<Core>) -> ExitCode {
 						crate::connection::serve(core, stream, draining, Arc::new(permit)).await;
 					});
 				}
-				Err(IpcError::PeerRejected { uid }) => {
-					eprintln!("jetd: refused local connection from uid {uid}");
+				Err(IpcError::PeerRejected { .. }) => {
+					// ASVS 16.2.5: record the rejection without the peer's identity.
+					eprintln!("jetd: refused local connection from a different user");
 				}
 				Err(error) => {
 					eprintln!("jetd: accept failed: {error}");

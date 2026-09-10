@@ -44,7 +44,7 @@ async fn external_conversations(core: &Core) -> ExternalConversationList {
 		.await
 		.unwrap();
 	let QueryResult::ExternalConversations(list) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::ExternalConversations");
 	};
 	list
 }
@@ -63,7 +63,7 @@ async fn import(
 		)
 		.await?;
 	let CommandOutcome::ConversationImported(imported) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::ConversationImported");
 	};
 	Ok(imported)
 }
@@ -84,7 +84,7 @@ async fn resume(
 		)
 		.await?;
 	let CommandOutcome::ConversationCreated(conversation) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::ConversationCreated");
 	};
 	Ok(conversation)
 }
@@ -212,7 +212,7 @@ async fn an_import_is_metadata_that_cannot_start_a_managed_run() {
 	let conversations =
 		core.query(&actor(), Query::Conversations).await.unwrap();
 	let QueryResult::Conversations(conversations) = conversations else {
-		panic!("unexpected result {conversations:?}");
+		panic!("expected QueryResult::Conversations");
 	};
 
 	assert_eq!(

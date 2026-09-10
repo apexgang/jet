@@ -22,7 +22,7 @@ async fn set_gate(
 async fn pairing(core: &Core) -> PairingSnapshot {
 	let result = core.query(&actor(), Query::Pairing).await.unwrap();
 	let QueryResult::Pairing(snapshot) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Pairing");
 	};
 	snapshot
 }
@@ -38,7 +38,7 @@ async fn events(core: &Core) -> Vec<EventKind> {
 		.await
 		.unwrap();
 	let QueryResult::Events(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Events");
 	};
 	page.events.into_iter().map(|event| event.kind).collect()
 }
@@ -54,7 +54,7 @@ async fn decisions(core: &Core) -> Vec<(String, AuditRisk, AuditOutcome)> {
 		.await
 		.unwrap();
 	let QueryResult::SecurityAudit(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::SecurityAudit");
 	};
 	page.entries
 		.into_iter()

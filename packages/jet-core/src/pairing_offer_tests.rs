@@ -94,7 +94,7 @@ async fn open_as(
 		disclosure,
 	} = outcome
 	else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::PairingOpened");
 	};
 	Ok((pending, disclosure))
 }
@@ -113,7 +113,7 @@ async fn claim(core: &Core, secret: &str) -> Result<CommandOutcome, CoreError> {
 async fn pairing(core: &Core) -> crate::PairingSnapshot {
 	let result = core.query(&actor(), Query::Pairing).await.unwrap();
 	let QueryResult::Pairing(snapshot) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Pairing");
 	};
 	snapshot
 }
@@ -129,7 +129,7 @@ async fn events(core: &Core) -> Vec<EventKind> {
 		.await
 		.unwrap();
 	let QueryResult::Events(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Events");
 	};
 	page.events.into_iter().map(|event| event.kind).collect()
 }
@@ -145,7 +145,7 @@ async fn decisions(core: &Core) -> Vec<(String, AuditRisk, AuditOutcome)> {
 		.await
 		.unwrap();
 	let QueryResult::SecurityAudit(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::SecurityAudit");
 	};
 	page.entries
 		.into_iter()
@@ -155,14 +155,14 @@ async fn decisions(core: &Core) -> Vec<(String, AuditRisk, AuditOutcome)> {
 
 fn manual_code(disclosure: &PairingDisclosure) -> String {
 	let PairingDisclosure::ManualCode { code } = disclosure else {
-		panic!("unexpected disclosure {disclosure:?}");
+		panic!("expected PairingDisclosure::ManualCode");
 	};
 	code.clone()
 }
 
 fn qr_payload(disclosure: &PairingDisclosure) -> String {
 	let PairingDisclosure::QrPayload { payload } = disclosure else {
-		panic!("unexpected disclosure {disclosure:?}");
+		panic!("expected PairingDisclosure::QrPayload");
 	};
 	payload.clone()
 }
@@ -186,7 +186,7 @@ async fn a_manual_code_is_eight_digits_a_person_can_read_out() {
 			code.chars().filter(char::is_ascii_digit).count()
 		),
 		(4, 4, 8),
-		"unexpected code shape {code:?}"
+		"expected two groups of four decimal digits"
 	);
 }
 
@@ -211,7 +211,7 @@ async fn a_qr_payload_carries_the_endpoint_and_a_one_time_token() {
 	let [scheme, version, token, endpoint] =
 		payload.splitn(4, ':').collect::<Vec<_>>()[..]
 	else {
-		panic!("unexpected payload {payload:?}");
+		panic!("expected four QR payload components");
 	};
 	assert_eq!(
 		(
@@ -315,14 +315,14 @@ async fn claiming_an_offer_leaves_both_sides_a_string_to_compare() {
 	let outcome = claim(&core, &manual_code(&disclosure)).await.unwrap();
 
 	let CommandOutcome::PairingClaimed { pending, challenge } = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::PairingClaimed");
 	};
 	let PairingProgress::AwaitingConfirmation {
 		client_id,
 		authentication_string,
 	} = pending.progress.clone()
 	else {
-		panic!("unexpected progress {:?}", pending.progress);
+		panic!("expected PairingProgress::AwaitingConfirmation");
 	};
 	let digits = authentication_string.0.replace('-', "");
 	assert_eq!(
@@ -444,7 +444,7 @@ async fn a_claim_gets_its_own_window_to_be_confirmed_in() {
 	let outcome = claim(&core, &manual_code(&disclosure)).await.unwrap();
 
 	let CommandOutcome::PairingClaimed { pending, .. } = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::PairingClaimed");
 	};
 	assert_eq!(
 		pending.expires_at,

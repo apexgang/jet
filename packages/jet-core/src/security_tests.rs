@@ -104,7 +104,7 @@ async fn a_degraded_plane_refuses_to_change_trust_and_keeps_working() {
 		.await
 		.unwrap();
 	let QueryResult::SecurityAudit(page) = readable else {
-		panic!("unexpected result {readable:?}");
+		panic!("expected QueryResult::SecurityAudit");
 	};
 
 	assert_eq!(

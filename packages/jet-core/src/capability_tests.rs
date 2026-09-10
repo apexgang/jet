@@ -77,7 +77,7 @@ async fn capabilities(
 		.await
 		.unwrap();
 	let QueryResult::Capabilities(snapshot) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Capabilities");
 	};
 	snapshot
 }
@@ -93,10 +93,14 @@ async fn auto_commit(core: &Core, scope: SettingScope) -> ResolvedSetting {
 		)
 		.await
 		.unwrap();
-	let QueryResult::Settings(mut snapshot) = result else {
-		panic!("unexpected result {result:?}");
+	let QueryResult::Settings(snapshot) = result else {
+		panic!("expected QueryResult::Settings");
 	};
-	snapshot.settings.remove(0)
+	snapshot
+		.settings
+		.into_iter()
+		.next()
+		.expect("auto-commit setting")
 }
 
 async fn enable_auto_commit(
