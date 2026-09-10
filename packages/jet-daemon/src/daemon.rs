@@ -141,11 +141,10 @@ pub(crate) async fn run(
 		loop {
 			if let Err(error) = utility_core.perform_utilities().await {
 				eprintln!("jetd: cannot settle Utility work: {error}");
+				tokio::time::sleep(Duration::from_secs(5)).await;
+				continue;
 			}
-			tokio::select! {
-				() = utility_core.wait_for_utility_work() => {},
-				() = tokio::time::sleep(Duration::from_secs(5)) => {},
-			}
+			utility_core.wait_for_utility_work().await;
 		}
 	});
 	let recovery_core = Arc::clone(&core);
@@ -160,32 +159,54 @@ pub(crate) async fn run(
 	});
 	let recovery = tokio::spawn(async move {
 		loop {
-			tokio::time::sleep(Duration::from_secs(1)).await;
+			let mut retry = false;
 			if let Err(error) = recovery_core.reconcile_crafts().await {
+				retry = true;
 				eprintln!("jetd: cannot reconcile Crafts: {error}");
 			}
 
 			if let Err(error) =
 				recovery_core.perform_craft_installations().await
 			{
+				retry = true;
 				eprintln!(
 					"jetd: cannot reconcile Craft installations: {error}"
 				);
 			}
 			if let Err(error) = recovery_core.perform_extension_changes().await
 			{
+				retry = true;
 				eprintln!(
 					"jetd: cannot apply native extension changes: {error}"
 				);
 			}
 			if let Err(error) = recovery_core.perform_schedules().await {
+				retry = true;
 				eprintln!("jetd: cannot advance schedules: {error}");
 			}
 			if let Err(error) = recovery_core.perform_terminals().await {
+				retry = true;
 				eprintln!("jetd: cannot recover terminals: {error}");
 			}
 			if let Err(error) = recovery_core.recover_runs().await {
+				retry = true;
 				eprintln!("jetd: cannot recover executions: {error}");
+			}
+			if let Err(error) = recovery_core.constrain_child_work().await {
+				retry = true;
+				eprintln!("jetd: cannot apply child Energy policy: {error}");
+			}
+			// Sweep once on startup, including durable extension/install work that
+			// has no active Run or schedule to supply the first wakeup.
+			if retry {
+				tokio::time::sleep(Duration::from_secs(1)).await;
+			} else if let Err(error) =
+				recovery_core.wait_for_maintenance().await
+			{
+				eprintln!(
+					"jetd: cannot determine maintenance deadline: {error}"
+				);
+				tokio::time::sleep(Duration::from_secs(1)).await;
 			}
 		}
 	});

@@ -122,6 +122,17 @@ fn quote(text: &str) -> String {
 	format!("'{}'", text.replace('\'', "'\\''"))
 }
 
+fn record_child_budget(max_children: Option<u32>) {
+	let manifest = std::path::PathBuf::from(
+		std::env::var_os("JET_FAKE_MANIFEST").unwrap(),
+	);
+	std::fs::write(
+		manifest.with_extension("energy"),
+		json!(max_children).to_string(),
+	)
+	.unwrap();
+}
+
 #[tokio::test]
 #[ignore = "invoked as a real out-of-process Craft"]
 async fn fake_craft_process() {
@@ -219,7 +230,11 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 	let resume = connection.hello().resume.clone();
 	let fork = connection.hello().fork.clone();
 	let (mut receiver, mut sender) = connection.split();
-	let first = receiver.receive().await.unwrap();
+	let mut first = receiver.receive().await.unwrap();
+	while let CraftCommand::ConstrainSubagents { max_children } = first {
+		record_child_budget(max_children);
+		first = receiver.receive().await.unwrap();
+	}
 	let (remote_selection, first) =
 		if let CraftCommand::ConfigureRemoteTools { selection } = first {
 			(Some(selection), receiver.receive().await.unwrap())
@@ -367,6 +382,10 @@ async fn execution(stream: UnixStream, specification: CraftSpecification) {
 	let (commands, mut requests) = tokio::sync::mpsc::channel(8);
 	tokio::spawn(async move {
 		while let Ok(command) = receiver.receive().await {
+			if let CraftCommand::ConstrainSubagents { max_children } = command {
+				record_child_budget(max_children);
+				continue;
+			}
 			if commands.send(command).await.is_err() {
 				break;
 			}

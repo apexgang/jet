@@ -1,5 +1,11 @@
 use pretty_assertions::assert_eq;
 
+#[path = "energy_transition_tests.rs"]
+mod energy_transition_tests;
+
+#[path = "energy_tests.rs"]
+mod energy_tests;
+
 use crate::test_support::{
 	actor, conversation_snapshot, events, register_repository, request,
 };
