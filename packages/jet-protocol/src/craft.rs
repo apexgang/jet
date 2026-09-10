@@ -58,6 +58,12 @@ pub enum CraftAction {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CraftCommand {
+	/// Pause new native children under energy pressure, or restore native policy
+	/// (Craft 1.9, subagents_limit). Never terminate an existing child.
+	ConstrainSubagents {
+		/// Zero blocks new child work; null restores the native policy.
+		max_children: Option<u32>,
+	},
 	/// Pinned remote destinations and honest capability report (Craft 1.6).
 	ConfigureRemoteTools {
 		/// Origin and authorized destinations.

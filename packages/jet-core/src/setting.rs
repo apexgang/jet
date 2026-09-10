@@ -109,6 +109,14 @@ impl SettingScopeKind {
 /// A Setting this core understands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SettingKey {
+	/// Plane-wide admission ceiling for concurrent managed work.
+	EnergyConcurrency,
+	/// Reduced ceiling while the Plane is power constrained; zero pauses new work.
+	EnergyLowPowerConcurrency,
+	/// Explicitly constrain power regardless of the operating system observation.
+	EnergyConstrained,
+	/// Visible, opt-in permission for foreground user work to exceed the ceiling.
+	EnergyForegroundOverride,
 	/// Maximum ingested Artifact size in MiB.
 	ArtifactMaxMiB,
 	/// Newly ingested Artifact bytes per Run in MiB.
@@ -173,7 +181,7 @@ struct Catalog {
 }
 
 /// Every Setting this core resolves, in the order a snapshot reports them.
-const CATALOG: [Catalog; 14] = [
+const CATALOG: [Catalog; 18] = [
 	Catalog {
 		key: SettingKey::UtilityAutomaticNaming,
 		spelling: "utility.automatic_naming",
@@ -271,6 +279,30 @@ const CATALOG: [Catalog; 14] = [
 		spelling: "artifact.run_mib",
 		scopes: &[SettingScopeKind::Plane],
 		built_in: BuiltIn::Count(2048),
+	},
+	Catalog {
+		key: SettingKey::EnergyConcurrency,
+		spelling: "energy.concurrency",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Count(8),
+	},
+	Catalog {
+		key: SettingKey::EnergyLowPowerConcurrency,
+		spelling: "energy.low_power_concurrency",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Count(1),
+	},
+	Catalog {
+		key: SettingKey::EnergyConstrained,
+		spelling: "energy.constrained",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Flag(false),
+	},
+	Catalog {
+		key: SettingKey::EnergyForegroundOverride,
+		spelling: "energy.foreground_override",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Flag(false),
 	},
 ];
 

@@ -276,6 +276,7 @@ impl CapabilityProbe for FixedProbe {
 /// A Plane with every tool, a reachable credential store, and one Craft.
 pub(crate) fn equipped() -> ObservedCapabilities {
 	ObservedCapabilities {
+		power: jet_runtime::PowerState::Normal,
 		platform: Platform {
 			operating_system: "linux",
 			architecture: "aarch64",
@@ -290,6 +291,7 @@ pub(crate) fn equipped() -> ObservedCapabilities {
 			kind: CredentialStoreKind::SecretService,
 		},
 		crafts: vec![InstalledCraft {
+			limits_subagents: false,
 			craft: CraftId("jet-craft-codex".into()),
 			version: "0.2.0".into(),
 			harnesses: vec![HarnessId("codex".into())],

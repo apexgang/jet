@@ -308,6 +308,10 @@ pub(crate) async fn connect(
 		return Err(RunRecoveryError::Unavailable);
 	}
 	Ok(Box::new(RunConnection {
+		limits_subagents: crate::run_craft::Contract::of(&plan.craft)
+			.map_err(|_| RunRecoveryError::Unsafe)?
+			.limits_subagents(),
+		child_work: tokio::sync::Mutex::new(None),
 		broker: crate::no_visa_broker::Broker::prepare(processes, &plan, id)
 			.map_err(|_| RunRecoveryError::Unavailable)?,
 		craft_minor: contract.craft_protocol.minor,

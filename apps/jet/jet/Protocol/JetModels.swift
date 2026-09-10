@@ -125,6 +125,7 @@ public struct CapabilitySnapshot {
     public let `harnesses`: [String]
     public let `observed_at_unix_ms`: Int64
     public let `platform`: Platform
+    public let `resource_budgets`: ResourceBudgets?
 }
 
 public struct ChangeArtifact {
@@ -630,6 +631,7 @@ public struct ImportedConversation {
 public struct InstalledCraft {
     public let `craft_id`: String
     public let `harnesses`: [String]
+    public let `subagent_control`: SubagentControl?
     public let `version`: String
 }
 
@@ -790,6 +792,12 @@ public struct PlaneUsage {
 public struct Platform {
     public let `architecture`: String
     public let `operating_system`: String
+}
+
+public enum PowerState: String {
+    case `normal` = "normal"
+    case `constrained` = "constrained"
+    case `unavailable` = "unavailable"
 }
 
 public struct Project {
@@ -1040,6 +1048,15 @@ public struct ResolvedSetting {
     public let `value`: SettingValue
 }
 
+public struct ResourceBudgets {
+    public let `craft_rss_mib`: UInt32
+    public let `helper_rss_mib`: UInt32
+    public let `idle_cpu_millicores`: UInt32
+    public let `idle_window_seconds`: UInt32
+    public let `jetd_rss_mib`: UInt32
+    public let `power`: PowerState
+}
+
 public enum RestartMetadata {
     case `cursor_expired`(RestartMetadataCursorExpired)
     case `cursor_ahead`(RestartMetadataCursorAhead)
@@ -1187,6 +1204,10 @@ public enum ServerMessage {
 }
 
 public enum SettingKey: String {
+    case `energy.concurrency` = "energy.concurrency"
+    case `energy.low_power_concurrency` = "energy.low_power_concurrency"
+    case `energy.constrained` = "energy.constrained"
+    case `energy.foreground_override` = "energy.foreground_override"
     case `artifact.max_mib` = "artifact.max_mib"
     case `artifact.run_mib` = "artifact.run_mib"
     case `utility.account_binding` = "utility.account_binding"
@@ -1238,6 +1259,11 @@ public enum StreamControl {
     case `terminal_gap`(StreamControlTerminalGap)
     case `terminal_finished`(StreamControlTerminalFinished)
     case `artifact_finished`(StreamControlArtifactFinished)
+}
+
+public enum SubagentControl: String {
+    case `monitor_only` = "monitor_only"
+    case `native_limits` = "native_limits"
 }
 
 public enum TerminalState: String {
@@ -2522,6 +2548,7 @@ public struct QueryResponseCapabilities {
     public let `harnesses`: [String]
     public let `observed_at_unix_ms`: Int64
     public let `platform`: Platform
+    public let `resource_budgets`: ResourceBudgets?
 }
 
 public struct QueryResponseAccountBindings {

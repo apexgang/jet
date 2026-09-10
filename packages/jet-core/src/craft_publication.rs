@@ -449,6 +449,9 @@ fn scan_installed(home: &Path) -> Vec<crate::InstalledCraft> {
 			continue;
 		}
 		installed.push(crate::InstalledCraft {
+			limits_subagents: crate::craft_specification::limits_subagents(
+				&manifest.specification,
+			),
 			craft: crate::CraftId(manifest.specification.id),
 			version: manifest.version,
 			harnesses: vec![crate::HarnessId(manifest.specification.harness)],

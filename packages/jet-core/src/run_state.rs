@@ -84,6 +84,8 @@ impl Core {
             Ok::<_, CoreError>(terminal && state.partial_source.count == 0)
         }).await?;
 		if terminal {
+			self.turn_wake.send_replace(());
+			self.maintenance_work.notify_one();
 			self.run_work.notify_one();
 		}
 		Ok(())
@@ -113,6 +115,8 @@ impl Core {
 			})
 			.await?;
 		if terminal {
+			self.turn_wake.send_replace(());
+			self.maintenance_work.notify_one();
 			self.run_work.notify_one();
 		}
 		Ok(())

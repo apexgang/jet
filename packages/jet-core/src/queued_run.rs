@@ -79,7 +79,7 @@ impl Core {
 				{
 					return Ok(());
 				}
-				prepare(tx, id, plan, self.now_unix_ms()).await
+				prepare(self, tx, id, plan, self.now_unix_ms()).await
 			})
 			.await
 	}
@@ -122,6 +122,7 @@ async fn continuation(
 }
 
 async fn prepare(
+	core: &Core,
 	tx: &mut WriteTransaction,
 	id: ConversationId,
 	mut plan: LaunchPlan,
@@ -133,6 +134,13 @@ async fn prepare(
 		selection.binding(tx).await?;
 	}
 	let mut queue = turn_queue::load(tx, id).await?;
+	plan.child_work = crate::energy::admit(
+		core,
+		tx,
+		queue.entries[0].turn.source,
+		crate::energy::Admission::NewRun,
+	)
+	.await?;
 	let actor = Actor::InteractiveClient {
 		client_id: queue.entries[0].turn.client_id,
 	};

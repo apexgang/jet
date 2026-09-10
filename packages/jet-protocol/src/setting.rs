@@ -29,6 +29,19 @@ pub enum SettingScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum SettingKey {
+	/// Maximum simultaneous managed work.
+	#[serde(rename = "energy.concurrency")]
+	EnergyConcurrency,
+	/// Reduced admission ceiling under power constraints.
+	#[serde(rename = "energy.low_power_concurrency")]
+	EnergyLowPowerConcurrency,
+	/// Force the reduced budget regardless of power observation.
+	#[serde(rename = "energy.constrained")]
+	EnergyConstrained,
+	/// Explicitly allow foreground user work above the budget.
+	#[serde(rename = "energy.foreground_override")]
+	EnergyForegroundOverride,
+
 	/// Plane-wide maximum ingested Artifact size in MiB.
 	#[serde(rename = "artifact.max_mib")]
 	ArtifactMaxMiB,

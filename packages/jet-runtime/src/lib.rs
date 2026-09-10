@@ -10,6 +10,8 @@ mod home;
 mod ipc;
 mod lock;
 mod no_visa;
+mod power;
+pub use power::{PowerState, observe_power};
 
 pub use execution::{
 	execution_boot_identity, execution_digest, execution_process_identity,

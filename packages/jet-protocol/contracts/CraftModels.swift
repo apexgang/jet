@@ -50,6 +50,7 @@ public struct CraftApprovalRequest {
 }
 
 public enum CraftCommand {
+    case `constrain_subagents`(CraftCommandConstrainSubagents)
     case `configure_remote_tools`(CraftCommandConfigureRemoteTools)
     case `remote_tool_result`(CraftCommandRemoteToolResult)
     case `recover`(CraftCommandRecover)
@@ -537,6 +538,10 @@ public struct CraftActionInvoke {
 public struct CraftActionApproval {
     public let `decision`: CraftApprovalDecision
     public let `request_id`: String
+}
+
+public struct CraftCommandConstrainSubagents {
+    public let `max_children`: UInt32?
 }
 
 public struct CraftCommandConfigureRemoteTools {

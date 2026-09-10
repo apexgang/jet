@@ -26,6 +26,7 @@ fn observed_at() -> SystemTime {
 fn equipped_snapshot() -> CapabilitySnapshot {
 	let observed = equipped();
 	CapabilitySnapshot {
+		power: jet_runtime::PowerState::Normal,
 		observed_at: observed_at(),
 		core_version: CORE_VERSION,
 		platform: observed.platform,

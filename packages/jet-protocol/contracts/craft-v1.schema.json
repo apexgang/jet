@@ -352,6 +352,28 @@
       "description": "Host-to-Craft Commands, admitted by Jet before crossing this boundary.",
       "oneOf": [
         {
+          "description": "Pause new native children under energy pressure, or restore native policy\n(Craft 1.9, subagents_limit). Never terminate an existing child.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "constrain_subagents"
+            },
+            "max_children": {
+              "description": "Zero blocks new child work; null restores the native policy.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
           "description": "Pinned remote destinations and honest capability report (Craft 1.6).",
           "type": "object",
           "properties": {

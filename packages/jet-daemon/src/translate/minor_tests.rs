@@ -63,6 +63,7 @@ fn resolved() -> SettingSnapshot {
 /// A Plane observed once, with every tool the core looks for missing.
 fn observed() -> CapabilitySnapshot {
 	CapabilitySnapshot {
+		power: jet_runtime::PowerState::Normal,
 		observed_at: UNIX_EPOCH + Duration::from_secs(1),
 		core_version: "0.2.0",
 		platform: Platform {
@@ -208,4 +209,35 @@ fn a_usage_event_reaches_only_a_minor_that_names_it() {
 		),
 		(false, true)
 	);
+}
+
+#[test]
+fn energy_reporting_requires_the_negotiated_minor() {
+	let mut source = observed();
+	source.crafts = vec![jet_core::InstalledCraft {
+		limits_subagents: true,
+		craft: jet_core::CraftId("native".into()),
+		version: "1".into(),
+		harnesses: vec![jet_core::HarnessId("native".into())],
+	}];
+	let old = serde_json::to_value(capability::snapshot(
+		source.clone(),
+		wire::ENERGY_MINOR - 1,
+	))
+	.unwrap();
+	let new =
+		serde_json::to_value(capability::snapshot(source, wire::ENERGY_MINOR))
+			.unwrap();
+	assert!(old.get("resource_budgets").is_none());
+	assert!(old["crafts"][0].get("subagent_control").is_none());
+	assert_eq!(new["crafts"][0]["subagent_control"], "native_limits");
+	let mut source = resolved();
+	source.settings.push(ResolvedSetting {
+		key: SettingKey::EnergyForegroundOverride,
+		value: SettingValue::Flag(true),
+		source: SettingSource::BuiltIn,
+	});
+	let old = setting::snapshot(source.clone(), wire::ENERGY_MINOR - 1);
+	let new = setting::snapshot(source, wire::ENERGY_MINOR);
+	assert_eq!(new.settings.len(), old.settings.len() + 1);
 }

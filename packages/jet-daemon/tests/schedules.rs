@@ -74,3 +74,33 @@ async fn wait_file(path: &std::path::Path, expected: &str) {
 		tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 	}
 }
+
+#[tokio::test]
+async fn an_idle_plane_wakes_at_a_new_schedule_deadline() {
+	tokio::time::timeout(std::time::Duration::from_secs(12), async {
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let daemon = start_jetd(&dir.path().join("jet")).await;
+        let owner = Uuid::new_v4();
+        let client = connect(&daemon, owner).await;
+        let conversation = client.create_conversation(Uuid::now_v7(), jet_protocol::RetentionPolicy::Retain).await.unwrap();
+        let id = conversation.conversation_id;
+        let due = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 3;
+        let seconds = due % 86400;
+        let local_time = format!("{:02}:{:02}:{:02}", seconds / 3600, seconds / 60 % 60, seconds % 60);
+        let mut wire = connect_raw(&daemon, owner).await;
+        wire.send(&json!({"kind":"command","id":1,"command_id":Uuid::now_v7(),"command":{"type":"create_schedule","conversation_id":id,"time_zone":"UTC","local_time":local_time,"prompt":"Continue"}})).await;
+        let created: Value = wire.receive().await;
+        assert_eq!(created["kind"], "command_result", "{created}");
+        loop {
+            let queue = client.turn_queue(id).await.unwrap();
+            if !queue.turns.is_empty() {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                assert!((due..=due + 2).contains(&now), "schedule missed its deadline");
+                assert_eq!(queue.turns.iter().map(|turn| (turn.source, turn.state)).collect::<Vec<_>>(),
+                    vec![(jet_protocol::TurnSource::Schedule, jet_protocol::TurnState::Queued)]);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }).await.unwrap();
+}

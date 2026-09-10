@@ -58,6 +58,20 @@ impl Core {
 				{
 					return Ok(None);
 				}
+				let child_work = match crate::energy::admit(
+					self,
+					tx,
+					queue.entries[0].turn.source,
+					crate::energy::Admission::ExistingRun(run_id),
+				)
+				.await
+				{
+					Ok(work) => work,
+					Err(error) if error.code == "energy.budget_exhausted" => {
+						return Ok(None);
+					}
+					Err(error) => return Err(error),
+				};
 				let next = queue.claim(run_id);
 				if let Some(entry) = &next {
 					if state.changes.is_some() {
@@ -82,12 +96,12 @@ impl Core {
 					.await?;
 					turn_queue::save(tx, id, &queue).await?;
 				}
-				Ok::<_, CoreError>(next)
+				Ok::<_, CoreError>(next.map(|entry| (entry, child_work)))
 			})
 			.await?;
-		if let Some(entry) = next {
+		if let Some((entry, child_work)) = next {
 			connection
-				.submit_turn(entry.turn.turn_id, entry.prompt)
+				.submit_turn(entry.turn.turn_id, entry.prompt, child_work)
 				.await?;
 		}
 		Ok(())

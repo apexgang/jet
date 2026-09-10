@@ -38,6 +38,17 @@ struct CraftProcess {
 }
 
 impl CraftProcesses {
+	pub(crate) async fn retirement_delay(&self) -> Option<Duration> {
+		self.processes
+			.lock()
+			.await
+			.values()
+			.filter_map(|process| process.idle_since)
+			.map(|since| {
+				(since + IDLE_TIMEOUT).saturating_duration_since(Instant::now())
+			})
+			.min()
+	}
 	pub(crate) fn new(
 		identity: Option<crate::installation_identity::Identity>,
 		home: PathBuf,

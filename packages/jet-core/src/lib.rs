@@ -65,10 +65,13 @@ mod craft_repository;
 mod craft_specification;
 mod discovery;
 mod effect;
+mod energy;
 mod error;
 mod event;
 mod event_query;
 mod execution_control;
+mod maintenance;
+pub use energy::ChildWork;
 mod execution_control_effect;
 mod filesystem;
 mod fork;
@@ -361,6 +364,7 @@ pub struct Core {
 	review_host: Option<Arc<dyn ReviewHost>>,
 	utility_work: tokio::sync::Mutex<()>,
 	run_work: tokio::sync::Notify,
+	maintenance_work: tokio::sync::Notify,
 	utility_wake: tokio::sync::Notify,
 	turn_wake: tokio::sync::watch::Sender<()>,
 	run_host: Option<Arc<dyn run_host::RunHost>>,
@@ -484,6 +488,7 @@ impl Core {
 			review_host: None,
 			utility_work: tokio::sync::Mutex::new(()),
 			run_work: tokio::sync::Notify::new(),
+			maintenance_work: tokio::sync::Notify::new(),
 			utility_wake: tokio::sync::Notify::new(),
 			turn_wake: tokio::sync::watch::channel(()).0,
 			run_host: None,

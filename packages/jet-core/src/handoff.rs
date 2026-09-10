@@ -235,6 +235,7 @@ pub(crate) async fn prepare(
 }
 
 pub(crate) async fn create(
+	core: &Core,
 	tx: &mut jet_store::WriteTransaction,
 	actor: &Actor,
 	command_id: CommandId,
@@ -287,7 +288,8 @@ pub(crate) async fn create(
 			.root
 			.into();
 		destination_root = Some(launch.root.clone());
-		run_command::record(tx, actor, command_id, id, launch, now).await?;
+		run_command::record(core, tx, actor, command_id, id, launch, now)
+			.await?;
 		tx.append_event(EventKind::HandoffCreated { provenance }.to_record(
 			actor,
 			crate::event::EventSubject::Conversation(id),

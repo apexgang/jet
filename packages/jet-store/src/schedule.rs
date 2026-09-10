@@ -2,6 +2,18 @@
 use crate::{ReadTransaction, StoreError, WriteTransaction};
 use uuid::Uuid;
 impl ReadTransaction {
+	/// The earliest indexed schedule deadline, without scanning Conversations.
+	/// # Errors
+	/// Returns a store error if the deadline cannot be read.
+	pub async fn next_schedule_deadline(
+		&mut self,
+	) -> Result<Option<i64>, StoreError> {
+		Ok(sqlx::query_scalar!(
+			"SELECT MIN(next_due_unix_ms) FROM scheduled_tasks"
+		)
+		.fetch_one(self.connection())
+		.await?)
+	}
 	/// Read enabled schedules in a Conversation. Creation bounds this to 32.
 	/// # Errors
 	/// Returns a store error if the query fails.
