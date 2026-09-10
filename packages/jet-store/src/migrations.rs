@@ -9,10 +9,8 @@
 //! that precedes a migration (ADR-0097) arrives with the recovery work;
 //! until then a pre-existing store is migrated in place.
 
-use sqlx::SqlitePool;
-use sqlx::migrate::Migrator;
-
 use crate::StoreError;
+use sqlx::{SqlitePool, migrate::Migrator};
 
 /// The migration set embedded in this build.
 ///

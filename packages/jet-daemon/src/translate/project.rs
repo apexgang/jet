@@ -1,12 +1,11 @@
 //! The Project half of the translation seam (ADR-0049, ADR-0101).
 
+use super::{actor_of, unix_ms};
 use jet_core::{
 	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
 	ProjectPreview, Registrability, Repository, ToolAvailability, Worktree,
 };
 use jet_protocol as wire;
-
-use super::{actor_of, unix_ms};
 
 pub(super) fn entry(entry: ProjectEntry) -> wire::ProjectEntry {
 	wire::ProjectEntry {

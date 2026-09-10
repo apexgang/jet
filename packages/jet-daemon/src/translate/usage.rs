@@ -2,6 +2,7 @@
 //! carries the Craft protocol's Usage report inward, since that report is
 //! a wire vocabulary too and the core never sees one.
 
+use super::unix_ms;
 use jet_core::{
 	AccountBindingId, ConversationId, ModelConsumption, ModelId,
 	ObservedConsumption, ObservedUsage, PlaneUsage, QuotaMeasure, QuotaReport,
@@ -9,8 +10,6 @@ use jet_core::{
 	UsageFreshness, UsageMeasurement, UsageReport, UsageSelection, UsageTokens,
 };
 use jet_protocol as wire;
-
-use super::unix_ms;
 
 /// What one Usage Query covers.
 pub(super) fn selection(selection: wire::UsageSelection) -> UsageSelection {

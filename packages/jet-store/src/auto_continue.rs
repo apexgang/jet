@@ -1,6 +1,7 @@
 //! Account-binding defaults for Auto-continue; retry state belongs to the queue.
 use crate::{ReadTransaction, StoreError, WriteTransaction};
 use uuid::Uuid;
+
 impl ReadTransaction {
 	/// Read the core-owned policy document for one Account binding.
 	/// # Errors

@@ -7,10 +7,9 @@
 //! Plane reports the item name it derived so the client that owns the
 //! secret writes it where the Plane will look.
 
+use crate::capability::CredentialStoreKind;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use crate::capability::CredentialStoreKind;
 
 /// Which backend a client asks a new binding to resolve its Credential
 /// through.
@@ -143,7 +142,7 @@ pub struct AccountBindingStatus {
 pub struct AccountBindingList {
 	/// Newest Event sequence visible when the snapshot was read, carried as
 	/// a decimal string (ADR-0089).
-	#[serde(with = "crate::decimal")]
+	#[serde(with = "crate::transport::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// The bindings in the order they were established.

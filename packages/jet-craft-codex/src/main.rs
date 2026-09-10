@@ -1,9 +1,6 @@
 //! Bundled Jet Craft for the Codex Harness (ADR-0046, ADR-0060).
-mod approval;
 mod execution;
 mod extensions;
-mod harness;
-mod presentation;
 mod specification;
 mod usage;
 

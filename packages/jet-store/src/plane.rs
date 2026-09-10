@@ -1,11 +1,8 @@
 //! The single Plane row: durable identity plus daemon lifecycle counters.
 
+use crate::{StoreError, records::parse_uuid, transaction::ReadTransaction};
 use sqlx::{SqliteExecutor, SqlitePool};
 use uuid::Uuid;
-
-use crate::StoreError;
-use crate::records::parse_uuid;
-use crate::transaction::ReadTransaction;
 
 /// Durable identity and daemon lifecycle counters of the Plane.
 #[derive(Debug, Clone, PartialEq, Eq)]

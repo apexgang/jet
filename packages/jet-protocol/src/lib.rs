@@ -11,90 +11,65 @@
 
 mod account;
 mod artifact;
-mod artifact_transfer;
-pub use artifact_transfer::{ArtifactControl, ArtifactDescriptor};
-pub use handshake::{ARTIFACTS_MINOR, DISK_PRESSURE_MINOR, ENERGY_MINOR};
-mod resource;
-pub use resource::{PowerState, ResourceBudgets, SubagentControl};
+pub use artifact::transfer::{ArtifactControl, ArtifactDescriptor};
+pub use execution::resource::{PowerState, ResourceBudgets, SubagentControl};
+pub use transport::handshake::{
+	ARTIFACTS_MINOR, DISK_PRESSURE_MINOR, ENERGY_MINOR,
+};
 mod audit;
-mod checkpoint;
-pub use checkpoint::{
+pub use conversation::checkpoint::{
 	ArtifactAvailability, ChangeArtifact, ChangeArtifactChunk, ChangeDiff,
 	ChangeOrigin, ChangeSnapshot, ChangedFile, DiffScope, TurnOutcome,
 };
 mod capability;
-mod compatibility;
-mod connection_auth;
-mod control;
 mod conversation;
 mod craft;
-mod craft_change;
-mod craft_installation;
-mod craft_lifecycle;
-mod craft_usage;
-pub use craft_change::CraftFileChange;
-pub use craft_lifecycle::CraftDisableMode;
-pub use craft_usage::{
+pub use conversation::handoff::HandoffRequest;
+pub use craft::change::CraftFileChange;
+pub use craft::lifecycle::CraftDisableMode;
+pub use craft::usage::{
 	CraftObservedUsage, CraftQuotaScope, CraftQuotaUnit, CraftQuotaWindow,
 	CraftUsage, CraftUsageEstimation, CraftUsageFinality,
 	CraftUsageMeasurement, CraftUsageTokens, QUOTA_SHARE_LIMIT,
 };
-pub use handshake::CRAFT_LIFECYCLE_MINOR;
-mod craft_handshake;
-mod craft_spec;
-mod decimal;
-mod event;
-mod execution_control;
-mod execution_recovery;
-mod frame;
-mod handoff;
-mod handshake;
-pub use handoff::HandoffRequest;
-pub use handshake::HANDOFFS_MINOR;
-mod helper;
-pub use execution_control::{RunControl, RunTermination, TerminationStage};
-pub use execution_recovery::{
+pub use execution::control::{RunControl, RunTermination, TerminationStage};
+pub use execution::recovery::{
 	ExecutionAction, ExecutionMetadata, ExecutionRole, OrphanedExecution,
 	OrphanedExecutions,
 };
-mod hex;
 #[cfg(feature = "schema")]
-pub(crate) use decimal::{Decimal, optional::OptionalDecimal};
+pub(crate) use transport::decimal::{Decimal, optional::OptionalDecimal};
+pub use transport::handshake::CRAFT_LIFECYCLE_MINOR;
+pub use transport::handshake::HANDOFFS_MINOR;
 #[cfg(feature = "schema")]
-pub(crate) use hex::Hex;
-mod import;
+pub(crate) use transport::hex::Hex;
 mod message;
-mod name;
 mod pairing;
 mod presentation;
 mod project;
-mod promotion;
-mod run;
 mod search;
 mod setting;
-mod stream;
-mod stream_control;
-mod stream_error;
-mod terminal;
-mod user_input;
-mod workspace;
-pub use terminal::{
+pub use conversation::schedule::{
+	ScheduleFiring, ScheduledTask, ScheduledTasks,
+};
+pub use conversation::turn::{Turn, TurnQueue, TurnSource, TurnState};
+pub use conversation::user_input::{
+	EditableFile, FileRevision, FileTarget, ReviewComment,
+};
+pub use execution::terminal::{
 	TerminalConfig, TerminalDescriptor, TerminalHelperAction,
 	TerminalHelperReply, TerminalHelperRequest, TerminalState,
 	WorkspaceTerminal,
 };
-mod schedule;
-pub use schedule::{ScheduleFiring, ScheduledTask, ScheduledTasks};
-mod turn;
-pub use turn::{Turn, TurnQueue, TurnSource, TurnState};
-pub use user_input::{EditableFile, FileRevision, FileTarget, ReviewComment};
 
-pub use helper::{
+pub use conversation::run::{
+	ManagedProcess, ManagedProcessRole, RunActivity, RunExecution,
+};
+pub use execution::helper::{
 	HelperCommand, HelperConfig, HelperDescriptor, HelperEvent, HelperHello,
 	HelperReady, HelperRecord, HelperReplay, HelperSignalled, HelperTerminated,
 	NativeInputMode, NativeSignal, NativeStream,
 };
-pub use run::{ManagedProcess, ManagedProcessRole, RunActivity, RunExecution};
 
 pub use account::{
 	AccountBinding, AccountBindingList, AccountBindingStatus, CredentialItem,
@@ -112,41 +87,41 @@ pub use capability::{
 	CredentialStoreStatus, DegradedCondition, ExternalTool, ExternalToolStatus,
 	InstalledCraft, Platform, ToolAvailability,
 };
-pub use compatibility::{
-	IncompatibleProtocol, NegotiatedProtocol, Negotiation, ProtocolFamily,
-	ProtocolOffer, ProtocolVersion,
-};
-pub use connection_auth::{
-	ConnectionProof, RemotePairingRequest, RemotePairingResponse,
-	connection_signing_bytes,
-};
-pub use control::{
-	ControlError, MAX_COLLECTION_ITEMS, MAX_CONTROL_ITEMS, MAX_NESTING_DEPTH,
-	decode_control, encode_control,
-};
+pub use conversation::event::{Actor, Event, EventOrigin};
 pub use conversation::{
 	CommandRequest, CommandResponse, ConflictState, Conversation,
 	ConversationList, ConversationSnapshot, PageCursor, RetentionPolicy,
 	RevisionConflict, Run, RunLifecycle,
 };
+pub use craft::handshake::{CraftFork, CraftHello, CraftReady, CraftResume};
+pub use craft::installation::{
+	CraftInstallationConfirmation, CraftInstallationPreview,
+	CraftInstallationQueued, CraftSource, CraftTrust,
+};
+pub use craft::spec::{
+	BrokerPermission, CraftFeature, CraftHostAccess, CraftSpecification,
+};
 pub use craft::{
 	CraftAction, CraftApprovalDecision, CraftApprovalRequest, CraftCommand,
 	CraftEvent,
 };
-pub use craft_handshake::{CraftFork, CraftHello, CraftReady, CraftResume};
-pub use craft_installation::{
-	CraftInstallationConfirmation, CraftInstallationPreview,
-	CraftInstallationQueued, CraftSource, CraftTrust,
+pub use transport::compatibility::{
+	IncompatibleProtocol, NegotiatedProtocol, Negotiation, ProtocolFamily,
+	ProtocolOffer, ProtocolVersion,
 };
-pub use craft_spec::{
-	BrokerPermission, CraftFeature, CraftHostAccess, CraftSpecification,
+pub use transport::connection_auth::{
+	ConnectionProof, RemotePairingRequest, RemotePairingResponse,
+	connection_signing_bytes,
 };
-pub use event::{Actor, Event, EventOrigin};
-pub use frame::{
+pub use transport::control::{
+	ControlError, MAX_COLLECTION_ITEMS, MAX_CONTROL_ITEMS, MAX_NESTING_DEPTH,
+	decode_control, encode_control,
+};
+pub use transport::frame::{
 	CONNECTION_STREAM, Frame, FrameError, FrameKind, FrameLimits, FrameReader,
 	FrameWriter, MAX_CONTROL_FRAME, MAX_DATA_FRAME, StreamId,
 };
-pub use handshake::{
+pub use transport::handshake::{
 	ACCOUNT_BINDINGS_MINOR, CHANGE_CHECKPOINTS_MINOR, CODEC_JSON_V1,
 	CONVERSATION_FORKS_MINOR, CRAFT_INSTALLATION_MINOR, ClientHello,
 	EXECUTION_CONTROL_MINOR, EXECUTION_RECOVERY_MINOR, FENCED_READS_MINOR,
@@ -160,34 +135,25 @@ pub use handshake::{
 	WORKSPACES_MINOR,
 };
 mod usage;
-pub use usage::{
-	ModelConsumption, ObservedConsumption, PlaneUsage, QuotaMeasure,
-	QuotaScope, QuotaUnit, QuotaWindow, UsageEstimation, UsageFinality,
-	UsageFreshness, UsageSelection, UsageTokens,
-};
-mod no_visa;
-pub use handshake::{
-	APPROVAL_RETRY_MINOR, AUTOMATIC_REVIEW_MINOR, NO_VISA_MINOR,
-};
-pub use no_visa::{
-	CraftRemoteTool, NoVisaOrigin, RemoteEnvironment, RemoteGitOperation,
-	RemoteToolAction, RemoteToolDecision, RemoteToolOutcome, RemoteToolRequest,
-	RemoteToolResult,
-};
-mod no_visa_run;
-pub use no_visa_run::{NoVisaDestination, NoVisaRunRequest, NoVisaSelection};
-mod visa;
-pub use handshake::VISA_RUNS_MINOR;
-pub use import::{
+pub use conversation::import::{
 	ConversationOrigin, ExternalConversation, ExternalConversationList,
 	ExternalOrigin, ExternalProcess, ImportedConversation,
+};
+pub use conversation::name::{Name, NameSource};
+pub use conversation::promotion::{
+	ChangeKind, ConflictKind, PromotedChange, PromotionBinding,
+	PromotionConflict, PromotionDestination, PromotionPreview, PromotionState,
+	WorkspacePromotion,
+};
+pub use conversation::workspace::{
+	BaseSelection, SeedSelection, WorkingTree, WorkingTreeRequest, Workspace,
+	WorkspaceBase, WorkspaceSeed,
 };
 pub use message::{
 	ClientMessage, ErrorCategory, EventPage, MAX_QUERY_TIMEOUT_MS, PlaneStatus,
 	QueryRequest, QueryResponse, RecoveryAction, RequestId, RestartMetadata,
 	ServerMessage, WireError, raw_command,
 };
-pub use name::{Name, NameSource};
 pub use pairing::{
 	ClientPublicKey, PairedClient, PairedClientAccess, PairingDisclosure,
 	PairingEnd, PairingGate, PairingKeyAlgorithm, PairingMethod,
@@ -198,40 +164,46 @@ pub use project::{
 	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
 	ProjectPreview, Registrability, Repository, Worktree,
 };
-pub use promotion::{
-	ChangeKind, ConflictKind, PromotedChange, PromotionBinding,
-	PromotionConflict, PromotionDestination, PromotionPreview, PromotionState,
-	WorkspacePromotion,
+pub use remote::no_visa::{
+	CraftRemoteTool, NoVisaOrigin, RemoteEnvironment, RemoteGitOperation,
+	RemoteToolAction, RemoteToolDecision, RemoteToolOutcome, RemoteToolRequest,
+	RemoteToolResult,
 };
+pub use remote::no_visa_run::{
+	NoVisaDestination, NoVisaRunRequest, NoVisaSelection,
+};
+pub use remote::visa::{VisaRunRequest, VisaSelection};
 pub use search::{SearchField, SearchHit, SearchResult};
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,
 	SettingSnapshot, SettingSource, SettingValue,
 };
-pub use stream::{
+pub use transport::handshake::VISA_RUNS_MINOR;
+pub use transport::handshake::{
+	APPROVAL_RETRY_MINOR, AUTOMATIC_REVIEW_MINOR, NO_VISA_MINOR,
+};
+pub use transport::stream::{
 	BinaryStreamKind, DataQueueOutcome, MAX_BINARY_QUEUE_BYTES,
 	MAX_CONTROL_QUEUE_BYTES, MAX_EVENT_WINDOW_BYTES, MAX_EVENT_WINDOW_EVENTS,
 	MAX_OPEN_BINARY_STREAMS, OutboundLimits, OutboundQueue, StreamQueueError,
 };
-pub use stream_control::StreamControl;
-pub use visa::{VisaRunRequest, VisaSelection};
-pub use workspace::{
-	BaseSelection, SeedSelection, WorkingTree, WorkingTreeRequest, Workspace,
-	WorkspaceBase, WorkspaceSeed,
+pub use transport::stream_control::StreamControl;
+pub use usage::{
+	ModelConsumption, ObservedConsumption, PlaneUsage, QuotaMeasure,
+	QuotaScope, QuotaUnit, QuotaWindow, UsageEstimation, UsageFinality,
+	UsageFreshness, UsageSelection, UsageTokens,
 };
 
 mod utility;
-pub use utility::{
-	UtilityJob, UtilityOutcome, UtilityPolicy, UtilityPurpose, UtilityRequest,
-};
-mod craft_utility;
-pub use craft_utility::{
-	CraftUtilityModel, CraftUtilityReply, CraftUtilityRequest, UtilityInput,
-};
-mod craft_review;
-pub use craft_review::{
+pub use craft::review::{
 	CraftReviewInput, CraftReviewModel, CraftReviewReply, CraftReviewRequest,
 	CraftReviewer,
+};
+pub use craft::utility::{
+	CraftUtilityModel, CraftUtilityReply, CraftUtilityRequest, UtilityInput,
+};
+pub use utility::{
+	UtilityJob, UtilityOutcome, UtilityPolicy, UtilityPurpose, UtilityRequest,
 };
 
 mod extension;
@@ -241,19 +213,23 @@ pub use extension::{
 	ExtensionConfirmation, ExtensionScope, ExtensionTrust,
 };
 
-pub use handshake::EXTENSIONS_MINOR;
+pub use transport::handshake::EXTENSIONS_MINOR;
 
-mod auto_continue;
-pub use auto_continue::{
+pub use conversation::auto_continue::{
 	AutoContinuePolicy, AutoContinueRetry, AutoContinueSnapshot,
 	AutoContinueStatus, AutoContinueTarget, AutoContinueUsage,
 };
-pub use handshake::AUTO_CONTINUE_MINOR;
+pub use transport::handshake::AUTO_CONTINUE_MINOR;
 
-pub use handshake::GIT_DELIVERY_MINOR;
+pub use transport::handshake::GIT_DELIVERY_MINOR;
 
-mod git_delivery;
-pub use git_delivery::{
+pub use conversation::git_delivery::{
 	GitCheckpoint, GitDelivery, GitDeliveryOutcome, GitDeliveryPolicy,
 	GitMessage, GitOperation,
 };
+
+mod transport;
+
+mod remote;
+
+mod execution;

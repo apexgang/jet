@@ -121,13 +121,13 @@ pub async fn serve_review(provider: UtilityProvider) -> Result<(), CraftError> {
 	let request: CraftReviewRequest =
 		serde_json::from_slice(&bytes).map_err(|_| invalid())?;
 	let body = body(provider, &request)?;
-	let key = crate::utility_credentials::resolve(
+	let key = crate::utility::credentials::resolve(
 		provider,
 		&request.credential_reference,
 		&request.binding_id.to_string(),
 	)
 	.await?;
-	let bytes = crate::utility_http::request(provider, &key, &body).await?;
+	let bytes = crate::utility::http::request(provider, &key, &body).await?;
 	let output =
 		output_text(provider, provider.reviewer_model(), &bytes, OUTPUT_BYTES)?;
 	write(&CraftReviewReply {

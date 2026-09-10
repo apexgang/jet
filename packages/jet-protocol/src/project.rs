@@ -4,11 +4,9 @@
 //! in this protocol that carries an absolute path. Every other file
 //! operation names a Project and a relative path.
 
+use crate::{capability::ToolAvailability, conversation::event::Actor};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use crate::capability::ToolAvailability;
-use crate::event::Actor;
 
 /// What a Path grant would register, shown before anything is recorded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,7 +104,7 @@ pub struct GitLink {
 pub struct ProjectEntry {
 	/// Newest Event sequence visible when the Project was read, carried as
 	/// a decimal string (ADR-0089).
-	#[serde(with = "crate::decimal")]
+	#[serde(with = "crate::transport::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// The Project the path was resolved in.
@@ -157,7 +155,7 @@ pub struct Project {
 pub struct ProjectList {
 	/// Newest Event sequence visible when the snapshot was read, carried as
 	/// a decimal string (ADR-0089).
-	#[serde(with = "crate::decimal")]
+	#[serde(with = "crate::transport::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// The Projects in the order they were registered.

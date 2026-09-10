@@ -42,5 +42,5 @@ Validation follows ASVS 2.2.1/2.2.2 and 5.3.2; closed package types follow 1.5.2
 Git uses argument arrays (1.2.5); destination state and launch Effect commit
 together (2.3.3). Workspace materialization follows the existing synchronous
 Workspace contract: a database commit failure can leave an unregistered worktree
-(see `packages/jet-core/src/workspace.rs`). Admission failures after Workspace
+(see `packages/jet-core/src/workspace/mod.rs`). Admission failures after Workspace
 creation remove that new worktree before rolling back.

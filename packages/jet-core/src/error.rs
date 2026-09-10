@@ -1,13 +1,11 @@
 //! Stable core errors (ADR-0068).
 
-use jet_store::StoreError;
-use serde::{Deserialize, Serialize};
-
-use crate::capability::Capability;
 use crate::{
 	Conversation, ConversationId, EventSequence, FileRevision, FileTarget,
-	Revision, Run, RunId,
+	Revision, Run, RunId, capability::Capability,
 };
+use jet_store::StoreError;
+use serde::{Deserialize, Serialize};
 
 /// Stable metadata explaining how a client must restart a stale read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

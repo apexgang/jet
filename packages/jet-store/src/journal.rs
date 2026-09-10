@@ -1,14 +1,15 @@
 //! The append-only Event journal (ADR-0020, ADR-0096). Sequence numbers are
 //! total and monotonic within this Plane only (ADR-0069).
 
-use std::collections::BTreeMap;
-
-use crate::StoreError;
-use crate::records::{
-	ActorRecord, EventRecord, NewEvent, VerifiedSnapshotCoverage, column_error,
-	parse_optional_uuid, parse_uuid,
+use crate::{
+	StoreError,
+	records::{
+		ActorRecord, EventRecord, NewEvent, VerifiedSnapshotCoverage,
+		column_error, parse_optional_uuid, parse_uuid,
+	},
+	transaction::{ReadTransaction, WriteTransaction},
 };
-use crate::transaction::{ReadTransaction, WriteTransaction};
+use std::collections::BTreeMap;
 
 /// Most operational Events removed in one compaction transaction.
 pub const EVENT_COMPACTION_BATCH_LIMIT: usize = 256;

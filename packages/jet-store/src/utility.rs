@@ -1,6 +1,7 @@
 //! Bounded, core-owned Utility documents, committed alongside their Effects.
 use crate::{ReadTransaction, StoreError, WriteTransaction};
 use uuid::Uuid;
+
 impl ReadTransaction {
 	/// Read one retained Utility job. Returns a store error on failure.
 	pub async fn utility_job(

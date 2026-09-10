@@ -1,6 +1,7 @@
 //! Core-owned Git delivery documents and per-Conversation ordering.
 use crate::{ReadTransaction, StoreError, WriteTransaction};
 use uuid::Uuid;
+
 impl ReadTransaction {
 	/// Read the branch explicitly created for this Conversation.
 	pub async fn git_branch(

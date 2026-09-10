@@ -3,12 +3,12 @@
 //! so current state and its journal Events always land together
 //! (ADR-0020, ADR-0071).
 
-use std::ops::{Deref, DerefMut};
-
+use crate::{
+	Store, StoreError,
+	audit::head::{self as audit_head, AuditHead},
+};
 use sqlx::{SqliteConnection, SqliteTransaction};
-
-use crate::audit_head::{self, AuditHead};
-use crate::{Store, StoreError};
+use std::ops::{Deref, DerefMut};
 
 /// One consistent read snapshot of the store.
 pub struct ReadTransaction {

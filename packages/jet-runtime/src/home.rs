@@ -1,8 +1,10 @@
 //! Layout of the per-user Jet home directory (ADR-0014).
 
-use std::fs;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::{
+	fs,
+	os::unix::fs::{DirBuilderExt, PermissionsExt},
+	path::{Path, PathBuf},
+};
 
 const RUNTIME_DIR: &str = "runtime";
 const LOCK_FILE: &str = "jetd.lock";

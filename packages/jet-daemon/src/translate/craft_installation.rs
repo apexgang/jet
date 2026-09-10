@@ -1,12 +1,11 @@
 //! Third-party Craft installation translation seam (ADR-0049, ADR-0013).
 
-use std::path::PathBuf;
-
 use jet_core::{
 	BrokerPermission, CraftHostAccess, CraftInstallationConfirmation,
 	CraftInstallationPreview, CraftSource, CraftTrust,
 };
 use jet_protocol as wire;
+use std::path::PathBuf;
 
 pub(super) fn source_from_wire(source: &wire::CraftSource) -> CraftSource {
 	match source {

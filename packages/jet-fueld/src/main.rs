@@ -1,7 +1,4 @@
 //! Run-role process supervision, independent from the daemon and Craft.
-mod native;
-mod serve;
-mod spool;
 mod terminal;
 
 use clap::Parser;
@@ -27,7 +24,7 @@ enum Role {
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
 	let result = match Cli::parse().role {
-		Role::Run { config } => serve::serve(&config).await,
+		Role::Run { config } => execution::serve::serve(&config).await,
 		Role::Terminal { config } => terminal::serve(&config).await,
 	};
 	match result {
@@ -38,3 +35,5 @@ async fn main() -> std::process::ExitCode {
 		}
 	}
 }
+
+mod execution;

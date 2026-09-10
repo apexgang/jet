@@ -1,13 +1,14 @@
 //! Durable Actor-scoped Command receipts (ADR-0093).
 
-use uuid::Uuid;
-
-use crate::StoreError;
-use crate::records::{
-	ActorRecord, CommandReceiptRecord, NewCommandReceipt, column_error,
-	parse_uuid,
+use crate::{
+	StoreError,
+	records::{
+		ActorRecord, CommandReceiptRecord, NewCommandReceipt, column_error,
+		parse_uuid,
+	},
+	transaction::{ReadTransaction, WriteTransaction},
 };
-use crate::transaction::{ReadTransaction, WriteTransaction};
+use uuid::Uuid;
 
 impl ReadTransaction {
 	/// Finds the receipt for `command_id` in `actor`'s identity scope.

@@ -1,6 +1,7 @@
 //! Explicit domain/wire translation for Git delivery.
 use jet_core as core;
 use jet_protocol as wire;
+
 pub(super) fn operation(value: core::GitOperation) -> wire::GitOperation {
 	match value {
 		core::GitOperation::Branch { name } => {

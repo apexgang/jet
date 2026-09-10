@@ -1,24 +1,5 @@
 //! Helpers shared by the core's test modules.
 
-use std::future::Future;
-use std::path::Path;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
-
-use jet_store::Store;
-use uuid::Uuid;
-
-use crate::capability::{
-	CapabilityProbe, CredentialStoreKind, CredentialStoreStatus, ExternalTool,
-	ExternalToolStatus, InstalledCraft, ObservedCapabilities, Platform,
-	ToolAvailability,
-};
-use crate::clock::{Clock, SystemClock};
-use crate::craft_repository::{
-	CraftRepository, ReleasedArtifact, ReleasedCraft,
-};
-use crate::discovery::ConversationDiscovery;
 use crate::{
 	Actor, BaseSelection, ClientId, Command, CommandEnvelope, CommandId,
 	CommandOutcome, ConversationId, ConversationSnapshot, Core, CraftId,
@@ -26,7 +7,24 @@ use crate::{
 	ProjectId, PromotionDestination, PromotionPreview, Query, QueryResult,
 	RetentionPolicy, SeedSelection, WorkingTreeRequest, Workspace,
 	WorkspaceHome, WorkspaceId,
+	capability::{
+		CapabilityProbe, CredentialStoreKind, CredentialStoreStatus,
+		ExternalTool, ExternalToolStatus, InstalledCraft, ObservedCapabilities,
+		Platform, ToolAvailability,
+	},
+	clock::{Clock, SystemClock},
+	conversation::discovery::ConversationDiscovery,
+	craft::repository::{CraftRepository, ReleasedArtifact, ReleasedCraft},
 };
+use jet_store::Store;
+use std::{
+	future::Future,
+	path::Path,
+	pin::Pin,
+	sync::{Arc, Mutex},
+	time::{Duration, SystemTime},
+};
+use uuid::Uuid;
 
 /// The one interactive Actor every core test acts as.
 pub(crate) fn actor() -> Actor {
@@ -164,7 +162,7 @@ impl CraftRepository for FixedCraftRepository {
 		&self,
 		url: &str,
 		limit: u64,
-		mut staging: crate::craft_publication::ArtifactStaging,
+		mut staging: crate::craft::publication::ArtifactStaging,
 	) -> Pin<Box<dyn Future<Output = Result<(), crate::CoreError>> + Send + '_>>
 	{
 		let accepted = url == "https://github.com/download/artifact"

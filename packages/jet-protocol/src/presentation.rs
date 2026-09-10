@@ -1,9 +1,8 @@
 //! Portable, non-executable presentation with lossless opaque fallback.
 
+use crate::{ControlError, decode_control};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
-
-use crate::{ControlError, decode_control};
 
 /// Presentation understood by every GUI; never executable UI code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
