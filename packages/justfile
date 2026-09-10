@@ -18,6 +18,13 @@ fix *args:
 clippy *args:
 	cargo clippy --tests {{ args }}
 
+# Scan all repository Rust sources, including tests, and fail on findings.
+# Use a fresh database path; optionally pin the query pack to a GitHub scan.
+codeql-scan database output cli="codeql" query_pack="codeql/rust-queries":
+	"$3" database create "$1" --language=rust --build-mode=none --source-root=.. --threads=4
+	"$3" database analyze "$1" "$4" --download --format=sarif-latest --output="$2" --threads=4
+	python3 -c 'import json, sys; count = sum(len(run.get("results", [])) for run in json.load(open(sys.argv[1]))["runs"]); print(f"CodeQL findings: {count}"); sys.exit(count > 0)' "$2"
+
 crate name *args:
 	cargo new {{ name }} {{ args }}
 

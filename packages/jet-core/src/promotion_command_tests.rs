@@ -31,7 +31,7 @@ async fn promote(
 		.execute(actor, request(Command::PromoteWorkspace { binding }))
 		.await?;
 	let CommandOutcome::WorkspacePromotionRecorded(promotion) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::WorkspacePromotionRecorded");
 	};
 	Ok(promotion)
 }

@@ -68,7 +68,7 @@ async fn start_paired(dir: &tempfile::TempDir) -> Core {
 		disclosure: PairingDisclosure::ManualCode { code },
 	} = opened
 	else {
-		panic!("unexpected outcome {opened:?}");
+		panic!("expected CommandOutcome::PairingOpened");
 	};
 	let claimed = execute(
 		&core,
@@ -81,7 +81,7 @@ async fn start_paired(dir: &tempfile::TempDir) -> Core {
 	.await
 	.unwrap();
 	let CommandOutcome::PairingClaimed { challenge, .. } = claimed else {
-		panic!("unexpected outcome {claimed:?}");
+		panic!("expected CommandOutcome::PairingClaimed");
 	};
 	let PairingProgress::AwaitingConfirmation {
 		authentication_string,
@@ -102,7 +102,7 @@ async fn start_paired(dir: &tempfile::TempDir) -> Core {
 	.unwrap();
 	let plane_id = match core.query(&actor(), Query::Status).await.unwrap() {
 		QueryResult::Status(status) => status.plane_id,
-		result => panic!("unexpected result {result:?}"),
+		_ => panic!("expected QueryResult::Status"),
 	};
 	let signature = PairingSignature(
 		signing_key()
@@ -230,7 +230,7 @@ async fn execute(
 async fn pairing(core: &Core) -> crate::PairingSnapshot {
 	let result = core.query(&actor(), Query::Pairing).await.unwrap();
 	let QueryResult::Pairing(snapshot) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Pairing");
 	};
 	snapshot
 }
@@ -246,7 +246,7 @@ async fn events(core: &Core) -> Vec<EventKind> {
 		.await
 		.unwrap();
 	let QueryResult::Events(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Events");
 	};
 	page.events.into_iter().map(|event| event.kind).collect()
 }
@@ -262,7 +262,7 @@ async fn decisions(core: &Core) -> Vec<(String, AuditRisk, AuditOutcome)> {
 		.await
 		.unwrap();
 	let QueryResult::SecurityAudit(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::SecurityAudit");
 	};
 	page.entries
 		.into_iter()

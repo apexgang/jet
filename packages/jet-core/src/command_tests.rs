@@ -31,7 +31,7 @@ async fn create_conversation(
 		.await
 		.unwrap();
 	let CommandOutcome::ConversationCreated(conversation) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::ConversationCreated");
 	};
 	conversation
 }
@@ -42,7 +42,7 @@ async fn create_run(core: &Core, conversation_id: ConversationId) -> Run {
 		.await
 		.unwrap();
 	let CommandOutcome::RunCreated(run) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::RunCreated");
 	};
 	run
 }
@@ -60,7 +60,7 @@ async fn transition(core: &Core, run: Run, lifecycle: RunLifecycle) -> Run {
 		.await
 		.unwrap();
 	let CommandOutcome::RunTransitioned(run) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::RunTransitioned");
 	};
 	run
 }
@@ -74,7 +74,7 @@ async fn snapshot(
 		.await
 		.unwrap();
 	let QueryResult::Conversation(snapshot) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Conversation");
 	};
 	*snapshot
 }
@@ -82,7 +82,7 @@ async fn snapshot(
 async fn events_after(core: &Core, after: EventSequence) -> EventPage {
 	let result = core.query(&actor(), Query::Events { after }).await.unwrap();
 	let QueryResult::Events(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Events");
 	};
 	page
 }

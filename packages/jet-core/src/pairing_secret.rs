@@ -7,6 +7,8 @@
 //! read to claim the offer it describes, and every comparison against it is
 //! constant-time.
 
+use std::mem::MaybeUninit;
+
 use jet_store::PairingMethod;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -66,9 +68,7 @@ pub(crate) fn issue(
 			))
 		}
 		PairingMethod::QrPayload { endpoint } => {
-			let mut token = [0u8; TOKEN_BYTES];
-			fill(&mut token)?;
-			let token = hex(&token);
+			let token = hex(&random_bytes::<TOKEN_BYTES>()?);
 			let payload =
 				format!("{QR_SCHEME}:{QR_VERSION}:{token}:{endpoint}");
 			Ok((
@@ -85,9 +85,7 @@ pub(crate) fn issue(
 ///
 /// Returns an `unavailable` [`CoreError`] when the Plane has no entropy.
 pub(crate) fn salt() -> Result<[u8; 16], CoreError> {
-	let mut salt = [0u8; 16];
-	fill(&mut salt)?;
-	Ok(salt)
+	random_bytes()
 }
 
 /// A fresh challenge for the claiming client's key to sign.
@@ -96,9 +94,7 @@ pub(crate) fn salt() -> Result<[u8; 16], CoreError> {
 ///
 /// Returns an `unavailable` [`CoreError`] when the Plane has no entropy.
 pub(crate) fn challenge() -> Result<PairingChallenge, CoreError> {
-	let mut challenge = [0u8; 32];
-	fill(&mut challenge)?;
-	Ok(PairingChallenge(challenge))
+	random_bytes().map(PairingChallenge)
 }
 
 /// The digest an offer keeps of its secret.
@@ -213,10 +209,9 @@ fn manual_code() -> Result<String, CoreError> {
 fn digit() -> Result<u8, CoreError> {
 	const LARGEST_MULTIPLE: u8 = 250;
 	loop {
-		let mut byte = [0u8; 1];
-		fill(&mut byte)?;
-		if byte[0] < LARGEST_MULTIPLE {
-			return Ok(byte[0] % 10);
+		let [byte] = random_bytes()?;
+		if byte < LARGEST_MULTIPLE {
+			return Ok(byte % 10);
 		}
 	}
 }
@@ -230,16 +225,24 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
 	})
 }
 
-/// Draws `bytes` from the operating system.
+/// Draws a complete array from the operating system.
 ///
 /// A Plane that cannot answer is not asked to carry on with a weaker
 /// secret: Pairing is refused until it can (ADR-0017).
-fn fill(bytes: &mut [u8]) -> Result<(), CoreError> {
-	getrandom::fill(bytes).map_err(|error| {
+fn random_bytes<const N: usize>() -> Result<[u8; N], CoreError> {
+	// ASVS 11.5.1: only the OS CSPRNG initializes the returned bytes.
+	// No zero-filled salt or token can survive an entropy-source failure.
+	let mut buffer = [MaybeUninit::uninit(); N];
+	let bytes = getrandom::fill_uninit(&mut buffer).map_err(|error| {
 		CoreError::unavailable(
 			"pairing.entropy_unavailable",
 			"this Plane cannot draw a Pairing secret right now",
 			error.to_string(),
 		)
-	})
+	})?;
+	Ok(std::array::from_fn(|index| bytes[index]))
 }
+
+#[cfg(test)]
+#[path = "pairing_secret_tests.rs"]
+mod tests;

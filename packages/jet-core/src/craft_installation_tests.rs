@@ -47,7 +47,7 @@ async fn preview(
 		.await
 		.unwrap();
 	let QueryResult::CraftInstallationPreview(preview) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::CraftInstallationPreview");
 	};
 	*preview
 }
@@ -84,7 +84,7 @@ async fn a_qualifying_release_is_discovered_as_an_exact_confirmation() {
 		.await
 		.unwrap();
 	let QueryResult::CraftInstallationPreview(preview) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::CraftInstallationPreview");
 	};
 
 	assert_eq!(preview.craft_id, "demo");
@@ -184,7 +184,7 @@ async fn an_exact_confirmation_publishes_an_audited_installed_craft() {
 		.await
 		.unwrap();
 	let QueryResult::Capabilities(capabilities) = capabilities else {
-		panic!("unexpected result {capabilities:?}");
+		panic!("expected QueryResult::Capabilities");
 	};
 	assert!(capabilities.crafts.iter().any(|craft| {
 		craft.craft.0 == "demo"
@@ -201,7 +201,7 @@ async fn an_exact_confirmation_publishes_an_audited_installed_craft() {
 		.await
 		.unwrap();
 	let QueryResult::SecurityAudit(audit) = audit else {
-		panic!("unexpected result {audit:?}");
+		panic!("expected QueryResult::SecurityAudit");
 	};
 	assert_eq!(
 		audit.entries.last().unwrap().decision,

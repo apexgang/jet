@@ -70,7 +70,7 @@ async fn start(
 async fn plane_id(core: &Core) -> PlaneId {
 	let result = core.query(&actor(), Query::Status).await.unwrap();
 	let QueryResult::Status(status) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Status");
 	};
 	status.plane_id
 }
@@ -88,10 +88,10 @@ async fn claimed(core: &Core) -> (PendingPairing, PairingChallenge) {
 		.await
 		.unwrap();
 	let CommandOutcome::PairingOpened { disclosure, .. } = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::PairingOpened");
 	};
 	let PairingDisclosure::ManualCode { code } = disclosure else {
-		panic!("unexpected disclosure {disclosure:?}");
+		panic!("expected PairingDisclosure::ManualCode");
 	};
 	let outcome = core
 		.execute(
@@ -104,7 +104,7 @@ async fn claimed(core: &Core) -> (PendingPairing, PairingChallenge) {
 		.await
 		.unwrap();
 	let CommandOutcome::PairingClaimed { pending, challenge } = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::PairingClaimed");
 	};
 	(pending, challenge)
 }
@@ -174,7 +174,7 @@ async fn complete(
 async fn pairing(core: &Core) -> PairingSnapshot {
 	let result = core.query(&actor(), Query::Pairing).await.unwrap();
 	let QueryResult::Pairing(snapshot) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Pairing");
 	};
 	snapshot
 }
@@ -190,7 +190,7 @@ async fn events(core: &Core) -> Vec<EventKind> {
 		.await
 		.unwrap();
 	let QueryResult::Events(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Events");
 	};
 	page.events.into_iter().map(|event| event.kind).collect()
 }
@@ -206,7 +206,7 @@ async fn decisions(core: &Core) -> Vec<(String, AuditRisk, AuditOutcome)> {
 		.await
 		.unwrap();
 	let QueryResult::SecurityAudit(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::SecurityAudit");
 	};
 	page.entries
 		.into_iter()

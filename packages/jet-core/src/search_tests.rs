@@ -27,7 +27,7 @@ async fn search(core: &Core, text: &str) -> SearchResult {
 		.await
 		.unwrap();
 	let QueryResult::Search(found) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Search");
 	};
 	found
 }
@@ -44,7 +44,7 @@ async fn sequence_of(core: &Core, kind: &str) -> EventSequence {
 		.await
 		.unwrap();
 	let QueryResult::Events(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Events");
 	};
 	page.events
 		.into_iter()

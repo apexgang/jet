@@ -107,7 +107,7 @@ async fn create(
 		)
 		.await?;
 	let CommandOutcome::ConversationCreated(conversation) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::ConversationCreated");
 	};
 	Ok(conversation)
 }

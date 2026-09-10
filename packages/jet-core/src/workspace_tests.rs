@@ -31,7 +31,7 @@ async fn create(
 		)
 		.await?;
 	let CommandOutcome::ConversationCreated(conversation) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::ConversationCreated");
 	};
 	Ok(conversation)
 }
@@ -44,7 +44,7 @@ async fn create_run(
 		.execute(&actor(), request(Command::CreateRun { conversation_id }))
 		.await?;
 	let CommandOutcome::RunCreated(run) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::RunCreated");
 	};
 	Ok(run)
 }

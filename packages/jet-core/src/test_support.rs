@@ -370,7 +370,7 @@ pub(crate) async fn conversation_snapshot(
 		.await
 		.unwrap();
 	let QueryResult::Conversation(snapshot) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Conversation");
 	};
 	*snapshot
 }
@@ -387,7 +387,7 @@ pub(crate) async fn events(core: &Core) -> Vec<EventKind> {
 		.await
 		.unwrap();
 	let QueryResult::Events(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Events");
 	};
 	page.events.into_iter().map(|event| event.kind).collect()
 }
@@ -418,11 +418,11 @@ pub(crate) fn git(dir: &Path, args: &[&str]) -> String {
 		.args(args)
 		.output()
 		.expect("git runs on the test host");
+	// ASVS 16.2.5: arguments and stderr can contain file or credential data.
 	assert!(
 		output.status.success(),
-		"git {args:?} in {} failed: {}",
-		dir.display(),
-		String::from_utf8_lossy(&output.stderr)
+		"test git command failed: {}",
+		output.status
 	);
 	String::from_utf8(output.stdout).unwrap()
 }
@@ -453,7 +453,7 @@ pub(crate) async fn register_repository(core: &Core, dir: &Path) -> ProjectId {
 		.await
 		.unwrap();
 	let CommandOutcome::ProjectRegistered(project) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::ProjectRegistered");
 	};
 	project.project_id
 }
@@ -505,7 +505,7 @@ pub(crate) async fn diverged(dir: &Path) -> Diverged {
 		.await
 		.unwrap();
 	let CommandOutcome::ConversationCreated(conversation) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::ConversationCreated");
 	};
 	let workspace = conversation_snapshot(&core, conversation.conversation_id)
 		.await
@@ -543,7 +543,7 @@ pub(crate) async fn preview_promotion(
 		)
 		.await?;
 	let QueryResult::PromotionPreview(preview) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::PromotionPreview");
 	};
 	Ok(*preview)
 }

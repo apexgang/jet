@@ -39,7 +39,7 @@ async fn audit(core: &Core, after: AuditSequence) -> AuditPage {
 		.await
 		.unwrap();
 	let QueryResult::SecurityAudit(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::SecurityAudit");
 	};
 	page
 }
@@ -67,7 +67,7 @@ async fn bind(core: &Core, label: &str) -> Uuid {
 		.await
 		.unwrap();
 	let CommandOutcome::AccountBound(binding) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::AccountBound");
 	};
 	binding.binding_id.0
 }
@@ -78,14 +78,14 @@ async fn binding_an_account_is_recorded_as_an_elevated_decision() {
 	let core = start(&dir).await;
 	let plane_id = match core.query(&actor(), Query::Status).await.unwrap() {
 		QueryResult::Status(status) => status.plane_id,
-		result => panic!("unexpected result {result:?}"),
+		_ => panic!("expected QueryResult::Status"),
 	};
 
 	let binding_id = bind(&core, "Work account").await;
 
 	let page = audit(&core, AuditSequence(0)).await;
 	let [entry] = page.entries.as_slice() else {
-		panic!("unexpected audit {page:?}");
+		panic!("expected one audit entry");
 	};
 	assert_eq!(
 		page,
@@ -132,7 +132,7 @@ async fn decisions_about_one_binding_share_its_opaque_reference() {
 	let page = audit(&core, AuditSequence(0)).await;
 	let [kept_bound, removed_bound, removed_unbound] = page.entries.as_slice()
 	else {
-		panic!("unexpected audit {page:?}");
+		panic!("expected three audit entries");
 	};
 	assert_eq!(
 		(
@@ -463,7 +463,7 @@ async fn clearing_the_retention_window_returns_to_the_built_in_one() {
 		.unwrap()
 	{
 		QueryResult::Settings(snapshot) => snapshot.settings,
-		result => panic!("unexpected result {result:?}"),
+		_ => panic!("expected QueryResult::Settings"),
 	};
 
 	assert_eq!(

@@ -65,7 +65,7 @@ async fn bind_to(
 		)
 		.await?;
 	let CommandOutcome::AccountBound(binding) = outcome else {
-		panic!("unexpected outcome {outcome:?}");
+		panic!("expected CommandOutcome::AccountBound");
 	};
 	Ok(binding)
 }
@@ -91,7 +91,7 @@ async fn observed_bindings(
 		.await
 		.unwrap();
 	let QueryResult::AccountBindings(list) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::AccountBindings");
 	};
 	list.bindings
 }
@@ -123,7 +123,7 @@ async fn events(core: &Core) -> Vec<EventKind> {
 		.await
 		.unwrap();
 	let QueryResult::Events(page) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Events");
 	};
 	page.events.into_iter().map(|event| event.kind).collect()
 }
@@ -454,7 +454,7 @@ async fn degraded(core: &Core) -> Vec<DegradedCondition> {
 		.await
 		.unwrap();
 	let QueryResult::Capabilities(snapshot) = result else {
-		panic!("unexpected result {result:?}");
+		panic!("expected QueryResult::Capabilities");
 	};
 	snapshot.degraded
 }
