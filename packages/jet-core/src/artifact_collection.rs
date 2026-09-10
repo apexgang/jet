@@ -1,125 +1,86 @@
-//! Grace-period collection of payloads with no committed Run/Event reference.
-use crate::{Actor, Core, CoreError};
+//! Bounded grace-period collection without touching authoritative state.
+use crate::{Actor, Core, CoreError, disposable};
 
-/// Serializes publication with collection and remembers the next collection batch.
+/// Serializes publication with collection and remembers each namespace's batch.
 #[derive(Debug, Default)]
 pub(crate) struct Publication {
-	collection_cursor: String,
+	collection_cursor: [String; 2],
 }
 
 impl Core {
-	/// Collects at most 256 abandoned payloads or interrupted staging files.
+	/// Collects at most 64 entries per disposable namespace after a 24-hour grace.
+	/// References and active file locks always protect content, including under pressure.
 	/// Returns the removed count or a stable authorization/storage error.
 	#[expect(
 		clippy::await_holding_invalid_type,
-		reason = "collection must fence publication while checking asynchronous reference transactions"
+		reason = "collection fences publication until reference checks and unlink complete"
 	)]
 	pub async fn collect_artifacts(
 		&self,
 		actor: &Actor,
 	) -> Result<u32, CoreError> {
-		let _access =
+		let access =
 			self.remote_access.acquire().await.expect("authority gate");
 		actor.authorize(&self.remote_sessions)?;
-		drop(_access);
+		drop(access);
 		let mut publication = self.artifact_publication.lock().await;
 		let _file_lock =
 			crate::artifact_files::publication_lock(self.run_home()).await?;
-		let home = self.run_home();
-		let now = self.clock.now();
-		let after = publication.collection_cursor.clone();
-		let candidates =
-			crate::filesystem::blocking(move || candidates(&home, now, &after))
-				.await??;
-		let next = if candidates.len() == 256 {
-			candidates.last().expect("full batch").1.clone()
-		} else {
-			String::new()
-		};
-		let mut removed = 0;
-		let _access =
+		let access =
 			self.remote_access.acquire().await.expect("authority gate");
 		actor.authorize(&self.remote_sessions)?;
-		for (directory, name) in candidates {
-			if self
-				.store
-				.read(async |tx| tx.artifact_referenced(&name).await)
-				.await?
-			{
-				continue;
-			}
-			crate::filesystem::blocking(move || {
-				rustix::fs::unlinkat(
-					&directory,
-					name.as_str(),
-					rustix::fs::AtFlags::empty(),
-				)
-				.map_err(crate::artifact_files::io_error)?;
-				directory
-					.sync_all()
-					.map_err(crate::artifact_files::io_error)
+		let mut removed = 0;
+		for (index, folder) in disposable::FOLDERS.into_iter().enumerate() {
+			let home = self.run_home();
+			let after = publication.collection_cursor[index].clone();
+			let page = crate::filesystem::blocking(move || {
+				disposable::batch(&home, folder, &after)
 			})
 			.await??;
-			removed += 1;
+			for entry in page.entries {
+				if entry.active {
+					continue;
+				}
+				if folder == disposable::Namespace::Payloads
+					&& self
+						.store
+						.read(async |tx| {
+							tx.artifact_referenced(&entry.name).await
+						})
+						.await?
+				{
+					continue;
+				}
+				let now = self.clock.now();
+				removed += crate::filesystem::blocking(move || {
+					let modified = entry
+						.file
+						.metadata()
+						.and_then(|m| m.modified())
+						.map_err(crate::artifact_files::io_error)?;
+					if !now
+						.duration_since(modified)
+						.is_ok_and(|age| age.as_secs() >= 86400)
+					{
+						return Ok::<_, CoreError>(0);
+					}
+					rustix::fs::unlinkat(
+						&entry.directory,
+						entry.name.as_str(),
+						rustix::fs::AtFlags::empty(),
+					)
+					.map_err(crate::artifact_files::io_error)?;
+					entry
+						.directory
+						.sync_all()
+						.map_err(crate::artifact_files::io_error)?;
+					Ok(1)
+				})
+				.await??;
+			}
+			publication.collection_cursor[index] = page.next;
 		}
-		publication.collection_cursor = next;
+		drop(access);
 		Ok(removed)
 	}
-}
-fn candidates(
-	home: &std::path::Path,
-	now: std::time::SystemTime,
-	after: &str,
-) -> Result<Vec<(std::fs::File, String)>, CoreError> {
-	let directory = crate::artifact_files::directory(home)?;
-	let mut names = std::collections::BTreeSet::new();
-	for entry in rustix::fs::Dir::read_from(&directory)
-		.map_err(crate::artifact_files::io_error)?
-	{
-		let entry = entry.map_err(crate::artifact_files::io_error)?;
-		let Ok(name) = entry.file_name().to_str() else {
-			continue;
-		};
-		if name <= after {
-			continue;
-		}
-		if crate::artifact::validate_hash(name).is_err()
-			&& !name
-				.strip_prefix(".pending-")
-				.is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
-		{
-			continue;
-		}
-		let Ok(file) = crate::artifact_files::open(&directory, name) else {
-			continue;
-		};
-		// A slow upload can outlive the grace period; age alone is not abandonment.
-		if name.starts_with(".pending-") && file.try_lock().is_err() {
-			continue;
-		}
-		let modified = file
-			.metadata()
-			.and_then(|m| m.modified())
-			.map_err(crate::artifact_files::io_error)?;
-		if now
-			.duration_since(modified)
-			.is_ok_and(|age| age.as_secs() >= 86400)
-		{
-			names.insert(name.to_owned());
-			if names.len() > 256 {
-				names.pop_last();
-			}
-		}
-	}
-	names
-		.into_iter()
-		.map(|name| {
-			Ok((
-				directory
-					.try_clone()
-					.map_err(crate::artifact_files::io_error)?,
-				name,
-			))
-		})
-		.collect()
 }

@@ -71,6 +71,8 @@ pub struct ChangeEvidence {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactAvailability {
+	/// Payload capture was paused to preserve the disk-space reserve.
+	DiskPressure,
 	/// Complete bytes are stored under the advertised hash.
 	#[default]
 	Stored,

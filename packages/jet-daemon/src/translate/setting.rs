@@ -27,6 +27,7 @@ pub(super) fn snapshot(
 /// The protocol minor that first named each Setting.
 fn introduced_in(key: SettingKey) -> u32 {
 	match key {
+		SettingKey::StorageDisposableMiB => wire::DISK_PRESSURE_MINOR,
 		SettingKey::GitAutoBranch => wire::GIT_DELIVERY_MINOR,
 		SettingKey::GitAutoPush => wire::GIT_DELIVERY_MINOR,
 		SettingKey::GitAutoDraftPullRequest => wire::GIT_DELIVERY_MINOR,
@@ -69,6 +70,9 @@ fn resolved_setting(resolved: ResolvedSetting) -> wire::ResolvedSetting {
 
 pub(super) fn key(key: SettingKey) -> wire::SettingKey {
 	match key {
+		SettingKey::StorageDisposableMiB => {
+			wire::SettingKey::StorageDisposableMiB
+		}
 		SettingKey::EnergyConcurrency => wire::SettingKey::EnergyConcurrency,
 		SettingKey::EnergyLowPowerConcurrency => {
 			wire::SettingKey::EnergyLowPowerConcurrency
@@ -130,6 +134,9 @@ pub(super) fn key_from_wire(key: wire::SettingKey) -> SettingKey {
 		}
 		wire::SettingKey::ArtifactMaxMiB => SettingKey::ArtifactMaxMiB,
 		wire::SettingKey::ArtifactRunMiB => SettingKey::ArtifactRunMiB,
+		wire::SettingKey::StorageDisposableMiB => {
+			SettingKey::StorageDisposableMiB
+		}
 		wire::SettingKey::UtilityAccountBinding => {
 			SettingKey::UtilityAccountBinding
 		}

@@ -11,7 +11,7 @@ pub(super) fn scope(value: &wire::DiffScope) -> core::DiffScope {
 		}
 	}
 }
-pub(super) fn diff(value: core::ChangeDiff) -> wire::ChangeDiff {
+pub(super) fn diff(value: core::ChangeDiff, minor: u32) -> wire::ChangeDiff {
 	wire::ChangeDiff {
 		total_files: value.total_files,
 		next_page: value.next_page.map(|cursor| wire::PageCursor(cursor.0)),
@@ -32,9 +32,9 @@ pub(super) fn diff(value: core::ChangeDiff) -> wire::ChangeDiff {
 			core::TurnOutcome::Completed => wire::TurnOutcome::Completed,
 			core::TurnOutcome::Interrupted => wire::TurnOutcome::Interrupted,
 		}),
-		before: snapshot(value.before),
-		after: snapshot(value.after),
-		artifact: artifact(value.artifact),
+		before: snapshot(value.before, minor),
+		after: snapshot(value.after, minor),
+		artifact: artifact(value.artifact, minor),
 		files: value
 			.files
 			.into_iter()
@@ -69,17 +69,30 @@ pub(super) fn diff(value: core::ChangeDiff) -> wire::ChangeDiff {
 		patch_truncated: value.patch_truncated,
 	}
 }
-fn snapshot(value: core::ChangeSnapshot) -> wire::ChangeSnapshot {
+fn snapshot(value: core::ChangeSnapshot, minor: u32) -> wire::ChangeSnapshot {
 	wire::ChangeSnapshot {
-		content_complete: value.omitted_files.is_empty(),
+		content_complete: value.omitted_files.is_empty()
+			&& value.uncommitted.availability
+				!= core::ArtifactAvailability::DiskPressure,
 		commit: value.commit,
 		tree: value.tree,
-		uncommitted: artifact(value.uncommitted),
+		uncommitted: artifact(value.uncommitted, minor),
 	}
 }
-pub(super) fn artifact(value: core::ChangeArtifact) -> wire::ChangeArtifact {
+pub(super) fn artifact(
+	value: core::ChangeArtifact,
+	minor: u32,
+) -> wire::ChangeArtifact {
 	wire::ChangeArtifact {
 		availability: match value.availability {
+			core::ArtifactAvailability::DiskPressure
+				if minor >= wire::DISK_PRESSURE_MINOR =>
+			{
+				wire::ArtifactAvailability::DiskPressure
+			}
+			core::ArtifactAvailability::DiskPressure => {
+				wire::ArtifactAvailability::RunBudgetExceeded
+			}
 			core::ArtifactAvailability::Stored => {
 				wire::ArtifactAvailability::Stored
 			}

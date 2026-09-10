@@ -691,7 +691,12 @@ pub(crate) fn stored_setting(
 			_,
 		)
 		| (SettingKey::UtilityAutomaticNaming, _)
-		| (SettingKey::ArtifactMaxMiB | SettingKey::ArtifactRunMiB, _)
+		| (
+			SettingKey::StorageDisposableMiB
+			| SettingKey::ArtifactMaxMiB
+			| SettingKey::ArtifactRunMiB,
+			_,
+		)
 		| (
 			SettingKey::GitMessageInstructions | SettingKey::GitBranchPrefix,
 			_,
@@ -730,6 +735,7 @@ pub(crate) fn cleared_setting(key: SettingKey) -> Option<AuditDecision> {
 		| SettingKey::UtilityAutomaticNaming
 		| SettingKey::ArtifactMaxMiB
 		| SettingKey::ArtifactRunMiB
+		| SettingKey::StorageDisposableMiB
 		| SettingKey::GitMessageInstructions
 		| SettingKey::GitBranchPrefix => None,
 	}

@@ -154,7 +154,9 @@ pub(crate) async fn prepare(
 			))
 		})
 		.await?;
-	if !checkpoint.after.omitted_files.is_empty() {
+	if !checkpoint.after.omitted_files.is_empty()
+		|| crate::checkpoint_pressure::incomplete(&checkpoint.after)
+	{
 		return Err(CoreError::conflict(
 			"fork.checkpoint_incomplete",
 			"the selected checkpoint omitted file content and cannot produce an exact Workspace",

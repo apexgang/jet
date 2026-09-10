@@ -13,7 +13,7 @@ mod account;
 mod artifact;
 mod artifact_transfer;
 pub use artifact_transfer::{ArtifactControl, ArtifactDescriptor};
-pub use handshake::{ARTIFACTS_MINOR, ENERGY_MINOR};
+pub use handshake::{ARTIFACTS_MINOR, DISK_PRESSURE_MINOR, ENERGY_MINOR};
 mod resource;
 pub use resource::{PowerState, ResourceBudgets, SubagentControl};
 mod audit;

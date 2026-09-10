@@ -127,16 +127,7 @@ pub(crate) fn reserve(
 	bytes: u64,
 	reserve: u64,
 ) -> Result<(), CoreError> {
-	let stat = rustix::fs::fstatvfs(file).map_err(io_error)?;
-	let free = stat.f_bavail.saturating_mul(stat.f_frsize);
-	if free < reserve || free - reserve < bytes {
-		return Err(CoreError::unavailable(
-			"artifact.disk_pressure",
-			"Artifact ingestion is paused until disk space recovers",
-			"free-space reserve",
-		));
-	}
-	Ok(())
+	crate::disk_pressure::reserve(file, bytes, reserve)
 }
 
 pub(crate) fn missing() -> CoreError {
@@ -158,4 +149,20 @@ pub(crate) fn io_error(error: impl std::fmt::Display) -> CoreError {
 		"Artifact storage is unavailable",
 		error.to_string(),
 	)
+}
+
+pub(crate) fn cache_directory(home: &Path) -> Result<File, CoreError> {
+	let flags =
+		OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+	let home =
+		rustix::fs::open(home, flags, Mode::empty()).map_err(io_error)?;
+	match rustix::fs::mkdirat(&home, "cache", Mode::from_raw_mode(0o700)) {
+		Ok(()) | Err(rustix::io::Errno::EXIST) => {}
+		Err(error) => return Err(io_error(error)),
+	}
+	let directory = openat(&home, "cache", flags, Mode::empty())
+		.map_err(io_error)?
+		.into();
+	rustix::fs::fsync(&home).map_err(io_error)?;
+	Ok(directory)
 }

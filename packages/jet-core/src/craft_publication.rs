@@ -144,6 +144,18 @@ impl ArtifactStaging {
 			.checked_add(chunk.len() as u64)
 			.filter(|written| *written <= self.size)
 			.ok_or_else(artifact_mismatch)?;
+		let file = self
+			.file
+			.try_clone()
+			.await
+			.map_err(|_| installation_failed())?
+			.into_std()
+			.await;
+		let bytes = chunk.len() as u64;
+		crate::filesystem::blocking(move || {
+			crate::disk_pressure::reserve(&file, bytes, 0)
+		})
+		.await??;
 		self.file
 			.write_all(chunk)
 			.await

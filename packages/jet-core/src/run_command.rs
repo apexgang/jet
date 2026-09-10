@@ -355,6 +355,7 @@ pub(crate) async fn record(
 			"an earlier turn still owns execution",
 		));
 	}
+	core.check_disk_at(plan.root.clone(), 0).await?;
 	plan.child_work = crate::energy::admit(
 		core,
 		tx,

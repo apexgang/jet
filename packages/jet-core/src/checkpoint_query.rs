@@ -208,15 +208,22 @@ pub(crate) async fn query(
 			append_transitions(&mut evidence, terminal_files);
 		}
 		crate::change_evidence::attribute(&mut diff.files, &evidence);
-		diff.artifact = checkpoint_capture::patch(
-			core,
-			&root,
-			run_id,
-			&diff.before.tree,
-			&diff.after.tree,
-			limits,
-		)
-		.await?;
+		diff.artifact = if crate::checkpoint_pressure::incomplete(&diff.before)
+			|| crate::checkpoint_pressure::incomplete(&diff.after)
+		{
+			crate::checkpoint_pressure::artifact()
+		} else {
+			checkpoint_capture::patch(
+				core,
+				&root,
+				run_id,
+				&diff.before.tree,
+				&diff.after.tree,
+				limits,
+				checkpoint_capture::Retention::Current,
+			)
+			.await?
+		};
 	}
 	if matches!(scope, DiffScope::Historical { from_turn, to_turn } if from_turn == to_turn)
 	{

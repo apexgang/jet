@@ -230,6 +230,7 @@ pub(crate) async fn prepare(
 	if matches!(&preview.confirmation.source, CraftSource::Local { .. }) {
 		require_developer_mode(core).await?;
 	}
+	core.check_disk(preview.artifact_size).await?;
 	let staging = crate::craft_publication::begin_stage(
 		craft_home,
 		effect_id,

@@ -56,6 +56,8 @@ pub enum ChangeOrigin {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactAvailability {
+	/// Only hash and size were retained to preserve the disk-space reserve.
+	DiskPressure,
 	/// Complete bytes are stored under the advertised hash.
 	#[default]
 	Stored,

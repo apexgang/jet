@@ -447,7 +447,11 @@ async fn queue(
 		} else {
 			false
 		};
-		if !checkpoint.after.omitted_files.is_empty() || dirty_baseline {
+		if !checkpoint.after.omitted_files.is_empty()
+			|| crate::checkpoint_pressure::incomplete(&checkpoint.before)
+			|| crate::checkpoint_pressure::incomplete(&checkpoint.after)
+			|| dirty_baseline
+		{
 			doc.delivery.outcome = GitDeliveryOutcome::Failed {
 				code: "git.incomplete_or_dirty_baseline".into(),
 			};

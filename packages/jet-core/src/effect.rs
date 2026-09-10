@@ -148,6 +148,25 @@ impl Core {
 		adapter: &mut impl EffectAdapter,
 		effect: Effect,
 	) -> Result<Effect, CoreError> {
+		if matches!(
+			effect.kind,
+			EffectKind::StartRun { .. }
+				| EffectKind::StartTerminal { .. }
+				| EffectKind::ChangeExtension
+				| EffectKind::PromoteWorkspace { .. }
+				| EffectKind::InstallCraft
+				| EffectKind::GitDelivery
+		) {
+			match self.check_effect_disk(&effect.kind).await {
+				Ok(()) => {}
+				// Preserve the exact pending/in-flight decision; recovery and controls
+				// still reconcile, without spending an attempt on a refused launch.
+				Err(error) if error.code == "storage.disk_pressure" => {
+					return Ok(effect);
+				}
+				Err(error) => return Err(error),
+			}
+		}
 		let record = self
 			.store
 			.write(async |tx| tx.begin_effect_attempt(effect.effect_id).await)

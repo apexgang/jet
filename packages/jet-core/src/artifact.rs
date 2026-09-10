@@ -23,7 +23,7 @@ pub struct ArtifactLimits {
 	pub artifact_bytes: u64,
 	/// Newly ingested bytes per Run, default 2 GiB.
 	pub run_bytes: u64,
-	/// Space ingestion must leave available, default 64 MiB.
+	/// Additional reserve floor, always at least 2 GiB or 5% of capacity.
 	pub free_reserve_bytes: u64,
 }
 impl Default for ArtifactLimits {
@@ -31,7 +31,7 @@ impl Default for ArtifactLimits {
 		Self {
 			artifact_bytes: 512 * 1024 * 1024,
 			run_bytes: 2 * 1024 * 1024 * 1024,
-			free_reserve_bytes: 64 * 1024 * 1024,
+			free_reserve_bytes: crate::disk_pressure::MINIMUM_RESERVE,
 		}
 	}
 }
@@ -142,6 +142,10 @@ impl Core {
 
 	/// Opens private staging for an authenticated Run, without exposing a reference.
 	/// Returns authorization, declaration, Run lookup, or storage errors.
+	#[expect(
+		clippy::await_holding_invalid_type,
+		reason = "publication lock serializes durable staging reservations with collection and publication"
+	)]
 	pub async fn begin_artifact_upload(
 		&self,
 		actor: &Actor,
@@ -165,12 +169,20 @@ impl Core {
 			.read(async |tx| tx.run(run_id.0).await)
 			.await?
 			.ok_or_else(files::missing)?;
+		drop(_access);
+		self.collect_artifacts(actor).await?;
+		let _publication = self.artifact_publication.lock().await;
+		let _file_lock = files::publication_lock(self.run_home()).await?;
+		self.check_disposable(descriptor.size).await?;
 		let home = self.run_home();
 		let stage_home = home.clone();
 		let size = descriptor.size;
 		let (pending, file) = filesystem::blocking(move || {
 			let (pending, file) = files::stage(&stage_home)?;
 			files::reserve(&file, size, limits.free_reserve_bytes)?;
+			// Sparse length reserves the declared disposable bytes across Core instances
+			// and crashes. Publication still requires every byte and the verified hash.
+			file.set_len(size).map_err(files::io_error)?;
 			Ok::<_, CoreError>((pending, file))
 		})
 		.await??;
@@ -228,6 +240,7 @@ impl Core {
 		let mut file = upload.file.into_std().await;
 		let _publication = self.artifact_publication.lock().await;
 		let _file_lock = files::publication_lock(self.run_home()).await?;
+		self.check_disposable(0).await?;
 		let descriptor = upload.descriptor;
 		let expected = descriptor.clone();
 		let run_id = upload.run_id;
@@ -251,6 +264,9 @@ impl Core {
 					.map_err(files::io_error)?,
 			)? {
 				ArtifactAvailability::Stored => Ok(()),
+				ArtifactAvailability::DiskPressure => {
+					Err(crate::disk_pressure::pressure())
+				}
 				ArtifactAvailability::RunBudgetExceeded => Err(invalid(
 					"artifact.run_budget_exceeded",
 					"the Run's Artifact ingestion budget is exhausted",

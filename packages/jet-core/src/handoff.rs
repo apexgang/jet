@@ -118,6 +118,9 @@ pub(crate) async fn prepare(
 		core.artifact_policy().await?,
 	)
 	.await?;
+	if crate::checkpoint_pressure::incomplete(&snapshot) {
+		return Err(crate::disk_pressure::pressure());
+	}
 	if !snapshot.omitted_files.is_empty()
 		|| snapshot.uncommitted.size > 16 * 1024
 		|| snapshot.uncommitted.availability

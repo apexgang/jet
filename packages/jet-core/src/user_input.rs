@@ -171,6 +171,8 @@ pub(crate) async fn prepare(
 		));
 	}
 	let root = core.store.read(async |tx| root(tx, target).await).await?;
+	core.check_disk_at(root.clone(), content.len() as u64)
+		.await?;
 	let before = observe(root.clone(), path.clone()).await?;
 	let after_mode = before.permission_mode.map_or("100644", |mode| {
 		if mode & 0o111 == 0 {

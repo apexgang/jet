@@ -6,6 +6,7 @@ use crate::{
 use crate::{change_artifact, repository, tree_capture, workspace, worktree};
 use std::path::Path;
 
+#[derive(Clone, Copy)]
 pub(crate) enum Retention {
 	Durable,
 	Current,
@@ -18,6 +19,19 @@ pub(crate) async fn snapshot(
 	retention: Retention,
 	limits: crate::ArtifactLimits,
 ) -> Result<ChangeSnapshot, CoreError> {
+	let capture_bytes = crate::checkpoint_pressure::capture_bytes(root).await?;
+	match async {
+		core.check_disk(capture_bytes).await?;
+		core.check_disk_at(root.to_path_buf(), capture_bytes).await
+	}
+	.await
+	{
+		Ok(()) => {}
+		Err(error) if error.code == "storage.disk_pressure" => {
+			return crate::checkpoint_pressure::snapshot(root).await;
+		}
+		Err(error) => return Err(error),
+	}
 	tokio::time::timeout(
 		std::time::Duration::from_secs(300),
 		workspace::with_scratch(
@@ -58,8 +72,10 @@ pub(crate) async fn snapshot(
 						"HEAD changed during capture",
 					));
 				}
-				let uncommitted =
-					patch(core, root, run_id, &commit, &tree, limits).await?;
+				let uncommitted = patch(
+					core, root, run_id, &commit, &tree, limits, retention,
+				)
+				.await?;
 				// Keep rewritten commits and uncommitted tree objects reachable across
 				// restart and Git GC. These refs create no commits or user-branch changes.
 				let prefix = format!("refs/jet/checkpoints/{}", run_id.0);
@@ -96,14 +112,31 @@ pub(crate) async fn snapshot(
 	.await
 	.map_err(change_artifact::failed)?
 }
+#[expect(
+	clippy::await_holding_invalid_type,
+	reason = "cached patches reserve their bounded write while holding the shared publication gate"
+)]
 pub(crate) async fn patch(
 	core: &Core,
 	root: &Path,
 	run_id: RunId,
 	before: &str,
 	after: &str,
-	limits: crate::ArtifactLimits,
+	mut limits: crate::ArtifactLimits,
+	retention: Retention,
 ) -> Result<ChangeArtifact, CoreError> {
+	match async {
+		core.check_disk(0).await?;
+		core.check_disk_at(root.to_path_buf(), 0).await
+	}
+	.await
+	{
+		Ok(()) => {}
+		Err(error) if error.code == "storage.disk_pressure" => {
+			return Ok(crate::checkpoint_pressure::artifact());
+		}
+		Err(error) => return Err(error),
+	}
 	let mut command = repository::command(root);
 	// ASVS 1.2.5: fixed flags, immutable object names, no shell or external
 	// diff/textconv programs. Binary patches also preserve arbitrary file bytes.
@@ -121,7 +154,35 @@ pub(crate) async fn patch(
 		after,
 		"--",
 	]);
-	change_artifact::publish(core.run_home(), run_id, command, limits).await
+	let _publication;
+	let _file_lock;
+	let original_limit = limits.artifact_bytes;
+	if matches!(retention, Retention::Current) {
+		_publication = core.artifact_publication.lock().await;
+		_file_lock =
+			crate::artifact_files::publication_lock(core.run_home()).await?;
+		let remaining = match core.disposable_remaining().await {
+			Ok(remaining) => remaining,
+			Err(error) if error.code == "storage.disk_pressure" => 0,
+			Err(error) => return Err(error),
+		};
+		limits.artifact_bytes = original_limit.min(remaining);
+	}
+	let mut artifact = change_artifact::publish(
+		core.run_home(),
+		run_id,
+		command,
+		limits,
+		retention,
+	)
+	.await?;
+	if artifact.availability
+		== crate::ArtifactAvailability::ArtifactSizeExceeded
+		&& limits.artifact_bytes < original_limit
+	{
+		artifact.availability = crate::ArtifactAvailability::DiskPressure;
+	}
+	Ok(artifact)
 }
 pub(crate) async fn files(
 	root: &Path,

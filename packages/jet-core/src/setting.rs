@@ -109,6 +109,8 @@ impl SettingScopeKind {
 /// A Setting this core understands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SettingKey {
+	/// Plane-wide disposable Artifact and cache budget in MiB.
+	StorageDisposableMiB,
 	/// Plane-wide admission ceiling for concurrent managed work.
 	EnergyConcurrency,
 	/// Reduced ceiling while the Plane is power constrained; zero pauses new work.
@@ -189,7 +191,13 @@ struct Catalog {
 }
 
 /// Every Setting this core resolves, in the order a snapshot reports them.
-const CATALOG: [Catalog; 22] = [
+const CATALOG: [Catalog; 23] = [
+	Catalog {
+		key: SettingKey::StorageDisposableMiB,
+		spelling: "storage.disposable_mib",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Count(5120),
+	},
 	Catalog {
 		key: SettingKey::GitAutoBranch,
 		spelling: "git.auto_branch",

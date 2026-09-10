@@ -392,3 +392,6 @@ async fn crossing_the_size_limit_preserves_each_captured_side_and_same_boundary_
 		(&None, &Some(after), "100644", "100644")
 	);
 }
+
+#[path = "disk_checkpoint_tests.rs"]
+mod disk_pressure;

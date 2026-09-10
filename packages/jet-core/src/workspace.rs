@@ -217,6 +217,7 @@ pub(crate) async fn prepare(
 		return Err(project_not_found());
 	};
 	let project_root = PathBuf::from(project.root);
+	core.check_disk_at(project_root.clone(), 0).await?;
 	let commit =
 		worktree::resolve_commit(&project_root, base.as_revision()).await?;
 	let changes = if seed.is_none() {

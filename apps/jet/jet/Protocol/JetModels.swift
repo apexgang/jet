@@ -28,6 +28,7 @@ public enum Actor {
 }
 
 public enum ArtifactAvailability: String {
+    case `disk_pressure` = "disk_pressure"
     case `stored` = "stored"
     case `run_budget_exceeded` = "run_budget_exceeded"
     case `artifact_size_exceeded` = "artifact_size_exceeded"
@@ -1309,6 +1310,7 @@ public enum ServerMessage {
 }
 
 public enum SettingKey: String {
+    case `storage.disposable_mib` = "storage.disposable_mib"
     case `energy.concurrency` = "energy.concurrency"
     case `energy.low_power_concurrency` = "energy.low_power_concurrency"
     case `energy.constrained` = "energy.constrained"

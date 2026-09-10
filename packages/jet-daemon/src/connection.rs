@@ -404,6 +404,16 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 		QueryRequest::Settings {
 			selection:
 				jet_protocol::SettingSelection::Key {
+					key: jet_protocol::SettingKey::StorageDisposableMiB,
+				},
+			..
+		} => Some(MinorRequirement {
+			minor: jet_protocol::DISK_PRESSURE_MINOR,
+			feature: "disposable storage policy",
+		}),
+		QueryRequest::Settings {
+			selection:
+				jet_protocol::SettingSelection::Key {
 					key:
 						jet_protocol::SettingKey::GitAutoBranch
 						| jet_protocol::SettingKey::GitAutoPush
@@ -577,6 +587,17 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		CommandRequest::ReviewRemoteTool { .. } => Some(MinorRequirement {
 			minor: jet_protocol::NO_VISA_MINOR,
 			feature: "No-Visa review",
+		}),
+		CommandRequest::SetSetting {
+			key: jet_protocol::SettingKey::StorageDisposableMiB,
+			..
+		}
+		| CommandRequest::ClearSetting {
+			key: jet_protocol::SettingKey::StorageDisposableMiB,
+			..
+		} => Some(MinorRequirement {
+			minor: jet_protocol::DISK_PRESSURE_MINOR,
+			feature: "disposable storage policy",
 		}),
 		CommandRequest::SetSetting {
 			key:

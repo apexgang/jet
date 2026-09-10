@@ -68,6 +68,7 @@ pub(crate) async fn prepare(
 			promotion::workspace_and_project(tx, binding.workspace_id).await
 		})
 		.await?;
+	core.check_disk_at(project_root.clone(), 0).await?;
 	let Compared {
 		binding: current,
 		changed_paths,
