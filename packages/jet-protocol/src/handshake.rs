@@ -14,7 +14,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 31;
+pub const PROTOCOL_MINOR: u32 = 32;
+
+/// First minor supporting single exact-action Automatic-review retries.
+pub const APPROVAL_RETRY_MINOR: u32 = 32;
 
 /// First minor supporting verified Artifact publication and binary transfers.
 pub const ARTIFACTS_MINOR: u32 = 31;

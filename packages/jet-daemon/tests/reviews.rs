@@ -8,6 +8,26 @@ use serde_json::{Value, json};
 use std::{os::unix::fs::PermissionsExt, path::Path, process::Stdio};
 use tokio::{io::AsyncWriteExt, process::Command};
 
+mod support;
+
+#[tokio::test]
+async fn approval_retry_commands_require_the_new_minor_and_a_live_denial() {
+	let dir = tempfile::tempdir().unwrap();
+	let daemon = support::start_jetd(&dir.path().join(".jet")).await;
+	let command = json!({"kind":"command", "id":1, "command_id":uuid::Uuid::now_v7(),
+		"command":{"type":"authorize_approval_retry", "run_id":uuid::Uuid::new_v4(), "review_id":uuid::Uuid::new_v4()}});
+	for (minor, code) in [
+		(jet_protocol::ARTIFACTS_MINOR, "protocol.unsupported_minor"),
+		(jet_protocol::APPROVAL_RETRY_MINOR, "review.run_unavailable"),
+	] {
+		let mut hello = support::hello(uuid::Uuid::new_v4());
+		hello.minor = minor;
+		let (mut wire, _) = support::handshake_raw(&daemon, &hello).await;
+		wire.send(&command).await;
+		assert_eq!(wire.receive::<Value>().await["error"]["code"], code);
+	}
+}
+
 fn executable(path: &Path, source: &str) {
 	std::fs::write(path, source).unwrap();
 	std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))

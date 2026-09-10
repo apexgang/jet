@@ -43,14 +43,30 @@ impl Core {
 	///
 	/// The supervising loop keeps reading the Craft while this runs, so a
 	/// slow reviewer never stalls the source the Run is still producing.
-	pub(crate) fn begin_automatic_review(
+	pub(crate) async fn begin_automatic_review(
 		self: &Arc<Self>,
 		run_id: RunId,
 		request: ApprovalRequest,
 	) {
+		let Some(connection) = self.live_connection(run_id) else {
+			return;
+		};
+		let Ok(turn) = self
+			.store
+			.read(async |tx| {
+				crate::review_guard::turn(
+					&crate::review_guard::load(tx, run_id).await?,
+				)
+			})
+			.await
+		else {
+			return;
+		};
 		let core = Arc::clone(self);
 		tokio::spawn(async move {
-			let _ = core.review_approval(run_id, request).await;
+			let _ = core
+				.review_approval(run_id, request, turn, connection)
+				.await;
 		});
 	}
 
@@ -61,30 +77,58 @@ impl Core {
 		&self,
 		run_id: RunId,
 		request: ApprovalRequest,
+		turn: u32,
+		connection: Arc<dyn crate::RunConnection>,
 	) -> Result<(), CoreError> {
 		request.validate()?;
 		let Some(routing) = self.review_routing(run_id).await? else {
 			return Ok(());
 		};
-		let answered = match routing.selection {
-			Ok(selection) => {
-				match tokio::time::timeout(
-					REVIEW_TIMEOUT,
-					self.consult(run_id, &request, &selection),
-				)
-				.await
-				{
-					Ok(Ok(reviewed)) => reviewed.settled(),
-					Ok(Err(error)) => Answered::unavailable(error),
-					Err(_) => {
-						Answered::unavailable(unavailable("review.timeout"))
+		let review_id = Uuid::now_v7();
+		let admission = self
+			.store
+			.write(async |tx| {
+				let mut state = crate::review_guard::load(tx, run_id).await?;
+				if crate::review_guard::turn(&state)? != turn {
+					return Err(unavailable("review.turn_changed"));
+				}
+				let result = state.review.admit(turn, review_id, &request);
+				crate::run_state::save(tx, run_id, &state).await?;
+				Ok::<_, CoreError>(result)
+			})
+			.await?;
+		let answered = if let Err(error) = admission {
+			if matches!(
+				error.code.as_str(),
+				"review.denial_budget" | "review.workaround_denied"
+			) {
+				Answered::denied(&error.code)
+			} else {
+				Answered::unavailable(error)
+			}
+		} else if crate::review_action::operation(&request).is_none() {
+			Answered::denied("review.action_not_supported")
+		} else {
+			match routing.selection {
+				Ok(selection) => {
+					match tokio::time::timeout(
+						REVIEW_TIMEOUT,
+						self.consult(run_id, &request, &selection),
+					)
+					.await
+					{
+						Ok(Ok(reviewed)) => reviewed.settled(),
+						Ok(Err(error)) => Answered::unavailable(error),
+						Err(_) => {
+							Answered::unavailable(unavailable("review.timeout"))
+						}
 					}
 				}
+				Err(error) => Answered::unavailable(error),
 			}
-			Err(error) => Answered::unavailable(error),
 		};
-		let review = ApprovalReview {
-			review_id: Uuid::now_v7(),
+		let mut review = ApprovalReview {
+			review_id,
 			run_id,
 			request,
 			reviewer: answered.reviewer,
@@ -94,16 +138,23 @@ impl Core {
 			policy: routing.policy,
 			outcome: answered.outcome,
 		};
+		if !self
+			.live_connection(run_id)
+			.is_some_and(|live| Arc::ptr_eq(&live, &connection))
+		{
+			review.outcome = ReviewOutcome::Unavailable {
+				reason: "review.execution_changed".into(),
+			};
+		}
 		// ADR-0064: the decision is durable before it can authorize
 		// anything, so a lost delivery leaves the request held rather than
 		// leaving an allowance nobody recorded.
-		self.record_review(&review).await?;
-		let ReviewOutcome::Decided { decision, .. } = review.outcome else {
-			return Ok(());
+		self.record_review(&mut review, turn).await?;
+		let decision = match review.outcome {
+			ReviewOutcome::Decided { decision, .. } => decision,
+			ReviewOutcome::Denied { .. } => ReviewDecision::Deny,
+			ReviewOutcome::Unavailable { .. } => return Ok(()),
 		};
-		let connection = self
-			.live_connection(run_id)
-			.ok_or_else(|| unavailable("review.execution_unavailable"))?;
 		connection
 			.decide_approval(&review.request.request_id, decision)
 			.await
@@ -132,7 +183,10 @@ impl Core {
 			.review(&selection.craft, &selection.binding, &pinned, &input)
 			.await
 			.map_err(|_| unavailable("review.failed"))?;
-		if reply.model != pinned.model || reply.output.len() > OUTPUT_BYTES {
+		if reply.model != pinned.model
+			|| reply.reviewer != pinned.reviewer
+			|| reply.output.len() > OUTPUT_BYTES
+		{
 			return Err(unavailable("review.output_invalid"));
 		}
 		Ok(Reviewed {
@@ -147,37 +201,57 @@ impl Core {
 	/// journal, because the audit holds no Conversation content (ADR-0105).
 	async fn record_review(
 		&self,
-		review: &ApprovalReview,
+		review: &mut ApprovalReview,
+		turn: u32,
 	) -> Result<(), CoreError> {
 		let now = self.now_unix_ms();
 		let run_id = review.run_id;
-		let outcome = match &review.outcome {
-			ReviewOutcome::Decided {
-				decision: ReviewDecision::Allow,
-				..
-			} => jet_store::AuditOutcome::Succeeded,
-			ReviewOutcome::Decided {
-				decision: ReviewDecision::Deny,
-				..
-			} => jet_store::AuditOutcome::Denied,
-			// Nothing was decided, so nothing was allowed or refused.
-			ReviewOutcome::Unavailable { .. } => {
-				jet_store::AuditOutcome::Failed
-			}
-		};
-		let review = review.clone();
 		self.store
 			.write(async |tx| {
-				let run = tx
-					.run(run_id.0)
-					.await?
-					.ok_or_else(|| unavailable("review.run_unavailable"))?;
 				let record = tx
 					.run_execution(run_id.0)
 					.await?
 					.ok_or_else(|| unavailable("review.run_unavailable"))?;
+				let mut state: crate::run_state::State =
+					crate::run_state::decode(&record.state)?;
 				let plan: crate::LaunchPlan =
 					crate::run_state::decode(&record.plan)?;
+				let run = tx
+					.run(run_id.0)
+					.await?
+					.ok_or_else(|| unavailable("review.run_unavailable"))?;
+				if crate::review_guard::turn(&state).ok() != Some(turn)
+					|| run.lifecycle != crate::RunLifecycle::Active
+				{
+					review.outcome = ReviewOutcome::Unavailable {
+						reason: "review.turn_changed".into(),
+					};
+				} else {
+					if !crate::review_policy::unchanged(tx, review, &plan)
+						.await?
+					{
+						review.outcome = ReviewOutcome::Unavailable {
+							reason: "review.policy_changed".into(),
+						};
+					}
+					state.review.record(review);
+					crate::run_state::save(tx, run_id, &state).await?;
+				}
+				let outcome = match &review.outcome {
+					ReviewOutcome::Decided {
+						decision: ReviewDecision::Allow,
+						..
+					} => jet_store::AuditOutcome::Succeeded,
+					ReviewOutcome::Decided {
+						decision: ReviewDecision::Deny,
+						..
+					}
+					| ReviewOutcome::Denied { .. } => jet_store::AuditOutcome::Denied,
+					// Nothing was decided, so nothing was allowed or refused.
+					ReviewOutcome::Unavailable { .. } => {
+						jet_store::AuditOutcome::Failed
+					}
+				};
 				crate::run_state::append(
 					tx,
 					&crate::EventActor::RunSupervisor {
@@ -186,7 +260,7 @@ impl Core {
 					},
 					&run.into(),
 					EventKind::ApprovalReviewed {
-						review: Box::new(review),
+						review: Box::new(review.clone()),
 					},
 					now,
 				)
@@ -241,6 +315,15 @@ impl Reviewed {
 }
 
 impl Answered {
+	fn denied(reason: &str) -> Self {
+		Self {
+			reviewer: None,
+			model: None,
+			outcome: ReviewOutcome::Denied {
+				reason: reason.into(),
+			},
+		}
+	}
 	/// A review that did not happen. Nothing was allowed, and the held
 	/// request still waits for a person.
 	fn unavailable(error: CoreError) -> Self {

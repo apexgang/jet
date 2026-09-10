@@ -100,7 +100,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::CraftInstallationQueued(queued) => Ok(queued),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::UtilityQueued { .. }

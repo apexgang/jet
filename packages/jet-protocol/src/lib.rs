@@ -164,7 +164,9 @@ pub use usage::{
 	UsageFreshness, UsageSelection, UsageTokens,
 };
 mod no_visa;
-pub use handshake::{AUTOMATIC_REVIEW_MINOR, NO_VISA_MINOR};
+pub use handshake::{
+	APPROVAL_RETRY_MINOR, AUTOMATIC_REVIEW_MINOR, NO_VISA_MINOR,
+};
 pub use no_visa::{
 	CraftRemoteTool, NoVisaOrigin, RemoteEnvironment, RemoteGitOperation,
 	RemoteToolAction, RemoteToolDecision, RemoteToolOutcome, RemoteToolRequest,

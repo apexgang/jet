@@ -128,7 +128,8 @@ impl Core {
 		now_unix_ms: i64,
 	) -> Result<Prepared, CoreError> {
 		match command {
-			Command::ReviewRemoteTool { .. } => Ok(Prepared::Nothing),
+			Command::AuthorizeApprovalRetry { .. }
+			| Command::ReviewRemoteTool { .. } => Ok(Prepared::Nothing),
 			Command::ChangeExtension { confirmation } => {
 				crate::extension_work::validate(self, confirmation).await?;
 				Ok(Prepared::Nothing)

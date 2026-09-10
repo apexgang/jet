@@ -376,6 +376,12 @@ pub enum EventKind {
 		/// The review, its routing, and the decision the core made.
 		review: Box<crate::ApprovalReview>,
 	},
+	/// An interactive user authorized one retry of a stored denied action.
+	#[serde(rename = "approval.retry_authorized")]
+	ApprovalRetryAuthorized {
+		/// The original denied review, retained in the journal.
+		review_id: Uuid,
+	},
 	/// An active Run began working or waiting for a specific reason.
 	#[serde(rename = "run.activity_changed")]
 	RunActivityChanged {
@@ -675,6 +681,7 @@ impl EventKind {
 			| Self::RunProcessesChanged { .. }
 			| Self::ApprovalRequested { .. }
 			| Self::ApprovalReviewed { .. }
+			| Self::ApprovalRetryAuthorized { .. }
 			| Self::RunOutput { .. }
 			| Self::RunNativeConversation { .. }
 			| Self::ConversationImported { .. }

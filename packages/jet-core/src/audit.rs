@@ -142,6 +142,8 @@ pub enum AuditDecision {
 	/// Automatic review answered exactly one Harness approval request that
 	/// would otherwise have waited for a person (ADR-0012).
 	ApprovalReviewed,
+	/// An interactive user authorized a single exact-action review retry.
+	ApprovalRetryAuthorized,
 	/// The owner changed whether, or through which binding, this Plane
 	/// reviews approval requests automatically.
 	ReviewPolicyChanged,
@@ -296,6 +298,7 @@ impl AuditDecision {
 			Self::DeveloperModeDisabled => "craft.developer_mode_disabled",
 			Self::DeveloperModeCleared => "craft.developer_mode_cleared",
 			Self::ApprovalReviewed => "approval.reviewed",
+			Self::ApprovalRetryAuthorized => "approval.retry_authorized",
 			Self::ReviewPolicyChanged => "policy.review_changed",
 		}
 	}
@@ -311,7 +314,7 @@ impl AuditDecision {
 			// Answering for a person is exactly what a review does, so
 			// every one of them is worth the same attention as the remote
 			// action a person reviews by hand.
-			Self::RemoteToolReviewed | Self::ApprovalReviewed => AuditRisk::Elevated,
+			Self::RemoteToolReviewed | Self::ApprovalReviewed | Self::ApprovalRetryAuthorized => AuditRisk::Elevated,
             Self::ExecutionResolutionRequested => AuditRisk::Destructive,
 			Self::TerminalOpened | Self::TerminalClosed | Self::TerminalInput | Self::ConnectionAuthenticated => AuditRisk::Routine,
 			Self::UtilityPolicyChanged
@@ -413,6 +416,9 @@ impl AuditSubject {
 /// guards can never drift apart.
 pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 	match command {
+		Command::AuthorizeApprovalRetry { .. } => {
+			Some(AuditDecision::ApprovalRetryAuthorized)
+		}
 		Command::ReviewRemoteTool { .. } => {
 			Some(AuditDecision::RemoteToolReviewed)
 		}
@@ -481,6 +487,9 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 /// that exists.
 fn refused_subject(command: &Command) -> AuditSubject {
 	match command {
+		Command::AuthorizeApprovalRetry { run_id, .. } => {
+			AuditSubject::Execution(*run_id)
+		}
 		Command::ReviewRemoteTool { .. } => AuditSubject::Plane,
 		Command::ChangeExtension { .. } => AuditSubject::Plane,
 		Command::DisableCraft { craft_id, .. } => {

@@ -100,9 +100,12 @@ mod remote;
 mod remote_pairing;
 mod repository;
 mod review;
+mod review_action;
+mod review_guard;
 mod review_input;
 mod review_output;
 mod review_policy;
+mod review_retry;
 mod review_work;
 pub use review::{
 	ApprovalRequest, ApprovalReview, AutomaticReviewPolicy,

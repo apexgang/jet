@@ -218,6 +218,7 @@ public struct ClientPublicKey {
 }
 
 public enum CommandRequest {
+    case `authorize_approval_retry`(CommandRequestAuthorizeApprovalRetry)
     case `change_extension`(CommandRequestChangeExtension)
     case `review_remote_tool`(CommandRequestReviewRemoteTool)
     case `request_utility`(CommandRequestRequestUtility)
@@ -263,6 +264,7 @@ public enum CommandRequest {
 }
 
 public enum CommandResponse {
+    case `approval_retry_authorized`(CommandResponseApprovalRetryAuthorized)
     case `extension_change_queued`(CommandResponseExtensionChangeQueued)
     case `remote_tool_reviewed`(CommandResponseRemoteToolReviewed)
     case `utility_queued`(CommandResponseUtilityQueued)
@@ -1569,6 +1571,11 @@ public struct ClientMessageCommand {
     public let `id`: UInt64
 }
 
+public struct CommandRequestAuthorizeApprovalRetry {
+    public let `review_id`: String
+    public let `run_id`: String
+}
+
 public struct CommandRequestChangeExtension {
     public let `confirmation`: ExtensionConfirmation
 }
@@ -1788,6 +1795,10 @@ public struct CommandRequestResumeImportedConversation {
     public let `import_id`: String
     public let `retention`: RetentionPolicy?
     public let `working_tree`: WorkingTreeRequest
+}
+
+public struct CommandResponseApprovalRetryAuthorized {
+    public let `review_id`: String
 }
 
 public struct CommandResponseExtensionChangeQueued {

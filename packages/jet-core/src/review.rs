@@ -160,7 +160,8 @@ pub struct ReviewReply {
 
 /// The exact policy one review ran under. Version 1 means one reviewer
 /// request, no tools, a bounded transcript, and the exact requested action.
-/// A review only exists on a Plane that turned Automatic review on, so
+/// Version 2 adds trusted action eligibility, durable per-turn denial
+/// limits, and single exact-action retries. A review only exists on a Plane that turned Automatic review on, so
 /// there is no disabled state to record here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AutomaticReviewPolicy {
@@ -175,6 +176,11 @@ pub struct AutomaticReviewPolicy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ReviewOutcome {
+	/// The trusted core refused the action independently of any reviewer.
+	Denied {
+		/// Stable, content-free policy rule.
+		reason: String,
+	},
 	/// The reviewer answered and the core settled what it authorizes.
 	Decided {
 		/// The reviewer's own judgement.

@@ -532,6 +532,12 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 
 fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 	match command {
+		CommandRequest::AuthorizeApprovalRetry { .. } => {
+			Some(MinorRequirement {
+				minor: jet_protocol::APPROVAL_RETRY_MINOR,
+				feature: "exact-action approval retries",
+			})
+		}
 		CommandRequest::ReviewRemoteTool { .. } => Some(MinorRequirement {
 			minor: jet_protocol::NO_VISA_MINOR,
 			feature: "No-Visa review",

@@ -16,6 +16,7 @@ mod pairing_requests;
 mod project_requests;
 mod promotion_requests;
 mod requests;
+mod review_requests;
 mod search_requests;
 mod ssh;
 mod turn_requests;

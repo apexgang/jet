@@ -72,7 +72,8 @@ async fn apply(
 				client: crate::translate::paired_client(client),
 			})
 		}
-		CommandOutcome::RemoteToolReviewed { .. }
+		CommandOutcome::ApprovalRetryAuthorized { .. }
+		| CommandOutcome::RemoteToolReviewed { .. }
 		| CommandOutcome::UserEditApplied(_)
 		| CommandOutcome::UtilityQueued { .. }
 		| CommandOutcome::CraftDisabled { .. }
