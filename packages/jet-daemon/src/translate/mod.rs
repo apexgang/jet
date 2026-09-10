@@ -261,14 +261,14 @@ pub(crate) fn query_result(
 		}
 		QueryResult::ChangeArtifact(chunk) => {
 			wire::QueryResponse::ChangeArtifact(wire::ChangeArtifactChunk {
-				artifact: checkpoint::artifact(chunk.artifact),
+				artifact: checkpoint::artifact(chunk.artifact, minor),
 				offset: chunk.offset,
 				bytes: chunk.bytes,
 			})
 		}
-		QueryResult::ChangeDiff(diff) => {
-			wire::QueryResponse::ChangeDiff(Box::new(checkpoint::diff(*diff)))
-		}
+		QueryResult::ChangeDiff(diff) => wire::QueryResponse::ChangeDiff(
+			Box::new(checkpoint::diff(*diff, minor)),
+		),
 		QueryResult::GitDeliveries(deliveries) => {
 			wire::QueryResponse::GitDeliveries {
 				deliveries: deliveries

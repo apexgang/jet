@@ -29,6 +29,9 @@ pub enum SettingScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum SettingKey {
+	/// Plane-wide disposable Artifact and cache budget in MiB.
+	#[serde(rename = "storage.disposable_mib")]
+	StorageDisposableMiB,
 	/// Maximum simultaneous managed work.
 	#[serde(rename = "energy.concurrency")]
 	EnergyConcurrency,

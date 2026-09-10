@@ -1,3 +1,6 @@
+#[path = "disk_run_tests.rs"]
+mod disk_run_tests;
+
 use pretty_assertions::assert_eq;
 
 #[path = "energy_transition_tests.rs"]

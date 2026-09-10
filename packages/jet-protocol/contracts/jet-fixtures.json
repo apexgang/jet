@@ -1,5 +1,15 @@
 [
   {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":1,\"result\":{\"type\":\"change_artifact\",\"artifact\":{\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":3,\"availability\":\"disk_pressure\"},\"offset\":\"0\",\"bytes\":[]}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"set_setting\",\"key\":\"storage.disposable_mib\",\"scope\":{\"type\":\"plane\"},\"value\":{\"type\":\"count\",\"value\":5120}}}"
+  },
+  {
     "schema": "ClientHello",
     "valid": true,
     "payload": "{\"protocol\":{\"min\":1,\"max\":1},\"minor\":19,\"codec\":\"json-v1\",\"client_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"max_control_frame\":1048576,\"max_data_frame\":262144,\"capabilities\":[],\"future_flag\":true}"

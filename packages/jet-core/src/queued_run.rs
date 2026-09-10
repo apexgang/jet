@@ -33,6 +33,7 @@ impl Core {
 				// Busy checkouts and unavailable pins retain their exact pending input.
 				if let Err(error) = outcome
 					&& !error.is_authoritative_result()
+					&& error.code != "storage.disk_pressure"
 				{
 					return Err(error);
 				}
@@ -56,6 +57,7 @@ impl Core {
 		// Read-only external validation precedes the write transaction. The
 		// transaction rechecks the selection before admitting another execution.
 		let prepared = async {
+			self.check_disk(0).await?;
 			let plan = if accepted.pinned {
 				host.prepare_retry_run(accepted.plan.clone()).await?
 			} else {
@@ -149,6 +151,7 @@ async fn prepare(
 		selection.binding(tx).await?;
 	}
 	let mut queue = turn_queue::load(tx, id).await?;
+	core.check_disk_at(plan.root.clone(), 0).await?;
 	plan.child_work = crate::energy::admit(
 		core,
 		tx,

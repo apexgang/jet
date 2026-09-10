@@ -232,6 +232,11 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 		(
 			vec![
 				resolved(
+					SettingKey::StorageDisposableMiB,
+					SettingValue::Count(5120),
+					SettingSource::BuiltIn
+				),
+				resolved(
 					SettingKey::GitAutoBranch,
 					SettingValue::Flag(false),
 					SettingSource::BuiltIn
@@ -345,6 +350,11 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 				),
 			],
 			vec![
+				resolved(
+					SettingKey::StorageDisposableMiB,
+					SettingValue::Count(5120),
+					SettingSource::BuiltIn
+				),
 				resolved(
 					SettingKey::GitAutoBranch,
 					SettingValue::Flag(false),

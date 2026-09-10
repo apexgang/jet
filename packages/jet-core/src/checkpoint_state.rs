@@ -162,15 +162,22 @@ pub(crate) async fn observe(
 	if !tracking.evidence_incomplete {
 		crate::change_evidence::attribute(&mut files, &tracking.evidence);
 	}
-	let artifact = checkpoint_capture::patch(
-		core,
-		&plan.root,
-		run_id,
-		&before.tree,
-		&after.tree,
-		limits,
-	)
-	.await?;
+	let artifact = if crate::checkpoint_pressure::incomplete(&before)
+		|| crate::checkpoint_pressure::incomplete(&after)
+	{
+		crate::checkpoint_pressure::artifact()
+	} else {
+		checkpoint_capture::patch(
+			core,
+			&plan.root,
+			run_id,
+			&before.tree,
+			&after.tree,
+			limits,
+			checkpoint_capture::Retention::Durable,
+		)
+		.await?
+	};
 	let run = tx.run(run_id.0).await?.ok_or_else(missing)?;
 	tracking.completed += 1;
 	let checkpoint = ChangeCheckpoint {

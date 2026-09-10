@@ -81,6 +81,9 @@ impl Core {
 		if recorded {
 			return Ok(Prepared::Nothing);
 		}
+		if crate::disk_pressure::requires_disk_admission(command) {
+			self.check_disk(0).await?;
+		}
 		if matches!(
 			command,
 			Command::ApplyUserEdit { .. }

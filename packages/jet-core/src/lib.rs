@@ -44,8 +44,14 @@ mod checkpoint;
 mod checkpoint_capture;
 mod checkpoint_omissions;
 mod checkpoint_pages;
+mod checkpoint_pressure;
 mod checkpoint_query;
 mod checkpoint_state;
+mod disk_pressure;
+#[cfg(test)]
+#[path = "disk_pressure_tests.rs"]
+mod disk_pressure_tests;
+mod disposable;
 pub use checkpoint::{
 	ArtifactAvailability, ChangeArtifact, ChangeArtifactChunk,
 	ChangeCheckpoint, ChangeDiff, ChangeEvidence, ChangeOrigin, ChangeSnapshot,

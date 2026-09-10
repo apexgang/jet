@@ -670,3 +670,6 @@ async fn delivery_waits_for_the_parser_checkpoint_before_mutating_a_live_run() {
 
 #[path = "git_delivery_github_tests.rs"]
 mod github_tests;
+
+#[path = "disk_delivery_tests.rs"]
+mod disk_pressure;

@@ -92,6 +92,9 @@ pub(crate) async fn admit(
 	source: TurnSource,
 	admission: Admission,
 ) -> Result<ChildWork, CoreError> {
+	if matches!(admission, Admission::NewRun) {
+		core.check_disk(0).await?;
+	}
 	let policy = policy(core, tx).await?;
 	if source == TurnSource::User && policy.foreground_override {
 		return Ok(policy.child_work);

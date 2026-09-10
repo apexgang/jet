@@ -44,9 +44,17 @@ pub(crate) async fn publish(
 	run_id: crate::RunId,
 	mut command: tokio::process::Command,
 	limits: crate::ArtifactLimits,
+	retention: crate::checkpoint_capture::Retention,
 ) -> Result<ChangeArtifact, CoreError> {
+	let budget_home = home.clone();
 	let (pending, file) = filesystem::blocking(move || {
-		let directory = directory(&home)?;
+		let directory = match retention {
+			crate::checkpoint_capture::Retention::Durable => directory(&home)?,
+			crate::checkpoint_capture::Retention::Current => {
+				crate::artifact_files::cache_directory(&home)
+					.map_err(std::io::Error::other)?
+			}
+		};
 		let name = format!(".pending-{}", uuid::Uuid::new_v4());
 		let file: File = openat(
 			&directory,
@@ -59,6 +67,7 @@ pub(crate) async fn publish(
 			Mode::from_raw_mode(0o600),
 		)?
 		.into();
+		file.lock()?;
 		Ok::<_, std::io::Error>((Pending { directory, name }, file))
 	})
 	.await?
@@ -72,6 +81,7 @@ pub(crate) async fn publish(
 	let mut output = child.stdout.take().expect("piped output");
 	let mut hash = Sha256::new();
 	let mut size = 0;
+	let mut pressure = false;
 	let mut chunk = [0; 65536];
 	loop {
 		let read = output.read(&mut chunk).await.map_err(failed)?;
@@ -80,17 +90,25 @@ pub(crate) async fn publish(
 		}
 		size += read as u64;
 		hash.update(&chunk[..read]);
-		if size <= limits.artifact_bytes {
+		if size <= limits.artifact_bytes && !pressure {
 			let directory = pending.directory.try_clone().map_err(failed)?;
-			filesystem::blocking(move || {
+			let space = filesystem::blocking(move || {
 				crate::artifact_files::reserve(
 					&directory,
 					read as u64,
 					limits.free_reserve_bytes,
 				)
 			})
-			.await??;
-			file.write_all(&chunk[..read]).await.map_err(failed)?;
+			.await?;
+			match space {
+				Ok(()) => {
+					file.write_all(&chunk[..read]).await.map_err(failed)?
+				}
+				Err(error) if error.code == "storage.disk_pressure" => {
+					pressure = true
+				}
+				Err(error) => return Err(error),
+			}
 		}
 	}
 	if !child.wait().await.map_err(failed)?.success() {
@@ -100,11 +118,14 @@ pub(crate) async fn publish(
 	drop(file);
 	let sha256 = format!("{:x}", hash.finalize());
 	let target = sha256.clone();
-	let availability = if size > limits.artifact_bytes {
+	let availability = if pressure {
+		// Preserve checkpoint metadata and Run recovery even when payload writes pause.
+		ArtifactAvailability::DiskPressure
+	} else if size > limits.artifact_bytes {
 		ArtifactAvailability::ArtifactSizeExceeded
 	} else {
 		filesystem::blocking(move || {
-			let budget = pending.directory.try_clone().map_err(failed)?;
+			let budget = directory(&budget_home).map_err(failed)?;
 			crate::change_artifact_budget::publish_with_limit(
 				pending,
 				run_id,
@@ -131,14 +152,20 @@ fn open_artifact(home: &Path, sha256: &str) -> Result<File, CoreError> {
 		return Err(failed("invalid Artifact address"));
 	}
 	let directory = directory(home).map_err(failed)?;
-	let file: File = openat(
-		&directory,
-		sha256,
-		OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-		Mode::empty(),
-	)
-	.map_err(failed)?
-	.into();
+	let flags =
+		OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+	let file: File = match openat(&directory, sha256, flags, Mode::empty()) {
+		Ok(file) => file.into(),
+		Err(rustix::io::Errno::NOENT) => openat(
+			&crate::artifact_files::cache_directory(home)?,
+			sha256,
+			flags,
+			Mode::empty(),
+		)
+		.map_err(failed)?
+		.into(),
+		Err(error) => return Err(failed(error)),
+	};
 	let metadata = file.metadata().map_err(failed)?;
 	if !metadata.is_file() {
 		return Err(failed("invalid Artifact file"));
