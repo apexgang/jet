@@ -193,5 +193,15 @@
     "schema": "CraftReviewReply",
     "valid": true,
     "payload": "{\"version\":1,\"model\":\"pinned-reviewer\",\"reviewer\":\"equivalent\",\"output\":\"{\\\"risk\\\":\\\"low\\\",\\\"authorization\\\":\\\"sufficient\\\",\\\"decision\\\":\\\"allow\\\",\\\"rationale\\\":\\\"Asked for.\\\"}\"}"
+  },
+  {
+    "schema": "CraftCommand",
+    "valid": true,
+    "payload": "{\"kind\":\"constrain_subagents\",\"max_children\":0}"
+  },
+  {
+    "schema": "CraftCommand",
+    "valid": true,
+    "payload": "{\"kind\":\"constrain_subagents\",\"max_children\":null}"
   }
 ]

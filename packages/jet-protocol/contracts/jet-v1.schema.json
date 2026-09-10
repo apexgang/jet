@@ -762,6 +762,17 @@
         "platform": {
           "description": "The operating system the Plane runs.",
           "$ref": "#/$defs/Platform"
+        },
+        "resource_budgets": {
+          "description": "Reference resource targets; absent before Jet 1.33.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceBudgets"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -5070,6 +5081,17 @@
             "type": "string"
           }
         },
+        "subagent_control": {
+          "description": "Native child-admission support; absent before Jet 1.33.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubagentControl"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "version": {
           "description": "The version its specification declares.",
           "type": "string"
@@ -5878,6 +5900,26 @@
       "required": [
         "operating_system",
         "architecture"
+      ]
+    },
+    "PowerState": {
+      "description": "Operating-system power observation. Unknown state uses the reduced budget.",
+      "oneOf": [
+        {
+          "description": "External power, without reported low-power mode.",
+          "type": "string",
+          "const": "normal"
+        },
+        {
+          "description": "Battery power or low-power mode.",
+          "type": "string",
+          "const": "constrained"
+        },
+        {
+          "description": "This platform observation could not be established.",
+          "type": "string",
+          "const": "unavailable"
+        }
       ]
     },
     "Project": {
@@ -8182,6 +8224,54 @@
         "source"
       ]
     },
+    "ResourceBudgets": {
+      "description": "Fixed reference targets, reported as budgets rather than measured usage.",
+      "type": "object",
+      "properties": {
+        "craft_rss_mib": {
+          "description": "Resident memory per idle Craft.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "helper_rss_mib": {
+          "description": "Helper resident memory, excluding its child.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "idle_cpu_millicores": {
+          "description": "Whole idle core CPU must stay below this many thousandths of one CPU.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "idle_window_seconds": {
+          "description": "Required idle CPU measurement window.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "jetd_rss_mib": {
+          "description": "Resident memory with ten thousand Conversations.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "power": {
+          "description": "Most recent on-demand operating-system observation.",
+          "$ref": "#/$defs/PowerState"
+        }
+      },
+      "required": [
+        "power",
+        "jetd_rss_mib",
+        "helper_rss_mib",
+        "craft_rss_mib",
+        "idle_cpu_millicores",
+        "idle_window_seconds"
+      ]
+    },
     "RestartMetadata": {
       "description": "Stable metadata explaining why a snapshot must be restarted.",
       "oneOf": [
@@ -9119,6 +9209,26 @@
       "description": "A Setting this protocol minor names. A spelling it does not name is\nrefused rather than guessed (ADR-0094).",
       "oneOf": [
         {
+          "description": "Maximum simultaneous managed work.",
+          "type": "string",
+          "const": "energy.concurrency"
+        },
+        {
+          "description": "Reduced admission ceiling under power constraints.",
+          "type": "string",
+          "const": "energy.low_power_concurrency"
+        },
+        {
+          "description": "Force the reduced budget regardless of power observation.",
+          "type": "string",
+          "const": "energy.constrained"
+        },
+        {
+          "description": "Explicitly allow foreground user work above the budget.",
+          "type": "string",
+          "const": "energy.foreground_override"
+        },
+        {
           "description": "Plane-wide maximum ingested Artifact size in MiB.",
           "type": "string",
           "const": "artifact.max_mib"
@@ -9497,6 +9607,21 @@
             "total_bytes",
             "sha256"
           ]
+        }
+      ]
+    },
+    "SubagentControl": {
+      "description": "Whether a Craft can prevent new native child work without stopping active work.",
+      "oneOf": [
+        {
+          "description": "Native events remain visible, but Jet cannot enforce native child limits.",
+          "type": "string",
+          "const": "monitor_only"
+        },
+        {
+          "description": "The accepted Craft supports admission-only child controls.",
+          "type": "string",
+          "const": "native_limits"
         }
       ]
     },

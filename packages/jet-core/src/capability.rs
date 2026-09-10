@@ -34,6 +34,14 @@ pub(crate) const MAX_VERSION_CHARS: usize = 120;
 /// time: a Plane observes its own machine, while a test answers with a
 /// fixed observation.
 pub trait CapabilityProbe: std::fmt::Debug + Send + Sync {
+	/// Reads power alone for admission and active-work maintenance. Implementations
+	/// should avoid unrelated tool discovery on this frequent observation path.
+	fn power(
+		&self,
+	) -> Pin<Box<dyn Future<Output = jet_runtime::PowerState> + Send + '_>> {
+		Box::pin(async { self.observe().await.power })
+	}
+
 	/// Observes the Plane once.
 	fn observe(
 		&self,
@@ -44,6 +52,8 @@ pub trait CapabilityProbe: std::fmt::Debug + Send + Sync {
 /// of the observation, and the degraded conditions that follow from it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObservedCapabilities {
+	/// Most recent operating-system power observation.
+	pub power: jet_runtime::PowerState,
 	/// The operating system the Plane runs.
 	pub platform: Platform,
 	/// Every external tool the core knows how to invoke.
@@ -57,6 +67,8 @@ pub struct ObservedCapabilities {
 /// A point-in-time report of what a Plane can do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilitySnapshot {
+	/// Most recent operating-system power observation.
+	pub power: jet_runtime::PowerState,
 	/// When the Plane was observed.
 	pub observed_at: SystemTime,
 	/// Version of the core that observed it.
@@ -173,6 +185,8 @@ pub struct HarnessId(pub String);
 /// One Craft installed on the Plane and the Harnesses it adapts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledCraft {
+	/// Whether the accepted Craft declares admission-only native child controls.
+	pub limits_subagents: bool,
 	/// The Craft's identity.
 	pub craft: CraftId,
 	/// The version its specification declares.
@@ -279,6 +293,7 @@ impl CapabilitySnapshot {
 		observed_at: SystemTime,
 	) -> Self {
 		let ObservedCapabilities {
+			power,
 			platform,
 			external_tools,
 			credential_store,
@@ -314,6 +329,7 @@ impl CapabilitySnapshot {
 			}
 		}
 		Self {
+			power,
 			observed_at,
 			core_version: CORE_VERSION,
 			platform,

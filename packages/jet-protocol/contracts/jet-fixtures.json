@@ -473,5 +473,15 @@
     "schema": "ServerMessage",
     "valid": true,
     "payload": "{\"kind\":\"command_result\",\"id\":700,\"result\":{\"type\":\"approval_retry_authorized\",\"review_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"set_setting\",\"scope\":{\"type\":\"plane\"},\"key\":\"energy.low_power_concurrency\",\"value\":{\"type\":\"count\",\"value\":1}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":1,\"result\":{\"type\":\"capabilities\",\"observed_at_unix_ms\":0,\"core_version\":\"0.2.0\",\"platform\":{\"operating_system\":\"macos\",\"architecture\":\"aarch64\"},\"external_tools\":[],\"credential_store\":{\"status\":\"available\",\"kind\":\"apple_keychain\"},\"crafts\":[{\"craft_id\":\"native\",\"version\":\"1\",\"harnesses\":[\"native\"],\"subagent_control\":\"native_limits\"},{\"craft_id\":\"observed\",\"version\":\"1\",\"harnesses\":[\"observed\"],\"subagent_control\":\"monitor_only\"}],\"harnesses\":[\"native\",\"observed\"],\"degraded\":[],\"resource_budgets\":{\"power\":\"constrained\",\"jetd_rss_mib\":35,\"helper_rss_mib\":8,\"craft_rss_mib\":15,\"idle_cpu_millicores\":2,\"idle_window_seconds\":300}}}"
   }
 ]

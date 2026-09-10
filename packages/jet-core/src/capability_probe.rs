@@ -20,6 +20,12 @@ use crate::capability::{
 pub(crate) struct SystemCapabilityProbe;
 
 impl CapabilityProbe for SystemCapabilityProbe {
+	fn power(
+		&self,
+	) -> Pin<Box<dyn Future<Output = jet_runtime::PowerState> + Send + '_>> {
+		Box::pin(jet_runtime::observe_power())
+	}
+
 	fn observe(
 		&self,
 	) -> Pin<Box<dyn Future<Output = ObservedCapabilities> + Send + '_>> {
@@ -33,6 +39,7 @@ impl CapabilityProbe for SystemCapabilityProbe {
 				});
 			}
 			ObservedCapabilities {
+				power: jet_runtime::observe_power().await,
 				platform: Platform {
 					operating_system: std::env::consts::OS,
 					architecture: std::env::consts::ARCH,

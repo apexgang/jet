@@ -103,6 +103,7 @@ impl CraftSpecification {
 		for feature in &self.features {
 			if [
 				"turns",
+				"subagents_limit",
 				"actions",
 				"resume",
 				"fork",

@@ -303,6 +303,26 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 					SettingValue::Count(2048),
 					SettingSource::BuiltIn
 				),
+				resolved(
+					SettingKey::EnergyConcurrency,
+					SettingValue::Count(8),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::EnergyLowPowerConcurrency,
+					SettingValue::Count(1),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::EnergyConstrained,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::EnergyForegroundOverride,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
 			],
 			vec![
 				resolved(
@@ -375,6 +395,26 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 				resolved(
 					SettingKey::ArtifactRunMiB,
 					SettingValue::Count(2048),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::EnergyConcurrency,
+					SettingValue::Count(8),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::EnergyLowPowerConcurrency,
+					SettingValue::Count(1),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::EnergyConstrained,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::EnergyForegroundOverride,
+					SettingValue::Flag(false),
 					SettingSource::BuiltIn
 				),
 			]

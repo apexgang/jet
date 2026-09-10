@@ -25,6 +25,24 @@ pub(crate) fn snapshot(
 	minor: u32,
 ) -> wire::CapabilitySnapshot {
 	wire::CapabilitySnapshot {
+		resource_budgets: (minor >= wire::ENERGY_MINOR).then_some(
+			wire::ResourceBudgets {
+				power: match snapshot.power {
+					jet_runtime::PowerState::Normal => wire::PowerState::Normal,
+					jet_runtime::PowerState::Constrained => {
+						wire::PowerState::Constrained
+					}
+					jet_runtime::PowerState::Unavailable => {
+						wire::PowerState::Unavailable
+					}
+				},
+				jetd_rss_mib: 35,
+				helper_rss_mib: 8,
+				craft_rss_mib: 15,
+				idle_cpu_millicores: 2,
+				idle_window_seconds: 300,
+			},
+		),
 		observed_at_unix_ms: unix_ms(snapshot.observed_at),
 		core_version: snapshot.core_version.into(),
 		platform: platform(snapshot.platform),
@@ -37,7 +55,11 @@ pub(crate) fn snapshot(
 			.map(external_tool_status)
 			.collect(),
 		credential_store: credential_store(snapshot.credential_store),
-		crafts: snapshot.crafts.into_iter().map(craft).collect(),
+		crafts: snapshot
+			.crafts
+			.into_iter()
+			.map(|installed| craft(installed, minor))
+			.collect(),
 		harnesses: snapshot.harnesses.into_iter().map(harness).collect(),
 		degraded: snapshot
 			.degraded
@@ -130,9 +152,16 @@ pub(super) fn credential_store_kind(
 	}
 }
 
-fn craft(installed: InstalledCraft) -> wire::InstalledCraft {
+fn craft(installed: InstalledCraft, minor: u32) -> wire::InstalledCraft {
 	let CraftId(craft_id) = installed.craft;
 	wire::InstalledCraft {
+		subagent_control: (minor >= wire::ENERGY_MINOR).then_some(
+			if installed.limits_subagents {
+				wire::SubagentControl::NativeLimits
+			} else {
+				wire::SubagentControl::MonitorOnly
+			},
+		),
 		craft_id,
 		version: installed.version,
 		harnesses: installed.harnesses.into_iter().map(harness).collect(),

@@ -85,6 +85,7 @@ pub(crate) async fn execution(
 		| CraftCommand::Interrupt { .. }
 		| CraftCommand::Action { .. }
 		| CraftCommand::Acknowledge { .. }
+		| CraftCommand::ConstrainSubagents { .. }
 		| CraftCommand::ConfigureRemoteTools { .. }
 		| CraftCommand::RemoteToolResult { .. }
 		| CraftCommand::Shutdown => return Err(CraftError::InvalidMessage),
@@ -298,7 +299,8 @@ async fn request(
 		}
 		// Releasing the connection closes the Harness's input, which is how
 		// this Harness ends: no signal, and its output stays retained.
-		CraftCommand::ConfigureRemoteTools { .. } => {
+		CraftCommand::ConstrainSubagents { .. }
+		| CraftCommand::ConfigureRemoteTools { .. } => {
 			Err(CraftError::InvalidMessage)
 		}
 		CraftCommand::RemoteToolResult {

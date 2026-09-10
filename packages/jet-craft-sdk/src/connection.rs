@@ -145,6 +145,14 @@ impl<R: AsyncRead + Unpin> CraftReceiver<R> {
 	pub async fn receive(&mut self) -> Result<CraftCommand, CraftError> {
 		let command = receive(&mut self.reader).await?;
 		let feature = match &command {
+			CraftCommand::ConstrainSubagents { max_children } => {
+				if self.ready.protocol.version.minor < 9
+					|| !matches!(max_children, None | Some(0))
+				{
+					return Err(CraftError::InvalidMessage);
+				}
+				"subagents_limit"
+			}
 			CraftCommand::ConfigureRemoteTools { .. }
 			| CraftCommand::RemoteToolResult { .. } => {
 				if self.ready.protocol.version.minor < 6 {
@@ -267,7 +275,7 @@ async fn handshake<R: AsyncRead + Unpin>(
 	// ASVS 2.3.1: a specification cannot make this SDK speak a new codec major.
 	let sdk = ProtocolOffer {
 		family: ProtocolFamily::Craft,
-		versions: vec![ProtocolVersion { major: 1, minor: 8 }],
+		versions: vec![ProtocolVersion { major: 1, minor: 9 }],
 		capabilities: vec![
 			"actions".into(),
 			"fork".into(),

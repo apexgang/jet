@@ -27,6 +27,10 @@ pub(super) fn snapshot(
 /// The protocol minor that first named each Setting.
 fn introduced_in(key: SettingKey) -> u32 {
 	match key {
+		SettingKey::EnergyConcurrency
+		| SettingKey::EnergyLowPowerConcurrency
+		| SettingKey::EnergyConstrained
+		| SettingKey::EnergyForegroundOverride => wire::ENERGY_MINOR,
 		SettingKey::ArtifactMaxMiB | SettingKey::ArtifactRunMiB => {
 			wire::ARTIFACTS_MINOR
 		}
@@ -61,6 +65,14 @@ fn resolved_setting(resolved: ResolvedSetting) -> wire::ResolvedSetting {
 
 pub(super) fn key(key: SettingKey) -> wire::SettingKey {
 	match key {
+		SettingKey::EnergyConcurrency => wire::SettingKey::EnergyConcurrency,
+		SettingKey::EnergyLowPowerConcurrency => {
+			wire::SettingKey::EnergyLowPowerConcurrency
+		}
+		SettingKey::EnergyConstrained => wire::SettingKey::EnergyConstrained,
+		SettingKey::EnergyForegroundOverride => {
+			wire::SettingKey::EnergyForegroundOverride
+		}
 		SettingKey::ArtifactMaxMiB => wire::SettingKey::ArtifactMaxMiB,
 		SettingKey::ArtifactRunMiB => wire::SettingKey::ArtifactRunMiB,
 		SettingKey::UtilityAccountBinding => {
@@ -97,6 +109,14 @@ pub(super) fn key(key: SettingKey) -> wire::SettingKey {
 
 pub(super) fn key_from_wire(key: wire::SettingKey) -> SettingKey {
 	match key {
+		wire::SettingKey::EnergyConcurrency => SettingKey::EnergyConcurrency,
+		wire::SettingKey::EnergyLowPowerConcurrency => {
+			SettingKey::EnergyLowPowerConcurrency
+		}
+		wire::SettingKey::EnergyConstrained => SettingKey::EnergyConstrained,
+		wire::SettingKey::EnergyForegroundOverride => {
+			SettingKey::EnergyForegroundOverride
+		}
 		wire::SettingKey::ArtifactMaxMiB => SettingKey::ArtifactMaxMiB,
 		wire::SettingKey::ArtifactRunMiB => SettingKey::ArtifactRunMiB,
 		wire::SettingKey::UtilityAccountBinding => {

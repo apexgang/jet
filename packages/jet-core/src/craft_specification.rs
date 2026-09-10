@@ -10,6 +10,18 @@ const MAX_ID_CHARS: usize = 80;
 const MAX_PUBLISHER_CHARS: usize = 256;
 const MAX_VERSION_CHARS: usize = 128;
 
+pub(crate) fn limits_subagents(specification: &CraftSpecification) -> bool {
+	specification
+		.protocol
+		.versions
+		.iter()
+		.any(|version| version.major == 1 && version.minor >= 9)
+		&& specification
+			.features
+			.iter()
+			.any(|feature| feature.name == "subagents_limit")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CraftSpecification {
 	schema: Version,
@@ -151,6 +163,7 @@ pub(crate) fn enabled_features(
 	for feature in &specification.features {
 		if [
 			"turns",
+			"subagents_limit",
 			"actions",
 			"resume",
 			"fork",

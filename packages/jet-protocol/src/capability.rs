@@ -18,6 +18,9 @@ pub enum CapabilityObservation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CapabilitySnapshot {
+	/// Reference resource targets; absent before Jet 1.33.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub resource_budgets: Option<crate::ResourceBudgets>,
 	/// When the Plane was observed, in signed Unix milliseconds.
 	pub observed_at_unix_ms: i64,
 	/// Version of the core that observed it.
@@ -129,6 +132,9 @@ pub enum CredentialStoreStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct InstalledCraft {
+	/// Native child-admission support; absent before Jet 1.33.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub subagent_control: Option<crate::SubagentControl>,
 	/// The Craft's identity.
 	pub craft_id: String,
 	/// The version its specification declares.

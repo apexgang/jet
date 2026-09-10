@@ -170,6 +170,7 @@ async fn fake_execution(stream: UnixStream) {
 			}
 			CraftCommand::Shutdown => break,
 			CraftCommand::Start { .. }
+			| CraftCommand::ConstrainSubagents { .. }
 			| CraftCommand::ConfigureRemoteTools { .. }
 			| CraftCommand::RemoteToolResult { .. }
 			| CraftCommand::Recover { .. }

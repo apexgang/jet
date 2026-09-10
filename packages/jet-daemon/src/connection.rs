@@ -475,6 +475,20 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::ARTIFACTS_MINOR,
 			feature: "Artifact policy",
 		}),
+		QueryRequest::Settings {
+			selection:
+				jet_protocol::SettingSelection::Key {
+					key:
+						jet_protocol::SettingKey::EnergyConcurrency
+						| jet_protocol::SettingKey::EnergyLowPowerConcurrency
+						| jet_protocol::SettingKey::EnergyConstrained
+						| jet_protocol::SettingKey::EnergyForegroundOverride,
+				},
+			..
+		} => Some(MinorRequirement {
+			minor: jet_protocol::ENERGY_MINOR,
+			feature: "Energy policy",
+		}),
 		QueryRequest::Settings { .. } => Some(MinorRequirement {
 			minor: jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR,
 			feature: "Setting Queries",
@@ -637,6 +651,25 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		} => Some(MinorRequirement {
 			minor: jet_protocol::ARTIFACTS_MINOR,
 			feature: "Artifact policy",
+		}),
+		CommandRequest::SetSetting {
+			key:
+				jet_protocol::SettingKey::EnergyConcurrency
+				| jet_protocol::SettingKey::EnergyLowPowerConcurrency
+				| jet_protocol::SettingKey::EnergyConstrained
+				| jet_protocol::SettingKey::EnergyForegroundOverride,
+			..
+		}
+		| CommandRequest::ClearSetting {
+			key:
+				jet_protocol::SettingKey::EnergyConcurrency
+				| jet_protocol::SettingKey::EnergyLowPowerConcurrency
+				| jet_protocol::SettingKey::EnergyConstrained
+				| jet_protocol::SettingKey::EnergyForegroundOverride,
+			..
+		} => Some(MinorRequirement {
+			minor: jet_protocol::ENERGY_MINOR,
+			feature: "Energy policy",
 		}),
 		CommandRequest::SetSetting { .. }
 		| CommandRequest::ClearSetting { .. } => Some(MinorRequirement {

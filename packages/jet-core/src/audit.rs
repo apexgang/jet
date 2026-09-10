@@ -658,6 +658,13 @@ pub(crate) fn stored_setting(
 			SettingKey::DeveloperMode,
 			SettingValue::Text(_) | SettingValue::Count(_),
 		)
+		| (
+			SettingKey::EnergyConcurrency
+			| SettingKey::EnergyLowPowerConcurrency
+			| SettingKey::EnergyConstrained
+			| SettingKey::EnergyForegroundOverride,
+			_,
+		)
 		| (SettingKey::UtilityAutomaticNaming, _)
 		| (SettingKey::ArtifactMaxMiB | SettingKey::ArtifactRunMiB, _)
 		| (SettingKey::GitMessageInstructions, _) => None,
@@ -683,7 +690,11 @@ pub(crate) fn cleared_setting(key: SettingKey) -> Option<AuditDecision> {
 			Some(AuditDecision::AuditRetentionCleared)
 		}
 		SettingKey::DeveloperMode => Some(AuditDecision::DeveloperModeCleared),
-		SettingKey::UtilityAutomaticNaming
+		SettingKey::EnergyConcurrency
+		| SettingKey::EnergyLowPowerConcurrency
+		| SettingKey::EnergyConstrained
+		| SettingKey::EnergyForegroundOverride
+		| SettingKey::UtilityAutomaticNaming
 		| SettingKey::ArtifactMaxMiB
 		| SettingKey::ArtifactRunMiB
 		| SettingKey::GitMessageInstructions => None,
