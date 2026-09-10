@@ -1,6 +1,7 @@
 //! Indexed deadlines with core-owned schedule documents.
 use crate::{ReadTransaction, StoreError, WriteTransaction};
 use uuid::Uuid;
+
 impl ReadTransaction {
 	/// The earliest indexed schedule deadline, without scanning Conversations.
 	/// # Errors

@@ -7,34 +7,14 @@
 //! Exit codes: `0` after a clean shutdown, `2` when another live `jetd`
 //! already owns the Plane, `1` for any other failure.
 
-mod artifact_stream;
-mod child_control;
 mod connection;
-mod connection_pairing;
-mod connection_session;
-mod craft_processes;
-mod craft_revocation;
-mod craft_supervisor;
 mod daemon;
-mod execution_signal;
-mod execution_termination;
-mod extension_host;
 mod installation_identity;
-mod no_visa_broker;
-mod remote_tool;
-mod review_host;
-mod run_craft;
-mod run_host;
-mod run_recovery;
-mod stdio;
 mod translate;
-mod utility_host;
-
-use std::path::PathBuf;
-use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
 use jet_runtime::{InstallationChannel, JetHome};
+use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Parser)]
 #[command(name = "jetd", version, about)]
@@ -114,21 +94,21 @@ async fn main() -> ExitCode {
 			executable,
 			socket,
 			digest,
-		} => match craft_supervisor::run(&executable, &socket, &digest).await {
+		} => match craft::supervisor::run(&executable, &socket, &digest).await {
 			Ok(()) => ExitCode::SUCCESS,
 			Err(error) => {
 				eprintln!("jetd: Craft supervisor failed: {error}");
 				ExitCode::FAILURE
 			}
 		},
-		Subcommand::RemoteWorker => remote_tool::worker().await,
+		Subcommand::RemoteWorker => remote::tool::worker().await,
 		Subcommand::Connect { home, .. } => {
 			let Some(home) =
 				home.map(JetHome::at).or_else(JetHome::for_current_user)
 			else {
 				return ExitCode::from(1);
 			};
-			let code = match stdio::connect(&home).await {
+			let code = match remote::stdio::connect(&home).await {
 				Ok(()) => 0,
 				Err(error) => {
 					eprintln!("jetd: stdio connection failed: {error}");
@@ -154,7 +134,7 @@ async fn main() -> ExitCode {
 			};
 			let release_key = match release_verification_key
 				.as_deref()
-				.map(craft_revocation::key)
+				.map(craft::revocation::key)
 				.transpose()
 			{
 				Ok(key) => key,
@@ -181,7 +161,10 @@ async fn main() -> ExitCode {
 	}
 }
 
-mod terminal_host;
-mod terminal_stream;
+mod craft;
 
-mod terminal_recovery;
+mod run;
+
+mod remote;
+
+mod terminal;

@@ -29,7 +29,7 @@ pub struct SearchHit {
 	/// The Event that carried the content, carried as a decimal string
 	/// (ADR-0089). A client reads it from the journal or scrolls the
 	/// Conversation to it.
-	#[serde(with = "crate::decimal")]
+	#[serde(with = "crate::transport::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub sequence: u64,
 	/// What kind of content matched.
@@ -45,13 +45,13 @@ pub struct SearchHit {
 pub struct SearchResult {
 	/// Newest Event sequence visible when the index was read, carried as a
 	/// decimal string (ADR-0089).
-	#[serde(with = "crate::decimal")]
+	#[serde(with = "crate::transport::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// The journal position the index had been derived through, carried
 	/// as a decimal string. It equals `cursor` unless indexing was
 	/// interrupted since the last Command.
-	#[serde(with = "crate::decimal")]
+	#[serde(with = "crate::transport::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub indexed_through: u64,
 	/// At most 64 hits, best match first.

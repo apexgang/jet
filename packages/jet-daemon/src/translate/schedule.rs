@@ -1,6 +1,7 @@
 //! Schedule values cross the wire through explicit DTO conversion.
 use jet_core as core;
 use jet_protocol as wire;
+
 pub(super) fn task(task: core::ScheduledTask) -> wire::ScheduledTask {
 	wire::ScheduledTask {
 		schedule_id: task.schedule_id,

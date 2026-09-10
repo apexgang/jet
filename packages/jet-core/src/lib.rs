@@ -8,50 +8,29 @@
 //! Domain types here never double as wire types (ADR-0049); `jetd`
 //! translates at the transport seam.
 
+mod startup;
+
 mod account;
 mod artifact;
-mod artifact_collection;
-mod artifact_files;
-mod artifact_policy;
 pub use artifact::{
 	ArtifactDescriptor, ArtifactDownload, ArtifactLimits, ArtifactUpload,
 };
-#[cfg(test)]
-#[path = "artifact_tests.rs"]
-mod artifact_tests;
-mod remote_review;
-mod remote_tool;
-mod remote_tool_types;
-mod remote_work;
-pub use remote_tool_types::{
+
+pub use remote::no_visa_run::{
+	NoVisaDestination, NoVisaRunRequest, NoVisaSelection,
+};
+pub use remote::tool_types::{
 	NoVisaOrigin, RemoteEnvironment, RemoteGitOperation, RemoteToolAction,
 	RemoteToolDecision, RemoteToolRequest, RemoteToolResult,
 };
-pub use remote_work::RemoteWork;
-mod no_visa_run;
-pub use no_visa_run::{NoVisaDestination, NoVisaRunRequest, NoVisaSelection};
-mod visa;
-pub use visa::{VisaRunRequest, VisaSelection};
+pub use remote::visa::{VisaRunRequest, VisaSelection};
+pub use remote::work::RemoteWork;
 mod audit;
-mod audit_actor;
-pub use audit_actor::AuditActor;
+pub use audit::actor::AuditActor;
 mod capability;
-mod capability_probe;
-mod change_artifact;
-mod change_artifact_budget;
-mod change_evidence;
 mod checkpoint;
-mod checkpoint_capture;
-mod checkpoint_omissions;
-mod checkpoint_pages;
-mod checkpoint_pressure;
-mod checkpoint_query;
-mod checkpoint_state;
 mod disk_pressure;
-#[cfg(test)]
-#[path = "disk_pressure_tests.rs"]
-mod disk_pressure_tests;
-mod disposable;
+
 pub use checkpoint::{
 	ArtifactAvailability, ChangeArtifact, ChangeArtifactChunk,
 	ChangeCheckpoint, ChangeDiff, ChangeEvidence, ChangeOrigin, ChangeSnapshot,
@@ -59,63 +38,22 @@ pub use checkpoint::{
 };
 mod clock;
 mod command;
-mod command_receipt;
 mod conversation;
-mod craft_artifact_collection;
-mod craft_installation;
-mod craft_lifecycle;
-pub use craft_lifecycle::CraftDisableMode;
-mod craft_local_source;
-mod craft_publication;
-mod craft_repository;
-mod craft_specification;
-mod discovery;
+pub use craft::lifecycle::CraftDisableMode;
 mod effect;
 mod energy;
 mod error;
 mod event;
-mod event_query;
-mod execution_control;
 mod maintenance;
 pub use energy::ChildWork;
-mod execution_control_effect;
 mod filesystem;
-mod fork;
-mod handoff;
-pub use handoff::{HandoffProvenance, HandoffRequest};
-mod import;
-mod lifecycle;
-mod name;
-mod orphan;
-mod pagination;
-mod paired_client;
+pub use conversation::handoff::{HandoffProvenance, HandoffRequest};
 mod pairing;
-mod pairing_completion;
-mod pairing_identity;
-mod pairing_offer;
-mod pairing_secret;
-mod preparation;
 mod project;
-mod project_entry;
 mod promotion;
-mod promotion_apply;
-mod promotion_command;
-mod promotion_effect;
-mod promotion_merge;
 mod query;
-mod queued_run;
-mod relative_path;
 mod remote;
-mod remote_pairing;
-mod repository;
 mod review;
-mod review_action;
-mod review_guard;
-mod review_input;
-mod review_output;
-mod review_policy;
-mod review_retry;
-mod review_work;
 pub use review::{
 	ApprovalRequest, ApprovalReview, AutomaticReviewPolicy,
 	ReviewAuthorization, ReviewDecision, ReviewHost, ReviewInput,
@@ -123,26 +61,13 @@ pub use review::{
 	ReviewerSelection,
 };
 mod run;
-mod run_command;
-mod run_craft;
-mod run_effect;
-mod run_host;
-mod run_observation;
-mod run_recovery;
-mod run_state;
-mod run_state_storage;
 mod turn;
-mod turn_dispatch;
-mod turn_queue;
 mod usage;
-mod usage_query;
-mod usage_record;
 mod user_input;
-mod user_input_files;
-pub use execution_control::{
+pub use run::execution_control::{
 	ExecutionSignal, RunControl, RunTermination, TerminationStage,
 };
-pub use orphan::{
+pub use run::orphan::{
 	ExecutionAction, ExecutionMetadata, ExecutionResolution, ExecutionRole,
 	OrphanedExecution, OrphanedExecutions,
 };
@@ -151,63 +76,41 @@ pub use user_input::{
 	EditableFile, FileRevision, FileTarget, ReviewComment, UserEdit,
 };
 mod schedule;
-mod schedule_clock;
-mod schedule_work;
 mod search;
-mod search_index;
 mod security;
-mod seed;
-mod seed_capture;
 mod setting;
 pub use schedule::{
 	ScheduleFiring, ScheduleFiringOutcome, ScheduledTask, ScheduledTasks,
 };
 mod status;
 mod terminal;
-mod terminal_command;
-mod terminal_effect;
 #[cfg(test)]
 mod test_support;
-mod tree_capture;
 mod workspace;
+pub use run::command::{ForkLaunchSource, LaunchFork, LaunchPlan};
+pub use run::craft::PinnedCraft;
+pub use run::host::{
+	RunConnection, RunFuture, RunHost, RunRecoveryCursor, RunRecoveryError,
+	RunStartError,
+};
+pub use run::observation::Observation as RunObservation;
+pub use run::{ManagedProcess, ManagedProcessRole, RunActivity, RunExecution};
 pub use terminal::{
 	TerminalHost, TerminalId, TerminalOperation, TerminalOutput, TerminalPlan,
 	TerminalState, WorkspaceTerminal,
 };
-mod worktree;
-pub use run::{ManagedProcess, ManagedProcessRole, RunActivity, RunExecution};
-pub use run_command::{ForkLaunchSource, LaunchFork, LaunchPlan};
-pub use run_craft::PinnedCraft;
-pub use run_host::{
-	RunConnection, RunFuture, RunHost, RunRecoveryCursor, RunRecoveryError,
-	RunStartError,
-};
-pub use run_observation::Observation as RunObservation;
-
-#[cfg(test)]
-#[path = "run_tests.rs"]
-mod run_tests;
-
-#[cfg(test)]
-#[path = "checkpoint_tests.rs"]
-mod checkpoint_tests;
-
-#[cfg(test)]
-#[path = "review_tests.rs"]
-mod review_tests;
-
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-use jet_store::{ActorRecord, Store};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use capability::CapabilityProbe;
-use capability_probe::SystemCapabilityProbe;
-use clock::{Clock, SystemClock};
-use craft_repository::{CraftRepository, SystemCraftRepository};
-use discovery::{ConversationDiscovery, SystemConversationDiscovery};
+use clock::Clock;
+use conversation::discovery::ConversationDiscovery;
+use craft::repository::CraftRepository;
+use jet_store::{ActorRecord, Store};
+use serde::{Deserialize, Serialize};
+use std::{
+	sync::Arc,
+	time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use uuid::Uuid;
 
 pub use account::{
 	AccountBinding, AccountBindingId, AccountBindingList, AccountBindingStatus,
@@ -224,11 +127,17 @@ pub use capability::{
 	HarnessId, InstalledCraft, Platform, ToolAvailability,
 };
 pub use command::{Command, CommandEnvelope, CommandId, CommandOutcome};
+pub use conversation::import::{
+	DiscoveredConversation, ExternalConversation, ExternalConversationList,
+	ExternalOrigin, ExternalProcess, ImportId, ImportedConversation,
+	NativeConversationId,
+};
+pub use conversation::name::{MAX_NAME_BYTES, Name, NameSource};
 pub use conversation::{
 	Conversation, ConversationId, ConversationList, ConversationOrigin,
 	ConversationSnapshot, PageCursor, Revision, Run, RunId,
 };
-pub use craft_installation::{
+pub use craft::installation::{
 	BrokerPermission, CraftHostAccess, CraftInstallationConfirmation,
 	CraftInstallationPreview, CraftSource, CraftTrust,
 };
@@ -240,39 +149,32 @@ pub use event::{
 	Event, EventActor, EventId, EventKind, EventPage, EventPayload,
 	EventSequence,
 };
-pub use import::{
-	DiscoveredConversation, ExternalConversation, ExternalConversationList,
-	ExternalOrigin, ExternalProcess, ImportId, ImportedConversation,
-	NativeConversationId,
-};
+pub use filesystem::relative_path::RelativePath;
 pub use jet_store::{AuditBreach, AuditHead};
 pub use jet_store::{
 	AuditEntryHash, AuditOutcome, AuditRisk, AuditTargetRef,
 	PairedClientAccess, PairingGate, PairingKeyAlgorithm, PairingMethod,
 	RetentionPolicy, RunLifecycle,
 };
-pub use name::{MAX_NAME_BYTES, Name, NameSource};
 pub use pairing::{
 	AuthenticationString, ClientPublicKey, PairedClient, PairingChallenge,
 	PairingDisclosure, PairingEnd, PairingOfferId, PairingProgress,
 	PairingSecret, PairingSignature, PairingSnapshot, PendingPairing,
 };
+pub use project::entry::{EntryKind, ProjectEntry};
 pub use project::{
 	Checkout, GitLink, PathGrant, Project, ProjectList, ProjectPreview,
 	Registrability, Repository, Worktree,
 };
-pub use project_entry::{EntryKind, ProjectEntry};
 pub use promotion::{
 	ChangeKind, ConflictKind, PromotedChange, PromotionBinding,
 	PromotionConflict, PromotionDestination, PromotionId, PromotionPreview,
 	PromotionState, WorkspacePromotion,
 };
 pub use query::{Query, QueryResult};
-pub use relative_path::RelativePath;
 pub use remote::RemoteSession;
 pub use search::{SearchField, SearchHit, SearchResult, SearchTerms};
 pub use security::{SecurityDegradation, SecurityState};
-pub use seed::{SeedSelection, WorkspaceSeed};
 pub use setting::{
 	ResolvedSetting, SettingKey, SettingScope, SettingSelection,
 	SettingSnapshot, SettingSource, SettingValue,
@@ -284,6 +186,7 @@ pub use usage::{
 	UsageEstimation, UsageFinality, UsageFreshness, UsageMeasurement,
 	UsageReport, UsageSelection, UsageSource, UsageTokens,
 };
+pub use workspace::seed::{SeedSelection, WorkspaceSeed};
 pub use workspace::{
 	BaseSelection, WorkingTree, WorkingTreeRequest, Workspace, WorkspaceBase,
 	WorkspaceHome, WorkspaceId,
@@ -363,7 +266,7 @@ impl Actor {
 pub struct Core {
 	github_host: Arc<dyn GitHubHost>,
 	artifact_limits: ArtifactLimits,
-	artifact_publication: tokio::sync::Mutex<artifact_collection::Publication>,
+	artifact_publication: tokio::sync::Mutex<artifact::collection::Publication>,
 	extension_host: Option<Arc<dyn ExtensionHost>>,
 	remote_worker: Option<std::path::PathBuf>,
 	remote_tool_slots: tokio::sync::Semaphore,
@@ -374,9 +277,9 @@ pub struct Core {
 	maintenance_work: tokio::sync::Notify,
 	utility_wake: tokio::sync::Notify,
 	turn_wake: tokio::sync::watch::Sender<()>,
-	run_host: Option<Arc<dyn run_host::RunHost>>,
+	run_host: Option<Arc<dyn run::host::RunHost>>,
 	terminal_host: Option<Arc<dyn terminal::TerminalHost>>,
-	run_recovery: run_recovery::Recovery,
+	run_recovery: run::recovery::Recovery,
 	// Serialize authority publication with Commands and fence concurrent reads.
 	remote_access: tokio::sync::Semaphore,
 	remote_sessions: remote::RemoteSessions,
@@ -397,8 +300,8 @@ pub struct Core {
 	effect_reconciliation: tokio::sync::Mutex<()>,
 	/// Serializes pre-transaction Craft publication with orphan collection.
 	craft_artifact_publication: tokio::sync::Mutex<()>,
-	conversation_pages: pagination::ConversationPages,
-	checkpoint_pages: checkpoint_pages::Pages,
+	conversation_pages: conversation::pagination::ConversationPages,
+	checkpoint_pages: checkpoint::pages::Pages,
 	/// Where this core creates Workspaces (ADR-0025).
 	workspace_home: workspace::WorkspaceHome,
 	/// How this core sees the Harness-native Conversations outside its
@@ -406,170 +309,6 @@ pub struct Core {
 	discovery: Arc<dyn ConversationDiscovery>,
 	/// How this core reads versioned Craft releases from their repository.
 	craft_repository: Arc<dyn CraftRepository>,
-}
-
-impl Core {
-	/// Install the trusted GitHub transport before accepting delivery work.
-	pub fn with_github_host(mut self, host: Arc<dyn GitHubHost>) -> Self {
-		self.github_host = host;
-		self
-	}
-	/// Installs the trusted host Adapter before accepting managed Runs.
-	pub fn with_run_host(mut self, host: Arc<dyn run_host::RunHost>) -> Self {
-		self.run_host = Some(host);
-		self
-	}
-
-	#[cfg(test)]
-	pub(crate) fn with_craft_repository(
-		mut self,
-		repository: Arc<dyn CraftRepository>,
-	) -> Self {
-		self.craft_repository = repository;
-		self
-	}
-
-	/// Starts the core on `store`, durably recording this daemon start.
-	///
-	/// # Errors
-	///
-	/// Returns [`CoreError`] with an `unavailable` or `internal` category
-	/// when the start cannot be committed.
-	pub async fn start(
-		store: Store,
-		workspace_home: WorkspaceHome,
-	) -> Result<Self, CoreError> {
-		Self::start_with(
-			store,
-			workspace_home,
-			Arc::new(SystemClock),
-			Arc::new(SystemCapabilityProbe),
-			Arc::new(SystemConversationDiscovery),
-		)
-		.await
-	}
-
-	/// Starts the core with an injected wall clock, Capability probe, and
-	/// Conversation discovery, observing the Plane once so its first report
-	/// needs no waiting.
-	///
-	/// # Errors
-	///
-	/// Returns [`CoreError`] with an `unavailable` or `internal` category
-	/// when the start cannot be committed.
-	pub(crate) async fn start_with(
-		store: Store,
-		workspace_home: WorkspaceHome,
-		clock: Arc<dyn Clock>,
-		probe: Arc<dyn CapabilityProbe>,
-		discovery: Arc<dyn ConversationDiscovery>,
-	) -> Result<Self, CoreError> {
-		store.record_daemon_start().await?;
-		let started_at = clock.now();
-		// Retention runs only behind a whole chain. A store that moved
-		// backwards keeps every record it still has until an owner has
-		// seen the evidence and decided what to do (ADR-0105).
-		let security = SecurityState::of(store.validate_audit().await?);
-		let craft_home = workspace_home
-			.0
-			.parent()
-			.expect("Workspace home has a parent")
-			.join("crafts");
-		if security == SecurityState::Trusted {
-			audit::sweep_retention(&store, unix_ms(started_at)).await?;
-			craft_artifact_collection::collect_unreferenced(
-				&store,
-				craft_home.clone(),
-				started_at,
-			)
-			.await?;
-		}
-		let mut observed = probe.observe().await;
-		observed
-			.crafts
-			.extend(craft_publication::installed_crafts(craft_home).await);
-		let capabilities =
-			CapabilitySnapshot::from_observation(observed, started_at);
-		let core = Self {
-			artifact_limits: ArtifactLimits::default(),
-			artifact_publication: tokio::sync::Mutex::default(),
-			remote_worker: None,
-			remote_tool_slots: tokio::sync::Semaphore::new(32),
-			extension_host: None,
-			utility_host: None,
-			github_host: Arc::new(github_host::SystemGitHub),
-			review_host: None,
-			utility_work: tokio::sync::Mutex::new(()),
-			run_work: tokio::sync::Notify::new(),
-			maintenance_work: tokio::sync::Notify::new(),
-			utility_wake: tokio::sync::Notify::new(),
-			turn_wake: tokio::sync::watch::channel(()).0,
-			run_host: None,
-			terminal_host: None,
-			run_recovery: run_recovery::Recovery::default(),
-			remote_access: tokio::sync::Semaphore::new(
-				remote::AUTHORITY_READERS as usize,
-			),
-			remote_sessions: remote::RemoteSessions::default(),
-			store,
-			clock,
-			probe,
-			capabilities: tokio::sync::RwLock::new(capabilities),
-			security: tokio::sync::RwLock::new(security),
-			started_at,
-			effect_reconciliation: tokio::sync::Mutex::new(()),
-			craft_artifact_publication: tokio::sync::Mutex::new(()),
-			conversation_pages: pagination::ConversationPages::default(),
-			checkpoint_pages: checkpoint_pages::Pages::default(),
-			workspace_home,
-			discovery,
-			craft_repository: Arc::new(SystemCraftRepository),
-		};
-		// The index follows the journal; a daemon that stopped between a
-		// Command and its indexing catches up here (ADR-0036).
-		core.index_search().await?;
-		Ok(core)
-	}
-
-	/// What the Plane could do when it was last observed. `jetd` reports
-	/// this at startup, before any client has connected to ask for it
-	/// (ADR-0086).
-	pub async fn capabilities(&self) -> CapabilitySnapshot {
-		self.capabilities.read().await.clone()
-	}
-
-	/// Whether the Plane can vouch for its own Security audit right now
-	/// (ADR-0105).
-	pub async fn security(&self) -> SecurityState {
-		*self.security.read().await
-	}
-
-	/// Observes the Plane again and keeps the result as its latest
-	/// snapshot.
-	pub(crate) async fn observe_capabilities(&self) -> CapabilitySnapshot {
-		let mut observed = self.probe.observe().await;
-		observed.crafts.extend(
-			craft_publication::installed_crafts(self.run_home().join("crafts"))
-				.await,
-		);
-		let snapshot =
-			CapabilitySnapshot::from_observation(observed, self.clock.now());
-		*self.capabilities.write().await = snapshot.clone();
-		snapshot
-	}
-
-	/// The core clock's current time as the store records it. Every stamp
-	/// written by one Command comes from this one reading.
-	pub(crate) fn now_unix_ms(&self) -> i64 {
-		unix_ms(self.clock.now())
-	}
-
-	/// Closes the Plane store, letting SQLite finish its write-ahead log
-	/// checkpoint before the process exits. The core answers nothing
-	/// afterwards, so only a daemon that has stopped serving calls this.
-	pub async fn close(&self) {
-		self.store.close().await;
-	}
 }
 
 /// Converts a stored wall-clock stamp back into a [`SystemTime`].
@@ -585,92 +324,15 @@ fn unix_ms(time: SystemTime) -> i64 {
 	}
 }
 
-#[cfg(test)]
-#[path = "core_tests.rs"]
-mod tests;
-
-#[cfg(test)]
-#[path = "effect_tests.rs"]
-mod effect_tests;
-
-#[cfg(test)]
-#[path = "setting_tests.rs"]
-mod setting_tests;
-
-#[cfg(test)]
-#[path = "capability_tests.rs"]
-mod capability_tests;
-
-#[cfg(test)]
-#[path = "craft_installation_tests.rs"]
-mod craft_installation_tests;
-
-#[cfg(test)]
-#[path = "account_tests.rs"]
-mod account_tests;
-
-#[cfg(test)]
-#[path = "audit_tests.rs"]
-mod audit_tests;
-
-#[cfg(test)]
-#[path = "security_tests.rs"]
-mod security_tests;
-
-#[cfg(test)]
-#[path = "pairing_tests.rs"]
-mod pairing_tests;
-
-#[cfg(test)]
-#[path = "pairing_offer_tests.rs"]
-mod pairing_offer_tests;
-
-#[cfg(test)]
-#[path = "pairing_completion_tests.rs"]
-mod pairing_completion_tests;
-
-#[cfg(test)]
-#[path = "paired_client_tests.rs"]
-mod paired_client_tests;
-
-#[cfg(test)]
-#[path = "search_tests.rs"]
-mod search_tests;
-
-mod terminal_orphan;
-
-#[cfg(test)]
-#[path = "schedule_tests.rs"]
-mod schedule_tests;
-
-#[cfg(test)]
-#[path = "auto_continue_tests.rs"]
-mod auto_continue_tests;
-
-#[cfg(test)]
-#[path = "utility_tests.rs"]
-mod utility_tests;
-
-#[cfg(test)]
-#[path = "usage_tests.rs"]
-mod usage_tests;
-
 mod utility;
 pub use utility::{UtilityJob, UtilityOutcome, UtilityPurpose, UtilityRequest};
 
-mod utility_host;
-mod utility_work;
 pub use utility::UtilityPolicy;
-pub use utility_host::{UtilityHost, UtilityInput, UtilityModel, UtilityReply};
-mod utility_input;
-mod utility_output;
-
-#[cfg(test)]
-#[path = "extension_tests.rs"]
-mod extension_tests;
+pub use utility::host::{
+	UtilityHost, UtilityInput, UtilityModel, UtilityReply,
+};
 
 mod extension;
-mod extension_work;
 pub use extension::{
 	ExtensionAction, ExtensionCatalog, ExtensionChange, ExtensionChangeState,
 	ExtensionConfirmation, ExtensionHost, ExtensionScope, ExtensionTrust,
@@ -682,23 +344,12 @@ pub use auto_continue::{
 	AutoContinueStatus, AutoContinueTarget,
 };
 
-mod auto_continue_work;
-
 mod git_delivery;
 pub use git_delivery::{
 	GitCheckpoint, GitDelivery, GitDeliveryOutcome, GitDeliveryPolicy,
 	GitMessage, GitOperation,
 };
 
-#[cfg(test)]
-#[path = "git_delivery_tests.rs"]
-mod git_delivery_tests;
+pub use git_delivery::github_host::{GitHubHost, GitHubRequest};
 
-mod git_delivery_io;
-mod git_delivery_state;
-mod git_delivery_work;
-
-mod git_delivery_github;
-
-mod github_host;
-pub use github_host::{GitHubHost, GitHubRequest};
+mod craft;

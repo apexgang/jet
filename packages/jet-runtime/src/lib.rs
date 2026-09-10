@@ -5,27 +5,27 @@
 //! the per-Plane lifetime lock (ADR-0003), and the owner-only local IPC
 //! listener (ADR-0087).
 
-mod execution;
 mod home;
 mod ipc;
-mod lock;
-mod no_visa;
 mod power;
 pub use power::{PowerState, observe_power};
 
-pub use execution::{
+pub use home::JetHome;
+pub use ipc::lock::{
+	DaemonMetadata, InstallationChannel, LifetimeLock, LockError,
+};
+pub use ipc::{IpcError, LocalListener};
+pub use process::execution::{
 	execution_boot_identity, execution_digest, execution_process_identity,
 	read_execution_file, validate_execution_directory,
 };
-pub use home::JetHome;
-pub use ipc::{IpcError, LocalListener};
-pub use lock::{DaemonMetadata, InstallationChannel, LifetimeLock, LockError};
-pub use no_visa::NoVisaOperation;
+pub use process::no_visa::NoVisaOperation;
 
-mod no_visa_terminal;
-pub use no_visa_terminal::no_visa_terminal;
-mod pty;
-pub use pty::{TerminalPipes, TerminalPty};
+pub use terminal::no_visa_terminal::no_visa_terminal;
+pub use terminal::pty::{TerminalPipes, TerminalPty};
 
-mod terminal_spool;
-pub use terminal_spool::{TerminalReplay, TerminalSpool};
+pub use terminal::spool::{TerminalReplay, TerminalSpool};
+
+mod process;
+
+mod terminal;

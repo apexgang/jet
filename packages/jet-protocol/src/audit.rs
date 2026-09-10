@@ -72,13 +72,13 @@ pub struct AuditTarget {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AuditEntry {
 	/// Plane-local audit position, carried as a decimal string (ADR-0089).
-	#[serde(with = "crate::decimal")]
+	#[serde(with = "crate::transport::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub sequence: u64,
 	/// The authority epoch the record belongs to, carried as a decimal
 	/// string. It changes only when an owner explicitly carries on past an
 	/// integrity failure.
-	#[serde(with = "crate::decimal")]
+	#[serde(with = "crate::transport::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub epoch: u64,
 	/// Durable identity.
@@ -107,7 +107,7 @@ pub struct AuditEntry {
 pub struct SecurityAudit {
 	/// Newest audit position when the page was read, carried as a decimal
 	/// string (ADR-0089).
-	#[serde(with = "crate::decimal")]
+	#[serde(with = "crate::transport::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// The records strictly after the requested position, oldest first.
@@ -130,7 +130,7 @@ pub enum SecurityState {
 		breach: AuditBreach,
 		/// The authority epoch that failed to validate, carried as a
 		/// decimal string (ADR-0089).
-		#[serde(with = "crate::decimal")]
+		#[serde(with = "crate::transport::decimal")]
 		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		epoch: u64,
 		/// The head published outside the store, when there still is one.
@@ -138,7 +138,7 @@ pub enum SecurityState {
 		head: Option<AuditHead>,
 		/// The newest position the store itself holds, carried as a
 		/// decimal string.
-		#[serde(with = "crate::decimal")]
+		#[serde(with = "crate::transport::decimal")]
 		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		store_sequence: u64,
 	},
@@ -162,7 +162,7 @@ pub enum AuditBreach {
 	/// The record at this position no longer folds to its own link.
 	RecordAltered {
 		/// Where the fold first disagreed, as a decimal string.
-		#[serde(with = "crate::decimal")]
+		#[serde(with = "crate::transport::decimal")]
 		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		sequence: u64,
 	},
@@ -171,7 +171,7 @@ pub enum AuditBreach {
 	TargetAltered {
 		/// Where the target and its reference first disagreed, as a
 		/// decimal string.
-		#[serde(with = "crate::decimal")]
+		#[serde(with = "crate::transport::decimal")]
 		#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 		sequence: u64,
 	},
@@ -182,11 +182,11 @@ pub enum AuditBreach {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AuditHead {
 	/// The epoch the record it names belongs to, as a decimal string.
-	#[serde(with = "crate::decimal")]
+	#[serde(with = "crate::transport::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub epoch: u64,
 	/// That record's position, as a decimal string.
-	#[serde(with = "crate::decimal")]
+	#[serde(with = "crate::transport::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub sequence: u64,
 	/// Lowercase hexadecimal of the chain link it folded to.

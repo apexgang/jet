@@ -1,9 +1,11 @@
 //! Mutable Setting values and the scope rows one resolution reads
 //! (ADR-0085).
 
-use crate::StoreError;
-use crate::records::{SettingRecord, SettingScopeRecord};
-use crate::transaction::{ReadTransaction, WriteTransaction};
+use crate::{
+	StoreError,
+	records::{SettingRecord, SettingScopeRecord},
+	transaction::{ReadTransaction, WriteTransaction},
+};
 
 /// One `settings` row as SQLite stores it, before its text columns are
 /// parsed back into domain types.

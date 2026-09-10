@@ -1,13 +1,14 @@
 //! Durable external-work Effect outbox (ADR-0064).
 
-use uuid::Uuid;
-
-use crate::StoreError;
-use crate::records::{
-	EffectKindRecord, EffectRecord, EffectSafetyRecord, EffectStateRecord,
-	NewEffect, column_error, parse_optional_uuid, parse_uuid,
+use crate::{
+	StoreError,
+	records::{
+		EffectKindRecord, EffectRecord, EffectSafetyRecord, EffectStateRecord,
+		NewEffect, column_error, parse_optional_uuid, parse_uuid,
+	},
+	transaction::{ReadTransaction, WriteTransaction},
 };
-use crate::transaction::{ReadTransaction, WriteTransaction};
+use uuid::Uuid;
 
 /// One `effects` row as SQLite stores it, before its text columns are parsed
 /// back into domain types.

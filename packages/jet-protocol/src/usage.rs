@@ -213,7 +213,7 @@ pub struct ObservedConsumption {
 pub struct PlaneUsage {
 	/// Newest Event sequence visible when the snapshot was read, carried
 	/// as a decimal string (ADR-0089).
-	#[serde(with = "crate::decimal")]
+	#[serde(with = "crate::transport::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// The Plane every record here was observed on. A total covers this

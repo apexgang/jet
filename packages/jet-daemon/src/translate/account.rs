@@ -1,12 +1,11 @@
 //! The Account binding half of the translation seam (ADR-0049, ADR-0016).
 
+use super::unix_ms;
 use jet_core::{
 	AccountBinding, AccountBindingList, AccountBindingStatus, CredentialItem,
 	CredentialReference, CredentialSource, CredentialState, ProviderAccount,
 };
 use jet_protocol as wire;
-
-use super::unix_ms;
 
 pub(super) fn list(list: AccountBindingList) -> wire::AccountBindingList {
 	wire::AccountBindingList {

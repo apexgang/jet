@@ -56,7 +56,7 @@ pub struct ClientPublicKey {
 	/// The algorithm it signs with.
 	pub algorithm: PairingKeyAlgorithm,
 	/// The key itself, as 64 lowercase hexadecimal characters.
-	#[serde(with = "crate::hex")]
+	#[serde(with = "crate::transport::hex")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Hex<32>"))]
 	pub key: [u8; 32],
 }
@@ -182,7 +182,7 @@ pub struct PendingPairing {
 pub struct PairingSnapshot {
 	/// Newest Event sequence visible when the snapshot was read, carried as
 	/// a decimal string (ADR-0089).
-	#[serde(with = "crate::decimal")]
+	#[serde(with = "crate::transport::decimal")]
 	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
 	pub cursor: u64,
 	/// Whether a new GUI client may begin Pairing.

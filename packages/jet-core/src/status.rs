@@ -1,9 +1,7 @@
 //! Plane status snapshot.
 
+use crate::{EventSequence, PlaneId, security::SecurityState};
 use std::time::SystemTime;
-
-use crate::security::SecurityState;
-use crate::{EventSequence, PlaneId};
 
 /// Point-in-time view of the daemon and the Plane it owns.
 #[derive(Debug, Clone, PartialEq, Eq)]

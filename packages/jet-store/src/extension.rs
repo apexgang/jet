@@ -1,6 +1,7 @@
 //! Core-owned native lifecycle documents stored beside their durable Effects.
 use crate::{ReadTransaction, StoreError, WriteTransaction};
 use uuid::Uuid;
+
 impl ReadTransaction {
 	/// Read one lifecycle document. Returns a store error if the read fails.
 	pub async fn extension_change(

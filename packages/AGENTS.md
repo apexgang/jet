@@ -25,6 +25,8 @@ In the packages directory where the Jet backend Rust code lives:
 - Do not add tests for values that are statically defined.
 - Do not add negative tests for logic that was removed.
 - Prefer private modules and explicitly exported public crate API.
+- Group related implementation under feature directories such as `src/pairing/` or `src/connection/`. Use `mod.rs` for the feature's interface and declarations, with focused submodules for its operations, types, and conversions. Keep the existing crate boundaries from ADR-0046.
+- Keep `lib.rs` and `main.rs` focused on crate exports and executable setup. Import internal implementation through its owning feature instead of adding aliases for old module paths at the crate root.
 - Avoid large modules:
   - Prefer adding new modules instead of growing existing ones.
   - Target Rust modules under 500 LoC, excluding tests.
@@ -34,8 +36,8 @@ In the packages directory where the Jet backend Rust code lives:
 
 Run `just fmt` (in the `packages` directory) automatically after you have finished making code changes anywhere in this repository; do not ask for approval to run it. Additionally, run the tests:
 
-1. Use `just test` to run unit and integration tests through cargo-nextest. Test execution defaults live in [`.config/nextest.toml`](./.config/nextest.toml); keep runner options there and command details in the justfile.
-2. Run the tests for the specific project that was changed. For example, if changes were made in `packages/jet-store`, run `just test -p jet-store`. Run its doctests separately with `just test-doc -p jet-store`, since nextest does not run doctests.
+1. Use `just test` to run unit tests, integration tests, and doctests through Cargo's built-in test runner. Keep test command defaults in the justfile.
+2. Run the tests for the specific project that was changed. For example, if changes were made in `packages/jet-store`, run `just test -p jet-store`. Use `just test-doc -p jet-store` when only doctests need checking.
 3. Once those pass, if any changes were made in common, core, or protocol, run the complete test suite with `just test`. Avoid `--all-features` for routine local runs because it expands the build matrix and can significantly increase `target/` disk usage; use it only when you specifically need full feature coverage. Project-specific or individual tests can be run without asking the user, but do ask the user before running the complete test suite.
 4. Use the development Cargo profiles selected by the justfile for checks and tests. Never use the release profile to validate changes.
 
@@ -83,12 +85,6 @@ Search for breaking changes in external integration surfaces:
 - CLI parameters
 - configuration loading
 
-### Test authoring guidance
-
-If unit tests are needed, put them in a dedicated test file (`*_tests.rs`). Avoid test-only functions in the main implementation.
-
-Check whether there are existing helpers to make tests more streamlined and readable.
-
 ### Change size guidance (800 lines)
 
 Unless the change is mechanical, the total number of changed lines should not exceed 800 lines. For complex logic changes, the size should be under 500 lines.
@@ -99,22 +95,25 @@ If the change is larger, explore whether it can be split into reviewable stages 
 
 Always use [justfile](./justfile) for backend commands. Run recipes from `packages/`, or use `just --justfile packages/justfile <recipe>` from the repository root. Use `just --list` to discover recipes; add a missing operation to the justfile before using it.
 
-Tests require cargo-nextest to be installed separately. `just test` forwards nextest arguments, including `-p <crate>` and `-E '<filterset>'`; use `just test-list` to inspect the selection. `just test --profile ci` writes a JUnit report to `packages/target/nextest/ci/junit.xml`. The nextest `--profile` flag selects runner configuration, not a Cargo build profile. `just test-doc` forwards Cargo doctest arguments.
+`just test` forwards Cargo arguments, including `-p <crate>`, `--test <target>`, and a test-name filter. Pass libtest options after `--`, for example `just test -p jet-core pairing -- --nocapture`. Use `just test-list -p <crate>` to inspect the selection. Tests within a target share a process, so fixtures must isolate their files, sockets, and other resources. `just test-doc` forwards Cargo doctest arguments.
 
 ## Tests
 
 ### Test module organization
 
-- When adding a new test module, define its contents in a separate sibling file rather than inline in the implementation file.
-- Use an explicit `#[path = "..._tests.rs"]` attribute so the test filename is descriptive and easy to locate:
+Keep unit tests in an inline `#[cfg(test)] mod tests` at the end of the file containing the code they exercise. Integration tests belong in the crate's `tests/` directory and exercise its public interface or deployed executables.
 
 ```rust
 #[cfg(test)]
-#[path = "parser_tests.rs"]
-mod tests;
+mod tests {
+    use super::*;
+
+    // Tests of this module's behavior.
+}
 ```
 
-- This applies only when introducing a new test module. Do not move or rewrite existing inline `#[cfg(test)] mod tests { ... }` modules solely to follow this convention.
+- Move related unit tests with extracted implementation. Tests are excluded from the 500-line target and 800-line threshold for implementation modules.
+- Shared fixture code may live in a `#[cfg(test)]` support module. Keep assertions and test cases with the implementation they cover, and integration fixtures under `tests/support/`.
 
 ### Benchmarks
 

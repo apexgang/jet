@@ -6,13 +6,8 @@
 //! its helper to launch and feed the Harness. The separate Utility and review
 //! entrypoints resolve transport authentication and perform one inference
 //! each, without a Harness and without reaching any Run.
-mod approval;
 mod execution;
 mod extensions;
-mod harness;
-mod native;
-mod presentation;
-mod remote_tools;
 mod specification;
 mod usage;
 

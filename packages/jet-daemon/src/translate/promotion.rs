@@ -1,14 +1,13 @@
 //! The Workspace promotion half of the translation seam (ADR-0025,
 //! ADR-0049).
 
+use super::unix_ms;
 use jet_core::{
 	ChangeKind, ClientId, ConflictKind, PromotedChange, PromotionBinding,
 	PromotionConflict, PromotionDestination, PromotionPreview, PromotionState,
 	WorkspaceId, WorkspacePromotion,
 };
 use jet_protocol as wire;
-
-use super::unix_ms;
 
 pub(super) fn destination_from_wire(
 	destination: &wire::PromotionDestination,

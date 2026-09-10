@@ -1,6 +1,7 @@
 //! Explicit translation of queue domain values into versioned wire values.
 use jet_core as core;
 use jet_protocol as wire;
+
 pub(super) fn source_from_wire(source: wire::TurnSource) -> core::TurnSource {
 	match source {
 		wire::TurnSource::User => core::TurnSource::User,

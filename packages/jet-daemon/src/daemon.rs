@@ -1,19 +1,18 @@
 //! Daemon lifecycle: lock, store, listener, serve, drain, shut down.
 
-use std::process::ExitCode;
-use std::sync::Arc;
-use std::time::Duration;
-
 use jet_core::{Core, WorkspaceHome};
 use jet_runtime::{
 	DaemonMetadata, InstallationChannel, IpcError, JetHome, LifetimeLock,
 	LocalListener, LockError,
 };
 use jet_store::Store;
-use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::{Semaphore, watch};
-use tokio::task::JoinSet;
-use tokio::time::timeout;
+use std::{process::ExitCode, sync::Arc, time::Duration};
+use tokio::{
+	signal::unix::{SignalKind, signal},
+	sync::{Semaphore, watch},
+	task::JoinSet,
+	time::timeout,
+};
 
 const EXIT_FAILURE: u8 = 1;
 const EXIT_PLANE_OWNED: u8 = 2;
@@ -76,21 +75,25 @@ pub(crate) async fn run(
 			core.with_remote_worker(
 				std::env::current_exe().expect("jetd executable path"),
 			)
-			.with_run_host(Arc::new(crate::run_host::CraftProcesses::new(
+			.with_run_host(Arc::new(crate::run::host::CraftProcesses::new(
 				identity,
 				home.root().to_path_buf(),
 				release_key,
 			)))
-			.with_extension_host(Arc::new(crate::extension_host::Extensions {
+			.with_extension_host(Arc::new(
+				crate::craft::extension_host::Extensions {
+					home: home.root().to_path_buf(),
+				},
+			))
+			.with_utility_host(Arc::new(
+				crate::craft::utility_host::Utilities {
+					home: home.root().to_path_buf(),
+				},
+			))
+			.with_review_host(Arc::new(crate::craft::review_host::Reviews {
 				home: home.root().to_path_buf(),
 			}))
-			.with_utility_host(Arc::new(crate::utility_host::Utilities {
-				home: home.root().to_path_buf(),
-			}))
-			.with_review_host(Arc::new(crate::review_host::Reviews {
-				home: home.root().to_path_buf(),
-			}))
-			.with_terminal_host(Arc::new(crate::terminal_host::Terminals)),
+			.with_terminal_host(Arc::new(crate::terminal::host::Terminals)),
 		),
 		Err(error) => {
 			eprintln!("jetd: cannot start the core: {error}");

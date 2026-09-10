@@ -1,6 +1,7 @@
 //! Explicit Utility translation keeps model data separate from Commands.
 use jet_core as core;
 use jet_protocol as wire;
+
 pub(super) fn request(request: wire::UtilityRequest) -> core::UtilityRequest {
 	match request {
 		wire::UtilityRequest::Naming { run_id } => {

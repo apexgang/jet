@@ -1,6 +1,7 @@
 //! Explicit domain/wire translations keep native metadata unchanged (ADR-0049).
 use jet_core as core;
 use jet_protocol as wire;
+
 pub(crate) fn catalog(value: core::ExtensionCatalog) -> wire::ExtensionCatalog {
 	wire::ExtensionCatalog {
 		craft_id: value.craft_id,

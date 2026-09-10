@@ -1,13 +1,12 @@
 //! The Pairing half of the translation seam (ADR-0049, ADR-0017).
 
+use super::unix_ms;
 use jet_core::{
 	AuthenticationString, ClientPublicKey, PairedClient, PairedClientAccess,
 	PairingDisclosure, PairingEnd, PairingGate, PairingKeyAlgorithm,
 	PairingMethod, PairingProgress, PairingSnapshot, PendingPairing,
 };
 use jet_protocol as wire;
-
-use super::unix_ms;
 
 pub(super) fn snapshot(snapshot: PairingSnapshot) -> wire::PairingSnapshot {
 	wire::PairingSnapshot {

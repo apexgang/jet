@@ -2,14 +2,13 @@
 //! (Craft 1.7, ADR-0023). The complete native event still travels beside
 //! every report.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use jet_protocol::{
 	CraftObservedUsage, CraftQuotaScope, CraftQuotaUnit, CraftQuotaWindow,
 	CraftUsage, CraftUsageEstimation, CraftUsageFinality,
 	CraftUsageMeasurement, CraftUsageTokens, QUOTA_SHARE_LIMIT,
 };
 use serde_json::Value;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Claude Code reports one unified limit rather than a window per Model,
 /// and names it only by reporting it.

@@ -35,18 +35,18 @@ install:
 
 [unix]
 test *args: build-run-helper
-	RUST_MIN_STACK={{ rust_min_stack }} cargo nextest run "$@"
+	RUST_MIN_STACK={{ rust_min_stack }} cargo test --no-fail-fast "$@"
 
 # Subprocess conformance uses the separately deployed helper and Crafts.
 build-run-helper:
 	cargo build -p jet-fueld -p jet-craft-claude -p jet-craft-codex
 
-# List tests without running them; accepts nextest package and filter arguments.
+# List tests without running them; accepts Cargo package and target arguments.
 [unix]
 test-list *args:
-	RUST_MIN_STACK={{ rust_min_stack }} cargo nextest list "$@"
+	RUST_MIN_STACK={{ rust_min_stack }} cargo test "$@" -- --list
 
-# Nextest does not run doctests; accepts cargo test arguments.
+# Run only doctests; `just test` also includes them by default.
 [unix]
 test-doc *args:
 	RUST_MIN_STACK={{ rust_min_stack }} cargo test --doc --no-fail-fast "$@"
@@ -62,8 +62,10 @@ check:
 
 # Run alone on the fixed macOS/Linux reference host; includes a five-minute window.
 resource-test:
-	just test -p jet-fueld -p jet-daemon -E 'binary(replay) | binary(recovery) | test(idle_craft)' --no-capture
-	just test -p jet-daemon --test resources --run-ignored all --no-capture
+	just test -p jet-fueld --test replay -- --nocapture
+	just test -p jet-daemon --test recovery -- --nocapture
+	just test -p jet-daemon --bin jetd idle_craft -- --nocapture
+	just test -p jet-daemon --test resources -- --include-ignored --nocapture
 
 # Regenerate every wire schema and its GUI models from the Rust wire DTOs.
 contracts: (emit-contracts justfile_directory() / "..")

@@ -1,12 +1,11 @@
 //! The Security audit half of the translation seam (ADR-0049, ADR-0105).
 
+use super::unix_ms;
 use jet_core::{
 	AuditActor, AuditBreach, AuditEntry, AuditHead, AuditOutcome, AuditPage,
 	AuditRisk, AuditTarget, SecurityDegradation, SecurityState,
 };
 use jet_protocol as wire;
-
-use super::unix_ms;
 
 pub(super) fn page(
 	page: AuditPage,

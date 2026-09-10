@@ -1,0 +1,195 @@
+//! Connection preface and restricted handshake messages (ADR-0090). The
+//! handshake negotiates protocol major and minor, codec, frame limits, and
+//! capabilities before any Plane state is exposed (ADR-0019).
+
+use crate::message::WireError;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+/// Fixed bytes every client sends before its first control frame.
+pub const PREFACE: &[u8] = b"jet-protocol\n";
+/// The only protocol major this crate speaks.
+pub const PROTOCOL_VERSION: u32 = 1;
+/// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
+/// additive: a peer negotiated to a lower minor never sees fields it does
+/// not know (ADR-0019).
+pub const PROTOCOL_MINOR: u32 = 36;
+
+/// Plane-wide disposable storage budget and disk-pressure admission.
+pub const DISK_PRESSURE_MINOR: u32 = 36;
+
+/// Bounded Auto-continue policies and retry decisions.
+pub const AUTO_CONTINUE_MINOR: u32 = 34;
+
+/// Energy admission policy and idle resource capabilities.
+pub const ENERGY_MINOR: u32 = 33;
+
+/// First minor supporting single exact-action Automatic-review retries.
+pub const APPROVAL_RETRY_MINOR: u32 = 32;
+
+/// First minor supporting verified Artifact publication and binary transfers.
+pub const ARTIFACTS_MINOR: u32 = 31;
+
+/// Plane-wide Automatic review of Harness approval requests.
+pub const AUTOMATIC_REVIEW_MINOR: u32 = 30;
+
+/// Normalized Usage records and the Plane-local Usage Query.
+pub const USAGE_RECORDS_MINOR: u32 = 29;
+
+/// Harness-native extension discovery and deferred lifecycle Commands.
+pub const EXTENSIONS_MINOR: u32 = 28;
+
+/// Staged Craft updates and durable disable controls.
+pub const CRAFT_LIFECYCLE_MINOR: u32 = 27;
+
+/// Paired No-Visa Run and remote operation support.
+pub const NO_VISA_MINOR: u32 = 26;
+
+/// Explicit Visa destination and Plane-local Account-binding selection.
+pub const VISA_RUNS_MINOR: u32 = 25;
+
+/// Explicit cross-Harness Handoff Commands.
+pub const HANDOFFS_MINOR: u32 = 24;
+
+/// Bounded Utility inference and its Plane policy.
+pub const UTILITY_MINOR: u32 = 22;
+/// Verified third-party Craft discovery, consent, and installation.
+pub const CRAFT_INSTALLATION_MINOR: u32 = 23;
+/// Durable Conversation schedules and scheduled Event origins.
+pub const SCHEDULES_MINOR: u32 = 21;
+/// Independent Conversation and Run names plus Managed-process labels.
+pub const NAMES_MINOR: u32 = 20;
+
+/// Direct user edits and structured review submissions.
+pub const USER_INPUT_MINOR: u32 = 19;
+
+/// Conversation forks from immutable Change checkpoints.
+pub const CONVERSATION_FORKS_MINOR: u32 = 19;
+
+/// Interrupt turn, Stop Run, and bounded Query timeouts.
+pub const EXECUTION_CONTROL_MINOR: u32 = 19;
+/// Change checkpoints and evidence-backed diff Queries.
+pub const CHANGE_CHECKPOINTS_MINOR: u32 = 17;
+/// Durable Turn queue Commands and Queries.
+pub const TURN_QUEUE_MINOR: u32 = 16;
+/// Minor introducing preserved Workspace terminals.
+pub const WORKSPACE_TERMINALS_MINOR: u32 = 18;
+/// Minor introducing interactive Orphaned-execution recovery.
+pub const EXECUTION_RECOVERY_MINOR: u32 = 14;
+/// Minor that introduced managed Run admission and execution snapshots.
+pub const MANAGED_RUNS_MINOR: u32 = 13;
+/// Minor that introduced fresh signed remote connection challenges.
+pub const REMOTE_AUTH_MINOR: u32 = 7;
+/// Minor that introduced fenced status and Conversation pagination.
+pub const FENCED_READS_MINOR: u32 = 1;
+/// Minor that switches post-handshake frames to numbered stream envelopes.
+pub const MULTIPLEXED_STREAMS_MINOR: u32 = 2;
+/// Minor that introduced Setting Queries and Commands and the Capability
+/// Query.
+pub const SETTINGS_AND_CAPABILITIES_MINOR: u32 = 3;
+/// Minor that introduced Account binding Queries and Commands.
+pub const ACCOUNT_BINDINGS_MINOR: u32 = 4;
+/// Minor that introduced the owner-only Security audit Query.
+pub const SECURITY_AUDIT_MINOR: u32 = 5;
+/// Minor that introduced the Pairing Query and Commands.
+pub const PAIRING_MINOR: u32 = 6;
+/// Minor that introduced Project registration, the Project Queries, and
+/// the Git LFS external tool in Capability snapshots.
+pub const PROJECTS_MINOR: u32 = 8;
+/// Minor that introduced Workspace and Local-checkout Conversations, the
+/// working tree on every Conversation, and the Workspace in a Conversation
+/// snapshot.
+pub const WORKSPACES_MINOR: u32 = 9;
+/// Minor that introduced seeding a Workspace from selected Local-checkout
+/// changes, and the seed on a Workspace.
+pub const SEEDED_WORKSPACES_MINOR: u32 = 10;
+/// Minor that introduced previewing and confirming a Workspace promotion,
+/// and the promotion on a Workspace.
+pub const WORKSPACE_PROMOTION_MINOR: u32 = 11;
+/// Minor that introduced the Search Query over Plane-local Conversation
+/// content.
+pub const SEARCH_MINOR: u32 = 12;
+/// Minor that introduced external Conversation discovery, imports, managed
+/// Resume, and the origin on every Conversation.
+pub const IMPORTED_CONVERSATIONS_MINOR: u32 = 15;
+/// The only v1 codec; other codecs are reserved for later negotiation.
+pub const CODEC_JSON_V1: &str = "json-v1";
+
+/// Inclusive range of protocol majors a client can speak.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct VersionRange {
+	/// Lowest supported major.
+	pub min: u32,
+	/// Highest supported major.
+	pub max: u32,
+}
+
+impl VersionRange {
+	/// Whether `version` falls within the range.
+	#[must_use]
+	pub fn contains(self, version: u32) -> bool {
+		self.min <= version && version <= self.max
+	}
+}
+
+/// First control frame from a client, sent right after the preface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ClientHello {
+	/// Protocol majors the client can speak.
+	pub protocol: VersionRange,
+	/// Newest minor of the `max` major the client speaks (ADR-0019).
+	pub minor: u32,
+	/// Requested codec name.
+	pub codec: String,
+	/// Durable Client identity of the connecting installation.
+	pub client_id: Uuid,
+	/// Largest control frame the client is willing to receive.
+	pub max_control_frame: u32,
+	/// Largest data frame the client is willing to receive.
+	pub max_data_frame: u32,
+	/// Protocol capability flags the client supports. No flags are defined
+	/// in v1; compatible minors may introduce them.
+	#[serde(default)]
+	pub capabilities: Vec<String>,
+}
+
+/// Server reply to a [`ClientHello`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ServerHello {
+	/// Remote endpoint access is established; Jet authorization is still pending.
+	Challenge {
+		/// A fresh 256-bit nonce, used once on this connection.
+		#[serde(with = "crate::transport::hex")]
+		#[cfg_attr(feature = "schema", schemars(with = "crate::Hex<32>"))]
+		nonce: [u8; 32],
+	},
+	/// The connection is authenticated and negotiated.
+	Welcome {
+		/// Selected protocol major.
+		protocol: u32,
+		/// Selected minor of that major: the smaller of the two peers' newest
+		/// minors, so neither side sends fields the other cannot read.
+		minor: u32,
+		/// Selected codec.
+		codec: String,
+		/// Negotiated control frame limit both peers honor when sending.
+		max_control_frame: u32,
+		/// Negotiated data frame limit both peers honor when sending.
+		max_data_frame: u32,
+		/// Protocol capability flags the server supports.
+		#[serde(default)]
+		capabilities: Vec<String>,
+	},
+	/// The server refuses the connection; it closes the stream afterwards.
+	Rejected {
+		/// Why the handshake failed.
+		error: WireError,
+	},
+}
+
+/// Independent non-destructive Git delivery Commands and policy.
+pub const GIT_DELIVERY_MINOR: u32 = 35;

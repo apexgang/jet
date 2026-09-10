@@ -4,34 +4,9 @@
 //! on `jet-protocol` and never links the core or SQLite (ADR-0050,
 //! ADR-0057).
 
-mod checkpoint_requests;
 mod connection;
-mod craft_installation_requests;
-mod fork_requests;
-mod handoff_requests;
-mod handshake;
-mod import_requests;
-mod name_requests;
-mod pairing_requests;
-mod project_requests;
-mod promotion_requests;
 mod requests;
-mod review_requests;
-mod search_requests;
-mod ssh;
-mod turn_requests;
-mod usage_requests;
-mod user_input_requests;
-mod visa_requests;
 
+pub use connection::handshake::ClientIdentity;
+pub use connection::ssh::SshEndpoint;
 pub use connection::{Client, ClientError};
-pub use handshake::ClientIdentity;
-pub use ssh::SshEndpoint;
-
-mod utility_requests;
-
-mod extension_requests;
-
-mod auto_continue_requests;
-
-mod git_delivery_requests;

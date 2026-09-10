@@ -1,13 +1,12 @@
 //! The external Conversation and import half of the translation seam
 //! (ADR-0010, ADR-0049).
 
+use super::{actor_of, unix_ms};
 use jet_core::{
 	ConversationOrigin, ExternalConversation, ExternalConversationList,
 	ExternalOrigin, ExternalProcess, ImportedConversation,
 };
 use jet_protocol as wire;
-
-use super::{actor_of, unix_ms};
 
 pub(super) fn list(
 	list: ExternalConversationList,
