@@ -66,12 +66,14 @@ pub(crate) async fn serve(path: &Path) -> std::io::Result<()> {
 	});
 	let mut done = state.done.subscribe();
 	let mut tasks = tokio::task::JoinSet::new();
-	let mut startup = tokio::time::interval(TIMEOUT);
-	startup.tick().await;
+	let startup = tokio::time::sleep(TIMEOUT);
+	tokio::pin!(startup);
+	let mut awaiting_start = true;
 	loop {
 		tokio::select! {
 			_ = done.changed() => break,
-			_ = startup.tick() => {
+			_ = &mut startup, if awaiting_start => {
+				awaiting_start = false;
 				if let Ok(launched) = state.launched.try_lock() && launched.is_none() { break; }
 			},
 			Some(_) = tasks.join_next(), if !tasks.is_empty() => {},

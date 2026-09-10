@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MIN(next_due_unix_ms) FROM scheduled_tasks",
+  "describe": {
+    "columns": [
+      {
+        "name": "MIN(next_due_unix_ms)",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "c77a8d47ba52603a6b1f18b7d3aab46f21aad1a2221d9db77906774e293bf665"
+}

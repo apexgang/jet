@@ -8,6 +8,7 @@
 //! already owns the Plane, `1` for any other failure.
 
 mod artifact_stream;
+mod child_control;
 mod connection;
 mod connection_pairing;
 mod connection_session;

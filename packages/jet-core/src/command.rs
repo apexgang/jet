@@ -792,6 +792,7 @@ impl Core {
 		// Command finishes what an interruption here leaves (ADR-0036).
 		self.turn_wake.send_replace(());
 		self.run_work.notify_one();
+		self.maintenance_work.notify_one();
 		self.utility_wake.notify_one();
 		self.index_search().await?;
 		Ok(outcome)
@@ -1110,6 +1111,7 @@ async fn execute_new(
 				));
 			};
 			crate::run_command::record(
+				core,
 				tx,
 				actor,
 				command_id,
@@ -1192,6 +1194,7 @@ async fn execute_new(
 				));
 			};
 			crate::handoff::create(
+				core,
 				tx,
 				actor,
 				command_id,

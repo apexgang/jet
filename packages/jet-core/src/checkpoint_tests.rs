@@ -1039,6 +1039,7 @@ impl RunConnection for Connection {
 		&self,
 		_turn_id: uuid::Uuid,
 		_prompt: String,
+		_child_work: crate::ChildWork,
 	) -> RunFuture<'_, Result<(), CoreError>> {
 		Box::pin(async { panic!("no input queued in this fixture") })
 	}

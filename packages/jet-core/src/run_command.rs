@@ -49,6 +49,9 @@ pub struct ForkLaunchSource {
 /// Durable domain plan: authority, working roots, and the exact accepted artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaunchPlan {
+	/// Native child admission accepted with this Run, never termination authority.
+	#[serde(default)]
+	pub child_work: crate::ChildWork,
 	/// Immutable No-Visa destinations; native binding stays on the origin.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub no_visa: Option<crate::NoVisaSelection>,
@@ -192,6 +195,7 @@ pub(crate) async fn prepare(
 		)
 	})?;
 	let mut plan = LaunchPlan {
+		child_work: crate::ChildWork::Native,
 		visa: None,
 		no_visa: None,
 		version: 1,
@@ -304,6 +308,7 @@ impl LaunchFork {
 }
 
 pub(crate) async fn record(
+	core: &Core,
 	tx: &mut WriteTransaction,
 	actor: &Actor,
 	command_id: CommandId,
@@ -338,6 +343,13 @@ pub(crate) async fn record(
 			"an earlier turn still owns execution",
 		));
 	}
+	plan.child_work = crate::energy::admit(
+		core,
+		tx,
+		queue.entries[0].turn.source,
+		crate::energy::Admission::NewRun,
+	)
+	.await?;
 	let CommandOutcome::RunCreated(run) =
 		crate::command::create_run(tx, actor, conversation_id, now).await?
 	else {

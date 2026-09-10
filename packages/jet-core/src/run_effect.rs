@@ -44,7 +44,7 @@ impl EffectAdapter for Runs<'_> {
 			Ok(Some(record)) => record,
 			Ok(None) | Err(_) => return EffectResult::Unknown,
 		};
-		let plan: LaunchPlan = match run_state::decode(&record.plan) {
+		let mut plan: LaunchPlan = match run_state::decode(&record.plan) {
 			Ok(plan) => plan,
 			Err(_) => return EffectResult::Unknown,
 		};
@@ -57,6 +57,17 @@ impl EffectAdapter for Runs<'_> {
 		let Some(host) = &self.0.run_host else {
 			return EffectResult::Failed;
 		};
+		// Admission already reserved this Run. Revalidate only new native child
+		// work here so a policy change between commit and launch is respected.
+		let Ok(policy) = self
+			.0
+			.store
+			.read(async |tx| crate::energy::policy(self.0, tx).await)
+			.await
+		else {
+			return EffectResult::Failed;
+		};
+		plan.child_work = policy.child_work;
 		if self.0.begin_run_changes(run_id, &plan).await.is_err() {
 			return EffectResult::Failed;
 		}
@@ -123,6 +134,7 @@ pub(crate) fn spawn_monitor(
 		.insert(run_id, Arc::clone(&connection));
 	tokio::spawn(async move {
 		let outcome = monitor(&core, run_id, &*connection, pending).await;
+		core.maintenance_work.notify_one();
 		// Control requests reach a Craft only while its connection is the
 		// one this monitor supervises.
 		core.run_recovery

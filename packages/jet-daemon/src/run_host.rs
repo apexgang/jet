@@ -31,6 +31,8 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) use crate::craft_processes::CraftProcesses;
 
 pub(crate) struct RunConnection {
+	pub(crate) limits_subagents: bool,
+	pub(crate) child_work: Mutex<Option<jet_core::ChildWork>>,
 	pub(crate) broker: Option<crate::no_visa_broker::Broker>,
 	pub(crate) craft_minor: u32,
 	pub(crate) reader: Mutex<FrameReader<OwnedReadHalf>>,
@@ -43,21 +45,19 @@ pub(crate) struct RunConnection {
 	reason = "independent read and write locks preserve partial frames while serializing complete outbound Craft messages"
 )]
 impl jet_core::RunConnection for RunConnection {
+	fn constrain_children(
+		&self,
+		work: jet_core::ChildWork,
+	) -> RunFuture<'_, Result<(), CoreError>> {
+		self.apply_child_policy(work)
+	}
 	fn submit_turn(
 		&self,
 		turn_id: Uuid,
 		prompt: String,
+		child_work: jet_core::ChildWork,
 	) -> RunFuture<'_, Result<(), CoreError>> {
-		Box::pin(async move {
-			send(
-				&mut *self.writer.lock().await,
-				&CraftCommand::Turn {
-					id: turn_id.to_string(),
-					text: prompt,
-				},
-			)
-			.await
-		})
+		self.deliver_turn(turn_id, prompt, child_work)
 	}
 	fn receive(&self) -> RunFuture<'_, Result<RunObservation, CoreError>> {
 		Box::pin(async move {
@@ -278,6 +278,9 @@ impl jet_core::RunConnection for RunConnection {
 	}
 }
 impl RunHost for CraftProcesses {
+	fn craft_retirement_delay(&self) -> RunFuture<'_, Option<Duration>> {
+		Box::pin(self.retirement_delay())
+	}
 	fn revoked_craft_digests(
 		&self,
 	) -> RunFuture<'_, Result<Vec<String>, CoreError>> {
@@ -363,6 +366,12 @@ impl RunHost for CraftProcesses {
 			let (mut connection, command) = start(self, home, run_id, &plan)
 				.await
 				.map_err(|_| RunStartError::NotStarted)?;
+			jet_core::RunConnection::constrain_children(
+				&connection,
+				plan.child_work,
+			)
+			.await
+			.map_err(|_| RunStartError::NotStarted)?;
 			send(connection.writer.get_mut(), &command)
 				.await
 				.map_err(|_| RunStartError::Unknown)?;
@@ -467,6 +476,8 @@ pub(crate) async fn start(
 	.await?;
 	let (socket, helper_pid) = helper(&runtime, run_id, plan).await?;
 	let connection = RunConnection {
+		limits_subagents: Contract::of(&plan.craft)?.limits_subagents(),
+		child_work: Mutex::new(None),
 		broker: crate::no_visa_broker::Broker::prepare(
 			processes, plan, run_id,
 		)?,

@@ -10,6 +10,12 @@ pub type RunFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Host-specific Craft validation and native transport, supplied by jetd.
 pub trait RunHost: std::fmt::Debug + Send + Sync {
+	/// Next idle Craft retirement, if a resident process still needs maintenance.
+	fn craft_retirement_delay(
+		&self,
+	) -> RunFuture<'_, Option<std::time::Duration>> {
+		Box::pin(async { None })
+	}
 	/// Checks the accepted Craft and installed desktop identity before admitting
 	/// an origin Run. Unsupported hosts fail closed.
 	fn validate_no_visa(&self, _plan: &LaunchPlan) -> Result<(), CoreError> {
@@ -182,11 +188,21 @@ pub enum RunStartError {
 }
 /// One authenticated, pinned Run connection. No protocol DTO crosses this port.
 pub trait RunConnection: Send + Sync {
-	/// Delivers one durably claimed turn; errors leave its outcome uncertain.
+	/// Changes native child admission only. Hosts without declared native controls
+	/// remain monitor-only and must report that limitation to clients.
+	fn constrain_children(
+		&self,
+		_work: crate::ChildWork,
+	) -> RunFuture<'_, Result<(), CoreError>> {
+		Box::pin(async { Ok(()) })
+	}
+	/// Applies child admission before delivering one durably claimed turn, as one
+	/// serialized transport operation. Errors leave its outcome uncertain.
 	fn submit_turn(
 		&self,
 		turn_id: uuid::Uuid,
 		prompt: String,
+		child_work: crate::ChildWork,
 	) -> RunFuture<'_, Result<(), CoreError>>;
 	/// Receives a domain observation, validating transport identities first.
 	fn receive(&self) -> RunFuture<'_, Result<Observation, CoreError>>;
