@@ -132,6 +132,11 @@ pub enum CraftCommand {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CraftEvent {
+	/// Explicit Model selected by the native session (1.10), never inferred from usage.
+	Model {
+		/// Exact resolved Model identity, at most 128 bytes.
+		model: String,
+	},
 	/// Request a Jet remote tool; the host supplies Actor and permissions (1.6).
 	RemoteTool {
 		/// Closed, destination-scoped request.
@@ -263,6 +268,22 @@ impl<'de> Deserialize<'de> for CraftEvent {
 				let _ = request.kind;
 				Ok(Self::RemoteTool { call: request.call })
 			}
+			"model" => {
+				#[derive(Deserialize)]
+				#[serde(deny_unknown_fields)]
+				struct Selected {
+					kind: String,
+					model: String,
+				}
+				let selected: Selected =
+					crate::decode_control(raw.get().as_bytes())
+						.map_err(serde::de::Error::custom)?;
+				let _ = selected.kind;
+				Ok(Self::Model {
+					model: selected.model,
+				})
+			}
+
 			"usage" => {
 				#[derive(Deserialize)]
 				#[serde(deny_unknown_fields)]

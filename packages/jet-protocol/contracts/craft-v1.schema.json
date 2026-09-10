@@ -581,6 +581,24 @@
       "description": "Craft-to-host events. Native content remains the authoritative payload.",
       "oneOf": [
         {
+          "description": "Explicit Model selected by the native session (1.10), never inferred from usage.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "model"
+            },
+            "model": {
+              "description": "Exact resolved Model identity, at most 128 bytes.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "model"
+          ]
+        },
+        {
           "description": "Request a Jet remote tool; the host supplies Actor and permissions (1.6).",
           "type": "object",
           "properties": {
@@ -1487,6 +1505,13 @@
       "description": "Host-owned recovery context; never evidence that an unacknowledged action failed.",
       "type": "object",
       "properties": {
+        "model": {
+          "description": "Resolved Model that a Craft 1.10 resume must enforce.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "native_conversation": {
           "description": "Native Conversation to reopen without replaying Commands automatically.",
           "type": "string"

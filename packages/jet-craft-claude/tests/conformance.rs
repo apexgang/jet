@@ -534,6 +534,17 @@ fn start_craft(
 	root: &Path,
 	harness: &Path,
 ) -> (PathBuf, tokio::process::Child) {
+	start_craft_with_resume(root, harness, ResumeMode::Fresh)
+}
+enum ResumeMode {
+	Fresh,
+	Pinned,
+}
+fn start_craft_with_resume(
+	root: &Path,
+	harness: &Path,
+	mode: ResumeMode,
+) -> (PathBuf, tokio::process::Child) {
 	let installed = root.join("craft/jet-craft-claude");
 	std::fs::create_dir_all(installed.with_file_name(".jet")).unwrap();
 	std::fs::copy(env!("CARGO_BIN_EXE_jet-craft-claude"), &installed).unwrap();
@@ -548,6 +559,14 @@ fn start_craft(
 		)
 		.replace("features = [", "features = [{ name = \"remote_tools\" }, ")
 		.replace("minor = 4", "minor = 8");
+	let declaration = if matches!(mode, ResumeMode::Pinned) {
+		declaration
+			.replace("minor = 8", "minor = 10")
+			.replace("features = [", "features = [{ name = \"resume\" }, ")
+			.replace("capabilities = [", "capabilities = [\"resume\", ")
+	} else {
+		declaration
+	};
 	std::fs::write(
 		installed.with_file_name(".jet").join("craft-spec.toml"),
 		declaration,
@@ -574,6 +593,14 @@ async fn accept_craft_at_minor(
 	run: Uuid,
 	minor: u32,
 ) -> (Reader, Writer, CraftReady) {
+	accept_resumable_craft(socket, run, minor, Value::Null).await
+}
+async fn accept_resumable_craft(
+	socket: &Path,
+	run: Uuid,
+	minor: u32,
+	resume: Value,
+) -> (Reader, Writer, CraftReady) {
 	let mut stream = loop {
 		match UnixStream::connect(socket).await {
 			Ok(stream) => break stream,
@@ -584,12 +611,18 @@ async fn accept_craft_at_minor(
 	let (read, write) = stream.into_split();
 	let mut reader = FrameReader::new(read);
 	let mut writer = FrameWriter::new(write);
-	let hello = json!({
+	let mut hello = json!({
 		"protocol": {"family": "craft", "versions": [{"major": 1, "minor": minor}], "capabilities": ["runs", "actions"]},
 		"specification": {"family": "specification", "versions": [{"major": 1, "minor": 0}]},
 		"execution_id": run,
-		"resume": Value::Null,
+		"resume": resume,
 	});
+	if !hello["resume"].is_null() {
+		hello["protocol"]["capabilities"]
+			.as_array_mut()
+			.unwrap()
+			.push(json!("resume"));
+	}
 	writer
 		.write(&Frame::control(encode_control(&hello).unwrap()))
 		.await
@@ -635,7 +668,7 @@ fn claude_double() {
 	.unwrap();
 	let session = arguments
 		.windows(2)
-		.find(|pair| pair[0] == "--session-id")
+		.find(|pair| pair[0] == "--session-id" || pair[0] == "--resume")
 		.map(|pair| pair[1].clone())
 		.expect("the Craft pins the native Conversation identity");
 	let permission = arguments
@@ -692,7 +725,7 @@ fn claude_double() {
 		}
 		emit(&json!({
 			"type": "system", "subtype": "init",
-			"claude_code_version": "2.1.263", "session_id": session,
+			"claude_code_version": "2.1.263", "session_id": session, "model": "claude-original-model",
 		}));
 		emit(&serde_json::from_str::<Value>(&assistant(&session)).unwrap());
 		if text == "remote" {
@@ -861,4 +894,31 @@ async fn native_mcp_call_waits_for_the_jet_remote_result_before_acknowledging_so
         assert_eq!(serde_json::from_str::<Value>(result["content"][0]["text"].as_str().unwrap()).unwrap(), json!({"type":"completed","result":{"type":"file","content":"destination evidence"}}));
         craft.kill().await.unwrap(); helper.kill().await.unwrap(); std::fs::remove_dir_all(root).unwrap();
     }).await.unwrap();
+}
+
+#[tokio::test]
+async fn native_resume_pins_the_requested_model() {
+	tokio::time::timeout(Duration::from_secs(30), async {
+        let (root, run, harness) = workspace();
+        let mut helper = start_helper(&root, run, &harness).await;
+        let (socket, mut craft) = start_craft_with_resume(&root, &harness, ResumeMode::Pinned);
+        let native = Uuid::new_v4().to_string();
+        let (mut reader, mut writer, ready) = accept_resumable_craft(&socket, run, 10, json!({"native_conversation": native, "version":{"major":1,"minor":10}, "model": "claude-original-model"})).await;
+        assert_eq!(ready.protocol.version.minor, 10);
+        command(&mut writer, &json!({"kind":"start", "id": run.to_string(), "text":"finish", "helper_socket":root.join("h.sock")})).await;
+        let mut observed_model = None;
+        loop {
+            let events = batch(&mut reader, &mut writer).await;
+            for event in &events { if let CraftEvent::Model { model } = event { observed_model = Some(model.clone()); } }
+            if events.iter().any(|event| matches!(event, CraftEvent::RunEnded {..})) { break; }
+        }
+        assert_eq!(observed_model.as_deref(), Some("claude-original-model"));
+        let arguments: Vec<String> = serde_json::from_slice(&std::fs::read(root.join("arguments.json")).unwrap()).unwrap();
+        assert!(arguments.windows(2).any(|pair| pair == ["--resume", &native]));
+        assert!(arguments.windows(2).any(|pair| pair == ["--model", "claude-original-model"]));
+        assert!(!arguments.iter().any(|argument| argument == "--session-id"));
+        craft.kill().await.unwrap();
+        helper.kill().await.unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }).await.expect("resumed native process completed");
 }

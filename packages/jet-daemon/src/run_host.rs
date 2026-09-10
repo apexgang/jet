@@ -113,6 +113,14 @@ impl jet_core::RunConnection for RunConnection {
 			}
 			Ok(match event {
 				CraftEvent::RemoteTool { .. } => unreachable!("handled above"),
+				CraftEvent::Model { model } => {
+					if self.craft_minor < 10 {
+						return Err(failed(
+							"Model selection requires Craft 1.10",
+						));
+					}
+					RunObservation::Model(jet_core::ModelId(model))
+				}
 				CraftEvent::Usage { usage } => RunObservation::Usage(
 					crate::translate::usage::report(usage),
 				),
@@ -342,6 +350,12 @@ impl RunHost for CraftProcesses {
 	) -> RunFuture<'_, Result<PinnedCraft, CoreError>> {
 		Box::pin(async move { run_craft::load(&home, &id).await })
 	}
+	fn prepare_retry_run(
+		&self,
+		plan: LaunchPlan,
+	) -> RunFuture<'_, Result<LaunchPlan, CoreError>> {
+		Box::pin(run_craft::prepare_retry_run(plan))
+	}
 	fn prepare_next_run(
 		&self,
 		plan: LaunchPlan,
@@ -557,6 +571,7 @@ pub(crate) async fn craft_connection(
 			jet_protocol::CraftResume {
 				version: contract.craft_protocol,
 				native_conversation: identity.clone(),
+				model: plan.model.as_ref().map(|model| model.0.clone()),
 			}
 		}),
 		fork,

@@ -392,3 +392,5 @@ mod conversation_fork_tests;
 mod utility;
 
 mod extension;
+
+mod auto_continue;

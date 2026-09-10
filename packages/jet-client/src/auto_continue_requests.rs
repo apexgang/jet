@@ -1,30 +1,26 @@
-//! Turn queue reads through the typed client boundary.
+//! Auto-continue policy Commands and fenced Queries.
 use crate::connection::{Client, ClientError};
 use crate::requests::unexpected;
 use jet_protocol::{QueryRequest, QueryResponse};
 use uuid::Uuid;
 impl Client {
-	/// Reads the authoritative Turn queue and Event fence (protocol minor 16).
-	/// Vector order is queue position; admission identity is stable as it moves.
+	/// Reads the durable policy and latest retry decision (protocol minor 34).
 	///
 	/// # Errors
 	/// Returns a feature, transport, or stable remote error.
-	pub async fn turn_queue(
+	pub async fn auto_continue(
 		&self,
-		conversation_id: Uuid,
-	) -> Result<jet_protocol::TurnQueue, ClientError> {
-		self.require_minor(jet_protocol::TURN_QUEUE_MINOR)?;
-		match self
-			.query(QueryRequest::TurnQueue { conversation_id })
-			.await?
-		{
-			QueryResponse::TurnQueue(queue) => Ok(queue),
+		target: jet_protocol::AutoContinueTarget,
+	) -> Result<jet_protocol::AutoContinueSnapshot, ClientError> {
+		self.require_minor(jet_protocol::AUTO_CONTINUE_MINOR)?;
+		match self.query(QueryRequest::AutoContinue { target }).await? {
+			QueryResponse::AutoContinue(snapshot) => Ok(snapshot),
 			other @ (QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
-			| QueryResponse::AutoContinue(_)
+			| QueryResponse::TurnQueue(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -48,6 +44,34 @@ impl Client {
 			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)
 			| QueryResponse::ExternalConversations(_)) => Err(unexpected(&other)),
+		}
+	}
+}
+
+impl Client {
+	/// Set an Account-binding default or a one-shot Conversation override.
+	/// # Errors
+	/// Returns a feature, transport, or stable remote error.
+	pub async fn set_auto_continue(
+		&self,
+		command_id: Uuid,
+		target: jet_protocol::AutoContinueTarget,
+		policy: jet_protocol::AutoContinuePolicy,
+	) -> Result<(), ClientError> {
+		self.require_minor(jet_protocol::AUTO_CONTINUE_MINOR)?;
+		let response = self
+			.execute_command(
+				command_id,
+				jet_protocol::CommandRequest::SetAutoContinue {
+					target,
+					policy,
+				},
+			)
+			.await?;
+		if response == jet_protocol::CommandResponse::AutoContinueConfigured {
+			Ok(())
+		} else {
+			Err(unexpected(&response))
 		}
 	}
 }

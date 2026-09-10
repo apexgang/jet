@@ -52,6 +52,7 @@ impl Client {
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
+			| QueryResponse::AutoContinue(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -105,6 +106,7 @@ impl Client {
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::AutoContinueConfigured
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }

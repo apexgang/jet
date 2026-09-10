@@ -242,3 +242,10 @@ pub use extension::{
 };
 
 pub use handshake::EXTENSIONS_MINOR;
+
+mod auto_continue;
+pub use auto_continue::{
+	AutoContinuePolicy, AutoContinueRetry, AutoContinueSnapshot,
+	AutoContinueStatus, AutoContinueTarget, AutoContinueUsage,
+};
+pub use handshake::AUTO_CONTINUE_MINOR;

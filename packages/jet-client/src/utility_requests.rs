@@ -21,6 +21,7 @@ impl Client {
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::TurnQueue(_)
+			| QueryResponse::AutoContinue(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }

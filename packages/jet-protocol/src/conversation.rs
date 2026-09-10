@@ -151,6 +151,13 @@ pub struct ConversationSnapshot {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandRequest {
+	/// Configure a bounded Auto-continue policy (Jet 1.34).
+	SetAutoContinue {
+		/// Policy scope.
+		target: crate::AutoContinueTarget,
+		/// Explicit policy.
+		policy: crate::AutoContinuePolicy,
+	},
 	/// Authorize one review retry of a stored denied action (Jet 1.32).
 	AuthorizeApprovalRetry {
 		/// Run that owns the current turn's denial.
@@ -490,6 +497,8 @@ pub enum CommandRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResponse {
+	/// The Auto-continue policy was stored.
+	AutoContinueConfigured,
 	/// A single exact-action review retry was authorized.
 	ApprovalRetryAuthorized {
 		/// Original denied review.

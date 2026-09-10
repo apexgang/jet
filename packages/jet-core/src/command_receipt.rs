@@ -27,6 +27,8 @@ const CRAFT_LIFECYCLE_OUTCOME_VERSION: u32 = 7;
 const EXTENSION_OUTCOME_VERSION: u32 = 8;
 /// Older releases cannot replay an exact-action review retry grant.
 const APPROVAL_RETRY_OUTCOME_VERSION: u32 = 9;
+/// Older releases cannot replay Auto-continue policy Commands.
+const AUTO_CONTINUE_OUTCOME_VERSION: u32 = 10;
 
 /// Uses the rollback release's encoding whenever that release can understand
 /// the result. Version 2 is reserved for name-only variants introduced here;
@@ -36,6 +38,9 @@ pub(crate) fn outcome_version(
 	result: &Result<CommandOutcome, CoreError>,
 ) -> u32 {
 	match result {
+		Ok(CommandOutcome::AutoContinueConfigured) => {
+			AUTO_CONTINUE_OUTCOME_VERSION
+		}
 		Ok(CommandOutcome::ApprovalRetryAuthorized { .. }) => {
 			APPROVAL_RETRY_OUTCOME_VERSION
 		}
@@ -144,7 +149,8 @@ pub(crate) fn replay(
 		| REMOTE_REVIEW_OUTCOME_VERSION
 		| CRAFT_LIFECYCLE_OUTCOME_VERSION
 		| EXTENSION_OUTCOME_VERSION
-		| APPROVAL_RETRY_OUTCOME_VERSION => decode_result(&outcome),
+		| APPROVAL_RETRY_OUTCOME_VERSION
+		| AUTO_CONTINUE_OUTCOME_VERSION => decode_result(&outcome),
 		PREVIOUS_OUTCOME_VERSION => decode_previous_result(&outcome),
 		_ => Ok(Err(CoreError::incompatible(
 			"command.outcome_incompatible",

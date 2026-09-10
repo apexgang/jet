@@ -533,3 +533,43 @@ async fn a_binding_refused_by_the_plane_is_recorded_as_denied() {
 		)
 	);
 }
+
+#[tokio::test]
+async fn auto_continue_policy_audit_excludes_the_message() {
+	let dir = tempfile::tempdir().unwrap();
+	let core = start(&dir).await;
+	let binding = crate::test_support::bind_native_account(
+		&core,
+		crate::ProviderId("anthropic".into()),
+	)
+	.await;
+	core.execute(
+		&actor(),
+		request(Command::SetAutoContinue {
+			target: crate::AutoContinueTarget::AccountBinding(binding),
+			policy: crate::AutoContinuePolicy::Retry {
+				delay_ms: 1000,
+				max_delay_ms: 2000,
+				max_retries: 2,
+				message: "private continuation".into(),
+			},
+		}),
+	)
+	.await
+	.unwrap();
+	let page = audit(&core, AuditSequence(0)).await;
+	let record = page.entries.last().unwrap();
+	assert_eq!(
+		(
+			record.decision.as_str(),
+			record.target.kind.as_str(),
+			record.target.identity.as_deref()
+		),
+		(
+			"policy.auto_continue_changed",
+			"account_binding",
+			Some(binding.0.to_string().as_str())
+		)
+	);
+	assert!(!format!("{page:?}").contains("private continuation"));
+}

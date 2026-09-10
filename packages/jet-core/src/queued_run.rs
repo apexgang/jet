@@ -8,6 +8,7 @@ use jet_store::{ReadTransaction, WriteTransaction};
 #[derive(PartialEq, Eq)]
 struct Continuation {
 	previous_run_id: uuid::Uuid,
+	pinned: bool,
 	plan: LaunchPlan,
 }
 
@@ -55,7 +56,11 @@ impl Core {
 		// Read-only external validation precedes the write transaction. The
 		// transaction rechecks the selection before admitting another execution.
 		let prepared = async {
-			let plan = host.prepare_next_run(accepted.plan.clone()).await?;
+			let plan = if accepted.pinned {
+				host.prepare_retry_run(accepted.plan.clone()).await?
+			} else {
+				host.prepare_next_run(accepted.plan.clone()).await?
+			};
 			plan.revalidate().await?;
 			self.revalidate_visa(&plan).await?;
 			Ok::<_, CoreError>(plan)
@@ -98,7 +103,12 @@ async fn continuation(
 	if runs.iter().any(|run| !run.lifecycle.is_terminal()) {
 		return Ok(None);
 	}
-	for run in runs.iter().rev() {
+	let origin = queue.entries[0].auto_continue_run;
+	for run in runs
+		.iter()
+		.rev()
+		.filter(|run| origin.is_none_or(|id| id.0 == run.run_id))
+	{
 		if let Some(execution) = tx.run_execution(run.run_id).await? {
 			let state: crate::run_state::State =
 				crate::run_state::decode(&execution.state)?;
@@ -110,10 +120,15 @@ async fn continuation(
 			// Fork delivery creates only the new native Conversation. Later queued
 			// Runs continue the destination's own durable native identity.
 			plan.fork = None;
+			if origin.is_some() {
+				plan.model = queue.entries[0].auto_continue_model.clone();
+				plan.version = 4;
+			}
 			plan.native_conversation =
 				state.native_conversation.or(plan.native_conversation);
 			return Ok(Some(Continuation {
 				previous_run_id: run.run_id,
+				pinned: origin.is_some(),
 				plan,
 			}));
 		}
@@ -150,6 +165,7 @@ async fn prepare(
 		unreachable!("Run created")
 	};
 	let entry = queue.claim(run.run_id).expect("pending input checked");
+	crate::auto_continue_work::claimed(tx, id, &mut queue, &entry, now).await?;
 	plan.prompt = entry.prompt.clone();
 	plan.turn_id = Some(entry.turn.turn_id);
 	plan.client_id = entry.turn.client_id;

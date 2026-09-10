@@ -36,6 +36,7 @@ impl Client {
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
 			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::AutoContinueConfigured
 			| CommandResponse::ScheduleCreated { .. }
 			| CommandResponse::ScheduleCanceled { .. }
 			| CommandResponse::UserEditApplied { .. }

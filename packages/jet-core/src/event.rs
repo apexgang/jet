@@ -70,6 +70,11 @@ pub(crate) enum EventSubject {
 /// Responsible origin of a journal Event. This grants no Command authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventActor {
+	/// An enabled Auto-continue policy admitted or settled input.
+	AutoContinue {
+		/// Client that authorized the execution.
+		authorized_by: ClientId,
+	},
 	/// A Scheduled task admitted or settled deterministic input.
 	ScheduledTask {
 		/// Responsible schedule.
@@ -106,6 +111,13 @@ impl EventActor {
 			.map_err(|e| {
 				CoreError::internal("event.malformed", e.to_string())
 			})?;
+		if payload
+			.get("_jet_auto_continue")
+			.and_then(serde_json::Value::as_bool)
+			== Some(true)
+		{
+			return Ok(Self::AutoContinue { authorized_by });
+		}
 		let Some(origin) = payload.get("_jet_origin") else {
 			return Ok(Self::InteractiveClient {
 				client_id: authorized_by,
@@ -157,6 +169,7 @@ impl EventActor {
 	) -> (jet_store::ActorRecord, Option<serde_json::Value>) {
 		let (client_id, origin) = match self {
 			Self::InteractiveClient { client_id } => (*client_id, None),
+			Self::AutoContinue { authorized_by } => (*authorized_by, None),
 			Self::ScheduledTask {
 				schedule_id,
 				authorized_by,
@@ -246,6 +259,20 @@ pub struct EventPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "payload")]
 pub enum EventKind {
+	/// An Auto-continue retry decision changed durably.
+	#[serde(rename = "auto_continue.changed")]
+	AutoContinueChanged {
+		/// Evidence, timing, policy, and bound.
+		retry: Box<crate::AutoContinueRetry>,
+	},
+	/// A user configured a bounded Auto-continue policy.
+	#[serde(rename = "auto_continue.configured")]
+	AutoContinueConfigured {
+		/// Scope of the policy.
+		target: crate::AutoContinueTarget,
+		/// Selected policy.
+		policy: crate::AutoContinuePolicy,
+	},
 	/// A daily schedule was attached to this Conversation.
 	#[serde(rename = "schedule.created")]
 	ScheduleCreated {
@@ -660,7 +687,9 @@ impl EventKind {
 	pub fn encode(&self) -> Result<EventPayload, CoreError> {
 		match self {
 			Self::Unrecognized(payload) => Ok(payload.clone()),
-			Self::ScheduleCreated { .. }
+			Self::AutoContinueChanged { .. }
+			| Self::AutoContinueConfigured { .. }
+			| Self::ScheduleCreated { .. }
 			| Self::ScheduleCanceled { .. }
 			| Self::ScheduleFired { .. }
 			| Self::UserEditApplied { .. }
@@ -777,8 +806,15 @@ impl EventKind {
 			payload_version,
 			payload,
 		} = self.encode()?;
+		let auto_continue = matches!(actor, EventActor::AutoContinue { .. });
 		let (actor, origin) = actor.provenance();
 		let mut payload = payload;
+		if auto_continue && let Some(fields) = payload.as_object_mut() {
+			fields.insert(
+				"_jet_auto_continue".into(),
+				serde_json::Value::Bool(true),
+			);
+		}
 		if let Some(origin) = origin {
 			// Additive metadata leaves legacy actor columns and payload decoders
 			// readable during rollback. Origin is always derived by Core.

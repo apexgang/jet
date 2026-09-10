@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO auto_continue_policies (binding_id, policy) VALUES (?1, ?2) ON CONFLICT(binding_id) DO UPDATE SET policy = excluded.policy",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "280c53724fe8e71b59ad1312d0dc94d7cab026524c418a85e9d9f7e546482d80"
+}

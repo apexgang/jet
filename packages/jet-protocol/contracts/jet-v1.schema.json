@@ -627,6 +627,279 @@
         "reference"
       ]
     },
+    "AutoContinuePolicy": {
+      "description": "Explicit retry limits; absence of a configured policy resolves to off.",
+      "oneOf": [
+        {
+          "description": "Do not admit automatic input.",
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "off"
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "description": "Retry the same native Conversation and execution selection.",
+          "type": "object",
+          "properties": {
+            "delay_ms": {
+              "description": "Initial fallback delay, in milliseconds.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "max_delay_ms": {
+              "description": "Maximum exponential fallback delay, in milliseconds.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "max_retries": {
+              "description": "Maximum admitted retries in one exhaustion episode.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "message": {
+              "description": "Exact continuation input, 1 to 8192 bytes.",
+              "type": "string"
+            },
+            "mode": {
+              "type": "string",
+              "const": "retry"
+            }
+          },
+          "required": [
+            "mode",
+            "delay_ms",
+            "max_delay_ms",
+            "max_retries",
+            "message"
+          ]
+        }
+      ]
+    },
+    "AutoContinueRetry": {
+      "description": "The evidence and policy retained for the latest retry decision.",
+      "type": "object",
+      "properties": {
+        "due_at_unix_ms": {
+          "description": "Earliest permitted delivery, respecting the Provider reset time.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "observed_at_unix_ms": {
+          "description": "Plane clock at the observation.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "policy": {
+          "description": "Exact policy selected for this episode, including its message.",
+          "$ref": "#/$defs/AutoContinuePolicy"
+        },
+        "retry_count": {
+          "description": "Number of automatic retries admitted in this episode.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "retry_turn": {
+          "description": "Turn admitted by this decision, absent until queue admission succeeds.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "run_id": {
+          "description": "Run whose structured quota condition triggered the decision.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "selected_from": {
+          "description": "Where that policy was selected.",
+          "$ref": "#/$defs/AutoContinueTarget"
+        },
+        "status": {
+          "description": "Latest decision outcome.",
+          "$ref": "#/$defs/AutoContinueStatus"
+        },
+        "triggering_turn": {
+          "description": "Input that encountered this quota condition.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "usage": {
+          "description": "Provider-reported Usage condition, retained without guessing from text.",
+          "$ref": "#/$defs/AutoContinueUsage"
+        }
+      },
+      "required": [
+        "run_id",
+        "triggering_turn",
+        "usage",
+        "observed_at_unix_ms",
+        "due_at_unix_ms",
+        "retry_count",
+        "policy",
+        "selected_from",
+        "status"
+      ]
+    },
+    "AutoContinueSnapshot": {
+      "description": "A fenced policy and retry snapshot.",
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "description": "Plane Event cursor in the same read transaction.",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "policy": {
+          "description": "Configured policy, or off when unset.",
+          "$ref": "#/$defs/AutoContinuePolicy"
+        },
+        "retry": {
+          "description": "Latest retry decision for a Conversation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AutoContinueRetry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "cursor",
+        "policy"
+      ]
+    },
+    "AutoContinueStatus": {
+      "description": "Durable outcome of the most recent retry decision.",
+      "oneOf": [
+        {
+          "description": "The selected policy disabled this exhaustion episode.",
+          "type": "string",
+          "const": "disabled"
+        },
+        {
+          "description": "Queue capacity prevented admission; the retry count has not advanced.",
+          "type": "string",
+          "const": "deferred"
+        },
+        {
+          "description": "The Turn queue holds the retry until its due time.",
+          "type": "string",
+          "const": "pending"
+        },
+        {
+          "description": "The retry was claimed for native delivery.",
+          "type": "string",
+          "const": "dispatched"
+        },
+        {
+          "description": "New user input canceled the retry.",
+          "type": "string",
+          "const": "canceled"
+        },
+        {
+          "description": "The configured retry count was reached.",
+          "type": "string",
+          "const": "exhausted"
+        }
+      ]
+    },
+    "AutoContinueTarget": {
+      "description": "Where the user configures Auto-continue.",
+      "oneOf": [
+        {
+          "description": "Default for this Home Plane's Account binding.",
+          "type": "object",
+          "properties": {
+            "account_binding": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "account_binding"
+          ]
+        },
+        {
+          "description": "One quota-exhaustion episode, consumed when selected.",
+          "type": "object",
+          "properties": {
+            "conversation": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "conversation"
+          ]
+        }
+      ]
+    },
+    "AutoContinueUsage": {
+      "description": "Structured Usage condition that triggered a retry.",
+      "type": "object",
+      "properties": {
+        "estimation": {
+          "description": "Report certainty.",
+          "$ref": "#/$defs/UsageEstimation"
+        },
+        "finality": {
+          "description": "Report finality.",
+          "$ref": "#/$defs/UsageFinality"
+        },
+        "measure": {
+          "description": "Reported fill.",
+          "$ref": "#/$defs/QuotaMeasure"
+        },
+        "resets_in_seconds": {
+          "description": "Reset countdown at observation.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "scope": {
+          "description": "Scope of the quota.",
+          "$ref": "#/$defs/QuotaScope"
+        },
+        "window": {
+          "description": "Provider window name.",
+          "type": "string"
+        },
+        "window_seconds": {
+          "description": "Provider window duration.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "window",
+        "scope",
+        "measure",
+        "estimation",
+        "finality"
+      ]
+    },
     "BaseSelection": {
       "description": "The base a Workspace starts from, as the user selects it. The Plane\nresolves it to one commit when the Workspace is created and never\nagain.",
       "oneOf": [
@@ -1404,6 +1677,29 @@
     "CommandRequest": {
       "description": "Commands a client may execute.",
       "oneOf": [
+        {
+          "description": "Configure a bounded Auto-continue policy (Jet 1.34).",
+          "type": "object",
+          "properties": {
+            "policy": {
+              "description": "Explicit policy.",
+              "$ref": "#/$defs/AutoContinuePolicy"
+            },
+            "target": {
+              "description": "Policy scope.",
+              "$ref": "#/$defs/AutoContinueTarget"
+            },
+            "type": {
+              "type": "string",
+              "const": "set_auto_continue"
+            }
+          },
+          "required": [
+            "type",
+            "target",
+            "policy"
+          ]
+        },
         {
           "description": "Authorize one review retry of a stored denied action (Jet 1.32).",
           "type": "object",
@@ -2482,6 +2778,19 @@
     "CommandResponse": {
       "description": "Durable Command outcomes.",
       "oneOf": [
+        {
+          "description": "The Auto-continue policy was stored.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "auto_continue_configured"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
         {
           "description": "A single exact-action review retry was authorized.",
           "type": "object",
@@ -4355,6 +4664,19 @@
       "description": "Responsible execution origin, when legacy client authorization is insufficient.",
       "oneOf": [
         {
+          "description": "Input admitted by an enabled Auto-continue policy (Jet 1.34).",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "auto_continue"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
           "description": "Input originated from a durable Scheduled task.",
           "type": "object",
           "properties": {
@@ -6225,6 +6547,24 @@
       "description": "Queries a client may run.",
       "oneOf": [
         {
+          "description": "Inspect an Auto-continue policy and retry (Jet 1.34).",
+          "type": "object",
+          "properties": {
+            "target": {
+              "description": "Scope to inspect.",
+              "$ref": "#/$defs/AutoContinueTarget"
+            },
+            "type": {
+              "type": "string",
+              "const": "auto_continue"
+            }
+          },
+          "required": [
+            "type",
+            "target"
+          ]
+        },
+        {
           "description": "Inspect native source, components and requested access before a mutation.",
           "type": "object",
           "properties": {
@@ -6844,6 +7184,20 @@
     "QueryResponse": {
       "description": "Query snapshots.",
       "oneOf": [
+        {
+          "description": "Durable Auto-continue policy and decision.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "auto_continue"
+            }
+          },
+          "$ref": "#/$defs/AutoContinueSnapshot",
+          "required": [
+            "type"
+          ]
+        },
         {
           "description": "Unconverted native catalog and metadata.",
           "type": "object",

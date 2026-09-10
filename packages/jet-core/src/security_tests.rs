@@ -298,3 +298,30 @@ async fn a_guarded_command_that_already_committed_still_replays() {
 		(true, Ok(committed))
 	);
 }
+
+#[tokio::test]
+async fn a_degraded_plane_refuses_auto_continue_policy_changes() {
+	let dir = tempfile::tempdir().unwrap();
+	let path = dir.path().join("plane.sqlite3");
+	let trusted = start_core(&path).await;
+	let binding = crate::test_support::bind_native_account(
+		&trusted,
+		crate::ProviderId("anthropic".into()),
+	)
+	.await;
+	trusted.close().await;
+	drop(trusted);
+	std::fs::remove_file(audit_head_path(&path)).unwrap();
+	let core = start_core(&path).await;
+	let error = core
+		.execute(
+			&actor(),
+			request(Command::SetAutoContinue {
+				target: crate::AutoContinueTarget::AccountBinding(binding),
+				policy: crate::AutoContinuePolicy::Off,
+			}),
+		)
+		.await
+		.unwrap_err();
+	assert_eq!(error.code, "security.audit_degraded");
+}

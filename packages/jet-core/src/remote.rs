@@ -31,6 +31,7 @@ pub(crate) fn invalidated_client(
 		| CommandOutcome::CraftDisabled { .. }
 		| CommandOutcome::ExtensionChangeQueued { .. }
 		| CommandOutcome::CraftInstallationQueued { .. }
+		| CommandOutcome::AutoContinueConfigured
 		| CommandOutcome::ScheduleCreated(_)
 		| CommandOutcome::ScheduleCanceled { .. }
 		| CommandOutcome::ConversationNamed(_)

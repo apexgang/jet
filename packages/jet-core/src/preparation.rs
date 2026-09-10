@@ -253,6 +253,7 @@ impl Core {
 				}
 			}
 			Command::RequestUtility { .. }
+			| Command::SetAutoContinue { .. }
 			| Command::CreateSchedule { .. }
 			| Command::CancelSchedule { .. }
 			| Command::SetConversationName { .. }

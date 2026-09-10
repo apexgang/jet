@@ -63,6 +63,7 @@ public enum CraftCommand {
 }
 
 public enum CraftEvent {
+    case `model`(CraftEventModel)
     case `remote_tool`(CraftEventRemoteTool)
     case `usage`(CraftEventUsage)
     case `approval_requested`(CraftEventApprovalRequested)
@@ -179,6 +180,7 @@ public struct CraftRemoteTool {
 }
 
 public struct CraftResume {
+    public let `model`: String?
     public let `native_conversation`: String
     public let `version`: ProtocolVersion
 }
@@ -586,6 +588,10 @@ public struct CraftCommandAction {
 
 public struct CraftCommandShutdown {
 
+}
+
+public struct CraftEventModel {
+    public let `model`: String
 }
 
 public struct CraftEventRemoteTool {

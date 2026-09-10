@@ -93,14 +93,14 @@ fn tokens(tokens: UsageTokens) -> wire::UsageTokens {
 	}
 }
 
-fn scope(scope: QuotaScope) -> wire::QuotaScope {
+pub(super) fn scope(scope: QuotaScope) -> wire::QuotaScope {
 	match scope {
 		QuotaScope::ProviderAccount => wire::QuotaScope::ProviderAccount,
 		QuotaScope::Model(ModelId(model)) => wire::QuotaScope::Model { model },
 	}
 }
 
-fn measure(measure: QuotaMeasure) -> wire::QuotaMeasure {
+pub(super) fn measure(measure: QuotaMeasure) -> wire::QuotaMeasure {
 	wire::QuotaMeasure {
 		unit: match measure.unit {
 			QuotaUnit::Tokens => wire::QuotaUnit::Tokens,
@@ -113,14 +113,14 @@ fn measure(measure: QuotaMeasure) -> wire::QuotaMeasure {
 	}
 }
 
-fn estimation(estimation: UsageEstimation) -> wire::UsageEstimation {
+pub(super) fn estimation(estimation: UsageEstimation) -> wire::UsageEstimation {
 	match estimation {
 		UsageEstimation::Measured => wire::UsageEstimation::Measured,
 		UsageEstimation::Estimated => wire::UsageEstimation::Estimated,
 	}
 }
 
-fn finality(finality: UsageFinality) -> wire::UsageFinality {
+pub(super) fn finality(finality: UsageFinality) -> wire::UsageFinality {
 	match finality {
 		UsageFinality::Interim => wire::UsageFinality::Interim,
 		UsageFinality::Final => wire::UsageFinality::Final,

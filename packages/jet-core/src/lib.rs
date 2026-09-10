@@ -631,6 +631,10 @@ mod terminal_orphan;
 mod schedule_tests;
 
 #[cfg(test)]
+#[path = "auto_continue_tests.rs"]
+mod auto_continue_tests;
+
+#[cfg(test)]
 #[path = "utility_tests.rs"]
 mod utility_tests;
 
@@ -658,3 +662,11 @@ pub use extension::{
 	ExtensionAction, ExtensionCatalog, ExtensionChange, ExtensionChangeState,
 	ExtensionConfirmation, ExtensionHost, ExtensionScope, ExtensionTrust,
 };
+
+mod auto_continue;
+pub use auto_continue::{
+	AutoContinuePolicy, AutoContinueRetry, AutoContinueSnapshot,
+	AutoContinueStatus, AutoContinueTarget,
+};
+
+mod auto_continue_work;

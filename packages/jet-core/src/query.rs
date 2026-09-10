@@ -28,6 +28,11 @@ use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
+	/// Read an Auto-continue policy and its latest durable decision.
+	AutoContinue {
+		/// Scope to inspect.
+		target: crate::AutoContinueTarget,
+	},
 	/// Inspect native source, components and requested access before a mutation.
 	InspectExtension {
 		/// Accepted Craft identity.
@@ -222,6 +227,8 @@ pub enum Query {
 /// Snapshots returned by [`Core::query`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult {
+	/// Fenced Auto-continue policy and decision.
+	AutoContinue(Box<crate::AutoContinueSnapshot>),
 	/// Unconverted native inventory.
 	ExtensionCatalog(crate::ExtensionCatalog),
 	/// Durable lifecycle outcome.
@@ -394,6 +401,13 @@ impl Core {
 				.read(async |tx| crate::utility_work::query(tx, job_id).await)
 				.await
 				.map(QueryResult::Utility),
+			Query::AutoContinue { target } => self
+				.store
+				.read(async |tx| {
+					crate::auto_continue::snapshot(tx, target).await
+				})
+				.await
+				.map(|s| QueryResult::AutoContinue(Box::new(s))),
 			Query::ScheduledTasks { conversation_id } => self
 				.store
 				.read(async |tx| {

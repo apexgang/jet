@@ -31,3 +31,5 @@ pub use ssh::SshEndpoint;
 mod utility_requests;
 
 mod extension_requests;
+
+mod auto_continue_requests;

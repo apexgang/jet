@@ -40,6 +40,7 @@ impl Client {
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
+			| QueryResponse::AutoContinue(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
@@ -88,6 +89,7 @@ impl Client {
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
+			| QueryResponse::AutoContinue(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }

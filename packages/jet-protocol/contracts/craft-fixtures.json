@@ -203,5 +203,15 @@
     "schema": "CraftCommand",
     "valid": true,
     "payload": "{\"kind\":\"constrain_subagents\",\"max_children\":null}"
+  },
+  {
+    "schema": "CraftEvent",
+    "valid": true,
+    "payload": "{\"kind\":\"model\",\"model\":\"claude-original-model\"}"
+  },
+  {
+    "schema": "CraftHello",
+    "valid": true,
+    "payload": "{\"protocol\":{\"family\":\"craft\",\"versions\":[{\"major\":1,\"minor\":10}],\"capabilities\":[\"runs\",\"resume\"]},\"specification\":{\"family\":\"specification\",\"versions\":[{\"major\":1,\"minor\":0}]},\"execution_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"resume\":{\"version\":{\"major\":1,\"minor\":10},\"native_conversation\":\"native-1\",\"model\":\"claude-original-model\"}}"
   }
 ]

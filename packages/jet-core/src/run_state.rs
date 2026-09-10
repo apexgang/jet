@@ -14,6 +14,14 @@ pub(crate) use crate::run_state_storage::{append, decode, save, snapshot};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct State {
+	#[serde(default)]
+	pub(crate) model: Option<crate::ModelId>,
+	#[serde(default)]
+	pub(crate) current_turn: Option<uuid::Uuid>,
+	#[serde(default)]
+	pub(crate) quota: Vec<crate::auto_continue_work::Condition>,
+	#[serde(default)]
+	pub(crate) quota_wait: bool,
 	/// Durable limits and reservations for Automatic review.
 	#[serde(default)]
 	pub(crate) review: crate::review_guard::Guard,
@@ -80,6 +88,7 @@ impl Core {
             let mut state: State = decode(&execution.state)?;
             state.partial_source = prefix;
             tx.update_run_execution(run_id.0, &serde_json::to_string(&state).map_err(|_| invalid())?).await?;
+            if state.partial_source.count == 0 { crate::auto_continue_work::consider(tx, run_id, now).await?; }
             let terminal = tx.run(run_id.0).await?.ok_or_else(missing)?.lifecycle.is_terminal();
             Ok::<_, CoreError>(terminal && state.partial_source.count == 0)
         }).await?;
@@ -151,6 +160,7 @@ async fn record(
 		| Observation::Activity(_)
 		| Observation::TurnCompleted { .. }
 		| Observation::Output { .. }
+		| Observation::Model(_)
 		| Observation::Usage(_)
 		| Observation::NativeConversation(_)
 		| Observation::ConversationTitle(_)
@@ -189,10 +199,40 @@ async fn record(
 				.await?;
 			return Ok(());
 		}
+		Observation::Model(model) => {
+			if !executing(run.lifecycle)
+				|| model.0.is_empty()
+				|| model.0.len() > 128
+				|| model.0.chars().any(char::is_control)
+			{
+				return Err(invalid());
+			}
+			state.model = Some(model);
+			save(tx, run_id, &state).await?;
+			return Ok(());
+		}
+
 		// A Usage record is durable Plane state of its own rather than
 		// execution state, so it is written beside the Run instead of
 		// changing its lifecycle (ADR-0023).
 		Observation::Usage(report) => {
+			if let crate::UsageReport::ProviderQuota(usage) = &report {
+				state.quota.retain(|previous| {
+					previous.usage.window != usage.window
+						|| previous.usage.scope != usage.scope
+				});
+				if state.quota.len() < 128 {
+					state.quota.push(crate::auto_continue_work::Condition {
+						usage: usage.clone(),
+						observed_at: now,
+						turn_id: state
+							.current_turn
+							.or(plan.turn_id)
+							.unwrap_or(run_id.0),
+					});
+				}
+				save(tx, run_id, &state).await?;
+			}
 			crate::usage_record::record(
 				tx,
 				&actor,
@@ -236,6 +276,7 @@ async fn record(
 		| Observation::TurnEnded(_)
 		| Observation::Activity(_)
 		| Observation::Output { .. }
+		| Observation::Model(_)
 		| Observation::Usage(_)
 		| Observation::ProcessTitle { .. }
 		| Observation::ConversationTitle(_)
@@ -378,6 +419,7 @@ fn apply(
 			activity(state, Some(RunActivity::Working), &mut events);
 		}
 		Observation::Activity(reason) if executing(lifecycle) => {
+			state.quota_wait = reason == RunActivity::WaitingForQuota;
 			activity(state, Some(reason), &mut events)
 		}
 		// Recording the request grants nothing: the Craft is still holding
@@ -477,6 +519,7 @@ fn apply(
 		| Observation::Activity(_)
 		| Observation::TurnCompleted { .. }
 		| Observation::Output { .. }
+		| Observation::Model(_)
 		| Observation::Usage(_)
 		| Observation::NativeConversation(_)
 		| Observation::ProcessTitle { .. }
