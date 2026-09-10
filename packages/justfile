@@ -60,6 +60,11 @@ bench-smoke:
 check:
 	cargo check
 
+# Run alone on the fixed macOS/Linux reference host; includes a five-minute window.
+resource-test:
+	just test -p jet-fueld -p jet-daemon -E 'binary(replay) | binary(recovery) | test(idle_craft)' --no-capture
+	just test -p jet-daemon --test resources --run-ignored all --no-capture
+
 # Regenerate every wire schema and its GUI models from the Rust wire DTOs.
 contracts: (emit-contracts justfile_directory() / "..")
 
