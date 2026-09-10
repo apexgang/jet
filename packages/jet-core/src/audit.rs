@@ -57,6 +57,8 @@ pub struct AuditRecordId(pub Uuid);
 /// what happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditDecision {
+	/// The owner changed an Account-binding default or one-shot retry policy.
+	AutoContinuePolicyChanged,
 	/// A user reviewed an exact remote action.
 	RemoteToolReviewed,
 	/// The owner changed Utility routing or purpose permissions.
@@ -264,6 +266,7 @@ impl AuditDecision {
 			Self::ExecutionResolutionRequested => {
 				"execution.resolution_requested"
 			}
+			Self::AutoContinuePolicyChanged => "policy.auto_continue_changed",
 			Self::UtilityPolicyChanged => "policy.utility_changed",
 			Self::TerminalOpened => "terminal.opened",
 			Self::TerminalClosed => "terminal.closed",
@@ -317,7 +320,8 @@ impl AuditDecision {
 			Self::RemoteToolReviewed | Self::ApprovalReviewed | Self::ApprovalRetryAuthorized => AuditRisk::Elevated,
             Self::ExecutionResolutionRequested => AuditRisk::Destructive,
 			Self::TerminalOpened | Self::TerminalClosed | Self::TerminalInput | Self::ConnectionAuthenticated => AuditRisk::Routine,
-			Self::UtilityPolicyChanged
+			Self::AutoContinuePolicyChanged
+			| Self::UtilityPolicyChanged
 			| Self::ReviewPolicyChanged
 			| Self::AccountBound
 			| Self::AccountUnbound
@@ -416,6 +420,9 @@ impl AuditSubject {
 /// guards can never drift apart.
 pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 	match command {
+		Command::SetAutoContinue { .. } => {
+			Some(AuditDecision::AutoContinuePolicyChanged)
+		}
 		Command::AuthorizeApprovalRetry { .. } => {
 			Some(AuditDecision::ApprovalRetryAuthorized)
 		}
@@ -487,6 +494,9 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 /// that exists.
 fn refused_subject(command: &Command) -> AuditSubject {
 	match command {
+		Command::SetAutoContinue { target, .. } => {
+			auto_continue_subject(*target)
+		}
 		Command::AuthorizeApprovalRetry { run_id, .. } => {
 			AuditSubject::Execution(*run_id)
 		}
@@ -833,6 +843,19 @@ impl From<AuditRecord> for AuditEntry {
 			decision: record.decision,
 			risk: record.risk,
 			outcome: record.outcome,
+		}
+	}
+}
+
+pub(crate) fn auto_continue_subject(
+	target: crate::AutoContinueTarget,
+) -> AuditSubject {
+	match target {
+		crate::AutoContinueTarget::AccountBinding(id) => {
+			AuditSubject::AccountBinding(id)
+		}
+		crate::AutoContinueTarget::Conversation(id) => {
+			AuditSubject::Conversation(id)
 		}
 	}
 }

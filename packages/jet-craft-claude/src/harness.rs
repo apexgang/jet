@@ -25,7 +25,10 @@ pub(crate) const TOOL: &str = "approve";
 /// The immutable argument vector for one Run. `--session-id` pins the native
 /// Conversation identity before any output exists, so a resumable identity is
 /// never inferred from a race with the Harness's first event.
-pub(crate) fn arguments(session: Uuid, resume: Option<&str>) -> Vec<String> {
+pub(crate) fn arguments(
+	session: Uuid,
+	resume: Option<&jet_protocol::CraftResume>,
+) -> Vec<String> {
 	let mut arguments: Vec<String> = [
 		"--print",
 		"--input-format",
@@ -42,9 +45,13 @@ pub(crate) fn arguments(session: Uuid, resume: Option<&str>) -> Vec<String> {
 	.map(|argument| (*argument).to_owned())
 	.collect();
 	match resume {
-		Some(native_conversation) => {
+		Some(resume) => {
 			arguments.push("--resume".into());
-			arguments.push(native_conversation.to_owned());
+			arguments.push(resume.native_conversation.clone());
+			if let Some(model) = &resume.model {
+				arguments.push("--model".into());
+				arguments.push(model.clone());
+			}
 		}
 		None => {
 			arguments.push("--session-id".into());

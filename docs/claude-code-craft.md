@@ -13,7 +13,7 @@ claude --print --input-format stream-json --output-format stream-json --verbose 
 
 and both directions are newline-delimited JSON. The process keeps reading its standard input for as long as that input is open, which is what Helper 1.3 exists for (#90): every later turn is a user message written there, and the Harness exits when the input closes.
 
-`--session-id` pins the native Conversation identity to the Run before any output exists, so a resumable identity is never inferred from a race with the Harness's first event. A recovered execution passes that identity back with `--resume`.
+`--session-id` pins the native Conversation identity to the Run before any output exists, so a resumable identity is never inferred from a race with the Harness's first event. A recovered execution passes that identity back with `--resume`. Craft 1.10 also passes an explicit `--model` for Auto-continue, using the Model reported by native `system/init`, independently of the consumption breakdown in `modelUsage`.
 
 The Harness is named by the Craft's own accepted declaration, read from `.jet/craft-spec.toml` beside the executable. The host compares the declaration a handshake carries against the document it accepted, so this read chooses which declaration to present and never what it is allowed to do; the helper independently enforces the executable disclosure it was configured with.
 

@@ -71,6 +71,21 @@ pub trait RunHost: std::fmt::Debug + Send + Sync {
 			"this Run host cannot validate Handoffs",
 		))
 	}
+	/// Refreshes host metadata for an automatic retry while enforcing its
+	/// original native Conversation, Model, Account binding, and Craft.
+	/// Hosts unable to enforce the selection must leave the retry pending.
+	fn prepare_retry_run(
+		&self,
+		_plan: LaunchPlan,
+	) -> RunFuture<'_, Result<LaunchPlan, CoreError>> {
+		Box::pin(async {
+			Err(CoreError::unavailable(
+				"auto_continue.unsupported",
+				"the Harness cannot preserve this retry's selection",
+				"pinned resume is unavailable",
+			))
+		})
+	}
 	/// Selects the current compatible default for a subsequent Run. Existing
 	/// executions recover through their immutable pin instead.
 	fn prepare_next_run(

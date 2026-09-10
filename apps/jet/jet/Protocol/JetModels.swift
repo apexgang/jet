@@ -100,6 +100,54 @@ public struct AuditTarget {
     public let `reference`: String
 }
 
+public enum AutoContinuePolicy {
+    case `off`(AutoContinuePolicyOff)
+    case `retry`(AutoContinuePolicyRetry)
+}
+
+public struct AutoContinueRetry {
+    public let `due_at_unix_ms`: Int64
+    public let `observed_at_unix_ms`: Int64
+    public let `policy`: AutoContinuePolicy
+    public let `retry_count`: UInt32
+    public let `retry_turn`: String?
+    public let `run_id`: String
+    public let `selected_from`: AutoContinueTarget
+    public let `status`: AutoContinueStatus
+    public let `triggering_turn`: String
+    public let `usage`: AutoContinueUsage
+}
+
+public struct AutoContinueSnapshot {
+    public let `cursor`: String
+    public let `policy`: AutoContinuePolicy
+    public let `retry`: AutoContinueRetry?
+}
+
+public enum AutoContinueStatus: String {
+    case `disabled` = "disabled"
+    case `deferred` = "deferred"
+    case `pending` = "pending"
+    case `dispatched` = "dispatched"
+    case `canceled` = "canceled"
+    case `exhausted` = "exhausted"
+}
+
+public enum AutoContinueTarget {
+    case `variant0`(AutoContinueTargetVariant0)
+    case `variant1`(AutoContinueTargetVariant1)
+}
+
+public struct AutoContinueUsage {
+    public let `estimation`: UsageEstimation
+    public let `finality`: UsageFinality
+    public let `measure`: QuotaMeasure
+    public let `resets_in_seconds`: UInt64?
+    public let `scope`: QuotaScope
+    public let `window`: String
+    public let `window_seconds`: UInt64?
+}
+
 public enum BaseSelection {
     case `head`(BaseSelectionHead)
     case `revision`(BaseSelectionRevision)
@@ -219,6 +267,7 @@ public struct ClientPublicKey {
 }
 
 public enum CommandRequest {
+    case `set_auto_continue`(CommandRequestSetAutoContinue)
     case `authorize_approval_retry`(CommandRequestAuthorizeApprovalRetry)
     case `change_extension`(CommandRequestChangeExtension)
     case `review_remote_tool`(CommandRequestReviewRemoteTool)
@@ -265,6 +314,7 @@ public enum CommandRequest {
 }
 
 public enum CommandResponse {
+    case `auto_continue_configured`(CommandResponseAutoContinueConfigured)
     case `approval_retry_authorized`(CommandResponseApprovalRetryAuthorized)
     case `extension_change_queued`(CommandResponseExtensionChangeQueued)
     case `remote_tool_reviewed`(CommandResponseRemoteToolReviewed)
@@ -484,6 +534,7 @@ public struct Event {
 }
 
 public enum EventOrigin {
+    case `auto_continue`(EventOriginAutoContinue)
     case `scheduled_task`(EventOriginScheduledTask)
     case `harness`(EventOriginHarness)
     case `run_supervisor`(EventOriginRunSupervisor)
@@ -868,6 +919,7 @@ public enum PromotionState: String {
 }
 
 public enum QueryRequest {
+    case `auto_continue`(QueryRequestAutoContinue)
     case `inspect_extension`(QueryRequestInspectExtension)
     case `extension_catalog`(QueryRequestExtensionCatalog)
     case `extension_change`(QueryRequestExtensionChange)
@@ -903,6 +955,7 @@ public enum QueryRequest {
 }
 
 public enum QueryResponse {
+    case `auto_continue`(QueryResponseAutoContinue)
     case `extension_catalog`(QueryResponseExtensionCatalog)
     case `extension_change`(QueryResponseExtensionChange)
     case `remote_tool_review`(QueryResponseRemoteToolReview)
@@ -1531,6 +1584,25 @@ public struct AuditBreachTargetAltered {
     public let `sequence`: String
 }
 
+public struct AutoContinuePolicyOff {
+
+}
+
+public struct AutoContinuePolicyRetry {
+    public let `delay_ms`: UInt32
+    public let `max_delay_ms`: UInt32
+    public let `max_retries`: UInt32
+    public let `message`: String
+}
+
+public struct AutoContinueTargetVariant0 {
+    public let `account_binding`: String
+}
+
+public struct AutoContinueTargetVariant1 {
+    public let `conversation`: String
+}
+
 public struct BaseSelectionHead {
 
 }
@@ -1595,6 +1667,11 @@ public struct ClientMessageCommand {
     public let `command`: CommandRequest
     public let `command_id`: String
     public let `id`: UInt64
+}
+
+public struct CommandRequestSetAutoContinue {
+    public let `policy`: AutoContinuePolicy
+    public let `target`: AutoContinueTarget
 }
 
 public struct CommandRequestAuthorizeApprovalRetry {
@@ -1821,6 +1898,10 @@ public struct CommandRequestResumeImportedConversation {
     public let `import_id`: String
     public let `retention`: RetentionPolicy?
     public let `working_tree`: WorkingTreeRequest
+}
+
+public struct CommandResponseAutoContinueConfigured {
+
 }
 
 public struct CommandResponseApprovalRetryAuthorized {
@@ -2182,6 +2263,10 @@ public struct EntryKindMissing {
 
 }
 
+public struct EventOriginAutoContinue {
+
+}
+
 public struct EventOriginScheduledTask {
     public let `schedule_id`: String
 }
@@ -2272,6 +2357,10 @@ public struct PromotionDestinationLocalCheckout {
 
 public struct PromotionDestinationBranch {
     public let `name`: String
+}
+
+public struct QueryRequestAutoContinue {
+    public let `target`: AutoContinueTarget
 }
 
 public struct QueryRequestInspectExtension {
@@ -2409,6 +2498,12 @@ public struct QueryRequestSearch {
 
 public struct QueryRequestExternalConversations {
 
+}
+
+public struct QueryResponseAutoContinue {
+    public let `cursor`: String
+    public let `policy`: AutoContinuePolicy
+    public let `retry`: AutoContinueRetry?
 }
 
 public struct QueryResponseExtensionCatalog {

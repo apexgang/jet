@@ -79,6 +79,7 @@ async fn apply(
 		| CommandOutcome::CraftDisabled { .. }
 		| CommandOutcome::ExtensionChangeQueued { .. }
 		| CommandOutcome::CraftInstallationQueued { .. }
+		| CommandOutcome::AutoContinueConfigured
 		| CommandOutcome::ScheduleCreated(_)
 		| CommandOutcome::ScheduleCanceled { .. }
 		| CommandOutcome::ConversationNamed(_)

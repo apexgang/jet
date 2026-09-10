@@ -16,6 +16,7 @@ impl Core {
 	/// # Errors
 	/// Returns a store error if an Effect or its observation cannot be recorded.
 	pub async fn perform_runs(self: &Arc<Self>) -> Result<(), CoreError> {
+		self.wake_auto_continue().await?;
 		self.perform_execution_resolutions().await?;
 		self.prepare_queued_runs().await?;
 		let outcomes = self
@@ -330,6 +331,7 @@ fn event_count(observation: &Observation) -> usize {
 		| Observation::TurnEnded(_)
 		| Observation::Completed(_)
 		| Observation::Activity(_)
+		| Observation::Model(_)
 		| Observation::Usage(_)
 		| Observation::Output { .. }
 		| Observation::NativeConversation(_)

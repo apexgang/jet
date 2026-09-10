@@ -156,6 +156,11 @@ pub enum ServerMessage {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryRequest {
+	/// Inspect an Auto-continue policy and retry (Jet 1.34).
+	AutoContinue {
+		/// Scope to inspect.
+		target: crate::AutoContinueTarget,
+	},
 	/// Inspect native source, components and requested access before a mutation.
 	InspectExtension {
 		/// Accepted Craft identity.
@@ -350,6 +355,8 @@ pub enum QueryRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryResponse {
+	/// Durable Auto-continue policy and decision.
+	AutoContinue(crate::AutoContinueSnapshot),
 	/// Unconverted native catalog and metadata.
 	ExtensionCatalog(crate::ExtensionCatalog),
 	/// Deferred native mutation outcome.

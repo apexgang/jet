@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT policy FROM auto_continue_policies WHERE binding_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "policy",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "auto_continue_policies",
+            "name": "policy"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f6bd461e8e6a88a9667a8725006357f7f83fd47987cdd9da153815672e82d177"
+}

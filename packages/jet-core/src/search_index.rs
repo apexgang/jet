@@ -127,6 +127,8 @@ pub(crate) fn documents_of(event: &Event) -> Vec<NewSearchDocument> {
 		| EventKind::ChangeCheckpointRecorded { .. }
         | EventKind::ArtifactPublished { .. }
 		| EventKind::TurnInput { .. }
+		| EventKind::AutoContinueChanged { .. }
+		| EventKind::AutoContinueConfigured { .. }
 		| EventKind::ScheduleCreated { .. } | EventKind::ScheduleCanceled { .. } | EventKind::ScheduleFired { .. } | EventKind::TurnChanged { .. }
 		| EventKind::RunControlRequested { .. }
 		| EventKind::RunTerminated { .. }

@@ -36,7 +36,7 @@ impl Contract {
 			jet_protocol::decode_control(pin.adapter_state.as_bytes())
 				.map_err(|_| unavailable())?;
 		if contract.version != 1
-			|| !(1..=9).contains(&contract.craft_protocol.minor)
+			|| !(1..=10).contains(&contract.craft_protocol.minor)
 			|| contract.craft_protocol.major != 1
 			|| contract.helper_protocol.major != 1
 			|| contract.helper_protocol.minor > 1
@@ -93,7 +93,10 @@ pub(crate) async fn load(
 	}
 	let offer = jet_protocol::ProtocolOffer {
 		family: jet_protocol::ProtocolFamily::Craft,
-		versions: vec![jet_protocol::ProtocolVersion { major: 1, minor: 9 }],
+		versions: vec![jet_protocol::ProtocolVersion {
+			major: 1,
+			minor: 10,
+		}],
 		capabilities: vec!["fork".into(), "runs".into()],
 	};
 	let negotiated = offer
@@ -239,4 +242,37 @@ fn unavailable() -> CoreError {
 		revision_conflict: None,
 		recovery_actions: vec![],
 	}
+}
+
+/// Retry only through a contract that enforces the resolved Model on native resume.
+pub(crate) async fn prepare_retry_run(
+	mut plan: jet_core::LaunchPlan,
+) -> Result<jet_core::LaunchPlan, CoreError> {
+	let mut contract = Contract::of(&plan.craft)?;
+	if plan.model.is_none()
+		|| plan.native_conversation.is_none()
+		|| contract.craft_protocol.minor < 10
+		|| !contract
+			.specification
+			.enabled_features()
+			.map_err(|_| unavailable())?
+			.iter()
+			.any(|name| name == "resume")
+		|| !contract
+			.specification
+			.protocol
+			.capabilities
+			.iter()
+			.any(|name| name == "resume")
+	{
+		return Err(unavailable());
+	}
+	contract.boot_identity =
+		filesystem::blocking(jet_runtime::execution_boot_identity)
+			.await?
+			.map_err(|_| unavailable())?;
+	plan.craft.adapter_state =
+		serde_json::to_string(&contract).map_err(|_| unavailable())?;
+	plan.craft.verify().await?;
+	Ok(plan)
 }

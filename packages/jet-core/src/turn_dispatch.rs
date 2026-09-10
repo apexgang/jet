@@ -58,6 +58,16 @@ impl Core {
 				{
 					return Ok(None);
 				}
+				if !crate::auto_continue_work::matches_execution(
+					tx,
+					&queue.entries[0],
+					&plan,
+					&state,
+				)
+				.await?
+				{
+					return Ok(None);
+				}
 				let child_work = match crate::energy::admit(
 					self,
 					tx,
@@ -74,6 +84,14 @@ impl Core {
 				};
 				let next = queue.claim(run_id);
 				if let Some(entry) = &next {
+					crate::auto_continue_work::claimed(
+						tx,
+						id,
+						&mut queue,
+						entry,
+						self.now_unix_ms(),
+					)
+					.await?;
 					if state.changes.is_some() {
 						crate::checkpoint_state::observe(
 							self,

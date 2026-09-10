@@ -214,6 +214,10 @@ impl<W: AsyncWrite + Unpin> CraftSender<W> {
 	/// # Errors
 	/// Rejects oversized or malformed output and closes on a slow/disconnected peer.
 	pub async fn send(&mut self, event: &CraftEvent) -> Result<(), CraftError> {
+		if self.minor < 10 && matches!(event, CraftEvent::Model { .. }) {
+			return Err(CraftError::InvalidMessage);
+		}
+
 		if self.minor < 7 && matches!(event, CraftEvent::Usage { .. }) {
 			return Err(CraftError::InvalidMessage);
 		}
@@ -275,7 +279,10 @@ async fn handshake<R: AsyncRead + Unpin>(
 	// ASVS 2.3.1: a specification cannot make this SDK speak a new codec major.
 	let sdk = ProtocolOffer {
 		family: ProtocolFamily::Craft,
-		versions: vec![ProtocolVersion { major: 1, minor: 9 }],
+		versions: vec![ProtocolVersion {
+			major: 1,
+			minor: 10,
+		}],
 		capabilities: vec![
 			"actions".into(),
 			"fork".into(),
@@ -295,7 +302,12 @@ async fn handshake<R: AsyncRead + Unpin>(
 		.negotiate(&hello.protocol, mode)
 		.map_err(|_| CraftError::Incompatible)?;
 	if let Some(resume) = &hello.resume
-		&& (resume.native_conversation.is_empty()
+		&& (resume.model.as_ref().is_some_and(|model| {
+			protocol.version.minor < 10
+				|| model.is_empty()
+				|| model.len() > 128
+				|| model.chars().any(char::is_control)
+		}) || resume.native_conversation.is_empty()
 			|| !enabled_features.iter().any(|name| name == "resume")
 			|| !protocol.capabilities.iter().any(|name| name == "resume"))
 	{

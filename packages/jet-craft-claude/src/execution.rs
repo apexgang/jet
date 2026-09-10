@@ -119,9 +119,7 @@ pub(crate) async fn execution(
 					program,
 					arguments: harness::arguments(
 						execution_id,
-						resume
-							.as_ref()
-							.map(|resume| resume.native_conversation.as_str()),
+						resume.as_ref(),
 					),
 					input: format!(
 						"{}{}",
@@ -468,6 +466,16 @@ async fn line_observed(
 	}
 	match native::meaning(&value) {
 		native::Meaning::Started { version } => {
+			if minor >= 10
+				&& let Some(model) =
+					value.get("model").and_then(serde_json::Value::as_str)
+			{
+				sender
+					.send(&CraftEvent::Model {
+						model: model.into(),
+					})
+					.await?;
+			}
 			// ADR-0104: a release outside the matrix still runs, but never
 			// silently. The warning is a diagnostic, not a Conversation
 			// Event: the native init event already carries the release.

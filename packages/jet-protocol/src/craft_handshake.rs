@@ -9,6 +9,9 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CraftResume {
+	/// Resolved Model that a Craft 1.10 resume must enforce.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub model: Option<String>,
 	/// Version pinned when this execution first negotiated.
 	pub version: ProtocolVersion,
 	/// Native Conversation to reopen without replaying Commands automatically.

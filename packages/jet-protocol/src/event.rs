@@ -22,6 +22,8 @@ pub enum Actor {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventOrigin {
+	/// Input admitted by an enabled Auto-continue policy (Jet 1.34).
+	AutoContinue,
 	/// Input originated from a durable Scheduled task.
 	ScheduledTask {
 		/// Responsible schedule.

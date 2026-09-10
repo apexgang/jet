@@ -415,6 +415,10 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::CRAFT_INSTALLATION_MINOR,
 			feature: "third-party Craft discovery",
 		}),
+		QueryRequest::AutoContinue { .. } => Some(MinorRequirement {
+			minor: jet_protocol::AUTO_CONTINUE_MINOR,
+			feature: "Auto-continue",
+		}),
 		QueryRequest::ScheduledTasks { .. } => Some(MinorRequirement {
 			minor: jet_protocol::SCHEDULES_MINOR,
 			feature: "Scheduled tasks",
@@ -571,6 +575,10 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		CommandRequest::InstallCraft { .. } => Some(MinorRequirement {
 			minor: jet_protocol::CRAFT_INSTALLATION_MINOR,
 			feature: "third-party Craft installation",
+		}),
+		CommandRequest::SetAutoContinue { .. } => Some(MinorRequirement {
+			minor: jet_protocol::AUTO_CONTINUE_MINOR,
+			feature: "Auto-continue",
 		}),
 		CommandRequest::CreateSchedule { .. }
 		| CommandRequest::CancelSchedule { .. } => Some(MinorRequirement {

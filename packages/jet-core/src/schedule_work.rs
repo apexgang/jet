@@ -220,7 +220,7 @@ pub(crate) async fn can_dispatch(
 	queue: &turn_queue::Queue,
 	now: i64,
 ) -> Result<bool, CoreError> {
-	if !queue.ready() {
+	if !queue.ready() || queue.quota_until.is_some_and(|due| due > now) {
 		return Ok(false);
 	}
 	let Some(input) = queue

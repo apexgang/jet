@@ -121,6 +121,9 @@ pub(crate) fn query(
 		wire::QueryRequest::Utility { job_id } => {
 			Query::Utility { job_id: *job_id }
 		}
+		wire::QueryRequest::AutoContinue { target } => Query::AutoContinue {
+			target: auto_continue::target(*target),
+		},
 		wire::QueryRequest::ScheduledTasks { conversation_id } => {
 			Query::ScheduledTasks {
 				conversation_id: ConversationId(*conversation_id),
@@ -263,6 +266,9 @@ pub(crate) fn query_result(
 		}
 		QueryResult::Utility(job) => {
 			wire::QueryResponse::Utility(utility::job(job))
+		}
+		QueryResult::AutoContinue(value) => {
+			wire::QueryResponse::AutoContinue(auto_continue::snapshot(*value))
 		}
 		QueryResult::ScheduledTasks(snapshot) => {
 			wire::QueryResponse::ScheduledTasks(wire::ScheduledTasks {
@@ -452,6 +458,12 @@ pub(crate) fn command(
 			conversation_id: ConversationId(*conversation_id),
 			turn_id: *turn_id,
 		},
+		wire::CommandRequest::SetAutoContinue { target, policy } => {
+			Command::SetAutoContinue {
+				target: auto_continue::target(*target),
+				policy: auto_continue::policy(policy.clone()),
+			}
+		}
 		wire::CommandRequest::CreateSchedule {
 			conversation_id,
 			time_zone,
@@ -772,6 +784,9 @@ pub(crate) fn command_outcome(
 				turn: turn::turn(value),
 			}
 		}
+		CommandOutcome::AutoContinueConfigured => {
+			wire::CommandResponse::AutoContinueConfigured
+		}
 		CommandOutcome::ScheduleCreated(value) => {
 			wire::CommandResponse::ScheduleCreated {
 				task: schedule::task(value),
@@ -1077,6 +1092,15 @@ fn event(event: &Event, minor: u32) -> Result<wire::Event, CoreError> {
 		payload_version,
 		mut payload,
 	} = event.kind.encode()?;
+	if let jet_core::EventKind::AutoContinueChanged { retry } = &event.kind {
+		payload =
+			serde_json::json!({"retry":auto_continue::retry(*retry.clone())});
+	}
+	if let jet_core::EventKind::AutoContinueConfigured { target, policy } =
+		&event.kind
+	{
+		payload = serde_json::json!({"target":auto_continue::target_out(*target),"policy":auto_continue::policy_out(policy.clone())});
+	}
 	if let jet_core::EventKind::TurnChanged { turn: value } = &event.kind {
 		payload = serde_json::json!({"turn":turn::turn(value.clone())});
 	}
@@ -1110,10 +1134,14 @@ fn event(event: &Event, minor: u32) -> Result<wire::Event, CoreError> {
 			jet_core::EventActor::InteractiveClient { client_id } => client_id,
 			jet_core::EventActor::Harness { authorized_by, .. }
 			| jet_core::EventActor::RunSupervisor { authorized_by, .. }
+			| jet_core::EventActor::AutoContinue { authorized_by }
 			| jet_core::EventActor::ScheduledTask { authorized_by, .. } => authorized_by,
 		}),
 		origin: match event.actor {
 			jet_core::EventActor::InteractiveClient { .. } => None,
+			jet_core::EventActor::AutoContinue { .. } => (minor
+				>= wire::AUTO_CONTINUE_MINOR)
+				.then_some(wire::EventOrigin::AutoContinue),
 			jet_core::EventActor::ScheduledTask { schedule_id, .. } => (minor
 				>= wire::SCHEDULES_MINOR)
 				.then_some(wire::EventOrigin::ScheduledTask { schedule_id }),
@@ -1337,3 +1365,5 @@ pub(super) fn unix_ms(time: SystemTime) -> i64 {
 #[cfg(test)]
 #[path = "minor_tests.rs"]
 mod tests;
+
+mod auto_continue;

@@ -9,11 +9,21 @@ use uuid::Uuid;
 
 #[derive(Default, Serialize, Deserialize)]
 pub(crate) struct Queue {
+	#[serde(default)]
+	pub(crate) quota_until: Option<i64>,
+	#[serde(default)]
+	pub(crate) auto_continue_override: Option<crate::AutoContinuePolicy>,
+	#[serde(default)]
+	pub(crate) auto_continue: Option<crate::AutoContinueRetry>,
 	sequence: u64,
 	pub(crate) entries: Vec<Entry>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Entry {
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub(crate) auto_continue_model: Option<crate::ModelId>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub(crate) auto_continue_run: Option<crate::RunId>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub(crate) schedule: Option<crate::schedule_work::ScheduleInput>,
 	pub(crate) turn: Turn,
@@ -65,7 +75,10 @@ pub(crate) async fn load(
 	}
 	tx.turn_queue(id.0)
 		.await?
-		.map(|json| crate::run_state::decode(&json))
+		.map(|json| {
+			crate::run_state::decode::<StoredQueue>(&json)
+				.map(StoredQueue::into_queue)
+		})
 		.transpose()
 		.map(Option::unwrap_or_default)
 }
@@ -74,7 +87,17 @@ pub(crate) async fn save(
 	id: ConversationId,
 	queue: &Queue,
 ) -> Result<(), CoreError> {
-	let json = serde_json::to_string(queue)
+	// The envelope deliberately omits legacy required fields. Older cores
+	// must refuse guarded work instead of ignoring its timing/selection.
+	let stored = if queue.quota_until.is_some()
+		|| queue.entries.iter().any(|e| e.auto_continue_run.is_some())
+	{
+		serde_json::json!({"auto_continue_v1": queue})
+	} else {
+		serde_json::to_value(queue)
+			.map_err(|e| CoreError::internal("turn.encode", e.to_string()))?
+	};
+	let json = serde_json::to_string(&stored)
 		.map_err(|e| CoreError::internal("turn.encode", e.to_string()))?;
 	let pending = queue
 		.entries
@@ -118,6 +141,15 @@ pub(crate) async fn changed(
 		| TurnState::Withdrawn => crate::EventActor::InteractiveClient {
 			client_id: actor.client_id(),
 		},
+	};
+	let origin = if entry.auto_continue_run.is_some()
+		&& matches!(entry.turn.state, TurnState::Queued | TurnState::Superseded)
+	{
+		crate::EventActor::AutoContinue {
+			authorized_by: entry.turn.client_id,
+		}
+	} else {
+		origin
 	};
 	let origin = if matches!(
 		entry.turn.state,
@@ -333,6 +365,8 @@ pub(crate) async fn prepare(
 		.as_ref()
 		.map_or_else(Uuid::now_v7, |input| input.firing.firing_id);
 	let entry = Entry {
+		auto_continue_run: None,
+		auto_continue_model: None,
 		schedule,
 		turn: Turn {
 			turn_id,
@@ -349,6 +383,11 @@ pub(crate) async fn prepare(
 	removed.push(entry.clone());
 	kept.push(entry);
 	queue.entries = kept;
+	if source == TurnSource::User
+		&& let Some(retry) = &mut queue.auto_continue
+	{
+		retry.status = crate::AutoContinueStatus::Canceled;
+	}
 	Ok((queue, removed))
 }
 
@@ -396,6 +435,14 @@ pub(crate) async fn commit(
 	changes: &[Entry],
 	now: i64,
 ) -> Result<(), CoreError> {
+	if changes.iter().any(|e| {
+		e.turn.source == TurnSource::AutoContinue
+			&& e.turn.state == TurnState::Canceled
+	}) && let Some(retry) = &queue.auto_continue
+	{
+		crate::auto_continue_work::changed(tx, actor, id, retry.clone(), now)
+			.await?;
+	}
 	for entry in changes {
 		changed(tx, actor, id, entry, now).await?;
 	}
@@ -428,5 +475,20 @@ impl Queue {
 		entry.turn.state = TurnState::Active;
 		entry.turn.run_id = Some(run_id);
 		Some(entry.clone())
+	}
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredQueue {
+	Guarded { auto_continue_v1: Queue },
+	Legacy(Queue),
+}
+impl StoredQueue {
+	fn into_queue(self) -> Queue {
+		match self {
+			Self::Guarded { auto_continue_v1 } => auto_continue_v1,
+			Self::Legacy(queue) => queue,
+		}
 	}
 }

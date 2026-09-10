@@ -113,6 +113,13 @@ impl CommandEnvelope {
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
+	/// Configure an Account-binding default or a one-shot Conversation override.
+	SetAutoContinue {
+		/// Policy scope.
+		target: crate::AutoContinueTarget,
+		/// Explicit bounded retry policy.
+		policy: crate::AutoContinuePolicy,
+	},
 	/// Authorize one review retry of the exact stored denied action.
 	AuthorizeApprovalRetry {
 		/// Live Run that owns the denied review.
@@ -431,7 +438,8 @@ impl Command {
 	/// (ADR-0086).
 	pub(crate) fn required_capabilities(&self) -> &'static [Capability] {
 		match self {
-			Self::AuthorizeApprovalRetry { .. }
+			Self::SetAutoContinue { .. }
+			| Self::AuthorizeApprovalRetry { .. }
 			| Self::ReviewRemoteTool { .. }
 			| Self::RequestUtility { .. }
 			| Self::ChangeExtension { .. }
@@ -508,6 +516,8 @@ impl Command {
 /// The durable result of a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
+	/// The requested Auto-continue policy was stored.
+	AutoContinueConfigured,
 	/// One exact-action retry grant was durably recorded.
 	ApprovalRetryAuthorized {
 		/// The original denied review.
@@ -826,6 +836,7 @@ fn redacted_for_receipt(
 			| CommandOutcome::ConversationNamed(_)
 			| CommandOutcome::RunNamed(_)
 			| CommandOutcome::TurnWithdrawn(_)
+			| CommandOutcome::AutoContinueConfigured
 			| CommandOutcome::ScheduleCreated(_)
 			| CommandOutcome::ScheduleCanceled { .. }
 			| CommandOutcome::TurnAdmitted(_)
@@ -881,6 +892,16 @@ async fn execute_new(
 		workspace_home,
 	} = context;
 	match command {
+		Command::SetAutoContinue { target, policy } => {
+			crate::auto_continue::configure(
+				tx,
+				actor,
+				target,
+				policy,
+				now_unix_ms,
+			)
+			.await
+		}
 		Command::AuthorizeApprovalRetry { run_id, review_id } => {
 			crate::review_retry::authorize(
 				tx,

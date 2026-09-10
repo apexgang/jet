@@ -36,6 +36,8 @@ pub(crate) enum SourceBoundary {
 /// Facts from the trusted Run Adapter, validated against the durable lifecycle.
 #[derive(Serialize)]
 pub enum Observation {
+	/// Explicit Model selected by the native session, distinct from consumption.
+	Model(crate::ModelId),
 	/// Native content receipt; the Run Adapter assigns Harness origin.
 	FileChanged(ChangeEvidence),
 	/// The trusted Adapter has held a new turn's input pending durable capture.

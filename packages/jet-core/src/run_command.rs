@@ -49,6 +49,9 @@ pub struct ForkLaunchSource {
 /// Durable domain plan: authority, working roots, and the exact accepted artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaunchPlan {
+	/// Resolved Model enforced on an automatic native resume.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub model: Option<crate::ModelId>,
 	/// Native child admission accepted with this Run, never termination authority.
 	#[serde(default)]
 	pub child_work: crate::ChildWork,
@@ -195,6 +198,7 @@ pub(crate) async fn prepare(
 		)
 	})?;
 	let mut plan = LaunchPlan {
+		model: None,
 		child_work: crate::ChildWork::Native,
 		visa: None,
 		no_visa: None,
@@ -247,7 +251,10 @@ impl LaunchPlan {
 	pub async fn revalidate(&self) -> Result<(), CoreError> {
 		if !matches!(
 			(self.version, self.visa, &self.no_visa),
-			(1, None, None) | (2, Some(_), None) | (3, Some(_), Some(_))
+			(1, None, None)
+				| (2, Some(_), None)
+				| (3, Some(_), Some(_))
+				| (4, Some(_), _)
 		) {
 			return Err(CoreError::conflict(
 				"run.incompatible_pin",

@@ -22,7 +22,7 @@ export type CraftApprovalRequest = { action: string; request_id: string; tool: s
 
 export type CraftCommand = { kind: "constrain_subagents"; max_children?: number | null } | { kind: "configure_remote_tools"; selection: NoVisaSelection } | { kind: "remote_tool_result"; operation_id: string; outcome: RemoteToolOutcome } | { checkpoint: string; helper_socket: string; id: string; kind: "recover"; source_offset: number } | { helper_socket: string; id: string; kind: "start"; text: string } | { kind: "acknowledge"; source_offset: number } | { id: string; kind: "turn"; text: string } | { id: string; kind: "interrupt" } | { action: CraftAction; id: string; kind: "action" } | { kind: "shutdown" };
 
-export type CraftEvent = { call: CraftRemoteTool; kind: "remote_tool" } | { kind: "usage"; usage: CraftUsage } | { kind: "approval_requested"; request: CraftApprovalRequest } | { kind: "turn_started" } | { kind: "turn_ended"; outcome: TurnOutcome } | { change: CraftFileChange; kind: "file_changed" } | { kind: "conversation_title"; title: string } | { kind: "run_title"; title: string } | { kind: "process_title"; pid: number; title: string } | { kind: "run_launch_failed" } | { harness_pid: number; helper_pid: number; kind: "run_started" } | { activity: RunActivity; kind: "activity" } | { checkpoint?: string; kind: "progress"; source_offset: number } | { helper_pid: number; kind: "run_recovered"; source_offset: number } | { exit_code?: number | null; kind: "run_ended" } | { kind: "output"; native_event: RawJSON; presentation?: Array<PresentationBlock> } | { id: string; kind: "completed"; native_conversation: string };
+export type CraftEvent = { kind: "model"; model: string } | { call: CraftRemoteTool; kind: "remote_tool" } | { kind: "usage"; usage: CraftUsage } | { kind: "approval_requested"; request: CraftApprovalRequest } | { kind: "turn_started" } | { kind: "turn_ended"; outcome: TurnOutcome } | { change: CraftFileChange; kind: "file_changed" } | { kind: "conversation_title"; title: string } | { kind: "run_title"; title: string } | { kind: "process_title"; pid: number; title: string } | { kind: "run_launch_failed" } | { harness_pid: number; helper_pid: number; kind: "run_started" } | { activity: RunActivity; kind: "activity" } | { checkpoint?: string; kind: "progress"; source_offset: number } | { helper_pid: number; kind: "run_recovered"; source_offset: number } | { exit_code?: number | null; kind: "run_ended" } | { kind: "output"; native_event: RawJSON; presentation?: Array<PresentationBlock> } | { id: string; kind: "completed"; native_conversation: string };
 
 export type CraftExtensionReply = { catalog: ExtensionCatalog; kind: "catalog" } | { kind: "applied" } | { kind: "refused" };
 
@@ -50,7 +50,7 @@ export type CraftReady = { enabled_features: Array<string>; protocol: Negotiated
 
 export type CraftRemoteTool = { action: RemoteToolAction; destination_plane_id: string; operation_id: string; workspace_id: string };
 
-export type CraftResume = { native_conversation: string; version: ProtocolVersion };
+export type CraftResume = { model?: string | null; native_conversation: string; version: ProtocolVersion };
 
 export type CraftReviewInput = { action: string; tool: string; transcript: string };
 
