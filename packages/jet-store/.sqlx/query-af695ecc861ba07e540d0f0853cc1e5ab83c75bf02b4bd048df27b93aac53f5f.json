@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO git_drafts (conversation_id, url) VALUES (?1, ?2) ON CONFLICT(conversation_id) DO UPDATE SET url = excluded.url",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "af695ecc861ba07e540d0f0853cc1e5ab83c75bf02b4bd048df27b93aac53f5f"
+}

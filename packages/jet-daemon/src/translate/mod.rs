@@ -118,6 +118,11 @@ pub(crate) fn query(
 		wire::QueryRequest::RunExecution { run_id } => Query::RunExecution {
 			run_id: RunId(*run_id),
 		},
+		wire::QueryRequest::GitDeliveries { conversation_id } => {
+			Query::GitDeliveries {
+				conversation_id: ConversationId(*conversation_id),
+			}
+		}
 		wire::QueryRequest::Utility { job_id } => {
 			Query::Utility { job_id: *job_id }
 		}
@@ -263,6 +268,14 @@ pub(crate) fn query_result(
 		}
 		QueryResult::ChangeDiff(diff) => {
 			wire::QueryResponse::ChangeDiff(Box::new(checkpoint::diff(*diff)))
+		}
+		QueryResult::GitDeliveries(deliveries) => {
+			wire::QueryResponse::GitDeliveries {
+				deliveries: deliveries
+					.into_iter()
+					.map(git_delivery::delivery)
+					.collect(),
+			}
 		}
 		QueryResult::Utility(job) => {
 			wire::QueryResponse::Utility(utility::job(job))
@@ -595,6 +608,20 @@ pub(crate) fn command(
 				conversation_id: ConversationId(*conversation_id),
 			}
 		}
+		wire::CommandRequest::AcknowledgeGitDelivery { delivery_id } => {
+			Command::AcknowledgeGitDelivery {
+				delivery_id: *delivery_id,
+			}
+		}
+		wire::CommandRequest::DeliverGit {
+			conversation_id,
+			checkpoint,
+			operation,
+		} => Command::DeliverGit {
+			conversation_id: ConversationId(*conversation_id),
+			checkpoint: checkpoint.map(git_delivery::checkpoint),
+			operation: git_delivery::operation_from_wire(operation.clone()),
+		},
 		wire::CommandRequest::RequestUtility { request } => {
 			Command::RequestUtility {
 				request: utility::request(request.clone()),
@@ -718,6 +745,12 @@ pub(crate) fn command_outcome(
 	minor: u32,
 ) -> wire::CommandResponse {
 	match outcome {
+		CommandOutcome::GitDeliveryAcknowledged { delivery_id } => {
+			wire::CommandResponse::GitDeliveryAcknowledged { delivery_id }
+		}
+		CommandOutcome::GitDeliveryQueued { delivery_id } => {
+			wire::CommandResponse::GitDeliveryQueued { delivery_id }
+		}
 		CommandOutcome::UtilityQueued { job_id } => {
 			wire::CommandResponse::UtilityQueued { job_id }
 		}
@@ -1367,3 +1400,5 @@ pub(super) fn unix_ms(time: SystemTime) -> i64 {
 mod tests;
 
 mod auto_continue;
+
+mod git_delivery;

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO git_deliveries (delivery_id, conversation_id, state) VALUES (?1, ?2, ?3) ON CONFLICT(delivery_id) DO UPDATE SET state = excluded.state",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "c3447bf9b780f5ec740bf88dd94dfe96972cffdf9b6d838d2ea441497cb40d79"
+}

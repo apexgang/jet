@@ -355,6 +355,7 @@ impl Actor {
 /// One running core bound to one Plane store.
 #[derive(Debug)]
 pub struct Core {
+	github_host: Arc<dyn GitHubHost>,
 	artifact_limits: ArtifactLimits,
 	artifact_publication: tokio::sync::Mutex<artifact_collection::Publication>,
 	extension_host: Option<Arc<dyn ExtensionHost>>,
@@ -402,6 +403,11 @@ pub struct Core {
 }
 
 impl Core {
+	/// Install the trusted GitHub transport before accepting delivery work.
+	pub fn with_github_host(mut self, host: Arc<dyn GitHubHost>) -> Self {
+		self.github_host = host;
+		self
+	}
 	/// Installs the trusted host Adapter before accepting managed Runs.
 	pub fn with_run_host(mut self, host: Arc<dyn run_host::RunHost>) -> Self {
 		self.run_host = Some(host);
@@ -485,6 +491,7 @@ impl Core {
 			remote_tool_slots: tokio::sync::Semaphore::new(32),
 			extension_host: None,
 			utility_host: None,
+			github_host: Arc::new(github_host::SystemGitHub),
 			review_host: None,
 			utility_work: tokio::sync::Mutex::new(()),
 			run_work: tokio::sync::Notify::new(),
@@ -670,3 +677,22 @@ pub use auto_continue::{
 };
 
 mod auto_continue_work;
+
+mod git_delivery;
+pub use git_delivery::{
+	GitCheckpoint, GitDelivery, GitDeliveryOutcome, GitDeliveryPolicy,
+	GitMessage, GitOperation,
+};
+
+#[cfg(test)]
+#[path = "git_delivery_tests.rs"]
+mod git_delivery_tests;
+
+mod git_delivery_io;
+mod git_delivery_state;
+mod git_delivery_work;
+
+mod git_delivery_github;
+
+mod github_host;
+pub use github_host::{GitHubHost, GitHubRequest};

@@ -401,6 +401,24 @@ fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::NO_VISA_MINOR,
 			feature: "No-Visa review",
 		}),
+		QueryRequest::Settings {
+			selection:
+				jet_protocol::SettingSelection::Key {
+					key:
+						jet_protocol::SettingKey::GitAutoBranch
+						| jet_protocol::SettingKey::GitAutoPush
+						| jet_protocol::SettingKey::GitAutoDraftPullRequest
+						| jet_protocol::SettingKey::GitBranchPrefix,
+				},
+			..
+		} => Some(MinorRequirement {
+			minor: jet_protocol::GIT_DELIVERY_MINOR,
+			feature: "Git delivery policy",
+		}),
+		QueryRequest::GitDeliveries { .. } => Some(MinorRequirement {
+			minor: jet_protocol::GIT_DELIVERY_MINOR,
+			feature: "Git delivery",
+		}),
 		QueryRequest::Utility { .. } => Some(MinorRequirement {
 			minor: jet_protocol::UTILITY_MINOR,
 			feature: "Utility work",
@@ -559,6 +577,30 @@ fn command_minor(command: &CommandRequest) -> Option<MinorRequirement> {
 		CommandRequest::ReviewRemoteTool { .. } => Some(MinorRequirement {
 			minor: jet_protocol::NO_VISA_MINOR,
 			feature: "No-Visa review",
+		}),
+		CommandRequest::SetSetting {
+			key:
+				jet_protocol::SettingKey::GitAutoBranch
+				| jet_protocol::SettingKey::GitAutoPush
+				| jet_protocol::SettingKey::GitAutoDraftPullRequest
+				| jet_protocol::SettingKey::GitBranchPrefix,
+			..
+		}
+		| CommandRequest::ClearSetting {
+			key:
+				jet_protocol::SettingKey::GitAutoBranch
+				| jet_protocol::SettingKey::GitAutoPush
+				| jet_protocol::SettingKey::GitAutoDraftPullRequest
+				| jet_protocol::SettingKey::GitBranchPrefix,
+			..
+		} => Some(MinorRequirement {
+			minor: jet_protocol::GIT_DELIVERY_MINOR,
+			feature: "Git delivery policy",
+		}),
+		CommandRequest::AcknowledgeGitDelivery { .. }
+		| CommandRequest::DeliverGit { .. } => Some(MinorRequirement {
+			minor: jet_protocol::GIT_DELIVERY_MINOR,
+			feature: "Git delivery",
 		}),
 		CommandRequest::RequestUtility { .. } => Some(MinorRequirement {
 			minor: jet_protocol::UTILITY_MINOR,

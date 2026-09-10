@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT state FROM git_deliveries WHERE conversation_id = ?1 ORDER BY delivery_id DESC LIMIT 100",
+  "describe": {
+    "columns": [
+      {
+        "name": "state",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_deliveries",
+            "name": "state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a4262468def90916c3ab52120c71b2685d26bd52d6b053f837bbb9cc42451da6"
+}

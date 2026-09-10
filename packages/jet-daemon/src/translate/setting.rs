@@ -27,6 +27,10 @@ pub(super) fn snapshot(
 /// The protocol minor that first named each Setting.
 fn introduced_in(key: SettingKey) -> u32 {
 	match key {
+		SettingKey::GitAutoBranch => wire::GIT_DELIVERY_MINOR,
+		SettingKey::GitAutoPush => wire::GIT_DELIVERY_MINOR,
+		SettingKey::GitAutoDraftPullRequest => wire::GIT_DELIVERY_MINOR,
+		SettingKey::GitBranchPrefix => wire::GIT_DELIVERY_MINOR,
 		SettingKey::EnergyConcurrency
 		| SettingKey::EnergyLowPowerConcurrency
 		| SettingKey::EnergyConstrained
@@ -90,6 +94,13 @@ pub(super) fn key(key: SettingKey) -> wire::SettingKey {
 			wire::SettingKey::UtilityAutomaticNaming
 		}
 		SettingKey::GitAutoCommit => wire::SettingKey::GitAutoCommit,
+		SettingKey::GitAutoBranch => wire::SettingKey::GitAutoBranch,
+		SettingKey::GitAutoPush => wire::SettingKey::GitAutoPush,
+		SettingKey::GitAutoDraftPullRequest => {
+			wire::SettingKey::GitAutoDraftPullRequest
+		}
+		SettingKey::GitBranchPrefix => wire::SettingKey::GitBranchPrefix,
+
 		SettingKey::GitMessageInstructions => {
 			wire::SettingKey::GitMessageInstructions
 		}
@@ -134,6 +145,13 @@ pub(super) fn key_from_wire(key: wire::SettingKey) -> SettingKey {
 			SettingKey::UtilityAutomaticNaming
 		}
 		wire::SettingKey::GitAutoCommit => SettingKey::GitAutoCommit,
+		wire::SettingKey::GitAutoBranch => SettingKey::GitAutoBranch,
+		wire::SettingKey::GitAutoPush => SettingKey::GitAutoPush,
+		wire::SettingKey::GitAutoDraftPullRequest => {
+			SettingKey::GitAutoDraftPullRequest
+		}
+		wire::SettingKey::GitBranchPrefix => SettingKey::GitBranchPrefix,
+
 		wire::SettingKey::GitMessageInstructions => {
 			SettingKey::GitMessageInstructions
 		}

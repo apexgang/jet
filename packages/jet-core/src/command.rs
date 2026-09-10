@@ -113,6 +113,20 @@ impl CommandEnvelope {
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
+	/// Acknowledge a reviewed uncertain outcome without retrying its Git operation.
+	AcknowledgeGitDelivery {
+		/// Exact uncertain Effect the user reviewed.
+		delivery_id: Uuid,
+	},
+	/// Queue one explicit non-destructive Git operation.
+	DeliverGit {
+		/// Owning Conversation.
+		conversation_id: ConversationId,
+		/// Retained content for commits and generated PR text.
+		checkpoint: Option<crate::GitCheckpoint>,
+		/// Allowlisted operation.
+		operation: crate::GitOperation,
+	},
 	/// Configure an Account-binding default or a one-shot Conversation override.
 	SetAutoContinue {
 		/// Policy scope.
@@ -438,7 +452,8 @@ impl Command {
 	/// (ADR-0086).
 	pub(crate) fn required_capabilities(&self) -> &'static [Capability] {
 		match self {
-			Self::SetAutoContinue { .. }
+			Self::AcknowledgeGitDelivery { .. }
+			| Self::SetAutoContinue { .. }
 			| Self::AuthorizeApprovalRetry { .. }
 			| Self::ReviewRemoteTool { .. }
 			| Self::RequestUtility { .. }
@@ -453,7 +468,8 @@ impl Command {
 			| Self::SubmitReview { .. }
 			| Self::WithdrawTurn { .. }
 			| Self::ControlRun { .. } => &[],
-			Self::StartRun { .. }
+			Self::DeliverGit { .. }
+			| Self::StartRun { .. }
 			| Self::StartVisaRun(_)
 			| Self::StartNoVisaRun(_) => GIT,
 			Self::SetSetting {
@@ -516,6 +532,16 @@ impl Command {
 /// The durable result of a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
+	/// A user released the uncertainty barrier; Git was not changed.
+	GitDeliveryAcknowledged {
+		/// Exact Effect identity.
+		delivery_id: Uuid,
+	},
+	/// Durable Git operation identity.
+	GitDeliveryQueued {
+		/// Stable Effect identity.
+		delivery_id: Uuid,
+	},
 	/// The requested Auto-continue policy was stored.
 	AutoContinueConfigured,
 	/// One exact-action retry grant was durably recorded.
@@ -828,6 +854,8 @@ fn redacted_for_receipt(
 		Ok(
 			outcome @ (CommandOutcome::ApprovalRetryAuthorized { .. }
 			| CommandOutcome::RemoteToolReviewed { .. }
+			| CommandOutcome::GitDeliveryAcknowledged { .. }
+			| CommandOutcome::GitDeliveryQueued { .. }
 			| CommandOutcome::UtilityQueued { .. }
 			| CommandOutcome::ExtensionChangeQueued { .. }
 			| CommandOutcome::CraftInstallationQueued { .. }
@@ -924,6 +952,24 @@ async fn execute_new(
 				operation_id,
 				decision,
 				now_unix_ms,
+			)
+			.await
+		}
+		Command::AcknowledgeGitDelivery { delivery_id } => {
+			crate::git_delivery_state::acknowledge(tx, actor, delivery_id).await
+		}
+		Command::DeliverGit {
+			conversation_id,
+			checkpoint,
+			operation,
+		} => {
+			crate::git_delivery_state::admit(
+				tx,
+				actor,
+				command_id,
+				conversation_id,
+				checkpoint,
+				operation,
 			)
 			.await
 		}

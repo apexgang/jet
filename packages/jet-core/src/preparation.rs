@@ -252,7 +252,9 @@ impl Core {
 					| WorkingTreeRequest::LocalCheckout { .. } => Ok(Prepared::Nothing),
 				}
 			}
-			Command::RequestUtility { .. }
+			Command::AcknowledgeGitDelivery { .. }
+			| Command::DeliverGit { .. }
+			| Command::RequestUtility { .. }
 			| Command::SetAutoContinue { .. }
 			| Command::CreateSchedule { .. }
 			| Command::CancelSchedule { .. }

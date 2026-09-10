@@ -232,6 +232,26 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 		(
 			vec![
 				resolved(
+					SettingKey::GitAutoBranch,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::GitAutoPush,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::GitAutoDraftPullRequest,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::GitBranchPrefix,
+					SettingValue::Text("jet/".into()),
+					SettingSource::BuiltIn
+				),
+				resolved(
 					SettingKey::UtilityAutomaticNaming,
 					SettingValue::Flag(true),
 					SettingSource::BuiltIn
@@ -325,6 +345,26 @@ async fn a_scope_resolves_every_setting_that_applies_to_it() {
 				),
 			],
 			vec![
+				resolved(
+					SettingKey::GitAutoBranch,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::GitAutoPush,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::GitAutoDraftPullRequest,
+					SettingValue::Flag(false),
+					SettingSource::BuiltIn
+				),
+				resolved(
+					SettingKey::GitBranchPrefix,
+					SettingValue::Text("jet/".into()),
+					SettingSource::BuiltIn
+				),
 				resolved(
 					SettingKey::UtilityAutomaticNaming,
 					SettingValue::Flag(true),

@@ -249,3 +249,11 @@ pub use auto_continue::{
 	AutoContinueStatus, AutoContinueTarget, AutoContinueUsage,
 };
 pub use handshake::AUTO_CONTINUE_MINOR;
+
+pub use handshake::GIT_DELIVERY_MINOR;
+
+mod git_delivery;
+pub use git_delivery::{
+	GitCheckpoint, GitDelivery, GitDeliveryOutcome, GitDeliveryPolicy,
+	GitMessage, GitOperation,
+};

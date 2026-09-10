@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT branch FROM git_branches WHERE conversation_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "branch",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_branches",
+            "name": "branch"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "dee339993743beb1aa32741667b571af938a523eae1141e432ed91fbe0db58c7"
+}

@@ -133,6 +133,14 @@ pub enum SettingKey {
 	UtilityAutomaticNaming,
 	/// Whether Jet commits Harness changes without being asked (ADR-0029).
 	GitAutoCommit,
+	/// Create a branch lazily after a successful turn.
+	GitAutoBranch,
+	/// Push successful turn changes without forcing.
+	GitAutoPush,
+	/// Create or update the Conversation GitHub draft.
+	GitAutoDraftPullRequest,
+	/// Editable prefix for proposed Conversation branches.
+	GitBranchPrefix,
 	/// Plane-wide guidance for generated commit messages and pull-request
 	/// text.
 	GitMessageInstructions,
@@ -181,7 +189,31 @@ struct Catalog {
 }
 
 /// Every Setting this core resolves, in the order a snapshot reports them.
-const CATALOG: [Catalog; 18] = [
+const CATALOG: [Catalog; 22] = [
+	Catalog {
+		key: SettingKey::GitAutoBranch,
+		spelling: "git.auto_branch",
+		scopes: &[SettingScopeKind::Project, SettingScopeKind::Conversation],
+		built_in: BuiltIn::Flag(false),
+	},
+	Catalog {
+		key: SettingKey::GitAutoPush,
+		spelling: "git.auto_push",
+		scopes: &[SettingScopeKind::Project, SettingScopeKind::Conversation],
+		built_in: BuiltIn::Flag(false),
+	},
+	Catalog {
+		key: SettingKey::GitAutoDraftPullRequest,
+		spelling: "git.auto_draft_pull_request",
+		scopes: &[SettingScopeKind::Project, SettingScopeKind::Conversation],
+		built_in: BuiltIn::Flag(false),
+	},
+	Catalog {
+		key: SettingKey::GitBranchPrefix,
+		spelling: "git.branch_prefix",
+		scopes: &[SettingScopeKind::Project, SettingScopeKind::Conversation],
+		built_in: BuiltIn::Text("jet/"),
+	},
 	Catalog {
 		key: SettingKey::UtilityAutomaticNaming,
 		spelling: "utility.automatic_naming",
@@ -379,6 +411,17 @@ impl SettingKey {
 	/// Returns an `invalid_input` [`CoreError`] when the value has the wrong
 	/// shape or exceeds the bound on stored text.
 	fn require_value(self, value: &SettingValue) -> Result<(), CoreError> {
+		if self == Self::GitBranchPrefix
+			&& let SettingValue::Text(prefix) = value
+		{
+			crate::git_delivery_io::validate_operation(
+				&crate::GitOperation::Branch {
+					name: format!(
+						"{prefix}00000000-0000-0000-0000-000000000000"
+					),
+				},
+			)?;
+		}
 		if matches!(
 			self,
 			Self::UtilityAccountBinding

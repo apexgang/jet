@@ -156,6 +156,11 @@ pub enum ServerMessage {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryRequest {
+	/// Latest 100 durable Git operations, newest first.
+	GitDeliveries {
+		/// Owning Conversation.
+		conversation_id: Uuid,
+	},
 	/// Inspect an Auto-continue policy and retry (Jet 1.34).
 	AutoContinue {
 		/// Scope to inspect.
@@ -355,6 +360,11 @@ pub enum QueryRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueryResponse {
+	/// Individually attributed Git outcomes.
+	GitDeliveries {
+		/// Newest operations, bounded to 100.
+		deliveries: Vec<crate::GitDelivery>,
+	},
 	/// Durable Auto-continue policy and decision.
 	AutoContinue(crate::AutoContinueSnapshot),
 	/// Unconverted native catalog and metadata.

@@ -67,6 +67,18 @@ pub enum SettingKey {
 	/// Whether Jet commits Harness changes without being asked.
 	#[serde(rename = "git.auto_commit")]
 	GitAutoCommit,
+	/// Create a branch lazily after a successful turn.
+	#[serde(rename = "git.auto_branch")]
+	GitAutoBranch,
+	/// Push successful turn changes without forcing.
+	#[serde(rename = "git.auto_push")]
+	GitAutoPush,
+	/// Create or update the Conversation GitHub draft.
+	#[serde(rename = "git.auto_draft_pull_request")]
+	GitAutoDraftPullRequest,
+	/// Editable prefix for proposed Conversation branches.
+	#[serde(rename = "git.branch_prefix")]
+	GitBranchPrefix,
 	/// Plane-wide guidance for generated commit messages and pull-request
 	/// text.
 	#[serde(rename = "git.message_instructions")]

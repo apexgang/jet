@@ -267,6 +267,8 @@ public struct ClientPublicKey {
 }
 
 public enum CommandRequest {
+    case `acknowledge_git_delivery`(CommandRequestAcknowledgeGitDelivery)
+    case `deliver_git`(CommandRequestDeliverGit)
     case `set_auto_continue`(CommandRequestSetAutoContinue)
     case `authorize_approval_retry`(CommandRequestAuthorizeApprovalRetry)
     case `change_extension`(CommandRequestChangeExtension)
@@ -314,6 +316,8 @@ public enum CommandRequest {
 }
 
 public enum CommandResponse {
+    case `git_delivery_acknowledged`(CommandResponseGitDeliveryAcknowledged)
+    case `git_delivery_queued`(CommandResponseGitDeliveryQueued)
     case `auto_continue_configured`(CommandResponseAutoContinueConfigured)
     case `approval_retry_authorized`(CommandResponseApprovalRetryAuthorized)
     case `extension_change_queued`(CommandResponseExtensionChangeQueued)
@@ -656,9 +660,55 @@ public enum FileTarget {
     case `workspace`(FileTargetWorkspace)
 }
 
+public struct GitCheckpoint {
+    public let `run_id`: String
+    public let `turn`: UInt32
+}
+
+public struct GitDelivery {
+    public let `acknowledged_by`: String?
+    public let `checkpoint`: GitCheckpoint?
+    public let `conversation_id`: String
+    public let `delivery_id`: String
+    public let `message`: GitMessage?
+    public let `operation`: GitOperation
+    public let `outcome`: GitDeliveryOutcome
+    public let `policy`: GitDeliveryPolicy
+    public let `utility_job`: String?
+}
+
+public enum GitDeliveryOutcome {
+    case `pending`(GitDeliveryOutcomePending)
+    case `completed`(GitDeliveryOutcomeCompleted)
+    case `failed`(GitDeliveryOutcomeFailed)
+    case `outcome_unknown`(GitDeliveryOutcomeOutcomeUnknown)
+}
+
+public struct GitDeliveryPolicy {
+    public let `automatic`: Bool
+    public let `branch`: Bool
+    public let `branch_prefix`: String
+    public let `commit`: Bool
+    public let `draft_pull_request`: Bool
+    public let `push`: Bool
+}
+
 public struct GitLink {
     public let `commit`: String
     public let `path`: String
+}
+
+public struct GitMessage {
+    public let `body`: String
+    public let `fallback_reason`: String?
+    public let `title`: String
+}
+
+public enum GitOperation {
+    case `branch`(GitOperationBranch)
+    case `commit`(GitOperationCommit)
+    case `push`(GitOperationPush)
+    case `draft_pull_request`(GitOperationDraftPullRequest)
 }
 
 public struct HandoffRequest {
@@ -919,6 +969,7 @@ public enum PromotionState: String {
 }
 
 public enum QueryRequest {
+    case `git_deliveries`(QueryRequestGitDeliveries)
     case `auto_continue`(QueryRequestAutoContinue)
     case `inspect_extension`(QueryRequestInspectExtension)
     case `extension_catalog`(QueryRequestExtensionCatalog)
@@ -955,6 +1006,7 @@ public enum QueryRequest {
 }
 
 public enum QueryResponse {
+    case `git_deliveries`(QueryResponseGitDeliveries)
     case `auto_continue`(QueryResponseAutoContinue)
     case `extension_catalog`(QueryResponseExtensionCatalog)
     case `extension_change`(QueryResponseExtensionChange)
@@ -1269,6 +1321,10 @@ public enum SettingKey: String {
     case `utility.git_text` = "utility.git_text"
     case `utility.automatic_naming` = "utility.automatic_naming"
     case `git.auto_commit` = "git.auto_commit"
+    case `git.auto_branch` = "git.auto_branch"
+    case `git.auto_push` = "git.auto_push"
+    case `git.auto_draft_pull_request` = "git.auto_draft_pull_request"
+    case `git.branch_prefix` = "git.branch_prefix"
     case `git.message_instructions` = "git.message_instructions"
     case `security.audit_retention_days` = "security.audit_retention_days"
     case `craft.developer_mode` = "craft.developer_mode"
@@ -1669,6 +1725,16 @@ public struct ClientMessageCommand {
     public let `id`: UInt64
 }
 
+public struct CommandRequestAcknowledgeGitDelivery {
+    public let `delivery_id`: String
+}
+
+public struct CommandRequestDeliverGit {
+    public let `checkpoint`: GitCheckpoint?
+    public let `conversation_id`: String
+    public let `operation`: GitOperation
+}
+
 public struct CommandRequestSetAutoContinue {
     public let `policy`: AutoContinuePolicy
     public let `target`: AutoContinueTarget
@@ -1898,6 +1964,14 @@ public struct CommandRequestResumeImportedConversation {
     public let `import_id`: String
     public let `retention`: RetentionPolicy?
     public let `working_tree`: WorkingTreeRequest
+}
+
+public struct CommandResponseGitDeliveryAcknowledged {
+    public let `delivery_id`: String
+}
+
+public struct CommandResponseGitDeliveryQueued {
+    public let `delivery_id`: String
 }
 
 public struct CommandResponseAutoContinueConfigured {
@@ -2313,6 +2387,41 @@ public struct FileTargetWorkspace {
     public let `workspace_id`: String
 }
 
+public struct GitDeliveryOutcomePending {
+
+}
+
+public struct GitDeliveryOutcomeCompleted {
+    public let `branch`: String?
+    public let `head`: String
+    public let `pull_request`: String?
+}
+
+public struct GitDeliveryOutcomeFailed {
+    public let `code`: String
+}
+
+public struct GitDeliveryOutcomeOutcomeUnknown {
+
+}
+
+public struct GitOperationBranch {
+    public let `name`: String
+}
+
+public struct GitOperationCommit {
+
+}
+
+public struct GitOperationPush {
+    public let `remote`: String
+}
+
+public struct GitOperationDraftPullRequest {
+    public let `base`: String?
+    public let `remote`: String
+}
+
 public struct PairingDisclosureManualCode {
     public let `code`: String
 }
@@ -2357,6 +2466,10 @@ public struct PromotionDestinationLocalCheckout {
 
 public struct PromotionDestinationBranch {
     public let `name`: String
+}
+
+public struct QueryRequestGitDeliveries {
+    public let `conversation_id`: String
 }
 
 public struct QueryRequestAutoContinue {
@@ -2498,6 +2611,10 @@ public struct QueryRequestSearch {
 
 public struct QueryRequestExternalConversations {
 
+}
+
+public struct QueryResponseGitDeliveries {
+    public let `deliveries`: [GitDelivery]
 }
 
 public struct QueryResponseAutoContinue {
