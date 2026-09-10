@@ -104,7 +104,8 @@ impl Client {
 			CommandResponse::WorkspacePromotionRecorded(promotion) => {
 				Ok(promotion)
 			}
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }

@@ -290,7 +290,7 @@ async fn monitor(
 					bytes = 0;
 					events = 0;
 					deadline = None;
-					core.begin_automatic_review(run_id, request);
+					core.begin_automatic_review(run_id, request).await;
 					continue;
 				}
 				deadline.get_or_insert_with(|| {

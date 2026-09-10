@@ -90,7 +90,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::ConversationImported(imported) => Ok(imported),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -160,7 +161,8 @@ impl Client {
 			CommandResponse::ConversationCreated(conversation) => {
 				Ok(conversation)
 			}
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }

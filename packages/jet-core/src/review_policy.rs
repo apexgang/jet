@@ -109,7 +109,7 @@ impl Core {
 					(None, _) => false,
 				};
 				let policy = AutomaticReviewPolicy {
-					version: 1,
+					version: 2,
 					cross_provider_consent: consent,
 				};
 				let daemon_starts = tx.plane().await?.daemon_starts;
@@ -182,4 +182,31 @@ fn binding_of(value: &SettingValue) -> Option<AccountBindingId> {
 		}
 		SettingValue::Flag(_) | SettingValue::Count(_) => None,
 	}
+}
+
+/// Rechecks mutable authorization in the decision's commit transaction.
+pub(crate) async fn unchanged(
+	tx: &mut jet_store::ReadTransaction,
+	review: &crate::ApprovalReview,
+	plan: &crate::LaunchPlan,
+) -> Result<bool, CoreError> {
+	let stored = tx.settings_for_scope(SettingScope::Plane.record()).await?;
+	let values = crate::setting::resolve(
+		&[
+			SettingKey::AutomaticReview,
+			SettingKey::AutomaticReviewBinding,
+			SettingKey::AutomaticReviewConsent,
+		],
+		&stored,
+	);
+	let binding = binding_of(&values[1].value)
+		.or_else(|| plan.visa.map(|visa| visa.account_binding_id));
+	let consent = binding.is_some_and(|id| {
+		values[2].value == SettingValue::Text(id.0.to_string())
+	});
+	// ASVS 8.3.2: disabling review or changing its binding/consent takes
+	// effect before any in-flight judgement can become an authorization.
+	Ok(values[0].value == SettingValue::Flag(true)
+		&& binding == review.binding_id
+		&& consent == review.policy.cross_provider_consent)
 }

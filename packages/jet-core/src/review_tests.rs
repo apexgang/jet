@@ -27,7 +27,16 @@ use crate::{
 #[derive(Debug)]
 struct Judge {
 	seen: Mutex<Vec<ReviewInput>>,
-	output: String,
+	output: Mutex<String>,
+	fault: Mutex<Option<Fault>>,
+}
+
+#[derive(Debug, Clone)]
+enum Fault {
+	Failure,
+	Timeout,
+	WrongReviewer,
+	Hold(Arc<tokio::sync::Notify>),
 }
 
 impl ReviewHost for Judge {
@@ -53,11 +62,27 @@ impl ReviewHost for Judge {
 		input: &'a ReviewInput,
 	) -> RunFuture<'a, Result<ReviewReply, CoreError>> {
 		self.seen.lock().expect("seen lock").push(input.clone());
+		let fault = self.fault.lock().unwrap().clone();
 		Box::pin(async move {
+			match &fault {
+				Some(Fault::Failure) => {
+					return Err(CoreError::conflict(
+						"fixture.failed",
+						"review failed",
+					));
+				}
+				Some(Fault::Timeout) => return std::future::pending().await,
+				Some(Fault::Hold(release)) => release.notified().await,
+				Some(Fault::WrongReviewer) | None => {}
+			}
 			Ok(ReviewReply {
 				model: selection.model.clone(),
-				reviewer: Reviewer::Equivalent,
-				output: self.output.as_bytes().to_vec(),
+				reviewer: if matches!(fault, Some(Fault::WrongReviewer)) {
+					Reviewer::Native
+				} else {
+					Reviewer::Equivalent
+				},
+				output: self.output.lock().unwrap().as_bytes().to_vec(),
 			})
 		})
 	}
@@ -73,7 +98,7 @@ fn asked() -> ApprovalRequest {
 	ApprovalRequest {
 		request_id: "native-approval-1".into(),
 		tool: "Bash".into(),
-		action: r#"{"command":"cargo test"}"#.into(),
+		action: r#"{"command":"/bin/echo safe"}"#.into(),
 	}
 }
 
@@ -95,7 +120,8 @@ async fn reviewing(
 	let (core, sender, answered) = start_answering(dir).await;
 	let judge = Arc::new(Judge {
 		seen: Mutex::default(),
-		output,
+		output: Mutex::new(output),
+		fault: Mutex::default(),
 	});
 	let core = Arc::new(
 		Arc::try_unwrap(core)
@@ -285,7 +311,7 @@ async fn review_answers_the_exact_request_through_the_runs_own_binding() {
 	assert_eq!(
 		review.policy,
 		AutomaticReviewPolicy {
-			version: 1,
+			version: 2,
 			cross_provider_consent: false,
 		}
 	);
@@ -337,7 +363,7 @@ async fn the_reviewer_sees_only_the_visible_transcript_and_the_exact_action() {
 			)
 			.into(),
 			tool: "Bash".into(),
-			action: r#"{"command":"cargo test"}"#.into(),
+			action: r#"{"command":"/bin/echo safe"}"#.into(),
 		}]
 	);
 }
@@ -589,3 +615,6 @@ async fn a_run_without_a_binding_leaves_the_request_for_a_person() {
 		)
 	);
 }
+
+#[path = "review_guard_tests.rs"]
+mod guard_tests;

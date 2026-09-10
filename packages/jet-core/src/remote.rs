@@ -24,7 +24,8 @@ pub(crate) fn invalidated_client(
 			PairedClientAccess::Disabled => Some(client.client_id),
 			PairedClientAccess::Enabled => None,
 		},
-		CommandOutcome::RemoteToolReviewed { .. }
+		CommandOutcome::ApprovalRetryAuthorized { .. }
+		| CommandOutcome::RemoteToolReviewed { .. }
 		| CommandOutcome::UserEditApplied(_)
 		| CommandOutcome::UtilityQueued { .. }
 		| CommandOutcome::CraftDisabled { .. }

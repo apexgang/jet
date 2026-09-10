@@ -42,6 +42,10 @@ decimal strings, and hexadecimal of the wrong width or case (ADR-0094).
 
 ## Usage negotiation
 
+Jet 1.32 adds `authorize_approval_retry` and `approval_retry_authorized`.
+The Command identifies the Run and a denied review, with no replacement
+action. Older peers cannot admit it. See [Automatic review](automatic-review.md).
+
 Jet 1.29 adds the `usage` Query and its Plane-local snapshot, and Craft
 1.7 adds the `usage` event. Neither needs a new Craft feature or broker
 permission: a Usage report grants nothing and changes no Run state. See

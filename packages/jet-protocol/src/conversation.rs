@@ -151,6 +151,13 @@ pub struct ConversationSnapshot {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandRequest {
+	/// Authorize one review retry of a stored denied action (Jet 1.32).
+	AuthorizeApprovalRetry {
+		/// Run that owns the current turn's denial.
+		run_id: Uuid,
+		/// Original denied review. The action cannot be replaced.
+		review_id: Uuid,
+	},
 	/// Stage one native extension mutation for subsequent Runs (Jet 1.28).
 	ChangeExtension {
 		/// Complete native consent snapshot.
@@ -483,6 +490,11 @@ pub enum CommandRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResponse {
+	/// A single exact-action review retry was authorized.
+	ApprovalRetryAuthorized {
+		/// Original denied review.
+		review_id: Uuid,
+	},
 	/// Native lifecycle request was durably staged.
 	ExtensionChangeQueued {
 		/// Identity for reading progress.

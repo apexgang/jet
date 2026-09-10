@@ -97,7 +97,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::ProjectRegistered(project) => Ok(project),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }

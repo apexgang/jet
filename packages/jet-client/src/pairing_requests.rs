@@ -83,7 +83,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingGateSet { gate } => Ok(gate),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -147,7 +148,8 @@ impl Client {
 				pending,
 				disclosure,
 			} => Ok((pending, disclosure)),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -217,7 +219,8 @@ impl Client {
 			CommandResponse::PairingClaimed { pending, challenge } => {
 				Ok((pending, challenge))
 			}
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -285,7 +288,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingConfirmed { pending } => Ok(pending),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -349,7 +353,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairingCompleted { client } => Ok(client),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -412,7 +417,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairedClientAccessSet { client } => Ok(client),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -473,7 +479,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::PairedClientRevoked { client_id } => Ok(client_id),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }

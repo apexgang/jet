@@ -485,6 +485,12 @@ pub(crate) fn command(
 			run_id: RunId(*run_id),
 			control: jet_core::RunControl::StopRun,
 		},
+		wire::CommandRequest::AuthorizeApprovalRetry { run_id, review_id } => {
+			Command::AuthorizeApprovalRetry {
+				run_id: RunId(*run_id),
+				review_id: *review_id,
+			}
+		}
 		wire::CommandRequest::ReviewRemoteTool {
 			client_id,
 			operation_id,
@@ -802,6 +808,9 @@ pub(crate) fn command_outcome(
 				key: setting::key(key),
 				scope: setting::scope(scope),
 			}
+		}
+		CommandOutcome::ApprovalRetryAuthorized { review_id } => {
+			wire::CommandResponse::ApprovalRetryAuthorized { review_id }
 		}
 		CommandOutcome::RemoteToolReviewed { operation_id } => {
 			wire::CommandResponse::RemoteToolReviewed { operation_id }

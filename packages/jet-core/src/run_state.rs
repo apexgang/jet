@@ -14,6 +14,9 @@ pub(crate) use crate::run_state_storage::{append, decode, save, snapshot};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct State {
+	/// Durable limits and reservations for Automatic review.
+	#[serde(default)]
+	pub(crate) review: crate::review_guard::Guard,
 	#[serde(default)]
 	pub(crate) changes: Option<crate::checkpoint_state::Tracking>,
 	pub(crate) activity: Option<RunActivity>,

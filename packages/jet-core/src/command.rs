@@ -113,6 +113,13 @@ impl CommandEnvelope {
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
+	/// Authorize one review retry of the exact stored denied action.
+	AuthorizeApprovalRetry {
+		/// Live Run that owns the denied review.
+		run_id: RunId,
+		/// Denial from the current turn; no replacement action is accepted.
+		review_id: Uuid,
+	},
 	/// Stage a confirmed native extension change for subsequent Runs.
 	ChangeExtension {
 		/// Exact native metadata and accepted same-user authority.
@@ -424,7 +431,8 @@ impl Command {
 	/// (ADR-0086).
 	pub(crate) fn required_capabilities(&self) -> &'static [Capability] {
 		match self {
-			Self::ReviewRemoteTool { .. }
+			Self::AuthorizeApprovalRetry { .. }
+			| Self::ReviewRemoteTool { .. }
 			| Self::RequestUtility { .. }
 			| Self::ChangeExtension { .. }
 			| Self::InstallCraft { .. }
@@ -500,6 +508,11 @@ impl Command {
 /// The durable result of a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
+	/// One exact-action retry grant was durably recorded.
+	ApprovalRetryAuthorized {
+		/// The original denied review.
+		review_id: Uuid,
+	},
 	/// A native mutation was durably staged.
 	ExtensionChangeQueued {
 		/// Identity for querying execution progress.
@@ -802,7 +815,8 @@ fn redacted_for_receipt(
 			})
 		}
 		Ok(
-			outcome @ (CommandOutcome::RemoteToolReviewed { .. }
+			outcome @ (CommandOutcome::ApprovalRetryAuthorized { .. }
+			| CommandOutcome::RemoteToolReviewed { .. }
 			| CommandOutcome::UtilityQueued { .. }
 			| CommandOutcome::ExtensionChangeQueued { .. }
 			| CommandOutcome::CraftInstallationQueued { .. }
@@ -866,6 +880,16 @@ async fn execute_new(
 		workspace_home,
 	} = context;
 	match command {
+		Command::AuthorizeApprovalRetry { run_id, review_id } => {
+			crate::review_retry::authorize(
+				tx,
+				actor,
+				run_id,
+				review_id,
+				now_unix_ms,
+			)
+			.await
+		}
 		Command::ReviewRemoteTool {
 			client_id,
 			operation_id,

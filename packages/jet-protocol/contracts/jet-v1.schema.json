@@ -1394,6 +1394,31 @@
       "description": "Commands a client may execute.",
       "oneOf": [
         {
+          "description": "Authorize one review retry of a stored denied action (Jet 1.32).",
+          "type": "object",
+          "properties": {
+            "review_id": {
+              "description": "Original denied review. The action cannot be replaced.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "run_id": {
+              "description": "Run that owns the current turn's denial.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "authorize_approval_retry"
+            }
+          },
+          "required": [
+            "type",
+            "run_id",
+            "review_id"
+          ]
+        },
+        {
           "description": "Stage one native extension mutation for subsequent Runs (Jet 1.28).",
           "type": "object",
           "properties": {
@@ -2446,6 +2471,25 @@
     "CommandResponse": {
       "description": "Durable Command outcomes.",
       "oneOf": [
+        {
+          "description": "A single exact-action review retry was authorized.",
+          "type": "object",
+          "properties": {
+            "review_id": {
+              "description": "Original denied review.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "approval_retry_authorized"
+            }
+          },
+          "required": [
+            "type",
+            "review_id"
+          ]
+        },
         {
           "description": "Native lifecycle request was durably staged.",
           "type": "object",

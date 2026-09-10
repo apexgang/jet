@@ -9,10 +9,9 @@ only thing that crosses back is one decision for one request. There is no
 blanket approval to grant: the wire carries `allow_once` and `deny`, and
 nothing else.
 
-The trusted-core deny rules, denial budgets, and the one-retry user override
-described by ADR-0012 are issue #40 and are not implemented here. Until then,
-a review that cannot happen makes no decision, and the request stays held for
-a person.
+Issue #40 adds trusted-core deny rules, durable denial budgets, and a
+one-retry user override. A review that cannot happen leaves the request
+held for a person.
 
 ## What one review is
 
@@ -144,3 +143,53 @@ came to: succeeded for an allowance, denied for a denial, and failed for a
 review the Plane opted into but could not carry out. The audit holds
 attribution and outcome only — the requested action is Conversation content
 and stays in the journal (ADR-0105).
+
+## Core enforcement and exact-action retries
+
+Issue #40 implements ADR-0012 at the managed-Run approval boundary. Only
+requests that the Harness already holds for approval reach this policy.
+The existing sandbox and permission boundaries still apply.
+
+The core uses positive command validation before consulting a reviewer.
+Version 2 recognizes only `/bin/pwd`, `/bin/echo` with bounded literal
+arguments, and `/bin/true` or `/usr/bin/true`. Absolute OS utility paths
+avoid PATH substitution. Project builds/tests and Git commands can load
+repository code or hooks, so they remain denied.
+It accepts the Bash and Codex command-approval envelopes. Unknown fields,
+duplicate fields, shell expansion, scripts, interpreters, file operations,
+network tools, permission changes, and other unrecognized actions are denied.
+This deliberately restricts automatic eligibility: a risk label cannot prove
+an opaque command safe. The core does not infer the effects of opaque project
+code. Existing Harness sandbox boundaries still apply.
+
+Denials apply to the operation across flags, whitespace and supported
+Harnesses. The core retains the last fifty outcomes and stops automatic
+review after three consecutive denials or ten denials in that window.
+Failures that leave approval with the user do not erase preceding denials.
+The stop remains in force until the next turn, even after an allowed retry.
+State is committed with the execution record and survives daemon restart.
+
+`authorize_approval_retry` names a Run and a denied review. Its authenticated
+interactive caller authorizes one further review of the exact stored tool
+and execution parameters.
+Codex correlation identities may change between native attempts; command
+bytes, working directory, and timeout must remain unchanged. A changed action
+cannot consume this grant. Consumption commits before contacting the reviewer,
+so timeout, crash, or denial cannot replenish it. Each denied review can
+receive one grant, including denials caused by the budget or workaround rule.
+A further denial requires a separate explicit user override. Denied requests
+remain available for grants until the turn ends; retained state grows with
+those journaled denials, whose individual action payloads are bounded.
+The retry can pass the denial budget but cannot bypass core action rules,
+reviewer denial, or reviewer routing policy.
+
+Only one reviewer exchange may be active per Run. A concurrent request is
+left for the user. Results from a completed turn or replaced connection
+cannot authorize later work. No reviewer failure permits a different
+Provider or Account binding.
+
+Review outcomes and retry grants enter the Event journal and Security audit
+before delivery. The journal contains the exact request; the audit contains
+attribution and outcome metadata without action or transcript content.
+The controls apply ASVS 2.2.1, 2.3.2, 2.3.4, 8.3.1, 8.3.2, 16.2.1, and
+16.3.2 through 16.3.4, emphasizing Integrity, Resilience, and Accountability.

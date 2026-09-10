@@ -262,7 +262,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::AuditEpochBegun { epoch } => Ok(epoch),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -404,7 +405,8 @@ impl Client {
 			CommandResponse::ConversationCreated(conversation) => {
 				Ok(conversation)
 			}
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -461,7 +463,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::RunCreated(run) => Ok(run),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -525,7 +528,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::RunTransitioned(run) => Ok(run),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -636,7 +640,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::SettingSet { value, .. } => Ok(value),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -695,7 +700,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::SettingCleared { .. } => Ok(()),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -874,7 +880,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::AccountBound(binding) => Ok(binding),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }
@@ -937,7 +944,8 @@ impl Client {
 				credential_reference,
 				..
 			} => Ok(credential_reference),
-			other @ (CommandResponse::RemoteToolReviewed { .. }
+			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
 			| CommandResponse::CraftDisabled { .. }

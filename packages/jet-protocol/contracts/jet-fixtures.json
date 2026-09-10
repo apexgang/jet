@@ -463,5 +463,15 @@
     "schema": "ArtifactControl",
     "valid": false,
     "payload": "{\"type\":\"artifact_download\",\"sha256\":\"BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD\"}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":700,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"authorize_approval_retry\",\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"review_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":700,\"result\":{\"type\":\"approval_retry_authorized\",\"review_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
   }
 ]
