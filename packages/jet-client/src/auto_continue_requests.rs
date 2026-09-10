@@ -15,7 +15,8 @@ impl Client {
 		self.require_minor(jet_protocol::AUTO_CONTINUE_MINOR)?;
 		match self.query(QueryRequest::AutoContinue { target }).await? {
 			QueryResponse::AutoContinue(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::ExtensionCatalog(_)
+			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)

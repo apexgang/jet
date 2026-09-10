@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT url FROM git_drafts WHERE conversation_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "url",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_drafts",
+            "name": "url"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6591189f300f48cec0298f40c1908fb343dc3fad92e0df6c7604baa3bc45e9c4"
+}

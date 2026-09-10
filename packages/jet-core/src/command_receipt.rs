@@ -29,6 +29,7 @@ const EXTENSION_OUTCOME_VERSION: u32 = 8;
 const APPROVAL_RETRY_OUTCOME_VERSION: u32 = 9;
 /// Older releases cannot replay Auto-continue policy Commands.
 const AUTO_CONTINUE_OUTCOME_VERSION: u32 = 10;
+const GIT_DELIVERY_OUTCOME_VERSION: u32 = 11;
 
 /// Uses the rollback release's encoding whenever that release can understand
 /// the result. Version 2 is reserved for name-only variants introduced here;
@@ -53,6 +54,10 @@ pub(crate) fn outcome_version(
 		Ok(CommandOutcome::RemoteToolReviewed { .. }) => {
 			REMOTE_REVIEW_OUTCOME_VERSION
 		}
+		Ok(
+			CommandOutcome::GitDeliveryQueued { .. }
+			| CommandOutcome::GitDeliveryAcknowledged { .. },
+		) => GIT_DELIVERY_OUTCOME_VERSION,
 		Ok(CommandOutcome::UtilityQueued { .. }) => UTILITY_OUTCOME_VERSION,
 		Ok(CommandOutcome::CraftInstallationQueued { .. }) => {
 			CRAFT_INSTALLATION_OUTCOME_VERSION
@@ -150,7 +155,8 @@ pub(crate) fn replay(
 		| CRAFT_LIFECYCLE_OUTCOME_VERSION
 		| EXTENSION_OUTCOME_VERSION
 		| APPROVAL_RETRY_OUTCOME_VERSION
-		| AUTO_CONTINUE_OUTCOME_VERSION => decode_result(&outcome),
+		| AUTO_CONTINUE_OUTCOME_VERSION
+		| GIT_DELIVERY_OUTCOME_VERSION => decode_result(&outcome),
 		PREVIOUS_OUTCOME_VERSION => decode_previous_result(&outcome),
 		_ => Ok(Err(CoreError::incompatible(
 			"command.outcome_incompatible",

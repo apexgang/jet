@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO git_branches (conversation_id, branch) VALUES (?1, ?2) ON CONFLICT(conversation_id) DO UPDATE SET branch = excluded.branch",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "d30328716cb50e1faa0c45d05f11b5ea498f2520e9bf8d4954882e841ce5d512"
+}

@@ -21,8 +21,7 @@ impl ReadTransaction {
 	/// core owns precedence between them and the built-in defaults beneath
 	/// them.
 	///
-	/// A Conversation's Project values join this chain once Projects are
-	/// registered; until then a Conversation resolves over the Plane alone.
+	/// A Conversation inherits the settings of its registered Project.
 	///
 	/// # Errors
 	///
@@ -41,6 +40,8 @@ impl ReadTransaction {
 				updated_at_unix_ms
 			 FROM settings
 			 WHERE scope = 'plane' OR (scope = ?1 AND scope_id = ?2)
+			 OR (scope = 'project' AND ?1 = 'conversation' AND scope_id =
+			     (SELECT project_id FROM conversations WHERE conversation_id = ?2))
 			 ORDER BY key, scope"#,
 			scope_kind,
 			scope_id

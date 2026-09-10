@@ -28,6 +28,11 @@ use crate::{Actor, CORE_VERSION, Core, PlaneId, ProjectId};
 /// Read-only requests answered with a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
+	/// Latest 100 durable Git operations, newest first.
+	GitDeliveries {
+		/// Owning Conversation.
+		conversation_id: ConversationId,
+	},
 	/// Read an Auto-continue policy and its latest durable decision.
 	AutoContinue {
 		/// Scope to inspect.
@@ -227,6 +232,8 @@ pub enum Query {
 /// Snapshots returned by [`Core::query`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult {
+	/// Individually attributed Git outcomes.
+	GitDeliveries(Vec<crate::GitDelivery>),
 	/// Fenced Auto-continue policy and decision.
 	AutoContinue(Box<crate::AutoContinueSnapshot>),
 	/// Unconverted native inventory.
@@ -396,6 +403,13 @@ impl Core {
 			Query::NextChangeDiff { cursor } => {
 				crate::checkpoint_query::next(self, cursor).await
 			}
+			Query::GitDeliveries { conversation_id } => self
+				.store
+				.read(async |tx| {
+					crate::git_delivery_state::query(tx, conversation_id).await
+				})
+				.await
+				.map(QueryResult::GitDeliveries),
 			Query::Utility { job_id } => self
 				.store
 				.read(async |tx| crate::utility_work::query(tx, job_id).await)

@@ -24,7 +24,8 @@ impl Client {
 		self.require_minor(jet_protocol::USAGE_RECORDS_MINOR)?;
 		match self.query(QueryRequest::Usage { selection }).await? {
 			QueryResponse::Usage(usage) => Ok(usage),
-			other @ (QueryResponse::ExtensionCatalog(_)
+			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::AccountBindings(_)

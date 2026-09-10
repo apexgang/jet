@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT key AS \"key!\", scope AS \"scope!\", scope_id, value,\n\t\t\t\tupdated_at_unix_ms\n\t\t\t FROM settings\n\t\t\t WHERE scope = 'plane' OR (scope = ?1 AND scope_id = ?2)\n\t\t\t ORDER BY key, scope",
+  "query": "SELECT key AS \"key!\", scope AS \"scope!\", scope_id, value,\n\t\t\t\tupdated_at_unix_ms\n\t\t\t FROM settings\n\t\t\t WHERE scope = 'plane' OR (scope = ?1 AND scope_id = ?2)\n\t\t\t OR (scope = 'project' AND ?1 = 'conversation' AND scope_id =\n\t\t\t     (SELECT project_id FROM conversations WHERE conversation_id = ?2))\n\t\t\t ORDER BY key, scope",
   "describe": {
     "columns": [
       {
@@ -70,5 +70,5 @@
       false
     ]
   },
-  "hash": "bea590c13df257e43a2e39cd02dfe8d47acd50d7fbd234c3944593a865b2ac44"
+  "hash": "109787d7db70a1efacb7094565e88d52fed8ec7b6d579c4696f57408a8699849"
 }

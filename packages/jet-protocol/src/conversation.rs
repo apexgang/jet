@@ -151,6 +151,20 @@ pub struct ConversationSnapshot {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandRequest {
+	/// Acknowledge a reviewed uncertain outcome without retrying its Git operation.
+	AcknowledgeGitDelivery {
+		/// Exact uncertain Effect the user reviewed.
+		delivery_id: Uuid,
+	},
+	/// Queue one explicit non-destructive Git operation.
+	DeliverGit {
+		/// Owning Conversation.
+		conversation_id: Uuid,
+		/// Retained content for commits and generated PR text.
+		checkpoint: Option<crate::GitCheckpoint>,
+		/// Allowlisted operation.
+		operation: crate::GitOperation,
+	},
 	/// Configure a bounded Auto-continue policy (Jet 1.34).
 	SetAutoContinue {
 		/// Policy scope.
@@ -497,6 +511,16 @@ pub enum CommandRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResponse {
+	/// A user released the uncertainty barrier; Git was not changed.
+	GitDeliveryAcknowledged {
+		/// Exact Effect identity.
+		delivery_id: Uuid,
+	},
+	/// Durable Git operation identity.
+	GitDeliveryQueued {
+		/// Stable Effect identity.
+		delivery_id: Uuid,
+	},
 	/// The Auto-continue policy was stored.
 	AutoContinueConfigured,
 	/// A single exact-action review retry was authorized.

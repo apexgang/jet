@@ -139,7 +139,7 @@ pub(crate) async fn run(
 	let utility_core = Arc::clone(&core);
 	let utility_work = tokio::spawn(async move {
 		loop {
-			if let Err(error) = utility_core.perform_utilities().await {
+			if let Err(error) = utility_core.perform_git_deliveries().await {
 				eprintln!("jetd: cannot settle Utility work: {error}");
 				tokio::time::sleep(Duration::from_secs(5)).await;
 				continue;

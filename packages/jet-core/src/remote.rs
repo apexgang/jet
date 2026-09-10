@@ -27,6 +27,8 @@ pub(crate) fn invalidated_client(
 		CommandOutcome::ApprovalRetryAuthorized { .. }
 		| CommandOutcome::RemoteToolReviewed { .. }
 		| CommandOutcome::UserEditApplied(_)
+		| CommandOutcome::GitDeliveryAcknowledged { .. }
+		| CommandOutcome::GitDeliveryQueued { .. }
 		| CommandOutcome::UtilityQueued { .. }
 		| CommandOutcome::CraftDisabled { .. }
 		| CommandOutcome::ExtensionChangeQueued { .. }

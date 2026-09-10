@@ -92,6 +92,9 @@ impl Core {
             let terminal = tx.run(run_id.0).await?.ok_or_else(missing)?.lifecycle.is_terminal();
             Ok::<_, CoreError>(terminal && state.partial_source.count == 0)
         }).await?;
+		// A delivery admitted in a partial source batch waits for the parser's
+		// complete boundary before touching the live checkout.
+		self.utility_wake.notify_one();
 		if terminal {
 			self.turn_wake.send_replace(());
 			self.maintenance_work.notify_one();

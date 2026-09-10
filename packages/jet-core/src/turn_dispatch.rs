@@ -47,6 +47,9 @@ impl Core {
 					return Ok(None);
 				}
 				let id = ConversationId(run.conversation_id);
+				if tx.git_delivery_blocks(id.0).await? {
+					return Ok(None);
+				}
 				let mut queue = turn_queue::load(tx, id).await?;
 				if !crate::schedule_work::can_dispatch(
 					tx,

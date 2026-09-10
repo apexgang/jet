@@ -13,6 +13,7 @@ pub(crate) enum EffectKind {
 	/// Deferred native extension mutation.
 	ChangeExtension,
 	Utility,
+	GitDelivery,
 	StartTerminal {
 		terminal_id: crate::TerminalId,
 	},
@@ -194,7 +195,7 @@ async fn settle(
 	now_unix_ms: i64,
 ) -> Result<(), CoreError> {
 	match effect.kind {
-		EffectKind::Utility => Ok(()),
+		EffectKind::Utility | EffectKind::GitDelivery => Ok(()),
 		EffectKind::StartTerminal { terminal_id }
 		| EffectKind::CloseTerminal { terminal_id } => {
 			crate::terminal_effect::settle(
@@ -226,6 +227,7 @@ impl TryFrom<EffectRecord> for Effect {
 	fn try_from(record: EffectRecord) -> Result<Self, CoreError> {
 		let kind = match record.kind {
 			EffectKindRecord::Utility => EffectKind::Utility,
+			EffectKindRecord::GitDelivery => EffectKind::GitDelivery,
 			EffectKindRecord::StartTerminal => EffectKind::StartTerminal {
 				terminal_id: crate::TerminalId(
 					record.terminal_id.ok_or_else(crate::terminal::missing)?,

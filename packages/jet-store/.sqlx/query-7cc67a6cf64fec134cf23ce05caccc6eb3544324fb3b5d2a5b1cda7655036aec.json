@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE git_deliveries SET acknowledged = 1 WHERE delivery_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "7cc67a6cf64fec134cf23ce05caccc6eb3544324fb3b5d2a5b1cda7655036aec"
+}

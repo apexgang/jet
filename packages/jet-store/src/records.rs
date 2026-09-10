@@ -235,6 +235,8 @@ pub struct UserEditIntentRecord {
 /// Closed durable spelling of external work understood by this release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectKindRecord {
+	/// One non-destructive Git delivery mutation.
+	GitDelivery,
 	/// Apply a deferred Harness-native extension operation.
 	ChangeExtension,
 	/// One bounded Utility inference request.
@@ -261,6 +263,7 @@ impl EffectKindRecord {
 		match self {
 			Self::ChangeExtension => "extension.change",
 			Self::Utility => "utility.infer",
+			Self::GitDelivery => "git.delivery",
 			Self::StartTerminal => "terminal.start",
 			Self::CloseTerminal => "terminal.close",
 			Self::ResolveExecution => "execution.resolve",
@@ -275,6 +278,7 @@ impl EffectKindRecord {
 		match text {
 			"extension.change" => Some(Self::ChangeExtension),
 			"utility.infer" => Some(Self::Utility),
+			"git.delivery" => Some(Self::GitDelivery),
 			"terminal.start" => Some(Self::StartTerminal),
 			"terminal.close" => Some(Self::CloseTerminal),
 			"execution.resolve" => Some(Self::ResolveExecution),

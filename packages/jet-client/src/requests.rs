@@ -32,7 +32,8 @@ impl Client {
 				))
 			}
 			QueryResponse::Status(status) => Ok(status),
-			other @ (QueryResponse::ExtensionCatalog(_)
+			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
@@ -74,7 +75,8 @@ impl Client {
 	pub async fn conversations(&self) -> Result<ConversationList, ClientError> {
 		match self.query(QueryRequest::Conversations).await? {
 			QueryResponse::Conversations(list) => Ok(list),
-			other @ (QueryResponse::ExtensionCatalog(_)
+			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
@@ -123,7 +125,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Conversations(list) => Ok(list),
-			other @ (QueryResponse::ExtensionCatalog(_)
+			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
@@ -172,7 +175,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Conversation(snapshot) => Ok(*snapshot),
-			other @ (QueryResponse::ExtensionCatalog(_)
+			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
@@ -218,7 +222,8 @@ impl Client {
 	) -> Result<EventPage, ClientError> {
 		match self.query(QueryRequest::Events { after: sequence }).await? {
 			QueryResponse::Events(page) => Ok(page),
-			other @ (QueryResponse::ExtensionCatalog(_)
+			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
@@ -267,7 +272,9 @@ impl Client {
 			.await?
 		{
 			CommandResponse::AuditEpochBegun { epoch } => Ok(epoch),
-			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			other @ (CommandResponse::GitDeliveryAcknowledged { .. }
+			| CommandResponse::GitDeliveryQueued { .. }
+			| CommandResponse::ApprovalRetryAuthorized { .. }
 			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
@@ -323,7 +330,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::SecurityAudit(page) => Ok(page),
-			other @ (QueryResponse::ExtensionCatalog(_)
+			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
@@ -412,7 +420,9 @@ impl Client {
 			CommandResponse::ConversationCreated(conversation) => {
 				Ok(conversation)
 			}
-			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			other @ (CommandResponse::GitDeliveryAcknowledged { .. }
+			| CommandResponse::GitDeliveryQueued { .. }
+			| CommandResponse::ApprovalRetryAuthorized { .. }
 			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
@@ -471,7 +481,9 @@ impl Client {
 			.await?
 		{
 			CommandResponse::RunCreated(run) => Ok(run),
-			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			other @ (CommandResponse::GitDeliveryAcknowledged { .. }
+			| CommandResponse::GitDeliveryQueued { .. }
+			| CommandResponse::ApprovalRetryAuthorized { .. }
 			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
@@ -537,7 +549,9 @@ impl Client {
 			.await?
 		{
 			CommandResponse::RunTransitioned(run) => Ok(run),
-			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			other @ (CommandResponse::GitDeliveryAcknowledged { .. }
+			| CommandResponse::GitDeliveryQueued { .. }
+			| CommandResponse::ApprovalRetryAuthorized { .. }
 			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
@@ -595,7 +609,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Settings(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::ExtensionCatalog(_)
+			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
@@ -651,7 +666,9 @@ impl Client {
 			.await?
 		{
 			CommandResponse::SettingSet { value, .. } => Ok(value),
-			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			other @ (CommandResponse::GitDeliveryAcknowledged { .. }
+			| CommandResponse::GitDeliveryQueued { .. }
+			| CommandResponse::ApprovalRetryAuthorized { .. }
 			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
@@ -712,7 +729,9 @@ impl Client {
 			.await?
 		{
 			CommandResponse::SettingCleared { .. } => Ok(()),
-			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			other @ (CommandResponse::GitDeliveryAcknowledged { .. }
+			| CommandResponse::GitDeliveryQueued { .. }
+			| CommandResponse::ApprovalRetryAuthorized { .. }
 			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
@@ -772,7 +791,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::Capabilities(snapshot) => Ok(snapshot),
-			other @ (QueryResponse::ExtensionCatalog(_)
+			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Utility(_)
@@ -828,7 +848,8 @@ impl Client {
 			.await?
 		{
 			QueryResponse::AccountBindings(list) => Ok(list),
-			other @ (QueryResponse::ExtensionCatalog(_)
+			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Usage(_)
@@ -895,7 +916,9 @@ impl Client {
 			.await?
 		{
 			CommandResponse::AccountBound(binding) => Ok(binding),
-			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			other @ (CommandResponse::GitDeliveryAcknowledged { .. }
+			| CommandResponse::GitDeliveryQueued { .. }
+			| CommandResponse::ApprovalRetryAuthorized { .. }
 			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }
@@ -960,7 +983,9 @@ impl Client {
 				credential_reference,
 				..
 			} => Ok(credential_reference),
-			other @ (CommandResponse::ApprovalRetryAuthorized { .. }
+			other @ (CommandResponse::GitDeliveryAcknowledged { .. }
+			| CommandResponse::GitDeliveryQueued { .. }
+			| CommandResponse::ApprovalRetryAuthorized { .. }
 			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::UtilityQueued { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }

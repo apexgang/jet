@@ -221,6 +221,9 @@ pub(crate) async fn observe(
 		)?,
 	)
 	.await?;
+	crate::git_delivery_state::automate(tx, &checkpoint, plan.client_id)
+		.await?;
+	core.utility_wake.notify_one();
 	save(tx, run_id, &state).await
 }
 async fn save(

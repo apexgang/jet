@@ -1678,6 +1678,60 @@
       "description": "Commands a client may execute.",
       "oneOf": [
         {
+          "description": "Acknowledge a reviewed uncertain outcome without retrying its Git operation.",
+          "type": "object",
+          "properties": {
+            "delivery_id": {
+              "description": "Exact uncertain Effect the user reviewed.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "acknowledge_git_delivery"
+            }
+          },
+          "required": [
+            "type",
+            "delivery_id"
+          ]
+        },
+        {
+          "description": "Queue one explicit non-destructive Git operation.",
+          "type": "object",
+          "properties": {
+            "checkpoint": {
+              "description": "Retained content for commits and generated PR text.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GitCheckpoint"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "conversation_id": {
+              "description": "Owning Conversation.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "description": "Allowlisted operation.",
+              "$ref": "#/$defs/GitOperation"
+            },
+            "type": {
+              "type": "string",
+              "const": "deliver_git"
+            }
+          },
+          "required": [
+            "type",
+            "conversation_id",
+            "operation"
+          ]
+        },
+        {
           "description": "Configure a bounded Auto-continue policy (Jet 1.34).",
           "type": "object",
           "properties": {
@@ -2778,6 +2832,44 @@
     "CommandResponse": {
       "description": "Durable Command outcomes.",
       "oneOf": [
+        {
+          "description": "A user released the uncertainty barrier; Git was not changed.",
+          "type": "object",
+          "properties": {
+            "delivery_id": {
+              "description": "Exact Effect identity.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "git_delivery_acknowledged"
+            }
+          },
+          "required": [
+            "type",
+            "delivery_id"
+          ]
+        },
+        {
+          "description": "Durable Git operation identity.",
+          "type": "object",
+          "properties": {
+            "delivery_id": {
+              "description": "Stable Effect identity.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "git_delivery_queued"
+            }
+          },
+          "required": [
+            "type",
+            "delivery_id"
+          ]
+        },
         {
           "description": "The Auto-continue policy was stored.",
           "type": "object",
@@ -5283,6 +5375,219 @@
         }
       ]
     },
+    "GitCheckpoint": {
+      "description": "Immutable source of generated Git text and committed content.",
+      "type": "object",
+      "properties": {
+        "run_id": {
+          "description": "Owning Run.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "turn": {
+          "description": "Turn number, starting at one.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "run_id",
+        "turn"
+      ]
+    },
+    "GitDelivery": {
+      "description": "One retained delivery operation, its exact policy, text attribution and outcome.",
+      "type": "object",
+      "properties": {
+        "acknowledged_by": {
+          "description": "User who acknowledged an uncertain outcome, without retrying it.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "checkpoint": {
+          "description": "Checkpoint supplying content, absent for manual branch and push Commands.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GitCheckpoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conversation_id": {
+          "description": "Owning Conversation.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "delivery_id": {
+          "description": "Stable Effect identity.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "message": {
+          "description": "Exact bounded text, absent for branch and push operations.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GitMessage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operation": {
+          "description": "Explicit allowlisted operation.",
+          "$ref": "#/$defs/GitOperation"
+        },
+        "outcome": {
+          "description": "Latest durable outcome.",
+          "$ref": "#/$defs/GitDeliveryOutcome"
+        },
+        "policy": {
+          "description": "Exact automation policy at admission.",
+          "$ref": "#/$defs/GitDeliveryPolicy"
+        },
+        "utility_job": {
+          "description": "Bounded Utility job containing the exact text and inference attribution.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "delivery_id",
+        "conversation_id",
+        "operation",
+        "policy",
+        "outcome"
+      ]
+    },
+    "GitDeliveryOutcome": {
+      "description": "Individually durable outcome; a later failure never rolls it back.",
+      "oneOf": [
+        {
+          "description": "Committed request awaiting execution.",
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "pending"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        {
+          "description": "Observed Git state after completion.",
+          "type": "object",
+          "properties": {
+            "branch": {
+              "description": "Resulting branch; absent for detached commits.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "head": {
+              "description": "Resulting commit identity.",
+              "type": "string"
+            },
+            "pull_request": {
+              "description": "Hosted draft URL, when applicable.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "const": "completed"
+            }
+          },
+          "required": [
+            "status",
+            "head"
+          ]
+        },
+        {
+          "description": "A definite refusal or unsuccessful operation.",
+          "type": "object",
+          "properties": {
+            "code": {
+              "description": "Stable, content-free explanation.",
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "code"
+          ]
+        },
+        {
+          "description": "Reconciliation could not establish what happened. Never retried.",
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "outcome_unknown"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        }
+      ]
+    },
+    "GitDeliveryPolicy": {
+      "description": "Policy resolved at admission and revalidated before each Effect.",
+      "type": "object",
+      "properties": {
+        "automatic": {
+          "description": "Whether a successful checkpoint admitted this operation.",
+          "type": "boolean"
+        },
+        "branch": {
+          "description": "Automatic branch creation.",
+          "type": "boolean"
+        },
+        "branch_prefix": {
+          "description": "Editable branch prefix.",
+          "type": "string"
+        },
+        "commit": {
+          "description": "Automatic commits.",
+          "type": "boolean"
+        },
+        "draft_pull_request": {
+          "description": "Automatic draft creation and updates.",
+          "type": "boolean"
+        },
+        "push": {
+          "description": "Automatic pushes.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "automatic",
+        "branch",
+        "commit",
+        "push",
+        "draft_pull_request",
+        "branch_prefix"
+      ]
+    },
     "GitLink": {
       "description": "One submodule as the index records it: a path holding a commit of\nanother repository.",
       "type": "object",
@@ -5299,6 +5604,114 @@
       "required": [
         "path",
         "commit"
+      ]
+    },
+    "GitMessage": {
+      "description": "Exact generated text used by a commit or draft Effect.",
+      "type": "object",
+      "properties": {
+        "body": {
+          "description": "Commit or PR body before Jet attribution markers.",
+          "type": "string"
+        },
+        "fallback_reason": {
+          "description": "Stable reason deterministic text replaced Utility inference.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "description": "Commit subject or PR title.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "body"
+      ]
+    },
+    "GitOperation": {
+      "description": "The only Git mutations exposed by delivery. Each is also a manual Command.",
+      "oneOf": [
+        {
+          "description": "Create and check out a new branch; never replace an existing branch.",
+          "type": "object",
+          "properties": {
+            "name": {
+              "description": "Editable proposed name.",
+              "type": "string"
+            },
+            "operation": {
+              "type": "string",
+              "const": "branch"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "operation",
+            "name"
+          ]
+        },
+        {
+          "description": "Commit the exact retained checkpoint tree.",
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "const": "commit"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "operation"
+          ]
+        },
+        {
+          "description": "Push one branch without force, tags, deletion, or configured refspecs.",
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "const": "push"
+            },
+            "remote": {
+              "description": "One configured remote name.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "operation",
+            "remote"
+          ]
+        },
+        {
+          "description": "Create or update this Conversation's GitHub draft.",
+          "type": "object",
+          "properties": {
+            "base": {
+              "description": "Explicit base branch, or the GitHub repository default.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation": {
+              "type": "string",
+              "const": "draft_pull_request"
+            },
+            "remote": {
+              "description": "One configured GitHub remote name.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "operation",
+            "remote"
+          ]
+        }
       ]
     },
     "HandoffRequest": {
@@ -6547,6 +6960,25 @@
       "description": "Queries a client may run.",
       "oneOf": [
         {
+          "description": "Latest 100 durable Git operations, newest first.",
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "description": "Owning Conversation.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "git_deliveries"
+            }
+          },
+          "required": [
+            "type",
+            "conversation_id"
+          ]
+        },
+        {
           "description": "Inspect an Auto-continue policy and retry (Jet 1.34).",
           "type": "object",
           "properties": {
@@ -7184,6 +7616,27 @@
     "QueryResponse": {
       "description": "Query snapshots.",
       "oneOf": [
+        {
+          "description": "Individually attributed Git outcomes.",
+          "type": "object",
+          "properties": {
+            "deliveries": {
+              "description": "Newest operations, bounded to 100.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/GitDelivery"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "git_deliveries"
+            }
+          },
+          "required": [
+            "type",
+            "deliveries"
+          ]
+        },
         {
           "description": "Durable Auto-continue policy and decision.",
           "type": "object",
@@ -9621,6 +10074,26 @@
           "description": "Whether Jet commits Harness changes without being asked.",
           "type": "string",
           "const": "git.auto_commit"
+        },
+        {
+          "description": "Create a branch lazily after a successful turn.",
+          "type": "string",
+          "const": "git.auto_branch"
+        },
+        {
+          "description": "Push successful turn changes without forcing.",
+          "type": "string",
+          "const": "git.auto_push"
+        },
+        {
+          "description": "Create or update the Conversation GitHub draft.",
+          "type": "string",
+          "const": "git.auto_draft_pull_request"
+        },
+        {
+          "description": "Editable prefix for proposed Conversation branches.",
+          "type": "string",
+          "const": "git.branch_prefix"
         },
         {
           "description": "Plane-wide guidance for generated commit messages and pull-request\ntext.",

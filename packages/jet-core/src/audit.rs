@@ -472,6 +472,8 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		| Command::StartRun { .. }
 		| Command::StartVisaRun(_)
 		| Command::StartNoVisaRun(_)
+		| Command::AcknowledgeGitDelivery { .. }
+		| Command::DeliverGit { .. }
 		| Command::RequestUtility { .. }
 		| Command::CreateSchedule { .. }
 		| Command::CancelSchedule { .. }
@@ -543,6 +545,8 @@ fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::StartRun { .. }
 		| Command::StartVisaRun(_)
 		| Command::StartNoVisaRun(_)
+		| Command::AcknowledgeGitDelivery { .. }
+		| Command::DeliverGit { .. }
 		| Command::RequestUtility { .. }
 		| Command::CreateSchedule { .. }
 		| Command::CancelSchedule { .. }
@@ -641,12 +645,20 @@ pub(crate) fn stored_setting(
 			| SettingKey::AutomaticReviewConsent,
 			_,
 		) => Some(AuditDecision::ReviewPolicyChanged),
-		(SettingKey::GitAutoCommit, SettingValue::Flag(true)) => {
-			Some(AuditDecision::GitAutomationEnabled)
-		}
-		(SettingKey::GitAutoCommit, SettingValue::Flag(false)) => {
-			Some(AuditDecision::GitAutomationDisabled)
-		}
+		(
+			SettingKey::GitAutoCommit
+			| SettingKey::GitAutoBranch
+			| SettingKey::GitAutoPush
+			| SettingKey::GitAutoDraftPullRequest,
+			SettingValue::Flag(true),
+		) => Some(AuditDecision::GitAutomationEnabled),
+		(
+			SettingKey::GitAutoCommit
+			| SettingKey::GitAutoBranch
+			| SettingKey::GitAutoPush
+			| SettingKey::GitAutoDraftPullRequest,
+			SettingValue::Flag(false),
+		) => Some(AuditDecision::GitAutomationDisabled),
 		(SettingKey::SecurityAuditRetentionDays, SettingValue::Count(_)) => {
 			Some(AuditDecision::AuditRetentionChanged)
 		}
@@ -657,7 +669,10 @@ pub(crate) fn stored_setting(
 			Some(AuditDecision::DeveloperModeDisabled)
 		}
 		(
-			SettingKey::GitAutoCommit,
+			SettingKey::GitAutoCommit
+			| SettingKey::GitAutoBranch
+			| SettingKey::GitAutoPush
+			| SettingKey::GitAutoDraftPullRequest,
 			SettingValue::Text(_) | SettingValue::Count(_),
 		)
 		| (
@@ -677,7 +692,10 @@ pub(crate) fn stored_setting(
 		)
 		| (SettingKey::UtilityAutomaticNaming, _)
 		| (SettingKey::ArtifactMaxMiB | SettingKey::ArtifactRunMiB, _)
-		| (SettingKey::GitMessageInstructions, _) => None,
+		| (
+			SettingKey::GitMessageInstructions | SettingKey::GitBranchPrefix,
+			_,
+		) => None,
 	}
 }
 
@@ -695,7 +713,12 @@ pub(crate) fn cleared_setting(key: SettingKey) -> Option<AuditDecision> {
 		| SettingKey::AutomaticReviewConsent => {
 			Some(AuditDecision::ReviewPolicyChanged)
 		}
-		SettingKey::GitAutoCommit => Some(AuditDecision::GitAutomationCleared),
+		SettingKey::GitAutoCommit
+		| SettingKey::GitAutoBranch
+		| SettingKey::GitAutoPush
+		| SettingKey::GitAutoDraftPullRequest => {
+			Some(AuditDecision::GitAutomationCleared)
+		}
 		SettingKey::SecurityAuditRetentionDays => {
 			Some(AuditDecision::AuditRetentionCleared)
 		}
@@ -707,7 +730,8 @@ pub(crate) fn cleared_setting(key: SettingKey) -> Option<AuditDecision> {
 		| SettingKey::UtilityAutomaticNaming
 		| SettingKey::ArtifactMaxMiB
 		| SettingKey::ArtifactRunMiB
-		| SettingKey::GitMessageInstructions => None,
+		| SettingKey::GitMessageInstructions
+		| SettingKey::GitBranchPrefix => None,
 	}
 }
 

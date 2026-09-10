@@ -323,6 +323,11 @@ pub(crate) async fn record(
 	mut plan: LaunchPlan,
 	now: i64,
 ) -> Result<CommandOutcome, CoreError> {
+	if tx.git_delivery_blocks(conversation_id.0).await? {
+		return Err(crate::git_delivery_state::refused(
+			"git.delivery_unresolved",
+		));
+	}
 	crate::extension_work::admit_run(tx).await?;
 	crate::craft_lifecycle::admit(tx, &plan.craft).await?;
 	// Preparation runs outside the write lock. Recheck consumption in this

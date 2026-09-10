@@ -30,7 +30,9 @@ impl Client {
 			{
 				Ok(())
 			}
-			other @ (CommandResponse::CraftInstallationQueued { .. }
+			other @ (CommandResponse::GitDeliveryAcknowledged { .. }
+			| CommandResponse::GitDeliveryQueued { .. }
+			| CommandResponse::CraftInstallationQueued { .. }
 			| CommandResponse::ApprovalRetryAuthorized { .. }
 			| CommandResponse::RemoteToolReviewed { .. }
 			| CommandResponse::ExtensionChangeQueued { .. }

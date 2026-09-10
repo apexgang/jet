@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT state FROM git_deliveries WHERE delivery_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "state",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "git_deliveries",
+            "name": "state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "018408a6688a924c01f4c566ef6f4523146fbdf6cd4f6df837a63fcd8473a1ca"
+}

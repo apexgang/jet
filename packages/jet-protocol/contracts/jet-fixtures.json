@@ -508,5 +508,70 @@
     "schema": "ServerMessage",
     "valid": true,
     "payload": "{\"kind\":\"query_result\",\"id\":2,\"result\":{\"type\":\"auto_continue\",\"cursor\":\"4\",\"policy\":{\"mode\":\"retry\",\"delay_ms\":60000,\"max_delay_ms\":600000,\"max_retries\":3,\"message\":\"Continue\"},\"retry\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"triggering_turn\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"retry_turn\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"usage\":{\"window\":\"five_hour\",\"scope\":{\"covers\":\"provider_account\"},\"measure\":{\"unit\":\"share\",\"used\":10000,\"limit\":10000},\"window_seconds\":18000,\"resets_in_seconds\":3600,\"estimation\":\"measured\",\"finality\":\"interim\"},\"observed_at_unix_ms\":1700000000000,\"due_at_unix_ms\":1700003600000,\"retry_count\":1,\"policy\":{\"mode\":\"retry\",\"delay_ms\":60000,\"max_delay_ms\":600000,\"max_retries\":3,\"message\":\"Continue\"},\"selected_from\":{\"conversation\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"},\"status\":\"pending\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":44,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"deliver_git\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"checkpoint\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"turn\":1},\"operation\":{\"operation\":\"branch\",\"name\":\"work/reviewed\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":44,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"deliver_git\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"checkpoint\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"turn\":1},\"operation\":{\"operation\":\"commit\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":44,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"deliver_git\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"checkpoint\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"turn\":1},\"operation\":{\"operation\":\"push\",\"remote\":\"origin\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":44,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"deliver_git\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"checkpoint\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"turn\":1},\"operation\":{\"operation\":\"draft_pull_request\",\"remote\":\"origin\",\"base\":\"main\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":44,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"acknowledge_git_delivery\",\"delivery_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":44,\"query\":{\"type\":\"git_deliveries\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"command\",\"id\":44,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"deliver_git\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"checkpoint\":null,\"operation\":{\"operation\":\"force_push\",\"remote\":\"origin\"}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":44,\"result\":{\"type\":\"git_delivery_queued\",\"delivery_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":44,\"result\":{\"type\":\"git_deliveries\",\"deliveries\":[{\"delivery_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"checkpoint\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"turn\":1},\"operation\":{\"operation\":\"commit\"},\"policy\":{\"automatic\":true,\"branch\":false,\"commit\":true,\"push\":false,\"draft_pull_request\":false,\"branch_prefix\":\"jet/\"},\"utility_job\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"message\":{\"title\":\"Updated parser\",\"body\":\"\",\"fallback_reason\":\"utility.disabled\"},\"acknowledged_by\":null,\"outcome\":{\"status\":\"pending\"}}]}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":44,\"result\":{\"type\":\"git_deliveries\",\"deliveries\":[{\"delivery_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"checkpoint\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"turn\":1},\"operation\":{\"operation\":\"commit\"},\"policy\":{\"automatic\":true,\"branch\":false,\"commit\":true,\"push\":false,\"draft_pull_request\":false,\"branch_prefix\":\"jet/\"},\"utility_job\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"message\":{\"title\":\"Updated parser\",\"body\":\"\",\"fallback_reason\":\"utility.disabled\"},\"acknowledged_by\":null,\"outcome\":{\"status\":\"completed\",\"head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"branch\":\"work/reviewed\",\"pull_request\":null}}]}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":44,\"result\":{\"type\":\"git_deliveries\",\"deliveries\":[{\"delivery_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"checkpoint\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"turn\":1},\"operation\":{\"operation\":\"commit\"},\"policy\":{\"automatic\":true,\"branch\":false,\"commit\":true,\"push\":false,\"draft_pull_request\":false,\"branch_prefix\":\"jet/\"},\"utility_job\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"message\":{\"title\":\"Updated parser\",\"body\":\"\",\"fallback_reason\":\"utility.disabled\"},\"acknowledged_by\":null,\"outcome\":{\"status\":\"failed\",\"code\":\"git.policy_changed\"}}]}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":44,\"result\":{\"type\":\"git_deliveries\",\"deliveries\":[{\"delivery_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"checkpoint\":{\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"turn\":1},\"operation\":{\"operation\":\"commit\"},\"policy\":{\"automatic\":true,\"branch\":false,\"commit\":true,\"push\":false,\"draft_pull_request\":false,\"branch_prefix\":\"jet/\"},\"utility_job\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"message\":{\"title\":\"Updated parser\",\"body\":\"\",\"fallback_reason\":\"utility.disabled\"},\"acknowledged_by\":null,\"outcome\":{\"status\":\"outcome_unknown\"}}]}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":44,\"result\":{\"type\":\"git_delivery_acknowledged\",\"delivery_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
   }
 ]
