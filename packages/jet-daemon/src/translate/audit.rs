@@ -79,20 +79,23 @@ fn outcome(outcome: AuditOutcome) -> wire::AuditOutcome {
 	}
 }
 
-pub(super) fn security(state: SecurityState) -> wire::SecurityState {
+/// `None` when the audit could not be validated, which only a Plane in
+/// read-only Recovery mode reports (ADR-0077).
+pub(super) fn security(state: SecurityState) -> Option<wire::SecurityState> {
 	match state {
-		SecurityState::Trusted => wire::SecurityState::Trusted,
+		SecurityState::Trusted => Some(wire::SecurityState::Trusted),
 		SecurityState::Degraded(SecurityDegradation {
 			breach,
 			epoch,
 			head,
 			store_sequence,
-		}) => wire::SecurityState::Degraded {
+		}) => Some(wire::SecurityState::Degraded {
 			breach: audit_breach(breach),
 			epoch: epoch.0,
 			head: head.map(audit_head),
 			store_sequence: store_sequence.0,
-		},
+		}),
+		SecurityState::Unverified => None,
 	}
 }
 

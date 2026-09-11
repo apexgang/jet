@@ -1,16 +1,101 @@
-//! Recovery of the Plane store itself: verified Recovery snapshots and
-//! when the core takes them (ADR-0097).
+//! Recovery of the Plane store itself: verified Recovery snapshots, when
+//! the core takes them (ADR-0097), and read-only Recovery mode, which the
+//! Plane enters when its store fails the checks that make it
+//! authoritative (ADR-0077).
 //!
 //! The store decides whether a routine snapshot is due; the core supplies
 //! the clock and the moments. A migration is snapshotted by the store as
 //! it opens, destructive maintenance at start is preceded by one here, and
 //! the first meaningful change of a day gets one when the daemon next
 //! wakes for maintenance, which every Command and Effect commit triggers.
+//!
+//! In Recovery mode the Plane still answers Queries, so it can be
+//! diagnosed and exported, and refuses every Command but one: restoring a
+//! verified snapshot, which is the deliberate way out and belongs to the
+//! person. Nothing that writes runs meanwhile, and surviving `jetfueld`
+//! executions are reconnected only after the restoration succeeds.
+
+mod restore;
+pub(crate) use restore::read_only;
 
 use crate::{Core, error::CoreError};
+use jet_store::{IntegrityFailureReason, StoreIntegrity};
 pub use jet_store::{RecoverySnapshot, SnapshotReason};
 
+/// Whether the Plane store serves or answers reads only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryMode {
+	/// The store passed its checks and accepts Commands.
+	Serving,
+	/// It did not, and the Plane is in read-only Recovery mode.
+	ReadOnly(RecoveryReason),
+}
+
+/// What put the store into read-only Recovery mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryReason {
+	/// SQLite's integrity check reported damage.
+	IntegrityCheckFailed,
+	/// A schema migration failed, leaving the store at its previous
+	/// version (ADR-0073).
+	MigrationFailed,
+}
+
+impl RecoveryMode {
+	/// The mode a store's integrity puts the Plane in.
+	pub(crate) fn of(integrity: &StoreIntegrity) -> Self {
+		match integrity {
+			StoreIntegrity::Verified => Self::Serving,
+			StoreIntegrity::Failed(failure) => {
+				Self::ReadOnly(match failure.reason {
+					IntegrityFailureReason::IntegrityCheck => {
+						RecoveryReason::IntegrityCheckFailed
+					}
+					IntegrityFailureReason::Migration => {
+						RecoveryReason::MigrationFailed
+					}
+				})
+			}
+		}
+	}
+}
+
+/// The store's Recovery mode and what it could be restored from, as the
+/// Plane status reports them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveryStatus {
+	/// Serving, or read-only and why.
+	pub mode: RecoveryMode,
+	/// Every verified snapshot, newest first.
+	pub snapshots: Vec<RecoverySnapshot>,
+}
+
 impl Core {
+	/// Whether the Plane store serves or answers reads only, right now
+	/// (ADR-0077).
+	#[must_use]
+	pub fn recovery_mode(&self) -> RecoveryMode {
+		*self.recovery.borrow()
+	}
+
+	/// Resolves once the Plane serves: at once when it does already, or
+	/// after a snapshot is restored. The daemon's workers wait here so
+	/// nothing writes, reconciles, or reconnects while the store is in
+	/// doubt.
+	pub async fn wait_until_serving(&self) {
+		let mut mode = self.recovery.subscribe();
+		// The sender lives as long as the core, so waiting cannot fail.
+		let _ = mode.wait_for(|mode| *mode == RecoveryMode::Serving).await;
+	}
+
+	/// The Recovery mode and the snapshots the Plane could restore.
+	pub(crate) fn recovery_status(&self) -> Result<RecoveryStatus, CoreError> {
+		Ok(RecoveryStatus {
+			mode: self.recovery_mode(),
+			snapshots: self.recovery_snapshots()?,
+		})
+	}
+
 	/// Takes the day's Recovery snapshot when a committed change is the
 	/// first of its day, and returns it (ADR-0097). Nothing is taken while
 	/// the store is unchanged since the newest snapshot.

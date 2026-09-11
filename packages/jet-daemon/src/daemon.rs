@@ -100,47 +100,22 @@ pub(crate) async fn run(
 			return ExitCode::from(EXIT_FAILURE);
 		}
 	};
-	if let Err(error) = core.reconcile_crafts().await {
-		eprintln!("jetd: cannot reconcile Crafts: {error}");
-	}
-	// A direct edit that reached its atomic replacement before an interruption
-	// is reconciled from its durable intent before clients can retry it.
-	if let Err(error) = core.perform_user_edits().await {
-		eprintln!("jetd: cannot reconcile direct user edits: {error}");
-	}
-	// A verified Artifact accepted before a restart is published before
-	// capabilities or new Commands can observe the installed Craft.
-	if let Err(error) = core.perform_craft_installations().await {
-		eprintln!("jetd: cannot reconcile Craft installations: {error}");
-	}
-	// A promotion a previous daemon did not finish is settled from what its
-	// destination holds before any client can ask for another (ADR-0064,
-	// ADR-0067).
-	if let Err(error) = core.perform_promotions().await {
-		eprintln!("jetd: cannot reconcile Workspace promotions: {error}");
-	}
-	if let Err(error) = core.perform_terminals().await {
-		eprintln!("jetd: cannot recover terminals: {error}");
-	}
-	// Coalesce offline firings before any pending input can start a Run.
-	if let Err(error) = core.perform_schedules().await {
-		eprintln!("jetd: cannot recover schedules: {error}");
-	}
-	// Settle durable Run admission before serving new Commands.
-	if let Err(error) = core.perform_runs().await {
-		eprintln!("jetd: cannot reconcile Run starts: {error}");
-	}
-	// An interrupted escalation is observed, never continued blindly: a
-	// signal already delivered may have ended work whose outcome is not yet
-	// visible (ADR-0083).
-	if let Err(error) = core.perform_run_controls().await {
-		eprintln!("jetd: cannot reconcile execution control: {error}");
-	}
-	if let Err(error) = core.recover_runs().await {
-		eprintln!("jetd: cannot recover executions: {error}");
+	match core.recovery_mode() {
+		jet_core::RecoveryMode::Serving => reconcile_at_start(&core).await,
+		jet_core::RecoveryMode::ReadOnly(reason) => {
+			// ADR-0077: the damaged store is served read-only, exactly as
+			// found, until an owner restores a verified snapshot. Nothing
+			// reconciles or reconnects before that; the workers below wait
+			// for it and run the start-time reconciliation then.
+			eprintln!(
+				"jetd: the Plane store failed its checks ({reason:?}); serving \
+				 read-only Recovery mode until a snapshot is restored"
+			);
+		}
 	}
 	let utility_core = Arc::clone(&core);
 	let utility_work = tokio::spawn(async move {
+		utility_core.wait_until_serving().await;
 		loop {
 			if let Err(error) = utility_core.perform_git_deliveries().await {
 				eprintln!("jetd: cannot settle Utility work: {error}");
@@ -153,6 +128,7 @@ pub(crate) async fn run(
 	let recovery_core = Arc::clone(&core);
 	let work_core = Arc::clone(&core);
 	let run_work = tokio::spawn(async move {
+		work_core.wait_until_serving().await;
 		loop {
 			work_core.wait_for_run_work().await;
 			if let Err(error) = work_core.perform_runs().await {
@@ -161,6 +137,10 @@ pub(crate) async fn run(
 		}
 	});
 	let recovery = tokio::spawn(async move {
+		if recovery_core.recovery_mode() != jet_core::RecoveryMode::Serving {
+			recovery_core.wait_until_serving().await;
+			reconcile_at_start(&recovery_core).await;
+		}
 		loop {
 			let mut retry = false;
 			if let Err(error) = recovery_core.reconcile_crafts().await {
@@ -233,12 +213,17 @@ pub(crate) async fn run(
 		core.capabilities().await,
 		jet_protocol::PROTOCOL_MINOR,
 	);
+	let recovery_mode = match core.recovery_mode() {
+		jet_core::RecoveryMode::Serving => "serving",
+		jet_core::RecoveryMode::ReadOnly(_) => "read_only",
+	};
 	println!(
 		"{}",
 		serde_json::json!({
 			"status": "ready",
 			"socket": listener.socket_path().display().to_string(),
 			"capabilities": capabilities,
+			"recovery": recovery_mode,
 		})
 	);
 	let exit = serve(listener, &core).await;
@@ -249,6 +234,51 @@ pub(crate) async fn run(
 	close_store(&core).await;
 	drop(lock);
 	exit
+}
+
+/// Settles what a previous daemon left unfinished before new Commands are
+/// served, in the order the durable state requires. Each step reports its
+/// own failure and the next still runs.
+async fn reconcile_at_start(core: &Arc<Core>) {
+	if let Err(error) = core.reconcile_crafts().await {
+		eprintln!("jetd: cannot reconcile Crafts: {error}");
+	}
+	// A direct edit that reached its atomic replacement before an interruption
+	// is reconciled from its durable intent before clients can retry it.
+	if let Err(error) = core.perform_user_edits().await {
+		eprintln!("jetd: cannot reconcile direct user edits: {error}");
+	}
+	// A verified Artifact accepted before a restart is published before
+	// capabilities or new Commands can observe the installed Craft.
+	if let Err(error) = core.perform_craft_installations().await {
+		eprintln!("jetd: cannot reconcile Craft installations: {error}");
+	}
+	// A promotion a previous daemon did not finish is settled from what its
+	// destination holds before any client can ask for another (ADR-0064,
+	// ADR-0067).
+	if let Err(error) = core.perform_promotions().await {
+		eprintln!("jetd: cannot reconcile Workspace promotions: {error}");
+	}
+	if let Err(error) = core.perform_terminals().await {
+		eprintln!("jetd: cannot recover terminals: {error}");
+	}
+	// Coalesce offline firings before any pending input can start a Run.
+	if let Err(error) = core.perform_schedules().await {
+		eprintln!("jetd: cannot recover schedules: {error}");
+	}
+	// Settle durable Run admission before serving new Commands.
+	if let Err(error) = core.perform_runs().await {
+		eprintln!("jetd: cannot reconcile Run starts: {error}");
+	}
+	// An interrupted escalation is observed, never continued blindly: a
+	// signal already delivered may have ended work whose outcome is not yet
+	// visible (ADR-0083).
+	if let Err(error) = core.perform_run_controls().await {
+		eprintln!("jetd: cannot reconcile execution control: {error}");
+	}
+	if let Err(error) = core.recover_runs().await {
+		eprintln!("jetd: cannot recover executions: {error}");
+	}
 }
 
 /// Closes the store so SQLite checkpoints its write-ahead log on the way

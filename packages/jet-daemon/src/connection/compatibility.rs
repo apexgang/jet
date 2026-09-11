@@ -375,6 +375,12 @@ pub(super) fn command_minor(
 			minor: jet_protocol::SECURITY_AUDIT_MINOR,
 			feature: "beginning a Security audit epoch",
 		}),
+		CommandRequest::RestoreRecoverySnapshot { .. } => {
+			Some(MinorRequirement {
+				minor: jet_protocol::STORE_RECOVERY_MINOR,
+				feature: "restoring a Recovery snapshot",
+			})
+		}
 		CommandRequest::SetPairingGate { .. }
 		| CommandRequest::OpenPairing { .. }
 		| CommandRequest::ClaimPairing { .. }

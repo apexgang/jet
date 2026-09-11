@@ -55,6 +55,9 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::RegisterProject { .. } => {
 			Some(AuditDecision::ProjectRegistered)
 		}
+		Command::RestoreRecoverySnapshot { .. } => {
+			Some(AuditDecision::RecoverySnapshotRestored)
+		}
 		Command::BeginAuditEpoch
 		| Command::ApplyUserEdit { .. }
 		| Command::SetConversationName { .. }
@@ -125,6 +128,7 @@ pub(super) fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::RegisterProject { .. }
 		| Command::PromoteWorkspace { .. }
 		| Command::BeginAuditEpoch
+		| Command::RestoreRecoverySnapshot { .. }
 		| Command::SetPairingGate { .. }
 		| Command::OpenPairing { .. }
 		| Command::ClaimPairing { .. }

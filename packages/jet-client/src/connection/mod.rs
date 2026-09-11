@@ -622,6 +622,7 @@ mod tests {
 							started_at_unix_ms: 0,
 							core_version: "0.2.0".into(),
 							security: None,
+							recovery: None,
 						}),
 					})
 					.unwrap(),
@@ -641,6 +642,7 @@ mod tests {
 				started_at_unix_ms: 0,
 				core_version: "0.2.0".into(),
 				security: None,
+				recovery: None,
 			}
 		);
 		server.await.unwrap();
@@ -709,6 +711,7 @@ mod tests {
 								started_at_unix_ms: 0,
 								core_version: format!("reply-{id}"),
 								security: None,
+								recovery: None,
 							}),
 						})
 						.unwrap(),
@@ -730,6 +733,7 @@ mod tests {
 					started_at_unix_ms: 0,
 					core_version: "reply-1".into(),
 					security: None,
+					recovery: None,
 				},
 				PlaneStatus {
 					cursor: Some(2),
@@ -738,6 +742,7 @@ mod tests {
 					started_at_unix_ms: 0,
 					core_version: "reply-2".into(),
 					security: None,
+					recovery: None,
 				},
 			)
 		);
@@ -882,6 +887,7 @@ mod tests {
 			started_at_unix_ms: 0,
 			core_version: "0.2.0".into(),
 			security: None,
+			recovery: None,
 		}
 	}
 }

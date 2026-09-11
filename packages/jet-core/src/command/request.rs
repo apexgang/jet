@@ -274,6 +274,12 @@ pub enum Command {
 	/// Begin a new authority epoch of the Security audit, carrying on past
 	/// an integrity failure and recording the gap it leaves (ADR-0105).
 	BeginAuditEpoch,
+	/// Restore a verified Recovery snapshot over the damaged store of a
+	/// Plane in read-only Recovery mode (ADR-0077).
+	RestoreRecoverySnapshot {
+		/// The snapshot, by name.
+		snapshot: String,
+	},
 	/// Open or close this Plane's Pairing gate, which decides whether a new
 	/// GUI client may begin Pairing at all (ADR-0017). It does not alter the
 	/// clients that are already Paired.
@@ -429,6 +435,7 @@ impl Command {
 			Self::BindAccount { .. }
 			| Self::UnbindAccount { .. }
 			| Self::BeginAuditEpoch
+			| Self::RestoreRecoverySnapshot { .. }
 			| Self::SetPairingGate { .. }
 			| Self::OpenPairing { .. }
 			| Self::ClaimPairing { .. }

@@ -13,7 +13,7 @@
 //! Restoring a snapshot moves authoritative state backwards, and the head
 //! left in place is what makes that visible to the audit (ADR-0105).
 
-use crate::{StoreError, migrations::SchemaState};
+use crate::StoreError;
 use sqlx::{
 	Connection as _, SqliteConnection, SqlitePool, sqlite::SqliteConnectOptions,
 };
@@ -143,28 +143,26 @@ pub(crate) fn wall_clock_unix_ms() -> i64 {
 pub(crate) struct Tracker {
 	/// A write has committed since the newest snapshot. An existing store
 	/// starts dirty, because what happened after the last snapshot before
-	/// this open is unknown; a store with no schema yet holds nothing.
+	/// this open is unknown; a store created just now holds nothing.
 	dirty: AtomicBool,
 	/// The day of the newest snapshot, or `i64::MIN` when there is none.
 	day: AtomicI64,
 }
 
 impl Tracker {
-	pub(crate) fn at_open(
-		database: &Path,
-		schema: SchemaState,
-	) -> Result<Self, StoreError> {
+	pub(crate) fn at_open(database: &Path) -> Result<Self, StoreError> {
 		let newest = list(database)?.into_iter().next();
-		let dirty = match schema {
-			SchemaState::Absent => false,
-			SchemaState::Current | SchemaState::Behind => true,
-		};
 		Ok(Self {
-			dirty: AtomicBool::new(dirty),
+			dirty: AtomicBool::new(true),
 			day: AtomicI64::new(
 				newest.map_or(i64::MIN, |snapshot| snapshot.day()),
 			),
 		})
+	}
+
+	/// Forgets the presumed change: the store was created just now.
+	pub(crate) fn clean(&self) {
+		self.dirty.store(false, Ordering::Relaxed);
 	}
 
 	pub(crate) fn mark_dirty(&self) {
@@ -272,6 +270,26 @@ pub(crate) fn list(
 			.then_with(|| b.name.cmp(&a.name))
 	});
 	Ok(snapshots)
+}
+
+/// The path of the verified snapshot called `name`, or an integrity error
+/// naming what was asked for when there is no such snapshot. Only a name
+/// the directory listing produced is accepted, so no path reaches the
+/// filesystem that was not a snapshot's own (ASVS 5.3.2).
+pub(crate) fn locate(
+	database: &Path,
+	name: &str,
+) -> Result<PathBuf, StoreError> {
+	let known = list(database)?
+		.into_iter()
+		.any(|snapshot| snapshot.name == name);
+	if known {
+		Ok(snapshots_dir(database).join(name))
+	} else {
+		Err(StoreError::Integrity(format!(
+			"no verified snapshot is called {name}"
+		)))
+	}
 }
 
 /// Removes every snapshot the retention tiers no longer cover, plus any

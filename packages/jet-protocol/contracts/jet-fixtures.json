@@ -583,5 +583,30 @@
     "schema": "ServerMessage",
     "valid": true,
     "payload": "{\"kind\":\"command_result\",\"id\":44,\"result\":{\"type\":\"git_delivery_acknowledged\",\"delivery_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
+  },
+  {
+    "schema": "PlaneStatus",
+    "valid": true,
+    "payload": "{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e71\",\"daemon_starts\":4,\"started_at_unix_ms\":1757000000000,\"core_version\":\"0.2.0\",\"cursor\":\"42\",\"security\":{\"state\":\"trusted\"},\"recovery\":{\"state\":\"read_only\",\"reason\":\"integrity_check_failed\",\"snapshots\":[{\"name\":\"plane-1757000000000-daily.sqlite3\",\"taken_at_unix_ms\":1757000000000,\"reason\":\"daily\",\"bytes\":405504}]}}"
+  },
+  {
+    "schema": "PlaneStatus",
+    "valid": true,
+    "payload": "{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e71\",\"daemon_starts\":4,\"started_at_unix_ms\":1757000000000,\"core_version\":\"0.2.0\",\"cursor\":\"42\",\"security\":{\"state\":\"trusted\"},\"recovery\":{\"state\":\"serving\",\"snapshots\":[]}}"
+  },
+  {
+    "schema": "PlaneStatus",
+    "valid": false,
+    "payload": "{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e71\",\"daemon_starts\":4,\"started_at_unix_ms\":1757000000000,\"core_version\":\"0.2.0\",\"cursor\":\"42\",\"recovery\":{\"state\":\"damaged\",\"snapshots\":[]}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e71\",\"command\":{\"type\":\"restore_recovery_snapshot\",\"snapshot\":\"plane-1757000000000-daily.sqlite3\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":1,\"result\":{\"type\":\"recovery_snapshot_restored\",\"snapshot\":\"plane-1757000000000-daily.sqlite3\",\"damaged\":\"plane.sqlite3.damaged-1757000100000\"}}"
   }
 ]

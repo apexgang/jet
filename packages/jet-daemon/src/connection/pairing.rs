@@ -102,6 +102,7 @@ async fn apply(
 		| CommandOutcome::PairedClientAccessSet { .. }
 		| CommandOutcome::PairingConfirmed { .. }
 		| CommandOutcome::AuditEpochBegun { .. }
+		| CommandOutcome::RecoverySnapshotRestored { .. }
 		| CommandOutcome::PairedClientRevoked { .. }
 		| CommandOutcome::ProjectRegistered(_)
 		| CommandOutcome::WorkspacePromotionRecorded(_)

@@ -13,7 +13,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 36;
+pub const PROTOCOL_MINOR: u32 = 37;
+
+/// Read-only Recovery mode, verified Recovery snapshots, and restoring one.
+pub const STORE_RECOVERY_MINOR: u32 = 37;
 
 /// Plane-wide disposable storage budget and disk-pressure admission.
 pub const DISK_PRESSURE_MINOR: u32 = 36;

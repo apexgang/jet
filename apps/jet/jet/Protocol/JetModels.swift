@@ -302,6 +302,7 @@ public enum CommandRequest {
     case `bind_account`(CommandRequestBindAccount)
     case `unbind_account`(CommandRequestUnbindAccount)
     case `begin_audit_epoch`(CommandRequestBeginAuditEpoch)
+    case `restore_recovery_snapshot`(CommandRequestRestoreRecoverySnapshot)
     case `set_pairing_gate`(CommandRequestSetPairingGate)
     case `open_pairing`(CommandRequestOpenPairing)
     case `claim_pairing`(CommandRequestClaimPairing)
@@ -350,6 +351,7 @@ public enum CommandResponse {
     case `pairing_completed`(CommandResponsePairingCompleted)
     case `paired_client_access_set`(CommandResponsePairedClientAccessSet)
     case `paired_client_revoked`(CommandResponsePairedClientRevoked)
+    case `recovery_snapshot_restored`(CommandResponseRecoverySnapshotRestored)
     case `audit_epoch_begun`(CommandResponseAuditEpochBegun)
     case `project_registered`(CommandResponseProjectRegistered)
     case `workspace_promotion_recorded`(CommandResponseWorkspacePromotionRecorded)
@@ -880,6 +882,7 @@ public struct PlaneStatus {
     public let `cursor`: String?
     public let `daemon_starts`: UInt64
     public let `plane_id`: String
+    public let `recovery`: RecoveryStatus?
     public let `security`: SecurityState?
     public let `started_at_unix_ms`: Int64
 }
@@ -1079,6 +1082,29 @@ public enum RecoveryAction {
     case `refresh_conversation`(RecoveryActionRefreshConversation)
     case `refresh_run`(RecoveryActionRefreshRun)
     case `resume_events`(RecoveryActionResumeEvents)
+}
+
+public enum RecoveryReason: String {
+    case `integrity_check_failed` = "integrity_check_failed"
+    case `migration_failed` = "migration_failed"
+}
+
+public struct RecoverySnapshot {
+    public let `bytes`: UInt64
+    public let `name`: String
+    public let `reason`: SnapshotReason
+    public let `taken_at_unix_ms`: Int64
+}
+
+public enum RecoveryState: String {
+    case `serving` = "serving"
+    case `read_only` = "read_only"
+}
+
+public struct RecoveryStatus {
+    public let `reason`: RecoveryReason?
+    public let `snapshots`: [RecoverySnapshot]
+    public let `state`: RecoveryState
 }
 
 public enum Registrability {
@@ -1364,6 +1390,12 @@ public enum SettingValue {
 }
 
 public typealias Sha256Digest = String
+
+public enum SnapshotReason: String {
+    case `daily` = "daily"
+    case `migration` = "migration"
+    case `maintenance` = "maintenance"
+}
 
 public enum StreamControl {
     case `credit`(StreamControlCredit)
@@ -1911,6 +1943,10 @@ public struct CommandRequestBeginAuditEpoch {
 
 }
 
+public struct CommandRequestRestoreRecoverySnapshot {
+    public let `snapshot`: String
+}
+
 public struct CommandRequestSetPairingGate {
     public let `gate`: PairingGate
 }
@@ -2146,6 +2182,11 @@ public struct CommandResponsePairedClientAccessSet {
 
 public struct CommandResponsePairedClientRevoked {
     public let `client_id`: String
+}
+
+public struct CommandResponseRecoverySnapshotRestored {
+    public let `damaged`: String
+    public let `snapshot`: String
 }
 
 public struct CommandResponseAuditEpochBegun {
@@ -2736,6 +2777,7 @@ public struct QueryResponseStatus {
     public let `cursor`: String?
     public let `daemon_starts`: UInt64
     public let `plane_id`: String
+    public let `recovery`: RecoveryStatus?
     public let `security`: SecurityState?
     public let `started_at_unix_ms`: Int64
 }

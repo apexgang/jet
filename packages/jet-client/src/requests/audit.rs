@@ -25,7 +25,8 @@ impl Client {
 			.await?
 		{
 			CommandResponse::AuditEpochBegun { epoch } => Ok(epoch),
-			other @ (CommandResponse::GitDeliveryAcknowledged { .. }
+			other @ (CommandResponse::RecoverySnapshotRestored { .. }
+			| CommandResponse::GitDeliveryAcknowledged { .. }
 			| CommandResponse::GitDeliveryQueued { .. }
 			| CommandResponse::ApprovalRetryAuthorized { .. }
 			| CommandResponse::RemoteToolReviewed { .. }

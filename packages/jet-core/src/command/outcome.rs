@@ -161,6 +161,14 @@ pub enum CommandOutcome {
 		/// The client that is no longer Paired.
 		client_id: ClientId,
 	},
+	/// The Plane serves again from the restored snapshot (ADR-0077).
+	RecoverySnapshotRestored {
+		/// The snapshot that is now the store.
+		snapshot: String,
+		/// The file name, beside the store, the damaged database was
+		/// moved to.
+		damaged: String,
+	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {
 		/// The epoch that holds the chain the Plane vouches for.

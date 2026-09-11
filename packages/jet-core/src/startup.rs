@@ -13,6 +13,7 @@ use super::{
 	craft::{self, repository::SystemCraftRepository},
 	git_delivery, remote, run, unix_ms,
 };
+use crate::store_recovery;
 use jet_store::Store;
 use std::sync::Arc;
 
@@ -72,18 +73,30 @@ impl Core {
 		probe: Arc<dyn CapabilityProbe>,
 		discovery: Arc<dyn ConversationDiscovery>,
 	) -> Result<Self, CoreError> {
-		store.record_daemon_start().await?;
+		let recovery = store_recovery::RecoveryMode::of(&store.integrity());
+		let serving = recovery == store_recovery::RecoveryMode::Serving;
+		if serving {
+			store.record_daemon_start().await?;
+		}
 		let started_at = clock.now();
 		// Retention runs only behind a whole chain. A store that moved
 		// backwards keeps every record it still has until an owner has
-		// seen the evidence and decided what to do (ADR-0105).
-		let security = SecurityState::of(store.validate_audit().await?);
+		// seen the evidence and decided what to do (ADR-0105). A damaged
+		// store is asked too, and may not be able to answer.
+		let security = if serving {
+			SecurityState::of(store.validate_audit().await?)
+		} else {
+			store
+				.validate_audit()
+				.await
+				.map_or(SecurityState::Unverified, SecurityState::of)
+		};
 		let craft_home = workspace_home
 			.0
 			.parent()
 			.expect("Workspace home has a parent")
 			.join("crafts");
-		if security == SecurityState::Trusted {
+		if serving && security == SecurityState::Trusted {
 			// What the sweep and the collection are about to remove is
 			// copied first, at most once a day (ADR-0097).
 			store
@@ -132,6 +145,7 @@ impl Core {
 			probe,
 			capabilities: tokio::sync::RwLock::new(capabilities),
 			security: tokio::sync::RwLock::new(security),
+			recovery: tokio::sync::watch::channel(recovery).0,
 			started_at,
 			effect_reconciliation: tokio::sync::Mutex::new(()),
 			craft_artifact_publication: tokio::sync::Mutex::new(()),
@@ -143,8 +157,11 @@ impl Core {
 			craft_repository: Arc::new(SystemCraftRepository),
 		};
 		// The index follows the journal; a daemon that stopped between a
-		// Command and its indexing catches up here (ADR-0036).
-		core.index_search().await?;
+		// Command and its indexing catches up here (ADR-0036). A damaged
+		// store is not written to; the restoration catches up instead.
+		if serving {
+			core.index_search().await?;
+		}
 		Ok(core)
 	}
 
@@ -196,7 +213,10 @@ mod tests {
 	use pretty_assertions::assert_eq;
 
 	use crate::test_support::{actor, start_core};
-	use crate::{CORE_VERSION, PlaneStatus, Query, QueryResult, SecurityState};
+	use crate::{
+		CORE_VERSION, PlaneStatus, Query, QueryResult, RecoveryMode,
+		RecoveryStatus, SecurityState,
+	};
 
 	#[tokio::test]
 	async fn status_reports_the_persisted_plane_across_core_restarts() {
@@ -228,6 +248,10 @@ mod tests {
 					started_at: before.started_at,
 					core_version: CORE_VERSION,
 					security: SecurityState::Trusted,
+					recovery: RecoveryStatus {
+						mode: RecoveryMode::Serving,
+						snapshots: vec![],
+					},
 				},
 				&PlaneStatus {
 					cursor: crate::EventSequence(0),
@@ -236,8 +260,23 @@ mod tests {
 					started_at: after.started_at,
 					core_version: CORE_VERSION,
 					security: SecurityState::Trusted,
+					// The restart's maintenance was preceded by a snapshot
+					// of the store the first core left behind (ADR-0097).
+					recovery: RecoveryStatus {
+						mode: RecoveryMode::Serving,
+						snapshots: after.recovery.snapshots.clone(),
+					},
 				}
 			)
+		);
+		assert_eq!(
+			after
+				.recovery
+				.snapshots
+				.iter()
+				.map(|snapshot| snapshot.reason)
+				.collect::<Vec<_>>(),
+			vec![crate::SnapshotReason::Maintenance]
 		);
 		assert!(after.started_at >= before.started_at);
 	}

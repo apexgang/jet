@@ -1,6 +1,8 @@
 //! Authorization, receipt replay, and durable Command execution.
 
-use super::{CommandEnvelope, CommandOutcome, TransactionContext, execute_new};
+use super::{
+	Command, CommandEnvelope, CommandOutcome, TransactionContext, execute_new,
+};
 use crate::{
 	Actor, Core,
 	command::receipt::{
@@ -39,6 +41,18 @@ impl Core {
 			command,
 			request_digest,
 		} = envelope;
+		// Restoring a snapshot replaces the store a receipt would go to, so
+		// it runs beside the pipeline; everything else waits while the
+		// store is in doubt (ADR-0077).
+		let command = match command {
+			Command::RestoreRecoverySnapshot { snapshot } => {
+				return self.restore_recovery_snapshot(actor, snapshot).await;
+			}
+			other => other,
+		};
+		if let crate::RecoveryMode::ReadOnly(reason) = self.recovery_mode() {
+			return Err(crate::store_recovery::read_only(reason));
+		}
 		let actor_record = actor.record();
 		let security = *self.security.read().await;
 		let recorded_at_unix_ms = self.now_unix_ms();
@@ -193,6 +207,7 @@ pub(super) fn redacted_for_receipt(
 			| CommandOutcome::AccountBound(_)
 			| CommandOutcome::AccountUnbound { .. }
 			| CommandOutcome::AuditEpochBegun { .. }
+			| CommandOutcome::RecoverySnapshotRestored { .. }
 			| CommandOutcome::PairingGateSet { .. }
 			| CommandOutcome::PairingClaimed { .. }
 			| CommandOutcome::PairingConfirmed { .. }

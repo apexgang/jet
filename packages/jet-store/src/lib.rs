@@ -23,6 +23,10 @@ mod pairing;
 mod plane;
 mod project;
 mod records;
+mod recovery;
+pub use recovery::{
+	IntegrityFailure, IntegrityFailureReason, RestoredStore, StoreIntegrity,
+};
 mod remote_operation;
 pub use remote_operation::RemoteOperationRecord;
 mod run;
@@ -160,19 +164,35 @@ impl From<sqlx::Error> for StoreError {
 /// written through [`Store::read`] and [`Store::write`].
 #[derive(Debug)]
 pub struct Store {
-	pool: SqlitePool,
+	/// The connection and what was learned opening it. Restoring a snapshot
+	/// replaces it as a whole (ADR-0077).
+	opened: std::sync::RwLock<Opened>,
 	/// The database file, which also names the Security audit head kept
 	/// beside it (ADR-0105).
 	database: PathBuf,
-	/// This Plane's durable identity, read once at open. It binds the audit
-	/// head to the store it describes.
-	plane_id: Uuid,
 	/// When the next routine Recovery snapshot is due (ADR-0097).
 	snapshots: snapshot::Tracker,
 }
 
+/// One connection to the database and what opening it established.
+#[derive(Debug)]
+struct Opened {
+	pool: SqlitePool,
+	/// This Plane's durable identity, read once at open. It binds the audit
+	/// head to the store it describes. It is nil while the store is damaged
+	/// enough that its Plane row cannot be read, and nothing writes the head
+	/// then.
+	plane_id: Uuid,
+	integrity: StoreIntegrity,
+}
+
 impl Store {
 	/// Opens or creates the store at `path` and applies pending migrations.
+	///
+	/// Every open runs SQLite's lightweight integrity check first. A store
+	/// that fails it, or whose migration fails, still opens, but reads only:
+	/// [`Store::integrity`] says so, and the damaged database is kept as
+	/// found until a verified snapshot is restored over it (ADR-0077).
 	///
 	/// A store whose schema is behind this build is copied into a verified
 	/// Recovery snapshot first, so the release before this one has a
@@ -185,57 +205,74 @@ impl Store {
 	/// # Errors
 	///
 	/// Returns [`StoreError::Unavailable`] when the file cannot be opened
-	/// and [`StoreError::Integrity`] when its schema cannot be prepared or
-	/// the pre-migration snapshot fails verification.
+	/// and [`StoreError::Integrity`] when the pre-migration snapshot fails
+	/// verification.
 	pub async fn open(path: &Path) -> Result<Self, StoreError> {
-		let pool = SqlitePoolOptions::new()
-			// One connection, so reads and writes serialize exactly as they
-			// did behind the single connection this store used to hold.
-			.max_connections(1)
-			.min_connections(0)
-			// A local file cannot go stale the way a socket can, and both
-			// `None`s keep the pool from spawning a maintenance task that
-			// would wake an idle Plane (ADR-0055).
-			.test_before_acquire(false)
-			.idle_timeout(None)
-			.max_lifetime(None)
-			// Long enough for a durable commit, short enough that a
-			// re-entrant transaction fails loudly instead of hanging.
-			.acquire_timeout(ACQUIRE_TIMEOUT)
-			// SQLite ends a transaction by itself when a statement fails on
-			// a full disk or an I/O error, which leaves the driver's own
-			// transaction counter one ahead of the connection. The rollback
-			// that follows then fails and the counter never comes back down,
-			// so such a connection would refuse every later transaction.
-			// Discard it and let the next caller open a fresh one.
-			.after_release(|connection, _| {
-				Box::pin(async move { Ok(!connection.is_in_transaction()) })
-			})
-			.connect_with(connect_options(path))
-			.await?;
-		verify_durability(&pool).await?;
-		reject_legacy_schema(&pool).await?;
-		let schema = migrations::state(&pool).await?;
-		let snapshots = snapshot::Tracker::at_open(path, schema)?;
-		if schema == migrations::SchemaState::Behind {
-			snapshot::create(
-				&pool,
-				path,
-				&snapshots,
-				SnapshotReason::Migration,
-				snapshot::wall_clock_unix_ms(),
-			)
-			.await?;
+		let snapshots = snapshot::Tracker::at_open(path)?;
+		let (opened, schema) = connect(path, &snapshots).await?;
+		if schema == migrations::SchemaState::Absent {
+			// A store created just now holds nothing worth copying.
+			snapshots.clean();
 		}
-		migrations::apply(&pool).await?;
-		plane::ensure_present(&pool).await?;
-		let plane_id = plane::read(&pool).await?.plane_id;
 		Ok(Self {
-			pool,
+			opened: std::sync::RwLock::new(opened),
 			database: path.to_owned(),
-			plane_id,
 			snapshots,
 		})
+	}
+
+	/// Whether this store passed the checks that make it authoritative, as
+	/// established when it was opened or last restored.
+	#[must_use]
+	pub fn integrity(&self) -> StoreIntegrity {
+		self.opened().integrity.clone()
+	}
+
+	/// Restores the verified Recovery snapshot called `name` over the
+	/// damaged database, keeping the damaged files beside it under a name
+	/// that carries `now_unix_ms`, and reopens the result through the same
+	/// checks as any open (ADR-0077). The Security audit head stays where
+	/// it is, so the audit sees that state moved backwards (ADR-0105).
+	///
+	/// Every connection this store held is closed first; a read in flight
+	/// fails as unavailable.
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Integrity`] when no verified snapshot has that
+	/// name or a damaged file of that stamp already exists, and
+	/// [`StoreError::Unavailable`] when the files cannot be moved or the
+	/// restored database cannot be opened. The store then keeps serving
+	/// whatever it could open.
+	pub async fn restore(
+		&self,
+		name: &str,
+		now_unix_ms: i64,
+	) -> Result<RestoredStore, StoreError> {
+		self.pool().close().await;
+		let (opened, restored) = recovery::restore(
+			&self.database,
+			&self.snapshots,
+			name,
+			now_unix_ms,
+		)
+		.await?;
+		*self.opened.write().expect("store state is not poisoned") = opened;
+		Ok(restored)
+	}
+
+	fn opened(&self) -> std::sync::RwLockReadGuard<'_, Opened> {
+		self.opened.read().expect("store state is not poisoned")
+	}
+
+	/// The current connection. The pool is a handle, so cloning it out of
+	/// the lock keeps no guard across an await.
+	fn pool(&self) -> SqlitePool {
+		self.opened().pool.clone()
+	}
+
+	fn plane_id(&self) -> Uuid {
+		self.opened().plane_id
 	}
 
 	/// Takes a verified Recovery snapshot for `reason`, stamped
@@ -251,7 +288,7 @@ impl Store {
 		now_unix_ms: i64,
 	) -> Result<RecoverySnapshot, StoreError> {
 		snapshot::create(
-			&self.pool,
+			&self.pool(),
 			&self.database,
 			&self.snapshots,
 			reason,
@@ -300,7 +337,7 @@ impl Store {
 	///
 	/// Returns a [`StoreError`] when the Plane row cannot be read.
 	pub async fn plane(&self) -> Result<PlaneRecord, StoreError> {
-		plane::read(&self.pool).await
+		plane::read(&self.pool()).await
 	}
 
 	/// Durably records that an authoritative `jetd` started on this Plane and
@@ -310,7 +347,7 @@ impl Store {
 	///
 	/// Returns a [`StoreError`] when the increment cannot be committed.
 	pub async fn record_daemon_start(&self) -> Result<PlaneRecord, StoreError> {
-		plane::record_daemon_start(&self.pool).await
+		plane::record_daemon_start(&self.pool()).await
 	}
 
 	/// Closes the store, letting SQLite finish its write-ahead log checkpoint
@@ -321,8 +358,131 @@ impl Store {
 	/// already survives abrupt termination (ADR-0071); it only leaves the log
 	/// for the next open to replay.
 	pub async fn close(&self) {
-		self.pool.close().await;
+		self.pool().close().await;
 	}
+}
+
+/// Opens the database at `path`, checks it, snapshots it when a migration
+/// is pending, migrates it, and reads its Plane identity. A check or
+/// migration that fails leaves the result read-only rather than failing
+/// the open (ADR-0077). The schema state found is returned beside it.
+async fn connect(
+	path: &Path,
+	snapshots: &snapshot::Tracker,
+) -> Result<(Opened, migrations::SchemaState), StoreError> {
+	let pool = connect_pool(path).await?;
+	// Damage can surface in the first statement that touches the schema,
+	// before the check itself runs; any of them failing on content rather
+	// than reachability is the check failing.
+	let schema = match inspect(&pool).await {
+		Ok(Inspection::Legacy) => return Err(legacy_schema_refusal()),
+		Ok(Inspection::Schema(schema)) => schema,
+		Err(StoreError::Integrity(detail)) => {
+			return Ok((
+				damaged(pool, IntegrityFailureReason::IntegrityCheck, detail)
+					.await,
+				migrations::SchemaState::Current,
+			));
+		}
+		Err(error) => return Err(error),
+	};
+	if schema == migrations::SchemaState::Behind {
+		snapshot::create(
+			&pool,
+			path,
+			snapshots,
+			SnapshotReason::Migration,
+			snapshot::wall_clock_unix_ms(),
+		)
+		.await?;
+	}
+	if let Err(error) = migrations::apply(&pool).await {
+		let failure = recovery::migration_failure(error)?;
+		return Ok((
+			damaged(pool, failure.reason, failure.detail).await,
+			schema,
+		));
+	}
+	plane::ensure_present(&pool).await?;
+	let plane_id = plane::read(&pool).await?.plane_id;
+	Ok((
+		Opened {
+			pool,
+			plane_id,
+			integrity: StoreIntegrity::Verified,
+		},
+		schema,
+	))
+}
+
+/// What the checks before any migration found.
+enum Inspection {
+	/// A pre-release tracker owns the store; it is refused outright.
+	Legacy,
+	/// Where the schema stands, with SQLite's own check passed.
+	Schema(migrations::SchemaState),
+}
+
+/// The checks that precede any migration, in order: durability settings,
+/// the schema tracker, and SQLite's own account of the pages. Damage
+/// reported by the check is an integrity error like damage met on the way
+/// to it.
+async fn inspect(pool: &SqlitePool) -> Result<Inspection, StoreError> {
+	verify_durability(pool).await?;
+	if is_legacy_schema(pool).await? {
+		return Ok(Inspection::Legacy);
+	}
+	let schema = migrations::state(pool).await?;
+	let findings = recovery::quick_check(pool).await?;
+	if findings.is_empty() {
+		Ok(Inspection::Schema(schema))
+	} else {
+		Err(StoreError::Integrity(findings.join("; ")))
+	}
+}
+
+/// A store that stays open for reads only. Its Plane identity is read
+/// when the damage allows, and nil otherwise.
+async fn damaged(
+	pool: SqlitePool,
+	reason: IntegrityFailureReason,
+	detail: String,
+) -> Opened {
+	Opened {
+		plane_id: plane::read(&pool)
+			.await
+			.map_or(Uuid::nil(), |plane| plane.plane_id),
+		pool,
+		integrity: StoreIntegrity::Failed(IntegrityFailure { reason, detail }),
+	}
+}
+
+async fn connect_pool(path: &Path) -> Result<SqlitePool, StoreError> {
+	Ok(SqlitePoolOptions::new()
+		// One connection, so reads and writes serialize exactly as they
+		// did behind the single connection this store used to hold.
+		.max_connections(1)
+		.min_connections(0)
+		// A local file cannot go stale the way a socket can, and both
+		// `None`s keep the pool from spawning a maintenance task that
+		// would wake an idle Plane (ADR-0055).
+		.test_before_acquire(false)
+		.idle_timeout(None)
+		.max_lifetime(None)
+		// Long enough for a durable commit, short enough that a
+		// re-entrant transaction fails loudly instead of hanging.
+		.acquire_timeout(ACQUIRE_TIMEOUT)
+		// SQLite ends a transaction by itself when a statement fails on
+		// a full disk or an I/O error, which leaves the driver's own
+		// transaction counter one ahead of the connection. The rollback
+		// that follows then fails and the counter never comes back down,
+		// so such a connection would refuse every later transaction.
+		// Discard it and let the next caller open a fresh one.
+		.after_release(|connection, _| {
+			Box::pin(async move { Ok(!connection.is_in_transaction()) })
+		})
+		.connect_with(connect_options(path))
+		.await?)
 }
 
 /// How long a caller waits for the store's one connection. A transaction
@@ -377,7 +537,7 @@ async fn verify_durability(pool: &SqlitePool) -> Result<(), StoreError> {
 /// The driver's own table decides. A `jetd` from before this change creates
 /// an empty `schema_migrations` on any store it opens, including one this
 /// code wrote, so its mere presence would condemn a healthy store.
-async fn reject_legacy_schema(pool: &SqlitePool) -> Result<(), StoreError> {
+async fn is_legacy_schema(pool: &SqlitePool) -> Result<bool, StoreError> {
 	let legacy: Option<String> = sqlx::query_scalar(
 		"SELECT name FROM sqlite_master
 		 WHERE type = 'table' AND name = 'schema_migrations'
@@ -388,14 +548,15 @@ async fn reject_legacy_schema(pool: &SqlitePool) -> Result<(), StoreError> {
 	)
 	.fetch_optional(pool)
 	.await?;
-	match legacy {
-		None => Ok(()),
-		Some(_) => Err(StoreError::Integrity(
-			"the store was written by a pre-release schema tracker; delete \
-			 the store file and let jetd recreate it"
-				.into(),
-		)),
-	}
+	Ok(legacy.is_some())
+}
+
+fn legacy_schema_refusal() -> StoreError {
+	StoreError::Integrity(
+		"the store was written by a pre-release schema tracker; delete the \
+		 store file and let jetd recreate it"
+			.into(),
+	)
 }
 
 /// SQLite's numeric value for `synchronous = FULL`.
@@ -550,11 +711,11 @@ mod tests {
 			.unwrap();
 
 		sqlx::query("CREATE VIRTUAL TABLE fts5_probe USING fts5(body)")
-			.execute(&store.pool)
+			.execute(&store.pool())
 			.await
 			.expect("the linked SQLite build must provide FTS5");
 		let journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode")
-			.fetch_one(&store.pool)
+			.fetch_one(&store.pool())
 			.await
 			.unwrap();
 
@@ -574,7 +735,7 @@ mod tests {
 			checksum, execution_time)
 		 VALUES (99990101000000, 'written by a newer release', TRUE, X'00', 0)",
 		)
-		.execute(&store.pool)
+		.execute(&store.pool())
 		.await
 		.unwrap();
 		drop(store);
@@ -684,7 +845,7 @@ mod tests {
 			applied_at_unix_ms INTEGER NOT NULL
 		)",
 		)
-		.execute(&store.pool)
+		.execute(&store.pool())
 		.await
 		.unwrap();
 		drop(store);
@@ -754,7 +915,7 @@ mod tests {
 			"DROP TABLE _sqlx_migrations",
 			"CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)",
 		] {
-			sqlx::query(statement).execute(&store.pool).await.unwrap();
+			sqlx::query(statement).execute(&store.pool()).await.unwrap();
 		}
 		drop(store);
 

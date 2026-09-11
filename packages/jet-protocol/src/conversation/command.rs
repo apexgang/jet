@@ -266,6 +266,14 @@ pub enum CommandRequest {
 	/// Begin a new authority epoch of the Security audit, carrying on past
 	/// an integrity failure and recording the gap it leaves behind.
 	BeginAuditEpoch,
+	/// Restore a verified Recovery snapshot over the damaged store of a
+	/// Plane in read-only Recovery mode, which then serves again. The
+	/// damaged database is kept beside the store, never deleted
+	/// (ADR-0077).
+	RestoreRecoverySnapshot {
+		/// The snapshot, by the name the status reports it under.
+		snapshot: String,
+	},
 	/// Open or close the Plane's Pairing gate, which decides whether a new
 	/// GUI client may begin Pairing at all. It does not alter the clients
 	/// that are already Paired.
