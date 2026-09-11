@@ -129,6 +129,7 @@ impl Store {
 					audit_head::write(&self.database, self.plane_id, head)
 						.map_err(E::from)?;
 				}
+				self.snapshots.mark_dirty();
 				Ok(value)
 			}
 			Err(error) => {

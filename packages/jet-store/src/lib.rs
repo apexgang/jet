@@ -29,6 +29,7 @@ mod run;
 mod schedule;
 mod search;
 mod setting;
+mod snapshot;
 mod terminal;
 mod transaction;
 mod turn_queue;
@@ -92,6 +93,10 @@ pub use run::execution::RunExecutionRecord;
 pub use search::{
 	NewSearchDocument, SEARCH_DOCUMENT_BODY_LIMIT, SEARCH_HIT_LIMIT,
 	SEARCH_INDEX_BATCH_LIMIT, SearchHitRecord,
+};
+pub use snapshot::{
+	DAILY_RETENTION, ROLLBACK_RETENTION, RecoverySnapshot, SnapshotReason,
+	WEEKLY_RETENTION, snapshots_dir,
 };
 pub use transaction::{ReadTransaction, WriteTransaction};
 pub use usage::quota::{
@@ -162,10 +167,16 @@ pub struct Store {
 	/// This Plane's durable identity, read once at open. It binds the audit
 	/// head to the store it describes.
 	plane_id: Uuid,
+	/// When the next routine Recovery snapshot is due (ADR-0097).
+	snapshots: snapshot::Tracker,
 }
 
 impl Store {
 	/// Opens or creates the store at `path` and applies pending migrations.
+	///
+	/// A store whose schema is behind this build is copied into a verified
+	/// Recovery snapshot first, so the release before this one has a
+	/// rollback point whatever the migration does (ADR-0073, ADR-0097).
 	///
 	/// The Security audit head lives beside the database rather than in it,
 	/// at [`audit_head_path`], so a database restored from a snapshot
@@ -174,7 +185,8 @@ impl Store {
 	/// # Errors
 	///
 	/// Returns [`StoreError::Unavailable`] when the file cannot be opened
-	/// and [`StoreError::Integrity`] when its schema cannot be prepared.
+	/// and [`StoreError::Integrity`] when its schema cannot be prepared or
+	/// the pre-migration snapshot fails verification.
 	pub async fn open(path: &Path) -> Result<Self, StoreError> {
 		let pool = SqlitePoolOptions::new()
 			// One connection, so reads and writes serialize exactly as they
@@ -203,6 +215,18 @@ impl Store {
 			.await?;
 		verify_durability(&pool).await?;
 		reject_legacy_schema(&pool).await?;
+		let schema = migrations::state(&pool).await?;
+		let snapshots = snapshot::Tracker::at_open(path, schema)?;
+		if schema == migrations::SchemaState::Behind {
+			snapshot::create(
+				&pool,
+				path,
+				&snapshots,
+				SnapshotReason::Migration,
+				snapshot::wall_clock_unix_ms(),
+			)
+			.await?;
+		}
 		migrations::apply(&pool).await?;
 		plane::ensure_present(&pool).await?;
 		let plane_id = plane::read(&pool).await?.plane_id;
@@ -210,7 +234,64 @@ impl Store {
 			pool,
 			database: path.to_owned(),
 			plane_id,
+			snapshots,
 		})
+	}
+
+	/// Takes a verified Recovery snapshot for `reason`, stamped
+	/// `now_unix_ms`, and rotates the retained set (ADR-0097).
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Unavailable`] when the copy cannot be written
+	/// and [`StoreError::Integrity`] when it fails verification.
+	pub async fn snapshot(
+		&self,
+		reason: SnapshotReason,
+		now_unix_ms: i64,
+	) -> Result<RecoverySnapshot, StoreError> {
+		snapshot::create(
+			&self.pool,
+			&self.database,
+			&self.snapshots,
+			reason,
+			now_unix_ms,
+		)
+		.await
+	}
+
+	/// Takes the snapshot for `reason` only when one is due: a write has
+	/// committed since the newest snapshot, and no snapshot yet belongs to
+	/// the day of `now_unix_ms`. This is how the first meaningful change of
+	/// a day, and destructive maintenance, get at most one snapshot a day
+	/// between them (ADR-0097).
+	///
+	/// # Errors
+	///
+	/// Returns the error of [`Store::snapshot`] when a due snapshot cannot
+	/// be taken.
+	pub async fn snapshot_if_due(
+		&self,
+		reason: SnapshotReason,
+		now_unix_ms: i64,
+	) -> Result<Option<RecoverySnapshot>, StoreError> {
+		if self.snapshots.is_due(now_unix_ms) {
+			Ok(Some(self.snapshot(reason, now_unix_ms).await?))
+		} else {
+			Ok(None)
+		}
+	}
+
+	/// Every verified Recovery snapshot of this store, newest first.
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Unavailable`] when the snapshot directory
+	/// cannot be read.
+	pub fn recovery_snapshots(
+		&self,
+	) -> Result<Vec<RecoverySnapshot>, StoreError> {
+		snapshot::list(&self.database)
 	}
 
 	/// Current Plane identity and daemon start count.
@@ -373,6 +454,7 @@ fn is_unavailable(error: &sqlx::Error) -> bool {
 #[cfg(test)]
 mod tests {
 	use pretty_assertions::assert_eq;
+	use sqlx::Connection as _;
 	use uuid::Uuid;
 
 	use super::{
@@ -610,6 +692,52 @@ mod tests {
 		let reopened = Store::open(&path).await.unwrap();
 
 		assert_eq!(reopened.plane().await.unwrap().daemon_starts, 0);
+	}
+
+	/// A store whose schema is behind this build is copied into a verified
+	/// pre-migration snapshot before anything is applied, and a store with
+	/// no schema at all is not (ADR-0073, ADR-0097).
+	#[tokio::test]
+	async fn a_store_behind_this_build_is_snapshotted_before_migrating() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("plane.sqlite3");
+		let fresh = Store::open(&path).await.unwrap();
+		assert_eq!(fresh.recovery_snapshots().unwrap(), vec![]);
+		fresh.close().await;
+		std::fs::remove_file(&path).unwrap();
+		// The driver's own tracker table, with nothing applied yet: the
+		// shape of a store every migration of this build is ahead of.
+		let mut connection = sqlx::SqliteConnection::connect_with(
+			&super::connect_options(&path),
+		)
+		.await
+		.unwrap();
+		sqlx::query(
+			"CREATE TABLE _sqlx_migrations (
+				version BIGINT PRIMARY KEY,
+				description TEXT NOT NULL,
+				installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				success BOOLEAN NOT NULL,
+				checksum BLOB NOT NULL,
+				execution_time BIGINT NOT NULL
+			)",
+		)
+		.execute(&mut connection)
+		.await
+		.unwrap();
+		connection.close().await.unwrap();
+
+		let migrated = Store::open(&path).await.unwrap();
+
+		let snapshots = migrated.recovery_snapshots().unwrap();
+		assert_eq!(
+			snapshots
+				.iter()
+				.map(|snapshot| snapshot.reason)
+				.collect::<Vec<_>>(),
+			vec![crate::SnapshotReason::Migration]
+		);
+		assert_eq!(migrated.plane().await.unwrap().daemon_starts, 0);
 	}
 
 	/// A store the pre-release tracker still owns has nothing the migrator can

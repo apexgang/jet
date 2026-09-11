@@ -83,6 +83,8 @@ pub use schedule::{
 	ScheduleFiring, ScheduleFiringOutcome, ScheduledTask, ScheduledTasks,
 };
 mod status;
+mod store_recovery;
+pub use store_recovery::{RecoverySnapshot, SnapshotReason};
 mod terminal;
 #[cfg(test)]
 mod test_support;

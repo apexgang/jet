@@ -84,6 +84,14 @@ impl Core {
 			.expect("Workspace home has a parent")
 			.join("crafts");
 		if security == SecurityState::Trusted {
+			// What the sweep and the collection are about to remove is
+			// copied first, at most once a day (ADR-0097).
+			store
+				.snapshot_if_due(
+					jet_store::SnapshotReason::Maintenance,
+					unix_ms(started_at),
+				)
+				.await?;
 			audit::sweep_retention(&store, unix_ms(started_at)).await?;
 			craft::artifact_collection::collect_unreferenced(
 				&store,

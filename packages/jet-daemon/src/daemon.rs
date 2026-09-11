@@ -199,6 +199,20 @@ pub(crate) async fn run(
 				retry = true;
 				eprintln!("jetd: cannot apply child Energy policy: {error}");
 			}
+			// Every Command and Effect commit wakes this loop, so the first
+			// meaningful change of a day is copied soon after it lands
+			// (ADR-0097). A failed copy is retried on the next wake.
+			match recovery_core.snapshot_if_due().await {
+				Ok(Some(snapshot)) => {
+					eprintln!("jetd: took Recovery snapshot {}", snapshot.name);
+				}
+				Ok(None) => {}
+				Err(error) => {
+					eprintln!(
+						"jetd: cannot take the Recovery snapshot: {error}"
+					);
+				}
+			}
 			// Sweep once on startup, including durable extension/install work that
 			// has no active Run or schedule to supply the first wakeup.
 			if retry {
