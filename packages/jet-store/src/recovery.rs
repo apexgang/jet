@@ -11,17 +11,21 @@
 
 use crate::{
 	Opened, StoreError,
-	snapshot::{self, Tracker},
+	snapshot::{self, Tracker, unavailable},
 };
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::{
 	fs,
 	path::{Path, PathBuf},
 };
 
-/// Suffix the damaged database and its journal files keep when a snapshot
-/// is restored over them, followed by the restoration's stamp.
+/// Suffix the database and its journal files keep when a snapshot is
+/// restored over them, followed by the restoration's stamp: what the
+/// check found them to be.
 const DAMAGED_SUFFIX: &str = ".damaged-";
+const UNMIGRATED_SUFFIX: &str = ".unmigrated-";
+const REPLACED_SUFFIX: &str = ".replaced-";
 
 /// The companions SQLite keeps beside a database in write-ahead-log mode.
 const JOURNAL_SUFFIXES: [&str; 2] = ["-wal", "-shm"];
@@ -55,12 +59,15 @@ pub enum IntegrityFailureReason {
 }
 
 /// What a restoration replaced and with what.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RestoredStore {
 	/// The snapshot now serving as the database.
 	pub snapshot: String,
-	/// The file name the damaged database was moved to, beside the store.
-	pub damaged: String,
+	/// The file name the previous database was moved to, beside the
+	/// store: `plane.sqlite3.damaged-<stamp>` after a failed integrity
+	/// check, `plane.sqlite3.unmigrated-<stamp>` after a failed migration,
+	/// which left it intact at its previous version.
+	pub replaced: String,
 }
 
 /// Runs SQLite's lightweight check over the database behind `pool` and
@@ -73,23 +80,31 @@ pub(crate) async fn quick_check(
 	let report: Vec<String> = sqlx::query_scalar("PRAGMA quick_check")
 		.fetch_all(pool)
 		.await?;
+	Ok(findings(report))
+}
+
+/// What an integrity pragma reported, minus the one row that means it
+/// found nothing.
+pub(crate) fn findings(report: Vec<String>) -> Vec<String> {
 	if report.len() == 1 && report[0] == "ok" {
-		Ok(vec![])
+		vec![]
 	} else {
-		Ok(report)
+		report
 	}
 }
 
-/// Moves the database and its journal files aside under a damaged name,
-/// copies the verified snapshot `name` into their place, and reopens it.
+/// Moves the database and its journal files aside under a name that says
+/// what `integrity` found them to be, copies the verified snapshot `name`
+/// into their place, and reopens it.
 pub(crate) async fn restore(
 	database: &Path,
 	snapshots: &Tracker,
+	integrity: &StoreIntegrity,
 	name: &str,
 	now_unix_ms: i64,
 ) -> Result<(Opened, RestoredStore), StoreError> {
 	let source = snapshot::locate(database, name)?;
-	let damaged = damaged_name(database, now_unix_ms)?;
+	let damaged = replaced_name(database, integrity, now_unix_ms)?;
 	let directory = database.parent().ok_or_else(|| {
 		StoreError::Unavailable("store has no directory".into())
 	})?;
@@ -112,13 +127,13 @@ pub(crate) async fn restore(
 	fs::File::open(directory)
 		.and_then(|dir| dir.sync_all())
 		.map_err(|error| unavailable(directory, &error))?;
-	let (opened, _schema) = crate::connect(database, snapshots).await?;
+	let opened = crate::open::connect(database, snapshots).await?;
 	snapshots.mark_dirty();
 	Ok((
 		opened,
 		RestoredStore {
 			snapshot: name.to_owned(),
-			damaged,
+			replaced: damaged,
 		},
 	))
 }
@@ -141,8 +156,9 @@ pub(crate) fn migration_failure(
 	}
 }
 
-fn damaged_name(
+fn replaced_name(
 	database: &Path,
+	integrity: &StoreIntegrity,
 	now_unix_ms: i64,
 ) -> Result<String, StoreError> {
 	let file = database
@@ -151,7 +167,15 @@ fn damaged_name(
 		.ok_or_else(|| {
 			StoreError::Unavailable("store file name is not valid UTF-8".into())
 		})?;
-	Ok(format!("{file}{DAMAGED_SUFFIX}{now_unix_ms}"))
+	let suffix = match integrity {
+		StoreIntegrity::Verified => REPLACED_SUFFIX,
+		StoreIntegrity::Failed(IntegrityFailure { reason, .. }) => match reason
+		{
+			IntegrityFailureReason::IntegrityCheck => DAMAGED_SUFFIX,
+			IntegrityFailureReason::Migration => UNMIGRATED_SUFFIX,
+		},
+	};
+	Ok(format!("{file}{suffix}{now_unix_ms}"))
 }
 
 fn sibling(database: &Path, suffix: &str) -> Result<PathBuf, StoreError> {
@@ -173,10 +197,6 @@ fn rename_aside(from: &Path, to: &Path) -> Result<(), StoreError> {
 		)));
 	}
 	fs::rename(from, to).map_err(|error| unavailable(from, &error))
-}
-
-fn unavailable(path: &Path, error: &std::io::Error) -> StoreError {
-	StoreError::Unavailable(format!("{}: {error}", path.display()))
 }
 
 #[cfg(test)]
@@ -238,12 +258,12 @@ mod tests {
 			restored,
 			RestoredStore {
 				snapshot: snapshot.name.clone(),
-				damaged: format!("plane.sqlite3.damaged-{}", NOW_UNIX_MS + 1),
+				replaced: format!("plane.sqlite3.damaged-{}", NOW_UNIX_MS + 1),
 			}
 		);
 		assert_eq!(damaged.integrity(), StoreIntegrity::Verified);
 		assert_eq!(damaged.plane().await.unwrap(), plane);
-		assert!(dir.path().join(&restored.damaged).exists());
+		assert!(dir.path().join(&restored.replaced).exists());
 		// The restored store writes again, and its snapshot is still there.
 		damaged.record_daemon_start().await.unwrap();
 		assert_eq!(
@@ -264,7 +284,7 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let path = dir.path().join("plane.sqlite3");
 		let mut connection = sqlx::SqliteConnection::connect_with(
-			&crate::connect_options(&path),
+			&crate::open::connect_options(&path),
 		)
 		.await
 		.unwrap();
@@ -296,14 +316,32 @@ mod tests {
 		};
 		assert_eq!(failure.reason, IntegrityFailureReason::Migration);
 		// The rollback point was taken before the attempt.
-		assert_eq!(
+		let rollback = SnapshotReason::Migration { applied_version: 0 };
+		let reasons = |store: &Store| {
 			store
 				.recovery_snapshots()
 				.unwrap()
 				.into_iter()
 				.map(|s| s.reason)
-				.collect::<Vec<_>>(),
-			vec![SnapshotReason::Migration]
+				.collect::<Vec<_>>()
+		};
+		assert_eq!(reasons(&store), vec![rollback]);
+		// Restoring it over the intact previous version moves that aside
+		// under an honest name, tries the migration again, and fails the
+		// same way, with the two attempts sharing one rollback point.
+		let name = store.recovery_snapshots().unwrap()[0].name.clone();
+		let restored = store.restore(&name, NOW_UNIX_MS).await.unwrap();
+		assert_eq!(
+			(
+				restored.replaced.as_str(),
+				store.integrity(),
+				reasons(&store).len()
+			),
+			(
+				"plane.sqlite3.unmigrated-1700000000000",
+				StoreIntegrity::Failed(failure),
+				1
+			)
 		);
 	}
 }

@@ -1,7 +1,7 @@
 //! Store Recovery: mode, reason, and the snapshots a Plane can restore.
 
 use jet_core::{
-	RecoveryMode, RecoveryReason, RecoverySnapshot, RecoveryStatus,
+	IntegrityFailureReason, RecoveryMode, RecoverySnapshot, RecoveryStatus,
 	SnapshotReason,
 };
 use jet_protocol as wire;
@@ -20,12 +20,12 @@ pub(super) fn recovery_status(status: &RecoveryStatus) -> wire::RecoveryStatus {
 	}
 }
 
-fn recovery_reason(reason: RecoveryReason) -> wire::RecoveryReason {
+fn recovery_reason(reason: IntegrityFailureReason) -> wire::RecoveryReason {
 	match reason {
-		RecoveryReason::IntegrityCheckFailed => {
+		IntegrityFailureReason::IntegrityCheck => {
 			wire::RecoveryReason::IntegrityCheckFailed
 		}
-		RecoveryReason::MigrationFailed => {
+		IntegrityFailureReason::Migration => {
 			wire::RecoveryReason::MigrationFailed
 		}
 	}
@@ -37,7 +37,7 @@ fn snapshot(snapshot: &RecoverySnapshot) -> wire::RecoverySnapshot {
 		taken_at_unix_ms: snapshot.taken_at_unix_ms,
 		reason: match snapshot.reason {
 			SnapshotReason::Daily => wire::SnapshotReason::Daily,
-			SnapshotReason::Migration => wire::SnapshotReason::Migration,
+			SnapshotReason::Migration { .. } => wire::SnapshotReason::Migration,
 			SnapshotReason::Maintenance => wire::SnapshotReason::Maintenance,
 		},
 		bytes: snapshot.bytes,

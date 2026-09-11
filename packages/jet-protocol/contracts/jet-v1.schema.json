@@ -3486,8 +3486,8 @@
           "description": "The Plane serves again from the restored snapshot.",
           "type": "object",
           "properties": {
-            "damaged": {
-              "description": "The file name, beside the store, the damaged database was\nmoved to.",
+            "replaced": {
+              "description": "The file name, beside the store, the previous database was\nmoved to: `plane.sqlite3.damaged-<stamp>` after a failed\nintegrity check, `plane.sqlite3.unmigrated-<stamp>` after a\nfailed migration.",
               "type": "string"
             },
             "snapshot": {
@@ -3502,7 +3502,7 @@
           "required": [
             "type",
             "snapshot",
-            "damaged"
+            "replaced"
           ]
         },
         {

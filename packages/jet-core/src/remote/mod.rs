@@ -63,7 +63,7 @@ pub(crate) fn invalidated_client(
 		| CommandOutcome::PairingClaimed { .. }
 		| CommandOutcome::PairingConfirmed { .. }
 		| CommandOutcome::AuditEpochBegun { .. }
-		| CommandOutcome::RecoverySnapshotRestored { .. }
+		| CommandOutcome::RecoverySnapshotRestored(_)
 		| CommandOutcome::ProjectRegistered(_)
 		| CommandOutcome::WorkspacePromotionRecorded(_)
 		| CommandOutcome::Terminal(_)

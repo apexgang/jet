@@ -207,7 +207,7 @@ pub(super) fn redacted_for_receipt(
 			| CommandOutcome::AccountBound(_)
 			| CommandOutcome::AccountUnbound { .. }
 			| CommandOutcome::AuditEpochBegun { .. }
-			| CommandOutcome::RecoverySnapshotRestored { .. }
+			| CommandOutcome::RecoverySnapshotRestored(_)
 			| CommandOutcome::PairingGateSet { .. }
 			| CommandOutcome::PairingClaimed { .. }
 			| CommandOutcome::PairingConfirmed { .. }

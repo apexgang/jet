@@ -2,7 +2,7 @@
 //! refusal every other Command meets while the store is in doubt
 //! (ADR-0077).
 
-use super::{RecoveryMode, RecoveryReason};
+use super::RecoveryMode;
 use crate::{
 	Actor, Core,
 	audit::{self, AuditDecision, AuditSubject, Decision},
@@ -10,21 +10,30 @@ use crate::{
 	error::CoreError,
 	security::SecurityState,
 };
-use jet_store::StoreIntegrity;
+use jet_store::{IntegrityFailureReason, StoreIntegrity};
 
 /// The refusal a Command meets in read-only Recovery mode. It is
 /// `unavailable` and retryable: the same Command succeeds once a snapshot
 /// has been restored, and no receipt records it (ADR-0093).
-pub(crate) fn read_only(reason: RecoveryReason) -> CoreError {
+pub(crate) fn read_only(reason: IntegrityFailureReason) -> CoreError {
 	CoreError::unavailable(
 		"recovery.read_only",
 		"this Plane is in Recovery mode: its store failed its checks, so it \
 		 accepts no new Runs or changes until a verified Recovery snapshot \
 		 is restored",
 		match reason {
-			RecoveryReason::IntegrityCheckFailed => "integrity check failed",
-			RecoveryReason::MigrationFailed => "schema migration failed",
+			IntegrityFailureReason::IntegrityCheck => "integrity check failed",
+			IntegrityFailureReason::Migration => "schema migration failed",
 		},
+	)
+}
+
+/// The refusal a restoration meets on a Plane that serves.
+pub(crate) fn not_read_only() -> CoreError {
+	CoreError::conflict(
+		"recovery.not_read_only",
+		"this Plane is serving; only a Plane in Recovery mode restores a \
+		 snapshot over its store",
 	)
 }
 
@@ -32,9 +41,16 @@ impl Core {
 	/// Restores the verified snapshot called `snapshot` over the damaged
 	/// store and brings the Plane back to serving: the daemon start is
 	/// recorded, the Security audit validated against the restored state,
-	/// the restoration itself recorded in the audit, and the search index
-	/// caught up, before workers waiting on [`Core::wait_until_serving`]
-	/// resume (ADR-0077).
+	/// the restoration itself recorded in the audit when that chain is
+	/// whole, and the search index caught up, before workers waiting on
+	/// [`Core::wait_until_serving`] resume (ADR-0077).
+	///
+	/// A snapshot older than the newest audit record leaves the audit
+	/// head naming a record the store no longer holds. That is the audit's
+	/// own evidence of the rollback, and appending to the chain would
+	/// publish a new head over it, so the Plane stays Security-degraded
+	/// until an owner begins a new epoch, whose first record says so
+	/// (ADR-0105).
 	///
 	/// This Command runs outside the receipt pipeline, because the store a
 	/// receipt would be written to is the one being replaced. It is not
@@ -56,11 +72,7 @@ impl Core {
 		snapshot: String,
 	) -> Result<CommandOutcome, CoreError> {
 		let RecoveryMode::ReadOnly(_) = self.recovery_mode() else {
-			return Err(CoreError::conflict(
-				"recovery.not_read_only",
-				"this Plane is serving; only a Plane in Recovery mode \
-				 restores a snapshot over its store",
-			));
+			return Err(not_read_only());
 		};
 		// Nothing else decides an Effect while the store is being replaced.
 		let _reconciliation = self.effect_reconciliation.lock().await;
@@ -83,26 +95,25 @@ impl Core {
 		// (ADR-0105).
 		let security = SecurityState::of(self.store.validate_audit().await?);
 		*self.security.write().await = security;
-		self.store
-			.write(async |tx| {
-				audit::record(
-					tx,
-					actor,
-					Decision::succeeded(
-						AuditDecision::RecoverySnapshotRestored,
-						AuditSubject::Plane,
-					),
-					now_unix_ms,
-				)
-				.await
-			})
-			.await?;
+		if security == SecurityState::Trusted {
+			self.store
+				.write(async |tx| {
+					audit::record(
+						tx,
+						actor,
+						Decision::succeeded(
+							AuditDecision::RecoverySnapshotRestored,
+							AuditSubject::Plane,
+						),
+						now_unix_ms,
+					)
+					.await
+				})
+				.await?;
+		}
 		self.index_search().await?;
 		self.recovery.send_replace(RecoveryMode::Serving);
-		Ok(CommandOutcome::RecoverySnapshotRestored {
-			snapshot: restored.snapshot,
-			damaged: restored.damaged,
-		})
+		Ok(CommandOutcome::RecoverySnapshotRestored(restored))
 	}
 }
 
@@ -111,7 +122,7 @@ mod tests {
 	use super::*;
 	use crate::{
 		Command, ErrorCategory, PairingGate, Query, QueryResult,
-		RecoveryStatus, SnapshotReason,
+		RecoveryStatus, RestoredStore, SnapshotReason,
 		test_support::{
 			FixedProbe, ManualClock, actor, equipped, request, start_core_with,
 		},
@@ -135,13 +146,41 @@ mod tests {
 		file.sync_all().unwrap();
 	}
 
-	async fn status(core: &Core) -> RecoveryStatus {
+	async fn status(core: &Core) -> (RecoveryStatus, SecurityState) {
 		let QueryResult::Status(status) =
 			core.query(&actor(), Query::Status).await.unwrap()
 		else {
 			panic!("expected a status snapshot");
 		};
-		status.recovery
+		(status.recovery, status.security)
+	}
+
+	async fn decisions(core: &Core) -> Vec<String> {
+		let QueryResult::SecurityAudit(page) = core
+			.query(
+				&actor(),
+				Query::SecurityAudit {
+					after: crate::AuditSequence(0),
+				},
+			)
+			.await
+			.unwrap()
+		else {
+			panic!("expected an audit page");
+		};
+		page.entries
+			.into_iter()
+			.map(|entry| entry.decision)
+			.collect()
+	}
+
+	async fn start(path: &Path, clock: &Arc<ManualClock>) -> Core {
+		start_core_with(
+			path,
+			Arc::clone(clock) as Arc<dyn crate::clock::Clock>,
+			FixedProbe::new(equipped()),
+		)
+		.await
 	}
 
 	/// A core on a damaged store answers Queries, refuses Commands without
@@ -153,12 +192,7 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let path = dir.path().join("plane.sqlite3");
 		let clock = ManualClock::at(UNIX_EPOCH + NOW);
-		let core = start_core_with(
-			&path,
-			Arc::clone(&clock) as Arc<dyn crate::clock::Clock>,
-			FixedProbe::new(equipped()),
-		)
-		.await;
+		let core = start(&path, &clock).await;
 		let gate = |gate| request(Command::SetPairingGate { gate });
 		core.execute(&actor(), gate(PairingGate::Closed))
 			.await
@@ -168,20 +202,18 @@ mod tests {
 		drop(core);
 		damage(&path);
 
-		let core = start_core_with(
-			&path,
-			Arc::clone(&clock) as Arc<dyn crate::clock::Clock>,
-			FixedProbe::new(equipped()),
-		)
-		.await;
+		let core = start(&path, &clock).await;
 		assert_eq!(
 			status(&core).await,
-			RecoveryStatus {
-				mode: RecoveryMode::ReadOnly(
-					RecoveryReason::IntegrityCheckFailed
-				),
-				snapshots: vec![snapshot.clone()],
-			}
+			(
+				RecoveryStatus {
+					mode: RecoveryMode::ReadOnly(
+						IntegrityFailureReason::IntegrityCheck
+					),
+					snapshots: vec![snapshot.clone()],
+				},
+				SecurityState::Trusted,
+			)
 		);
 		let refused = core
 			.execute(&actor(), gate(PairingGate::Open))
@@ -203,17 +235,27 @@ mod tests {
 			.unwrap();
 		assert_eq!(
 			outcome,
-			CommandOutcome::RecoverySnapshotRestored {
+			CommandOutcome::RecoverySnapshotRestored(RestoredStore {
 				snapshot: snapshot.name.clone(),
-				damaged: "plane.sqlite3.damaged-1700000000000".into(),
-			}
+				replaced: "plane.sqlite3.damaged-1700000000000".into(),
+			})
 		);
 		assert_eq!(
 			status(&core).await,
-			RecoveryStatus {
-				mode: RecoveryMode::Serving,
-				snapshots: vec![snapshot.clone()],
-			}
+			(
+				RecoveryStatus {
+					mode: RecoveryMode::Serving,
+					snapshots: vec![snapshot.clone()],
+				},
+				SecurityState::Trusted,
+			)
+		);
+		assert_eq!(
+			decisions(&core).await,
+			vec![
+				"pairing.gate_closed".to_string(),
+				"recovery.snapshot_restored".to_string()
+			]
 		);
 		assert!(
 			dir.path()
@@ -236,6 +278,61 @@ mod tests {
 		assert_eq!(again.code, "recovery.not_read_only");
 	}
 
+	/// A snapshot older than the newest audit record leaves the head
+	/// naming a record the restored store does not hold. The restoration
+	/// does not paper over that: the Plane serves Security-degraded, and
+	/// only an owner's new epoch carries the audit on (ADR-0105).
+	#[tokio::test]
+	async fn restoring_behind_the_audit_head_leaves_the_plane_degraded() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("plane.sqlite3");
+		let clock = ManualClock::at(UNIX_EPOCH + NOW);
+		let core = start(&path, &clock).await;
+		let gate = |gate| request(Command::SetPairingGate { gate });
+		core.execute(&actor(), gate(PairingGate::Closed))
+			.await
+			.unwrap();
+		let snapshot = core.snapshot_if_due().await.unwrap().unwrap();
+		// An audited decision the snapshot does not hold.
+		core.execute(&actor(), gate(PairingGate::Open))
+			.await
+			.unwrap();
+		core.close().await;
+		drop(core);
+		damage(&path);
+
+		let core = start(&path, &clock).await;
+		core.execute(
+			&actor(),
+			request(Command::RestoreRecoverySnapshot {
+				snapshot: snapshot.name,
+			}),
+		)
+		.await
+		.unwrap();
+		let (recovery, security) = status(&core).await;
+		let SecurityState::Degraded(degradation) = security else {
+			panic!("the rollback went unnoticed: {security:?}");
+		};
+		assert_eq!(
+			(recovery.mode, degradation.breach, decisions(&core).await),
+			(
+				RecoveryMode::Serving,
+				jet_store::AuditBreach::HeadNotInStore,
+				vec!["pairing.gate_closed".to_string()]
+			)
+		);
+		// Restarting sees the same evidence: nothing republished the head.
+		core.close().await;
+		drop(core);
+		let core = start(&path, &clock).await;
+		assert_eq!(status(&core).await.1, security);
+		core.execute(&actor(), request(Command::BeginAuditEpoch))
+			.await
+			.unwrap();
+		assert_eq!(status(&core).await.1, SecurityState::Trusted);
+	}
+
 	/// A snapshot the directory does not hold cannot be restored, and the
 	/// Plane stays where it was.
 	#[tokio::test]
@@ -243,21 +340,11 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let path = dir.path().join("plane.sqlite3");
 		let clock = ManualClock::at(UNIX_EPOCH + NOW);
-		let core = start_core_with(
-			&path,
-			Arc::clone(&clock) as Arc<dyn crate::clock::Clock>,
-			FixedProbe::new(equipped()),
-		)
-		.await;
+		let core = start(&path, &clock).await;
 		core.close().await;
 		drop(core);
 		damage(&path);
-		let core = start_core_with(
-			&path,
-			Arc::clone(&clock) as Arc<dyn crate::clock::Clock>,
-			FixedProbe::new(equipped()),
-		)
-		.await;
+		let core = start(&path, &clock).await;
 		let error = core
 			.execute(
 				&actor(),
@@ -271,7 +358,7 @@ mod tests {
 			(error.code.as_str(), core.recovery_mode()),
 			(
 				"store.integrity",
-				RecoveryMode::ReadOnly(RecoveryReason::IntegrityCheckFailed)
+				RecoveryMode::ReadOnly(IntegrityFailureReason::IntegrityCheck)
 			)
 		);
 	}

@@ -42,7 +42,7 @@ pub(crate) fn outcome_version(
 	result: &Result<CommandOutcome, CoreError>,
 ) -> u32 {
 	match result {
-		Ok(CommandOutcome::RecoverySnapshotRestored { .. }) => {
+		Ok(CommandOutcome::RecoverySnapshotRestored(_)) => {
 			STORE_RECOVERY_OUTCOME_VERSION
 		}
 		Ok(CommandOutcome::AutoContinueConfigured) => {

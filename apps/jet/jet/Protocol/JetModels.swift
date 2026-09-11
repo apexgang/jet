@@ -2185,7 +2185,7 @@ public struct CommandResponsePairedClientRevoked {
 }
 
 public struct CommandResponseRecoverySnapshotRestored {
-    public let `damaged`: String
+    public let `replaced`: String
     public let `snapshot`: String
 }
 

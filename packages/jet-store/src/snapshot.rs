@@ -31,8 +31,10 @@ pub const DAILY_RETENTION: usize = 7;
 /// How many distinct weeks before those days keep their newest snapshot.
 pub const WEEKLY_RETENTION: usize = 4;
 
-/// How many pre-migration snapshots stay whatever their age: one for the
-/// current release and one for the release before it (ADR-0073).
+/// How many schema versions keep their newest pre-migration snapshot,
+/// whatever its age: the one the current release migrated from and the one
+/// before it (ADR-0073). Repeated attempts at one migration share a
+/// version, so they cannot crowd the older rollback point out.
 pub const ROLLBACK_RETENTION: usize = 2;
 
 /// Directory beside the database that holds its snapshots.
@@ -53,27 +55,46 @@ const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 pub enum SnapshotReason {
 	/// The first meaningful committed change of a day.
 	Daily,
-	/// A schema migration was about to run.
-	Migration,
+	/// A schema migration was about to run on a store at this version.
+	Migration {
+		/// The newest migration the store had applied.
+		applied_version: i64,
+	},
 	/// Destructive maintenance was about to run.
 	Maintenance,
 }
 
 impl SnapshotReason {
-	fn as_str(self) -> &'static str {
+	fn segment(self) -> String {
 		match self {
-			Self::Daily => "daily",
-			Self::Migration => "migration",
-			Self::Maintenance => "maintenance",
+			Self::Daily => "daily".into(),
+			Self::Migration { applied_version } => {
+				format!("migration-{applied_version}")
+			}
+			Self::Maintenance => "maintenance".into(),
 		}
 	}
 
 	fn parse(text: &str) -> Option<Self> {
 		match text {
 			"daily" => Some(Self::Daily),
-			"migration" => Some(Self::Migration),
 			"maintenance" => Some(Self::Maintenance),
-			_ => None,
+			_ => text.strip_prefix("migration-").and_then(|version| {
+				(!version.is_empty()
+					&& version.bytes().all(|byte| byte.is_ascii_digit()))
+				.then(|| version.parse().ok())
+				.flatten()
+				.map(|applied_version| Self::Migration { applied_version })
+			}),
+		}
+	}
+
+	/// The schema version a pre-migration snapshot is the rollback point
+	/// for, and `None` for a routine one.
+	fn rollback_version(self) -> Option<i64> {
+		match self {
+			Self::Migration { applied_version } => Some(applied_version),
+			Self::Daily | Self::Maintenance => None,
 		}
 	}
 }
@@ -141,10 +162,15 @@ pub(crate) fn wall_clock_unix_ms() -> i64 {
 /// a routine snapshot is due, never whether one is valid.
 #[derive(Debug)]
 pub(crate) struct Tracker {
-	/// A write has committed since the newest snapshot. An existing store
-	/// starts dirty, because what happened after the last snapshot before
-	/// this open is unknown; a store created just now holds nothing.
+	/// A write has committed through this store since the newest snapshot.
+	/// What happened before this open is unknown and counts as nothing:
+	/// a change the previous daemon made after its last snapshot is copied
+	/// with the next change, or before the next maintenance, whichever
+	/// comes first.
 	dirty: AtomicBool,
+	/// The database existed before this open. A store created just now
+	/// holds nothing worth copying before maintenance.
+	existed: bool,
 	/// The day of the newest snapshot, or `i64::MIN` when there is none.
 	day: AtomicI64,
 }
@@ -152,29 +178,40 @@ pub(crate) struct Tracker {
 impl Tracker {
 	pub(crate) fn at_open(database: &Path) -> Result<Self, StoreError> {
 		let newest = list(database)?.into_iter().next();
+		let existed =
+			fs::metadata(database).is_ok_and(|metadata| metadata.len() > 0);
 		Ok(Self {
-			dirty: AtomicBool::new(true),
+			dirty: AtomicBool::new(false),
+			existed,
 			day: AtomicI64::new(
 				newest.map_or(i64::MIN, |snapshot| snapshot.day()),
 			),
 		})
 	}
 
-	/// Forgets the presumed change: the store was created just now.
-	pub(crate) fn clean(&self) {
-		self.dirty.store(false, Ordering::Relaxed);
-	}
-
 	pub(crate) fn mark_dirty(&self) {
 		self.dirty.store(true, Ordering::Relaxed);
 	}
 
-	/// Whether a routine snapshot is due at `now_unix_ms`: something has
-	/// changed, and no snapshot yet belongs to that day.
-	pub(crate) fn is_due(&self, now_unix_ms: i64) -> bool {
-		self.dirty.load(Ordering::Relaxed)
-			&& self.day.load(Ordering::Relaxed)
-				!= now_unix_ms.div_euclid(DAY_MS)
+	/// Whether a snapshot for `reason` is due at `now_unix_ms`. A daily one
+	/// follows a change on a day without a snapshot; a maintenance one
+	/// precedes destructive work on a day without one, changed or not, as
+	/// long as the store predates this open; a pre-migration one is always
+	/// due.
+	pub(crate) fn is_due(
+		&self,
+		reason: SnapshotReason,
+		now_unix_ms: i64,
+	) -> bool {
+		let new_day =
+			self.day.load(Ordering::Relaxed) != now_unix_ms.div_euclid(DAY_MS);
+		match reason {
+			SnapshotReason::Daily => {
+				new_day && self.dirty.load(Ordering::Relaxed)
+			}
+			SnapshotReason::Maintenance => new_day && self.existed,
+			SnapshotReason::Migration { .. } => true,
+		}
 	}
 
 	fn captured(&self, snapshot: &RecoverySnapshot) {
@@ -194,7 +231,7 @@ pub(crate) async fn create(
 ) -> Result<RecoverySnapshot, StoreError> {
 	let directory = snapshots_dir(database);
 	prepare_directory(&directory)?;
-	let name = format!("{PREFIX}{now_unix_ms}-{}{SUFFIX}", reason.as_str());
+	let name = format!("{PREFIX}{now_unix_ms}-{}{SUFFIX}", reason.segment());
 	let pending = directory.join(format!("{PENDING_PREFIX}{name}"));
 	let target = directory.join(&name);
 	if target.exists() {
@@ -293,16 +330,14 @@ pub(crate) fn locate(
 }
 
 /// Removes every snapshot the retention tiers no longer cover, plus any
-/// pending file a crash left behind, and returns the names removed.
-pub(crate) fn rotate(database: &Path) -> Result<Vec<String>, StoreError> {
+/// pending file a crash left behind.
+pub(crate) fn rotate(database: &Path) -> Result<(), StoreError> {
 	let directory = snapshots_dir(database);
 	let snapshots = list(database)?;
 	let keep = retained(&snapshots);
-	let mut removed = vec![];
 	for snapshot in &snapshots {
 		if !keep.contains(&snapshot.name.as_str()) {
 			remove_if_present(&directory.join(&snapshot.name))?;
-			removed.push(snapshot.name.clone());
 		}
 	}
 	for entry in fs::read_dir(&directory)
@@ -317,24 +352,26 @@ pub(crate) fn rotate(database: &Path) -> Result<Vec<String>, StoreError> {
 			remove_if_present(&entry.path())?;
 		}
 	}
-	Ok(removed)
+	Ok(())
 }
 
 /// The names retention keeps out of `snapshots`, which must be newest
 /// first: the newest of each of the [`DAILY_RETENTION`] newest days, the
 /// newest of each of the [`WEEKLY_RETENTION`] weeks before those days, and
-/// the [`ROLLBACK_RETENTION`] newest pre-migration snapshots.
+/// the newest pre-migration snapshot of each of the [`ROLLBACK_RETENTION`]
+/// newest schema versions.
 fn retained(snapshots: &[RecoverySnapshot]) -> Vec<&str> {
 	let mut keep = vec![];
 	let mut days: Vec<i64> = vec![];
 	let mut weeks: Vec<i64> = vec![];
-	let mut rollback = 0;
+	let mut versions: Vec<i64> = vec![];
 	for snapshot in snapshots {
 		let mut kept = false;
-		if snapshot.reason == SnapshotReason::Migration
-			&& rollback < ROLLBACK_RETENTION
+		if let Some(version) = snapshot.reason.rollback_version()
+			&& versions.len() < ROLLBACK_RETENTION
+			&& !versions.contains(&version)
 		{
-			rollback += 1;
+			versions.push(version);
 			kept = true;
 		}
 		if days.len() < DAILY_RETENTION {
@@ -367,12 +404,13 @@ async fn verify(pending: &Path) -> Result<(), StoreError> {
 		.fetch_all(&mut connection)
 		.await?;
 	connection.close().await?;
-	if report.len() == 1 && report[0] == "ok" {
+	let findings = crate::recovery::findings(report);
+	if findings.is_empty() {
 		Ok(())
 	} else {
 		Err(StoreError::Integrity(format!(
 			"snapshot failed its integrity check with {} finding(s)",
-			report.len()
+			findings.len()
 		)))
 	}
 }
@@ -420,7 +458,8 @@ fn remove_if_present(path: &Path) -> Result<(), StoreError> {
 	}
 }
 
-fn unavailable(path: &Path, error: &std::io::Error) -> StoreError {
+/// An I/O failure at `path`, filed as the store being unreachable.
+pub(crate) fn unavailable(path: &Path, error: &std::io::Error) -> StoreError {
 	StoreError::Unavailable(format!("{}: {error}", path.display()))
 }
 
@@ -432,6 +471,13 @@ mod tests {
 
 	const NOW_UNIX_MS: i64 = 1_700_000_000_000;
 
+	const MIGRATION: SnapshotReason = SnapshotReason::Migration {
+		applied_version: 20_260_910_090_010,
+	};
+	const OLDER_MIGRATION: SnapshotReason = SnapshotReason::Migration {
+		applied_version: 20_260_904_185_326,
+	};
+
 	fn snapshot(
 		taken_at_unix_ms: i64,
 		reason: SnapshotReason,
@@ -439,7 +485,7 @@ mod tests {
 		RecoverySnapshot {
 			name: format!(
 				"{PREFIX}{taken_at_unix_ms}-{}{SUFFIX}",
-				reason.as_str()
+				reason.segment()
 			),
 			taken_at_unix_ms,
 			reason,
@@ -454,15 +500,16 @@ mod tests {
 	#[test]
 	fn a_snapshot_name_round_trips_and_rejects_strangers() {
 		let parsed = RecoverySnapshot::parse(
-			"plane-1700000000000-migration.sqlite3",
+			"plane-1700000000000-migration-20260910090010.sqlite3",
 			42,
 		);
 		assert_eq!(
 			parsed,
 			Some(RecoverySnapshot {
-				name: "plane-1700000000000-migration.sqlite3".into(),
+				name: "plane-1700000000000-migration-20260910090010.sqlite3"
+					.into(),
 				taken_at_unix_ms: 1_700_000_000_000,
-				reason: SnapshotReason::Migration,
+				reason: MIGRATION,
 				bytes: 42,
 			})
 		);
@@ -471,6 +518,8 @@ mod tests {
 			".pending-plane-1700000000000-daily.sqlite3",
 			"plane-abc-daily.sqlite3",
 			"plane-1700000000000-hourly.sqlite3",
+			"plane-1700000000000-migration.sqlite3",
+			"plane-1700000000000-migration-x.sqlite3",
 			"plane--daily.sqlite3",
 		] {
 			assert_eq!(
@@ -482,8 +531,10 @@ mod tests {
 	}
 
 	/// Seven days keep their newest copy, the four weeks before them keep
-	/// one each, and the two newest pre-migration snapshots stay however
-	/// old they are (ADR-0097).
+	/// one each, and the two newest schema versions keep their newest
+	/// pre-migration snapshot however old it is, so repeated attempts at
+	/// one migration cannot crowd the older rollback point out (ADR-0097,
+	/// ADR-0073).
 	#[test]
 	fn retention_keeps_daily_weekly_and_rollback_tiers() {
 		let day = |offset: i64| NOW_UNIX_MS - offset * DAY_MS;
@@ -504,10 +555,15 @@ mod tests {
 			snapshot(day(21), SnapshotReason::Daily),
 			snapshot(day(28), SnapshotReason::Daily),
 			snapshot(day(35), SnapshotReason::Daily),
-			// Rollback points, the oldest of which is beyond the pair.
-			snapshot(day(40), SnapshotReason::Migration),
-			snapshot(day(90), SnapshotReason::Migration),
-			snapshot(day(200), SnapshotReason::Migration),
+			// Rollback points: two attempts at the newest migration, the
+			// version before it, and one beyond the pair.
+			snapshot(day(40), MIGRATION),
+			snapshot(day(41), MIGRATION),
+			snapshot(day(90), OLDER_MIGRATION),
+			snapshot(
+				day(200),
+				SnapshotReason::Migration { applied_version: 1 },
+			),
 		];
 		snapshots.sort_by_key(|s| std::cmp::Reverse(s.taken_at_unix_ms));
 		let kept = retained(&snapshots);
@@ -525,8 +581,8 @@ mod tests {
 			(day(14), SnapshotReason::Daily),
 			(day(21), SnapshotReason::Daily),
 			(day(28), SnapshotReason::Daily),
-			(day(40), SnapshotReason::Migration),
-			(day(90), SnapshotReason::Migration),
+			(day(40), MIGRATION),
+			(day(90), OLDER_MIGRATION),
 		]
 		.into_iter()
 		.map(|(stamp, reason)| snapshot(stamp, reason).name)
@@ -628,8 +684,20 @@ mod tests {
 				.unwrap(),
 			None
 		);
+		// A store created in this process owes maintenance nothing yet; the
+		// change it holds is copied as the next day's daily snapshot.
+		assert_eq!(
+			store
+				.snapshot_if_due(
+					SnapshotReason::Maintenance,
+					NOW_UNIX_MS + DAY_MS
+				)
+				.await
+				.unwrap(),
+			None
+		);
 		let next = store
-			.snapshot_if_due(SnapshotReason::Maintenance, NOW_UNIX_MS + DAY_MS)
+			.snapshot_if_due(SnapshotReason::Daily, NOW_UNIX_MS + DAY_MS)
 			.await
 			.unwrap()
 			.unwrap();
@@ -650,16 +718,25 @@ mod tests {
 			.unwrap();
 		store.close().await;
 		let reopened = Store::open(&path).await.unwrap();
-		assert_eq!(
-			reopened
-				.snapshot_if_due(SnapshotReason::Daily, NOW_UNIX_MS + 1)
-				.await
-				.unwrap(),
-			None
-		);
+		// Nothing has changed through this store yet, and the day is
+		// taken: only maintenance on a new day is owed a copy.
+		for (reason, now) in [
+			(SnapshotReason::Daily, NOW_UNIX_MS + 1),
+			(SnapshotReason::Daily, NOW_UNIX_MS + DAY_MS),
+			(SnapshotReason::Maintenance, NOW_UNIX_MS + 1),
+		] {
+			assert_eq!(
+				reopened.snapshot_if_due(reason, now).await.unwrap(),
+				None,
+				"{reason:?} at {now}"
+			);
+		}
 		assert!(
 			reopened
-				.snapshot_if_due(SnapshotReason::Daily, NOW_UNIX_MS + DAY_MS)
+				.snapshot_if_due(
+					SnapshotReason::Maintenance,
+					NOW_UNIX_MS + DAY_MS
+				)
 				.await
 				.unwrap()
 				.is_some()

@@ -479,11 +479,9 @@ pub(super) async fn execute_new(
 		}
 		// Intercepted before the pipeline in `Core::execute`; a serving
 		// Plane answers the same way it would there.
-		Command::RestoreRecoverySnapshot { .. } => Err(CoreError::conflict(
-			"recovery.not_read_only",
-			"this Plane is serving; only a Plane in Recovery mode restores \
-			 a snapshot over its store",
-		)),
+		Command::RestoreRecoverySnapshot { .. } => {
+			Err(crate::store_recovery::not_read_only())
+		}
 		Command::SetPairingGate { gate } => {
 			pairing::set_gate(tx, actor, gate, now_unix_ms).await
 		}

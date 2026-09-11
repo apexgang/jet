@@ -16,11 +16,13 @@
 //! executions are reconnected only after the restoration succeeds.
 
 mod restore;
-pub(crate) use restore::read_only;
+pub(crate) use restore::{not_read_only, read_only};
 
 use crate::{Core, error::CoreError};
-use jet_store::{IntegrityFailureReason, StoreIntegrity};
-pub use jet_store::{RecoverySnapshot, SnapshotReason};
+use jet_store::StoreIntegrity;
+pub use jet_store::{
+	IntegrityFailureReason, RecoverySnapshot, RestoredStore, SnapshotReason,
+};
 
 /// Whether the Plane store serves or answers reads only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,17 +30,7 @@ pub enum RecoveryMode {
 	/// The store passed its checks and accepts Commands.
 	Serving,
 	/// It did not, and the Plane is in read-only Recovery mode.
-	ReadOnly(RecoveryReason),
-}
-
-/// What put the store into read-only Recovery mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RecoveryReason {
-	/// SQLite's integrity check reported damage.
-	IntegrityCheckFailed,
-	/// A schema migration failed, leaving the store at its previous
-	/// version (ADR-0073).
-	MigrationFailed,
+	ReadOnly(IntegrityFailureReason),
 }
 
 impl RecoveryMode {
@@ -46,16 +38,7 @@ impl RecoveryMode {
 	pub(crate) fn of(integrity: &StoreIntegrity) -> Self {
 		match integrity {
 			StoreIntegrity::Verified => Self::Serving,
-			StoreIntegrity::Failed(failure) => {
-				Self::ReadOnly(match failure.reason {
-					IntegrityFailureReason::IntegrityCheck => {
-						RecoveryReason::IntegrityCheckFailed
-					}
-					IntegrityFailureReason::Migration => {
-						RecoveryReason::MigrationFailed
-					}
-				})
-			}
+			StoreIntegrity::Failed(failure) => Self::ReadOnly(failure.reason),
 		}
 	}
 }
@@ -120,7 +103,7 @@ impl Core {
 	///
 	/// Returns a store category [`CoreError`] when the snapshot directory
 	/// cannot be read.
-	pub fn recovery_snapshots(
+	pub(crate) fn recovery_snapshots(
 		&self,
 	) -> Result<Vec<RecoverySnapshot>, CoreError> {
 		Ok(self.store.recovery_snapshots()?)

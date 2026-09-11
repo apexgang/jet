@@ -607,6 +607,6 @@
   {
     "schema": "ServerMessage",
     "valid": true,
-    "payload": "{\"kind\":\"command_result\",\"id\":1,\"result\":{\"type\":\"recovery_snapshot_restored\",\"snapshot\":\"plane-1757000000000-daily.sqlite3\",\"damaged\":\"plane.sqlite3.damaged-1757000100000\"}}"
+    "payload": "{\"kind\":\"command_result\",\"id\":1,\"result\":{\"type\":\"recovery_snapshot_restored\",\"snapshot\":\"plane-1757000000000-daily.sqlite3\",\"replaced\":\"plane.sqlite3.damaged-1757000100000\"}}"
   }
 ]

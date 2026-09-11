@@ -10,8 +10,8 @@ use uuid::Uuid;
 pub struct RestoredSnapshot {
 	/// The snapshot that is now the store.
 	pub snapshot: String,
-	/// The file name, beside the store, the damaged database was moved to.
-	pub damaged: String,
+	/// The file name, beside the store, the previous database was moved to.
+	pub replaced: String,
 }
 
 impl Client {
@@ -37,9 +37,10 @@ impl Client {
 			)
 			.await?
 		{
-			CommandResponse::RecoverySnapshotRestored { snapshot, damaged } => {
-				Ok(RestoredSnapshot { snapshot, damaged })
-			}
+			CommandResponse::RecoverySnapshotRestored {
+				snapshot,
+				replaced,
+			} => Ok(RestoredSnapshot { snapshot, replaced }),
 			other => Err(unexpected(&other)),
 		}
 	}

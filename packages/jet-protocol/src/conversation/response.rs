@@ -191,9 +191,11 @@ pub enum CommandResponse {
 	RecoverySnapshotRestored {
 		/// The snapshot that is now the store.
 		snapshot: String,
-		/// The file name, beside the store, the damaged database was
-		/// moved to.
-		damaged: String,
+		/// The file name, beside the store, the previous database was
+		/// moved to: `plane.sqlite3.damaged-<stamp>` after a failed
+		/// integrity check, `plane.sqlite3.unmigrated-<stamp>` after a
+		/// failed migration.
+		replaced: String,
 	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {

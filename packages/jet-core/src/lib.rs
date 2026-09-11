@@ -85,8 +85,8 @@ pub use schedule::{
 mod status;
 mod store_recovery;
 pub use store_recovery::{
-	RecoveryMode, RecoveryReason, RecoverySnapshot, RecoveryStatus,
-	SnapshotReason,
+	IntegrityFailureReason, RecoveryMode, RecoverySnapshot, RecoveryStatus,
+	RestoredStore, SnapshotReason,
 };
 mod terminal;
 #[cfg(test)]

@@ -8,8 +8,8 @@ mod support;
 
 use jet_client::ClientError;
 use jet_protocol::{
-	ErrorCategory, RecoveryReason, RecoveryState, RetentionPolicy,
-	SnapshotReason,
+	ErrorCategory, RecoveryReason, RecoverySnapshot, RecoveryState,
+	RecoveryStatus, RetentionPolicy, SecurityState, SnapshotReason,
 };
 use pretty_assertions::assert_eq;
 use std::{
@@ -87,22 +87,21 @@ async fn a_damaged_store_is_served_read_only_until_a_snapshot_is_restored() {
 		let client = support::connect(&daemon, client_id).await;
 		let status = client.status().await.unwrap();
 		let recovery = status.recovery.clone().unwrap();
+		let taken = recovery.snapshots[0].clone();
 		assert_eq!(
-			(
-				recovery.state,
-				recovery.reason,
-				recovery
-					.snapshots
-					.iter()
-					.map(|s| (s.name.as_str(), s.reason))
-					.collect::<Vec<_>>(),
-			),
-			(
-				RecoveryState::ReadOnly,
-				Some(RecoveryReason::IntegrityCheckFailed),
-				vec![(snapshot.as_str(), SnapshotReason::Daily)],
-			)
+			recovery,
+			RecoveryStatus {
+				state: RecoveryState::ReadOnly,
+				reason: Some(RecoveryReason::IntegrityCheckFailed),
+				snapshots: vec![RecoverySnapshot {
+					name: snapshot.clone(),
+					taken_at_unix_ms: taken.taken_at_unix_ms,
+					reason: SnapshotReason::Daily,
+					bytes: taken.bytes,
+				}],
+			}
 		);
+		assert!(taken.bytes > 0);
 		// Reads still answer; every Command but the restoration is refused
 		// without a receipt, so the same identity succeeds afterwards.
 		let command_id = Uuid::now_v7();
@@ -123,15 +122,24 @@ async fn a_damaged_store_is_served_read_only_until_a_snapshot_is_restored() {
 			.await
 			.unwrap();
 		assert_eq!(restored.snapshot, snapshot);
-		assert!(restored.damaged.starts_with("plane.sqlite3.damaged-"));
-		assert!(home.join(&restored.damaged).exists());
+		assert!(restored.replaced.starts_with("plane.sqlite3.damaged-"));
+		assert!(home.join(&restored.replaced).exists());
 		let status = client.status().await.unwrap();
 		assert_eq!(
 			(
-				status.recovery.as_ref().map(|r| (r.state, r.reason)),
-				status.daemon_starts,
+				status.recovery.clone(),
+				status.security.clone(),
+				status.daemon_starts
 			),
-			(Some((RecoveryState::Serving, None)), 2)
+			(
+				Some(RecoveryStatus {
+					state: RecoveryState::Serving,
+					reason: None,
+					snapshots: vec![taken],
+				}),
+				Some(SecurityState::Trusted),
+				2
+			)
 		);
 		let conversations = client.conversations().await.unwrap();
 		assert_eq!(
@@ -167,7 +175,10 @@ async fn a_damaged_store_is_served_read_only_until_a_snapshot_is_restored() {
 			.status()
 			.await
 			.unwrap();
-		assert_eq!(status.daemon_starts, 3);
+		assert_eq!(
+			(status.daemon_starts, status.security),
+			(3, Some(SecurityState::Trusted))
+		);
 	})
 	.await
 	.unwrap();
