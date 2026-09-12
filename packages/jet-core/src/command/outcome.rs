@@ -1,5 +1,6 @@
 //! Durable results of admitted Commands.
 
+use crate::store_recovery::RestoredStore;
 use crate::{
 	ClientId,
 	account::{AccountBinding, AccountBindingId, CredentialReference},
@@ -161,6 +162,8 @@ pub enum CommandOutcome {
 		/// The client that is no longer Paired.
 		client_id: ClientId,
 	},
+	/// The Plane serves again from the restored snapshot (ADR-0077).
+	RecoverySnapshotRestored(RestoredStore),
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {
 		/// The epoch that holds the chain the Plane vouches for.

@@ -72,7 +72,7 @@ impl Store {
 		work: impl AsyncFnOnce(&mut ReadTransaction) -> Result<T, E>,
 	) -> Result<T, E> {
 		let transaction = self
-			.pool
+			.pool()
 			.begin_with("BEGIN DEFERRED")
 			.await
 			.map_err(StoreError::from)?;
@@ -103,7 +103,7 @@ impl Store {
 		// before it writes cannot upgrade, and SQLite refuses it outright
 		// rather than waiting on the busy handler.
 		let transaction = self
-			.pool
+			.pool()
 			.begin_with("BEGIN IMMEDIATE")
 			.await
 			.map_err(StoreError::from)?;
@@ -126,9 +126,10 @@ impl Store {
 				// head written first would name a record no commit ever
 				// made (ADR-0105).
 				if let Some(head) = head {
-					audit_head::write(&self.database, self.plane_id, head)
+					audit_head::write(&self.database, self.plane_id(), head)
 						.map_err(E::from)?;
 				}
+				self.snapshots.mark_dirty();
 				Ok(value)
 			}
 			Err(error) => {

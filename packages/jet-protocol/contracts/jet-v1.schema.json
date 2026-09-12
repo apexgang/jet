@@ -2564,6 +2564,24 @@
           ]
         },
         {
+          "description": "Restore a verified Recovery snapshot over the damaged store of a\nPlane in read-only Recovery mode, which then serves again. The\ndamaged database is kept beside the store, never deleted\n(ADR-0077).",
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "description": "The snapshot, by the name the status reports it under.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "restore_recovery_snapshot"
+            }
+          },
+          "required": [
+            "type",
+            "snapshot"
+          ]
+        },
+        {
           "description": "Open or close the Plane's Pairing gate, which decides whether a new\nGUI client may begin Pairing at all. It does not alter the clients\nthat are already Paired.",
           "type": "object",
           "properties": {
@@ -3462,6 +3480,29 @@
           "required": [
             "type",
             "client_id"
+          ]
+        },
+        {
+          "description": "The Plane serves again from the restored snapshot.",
+          "type": "object",
+          "properties": {
+            "replaced": {
+              "description": "The file name, beside the store, the previous database was\nmoved to: `plane.sqlite3.damaged-<stamp>` after a failed\nintegrity check, `plane.sqlite3.unmigrated-<stamp>` after a\nfailed migration.",
+              "type": "string"
+            },
+            "snapshot": {
+              "description": "The snapshot that is now the store.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "recovery_snapshot_restored"
+            }
+          },
+          "required": [
+            "type",
+            "snapshot",
+            "replaced"
           ]
         },
         {
@@ -6567,8 +6608,19 @@
           "type": "string",
           "format": "uuid"
         },
+        "recovery": {
+          "description": "Whether the Plane store serves or answers reads only, and the\nsnapshots it can restore. Absent on a minor that does not name\nstore Recovery.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "security": {
-          "description": "Whether the Plane can vouch for its own Security audit. Absent on a\nminor that does not name the Security audit.",
+          "description": "Whether the Plane can vouch for its own Security audit. Absent on a\nminor that does not name the Security audit, and while the Plane is\nin read-only Recovery mode and the audit could not be validated.",
           "anyOf": [
             {
               "$ref": "#/$defs/SecurityState"
@@ -8394,6 +8446,99 @@
             "after"
           ]
         }
+      ]
+    },
+    "RecoveryReason": {
+      "description": "What put the store into read-only Recovery mode.",
+      "oneOf": [
+        {
+          "description": "SQLite's integrity check reported damage.",
+          "type": "string",
+          "const": "integrity_check_failed"
+        },
+        {
+          "description": "A schema migration failed, leaving the store at its previous\nversion (ADR-0073).",
+          "type": "string",
+          "const": "migration_failed"
+        }
+      ]
+    },
+    "RecoverySnapshot": {
+      "description": "One verified Recovery snapshot the Plane can restore.",
+      "type": "object",
+      "properties": {
+        "bytes": {
+          "description": "Its size on disk.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "name": {
+          "description": "The name a restore request names it by.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why it was taken.",
+          "$ref": "#/$defs/SnapshotReason"
+        },
+        "taken_at_unix_ms": {
+          "description": "When it was taken, in signed Unix milliseconds.",
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "required": [
+        "name",
+        "taken_at_unix_ms",
+        "reason",
+        "bytes"
+      ]
+    },
+    "RecoveryState": {
+      "description": "Whether the Plane store is authoritative or in read-only Recovery mode.",
+      "oneOf": [
+        {
+          "description": "The store passed its checks and accepts Commands.",
+          "type": "string",
+          "const": "serving"
+        },
+        {
+          "description": "It did not. Queries are answered as far as the damage allows; new\nRuns and every other Command wait until a verified snapshot is\nrestored.",
+          "type": "string",
+          "const": "read_only"
+        }
+      ]
+    },
+    "RecoveryStatus": {
+      "description": "The store's Recovery state and what it could be restored from.",
+      "type": "object",
+      "properties": {
+        "reason": {
+          "description": "Why it is read-only. Present exactly when `state` is `read_only`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshots": {
+          "description": "Every verified snapshot, newest first.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecoverySnapshot"
+          }
+        },
+        "state": {
+          "description": "Serving, or read-only.",
+          "$ref": "#/$defs/RecoveryState"
+        }
+      },
+      "required": [
+        "state",
+        "snapshots"
       ]
     },
     "Registrability": {
@@ -10353,6 +10498,26 @@
     "Sha256Digest": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "SnapshotReason": {
+      "description": "Why a Recovery snapshot was taken.",
+      "oneOf": [
+        {
+          "description": "The first meaningful committed change of a day.",
+          "type": "string",
+          "const": "daily"
+        },
+        {
+          "description": "A schema migration was about to run.",
+          "type": "string",
+          "const": "migration"
+        },
+        {
+          "description": "Destructive maintenance was about to run.",
+          "type": "string",
+          "const": "maintenance"
+        }
+      ]
     },
     "StreamControl": {
       "description": "Stream-local control carried as strict JSON on a numbered stream.",

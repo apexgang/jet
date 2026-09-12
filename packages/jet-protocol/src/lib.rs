@@ -49,6 +49,7 @@ mod presentation;
 mod project;
 mod search;
 mod setting;
+mod store_recovery;
 pub use conversation::schedule::{
 	ScheduleFiring, ScheduledTask, ScheduledTasks,
 };
@@ -60,6 +61,10 @@ pub use execution::terminal::{
 	TerminalConfig, TerminalDescriptor, TerminalHelperAction,
 	TerminalHelperReply, TerminalHelperRequest, TerminalState,
 	WorkspaceTerminal,
+};
+pub use store_recovery::{
+	RecoveryReason, RecoverySnapshot, RecoveryState, RecoveryStatus,
+	SnapshotReason,
 };
 
 pub use conversation::run::{
@@ -129,10 +134,10 @@ pub use transport::handshake::{
 	MULTIPLEXED_STREAMS_MINOR, NAMES_MINOR, PAIRING_MINOR, PREFACE,
 	PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR,
 	SCHEDULES_MINOR, SEARCH_MINOR, SECURITY_AUDIT_MINOR,
-	SEEDED_WORKSPACES_MINOR, SETTINGS_AND_CAPABILITIES_MINOR, ServerHello,
-	TURN_QUEUE_MINOR, USAGE_RECORDS_MINOR, USER_INPUT_MINOR, UTILITY_MINOR,
-	VersionRange, WORKSPACE_PROMOTION_MINOR, WORKSPACE_TERMINALS_MINOR,
-	WORKSPACES_MINOR,
+	SEEDED_WORKSPACES_MINOR, SETTINGS_AND_CAPABILITIES_MINOR,
+	STORE_RECOVERY_MINOR, ServerHello, TURN_QUEUE_MINOR, USAGE_RECORDS_MINOR,
+	USER_INPUT_MINOR, UTILITY_MINOR, VersionRange, WORKSPACE_PROMOTION_MINOR,
+	WORKSPACE_TERMINALS_MINOR, WORKSPACES_MINOR,
 };
 mod usage;
 pub use conversation::import::{

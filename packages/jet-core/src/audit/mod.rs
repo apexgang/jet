@@ -94,6 +94,10 @@ pub enum AuditDecision {
 	/// An owner carried on past an integrity failure, beginning an
 	/// authority epoch that records the gap it leaves behind.
 	AuditEpochBegun,
+	/// An owner restored a verified Recovery snapshot over a damaged
+	/// store, moving authoritative state back to when it was taken
+	/// (ADR-0077).
+	RecoverySnapshotRestored,
 	/// The Plane began accepting new Pairings, so a GUI client that holds a
 	/// current pairing code may take control of it (ADR-0017).
 	PairingGateOpened,

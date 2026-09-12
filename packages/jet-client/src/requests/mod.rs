@@ -2,6 +2,9 @@
 
 mod audit;
 
+mod store_recovery;
+pub use store_recovery::RestoredSnapshot;
+
 mod account;
 
 mod setting;

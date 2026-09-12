@@ -34,6 +34,7 @@ impl AuditDecision {
 			Self::AuditRetentionChanged => "policy.audit_retention_changed",
 			Self::AuditRetentionCleared => "policy.audit_retention_cleared",
 			Self::AuditEpochBegun => "audit.epoch_begun",
+			Self::RecoverySnapshotRestored => "recovery.snapshot_restored",
 			Self::PairingGateOpened => "pairing.gate_opened",
 			Self::PairingGateClosed => "pairing.gate_closed",
 			Self::PairingOffered => "pairing.offered",
@@ -107,6 +108,10 @@ impl AuditDecision {
 			// can put it back: the installation pairs again or it does not
 			// control this Plane.
 			Self::PairedClientRevoked => AuditRisk::Destructive,
+			// Everything committed after the snapshot was taken is gone
+			// from the store, deliberately; the damaged copy stays beside
+			// it.
+			Self::RecoverySnapshotRestored => AuditRisk::Destructive,
 			// Shortening the window destroys evidence the Plane already
 			// holds, which is the one policy change the audit itself is at
 			// stake in.

@@ -34,6 +34,11 @@ pub enum SecurityState {
 	Trusted,
 	/// It does not, and the Plane is in Security-degraded mode.
 	Degraded(SecurityDegradation),
+	/// Validation could not run, because the Plane is in read-only
+	/// Recovery mode and the damaged store did not answer (ADR-0077).
+	/// Nothing mutates meanwhile, so nothing goes unrecorded; the audit is
+	/// validated again once a snapshot is restored.
+	Unverified,
 }
 
 /// What validation found. It names positions and hashes and quotes no
@@ -90,8 +95,8 @@ impl SecurityState {
 	pub(crate) fn admit(self, class: SecurityClass) -> Result<(), CoreError> {
 		match (self, class) {
 			(Self::Trusted, _)
-			| (Self::Degraded(_), SecurityClass::Ordinary) => Ok(()),
-			(Self::Degraded(_), SecurityClass::Guarded) => {
+			| (Self::Degraded(_) | Self::Unverified, SecurityClass::Ordinary) => Ok(()),
+			(Self::Degraded(_) | Self::Unverified, SecurityClass::Guarded) => {
 				Err(CoreError::conflict(
 					"security.audit_degraded",
 					"this Plane cannot vouch for its Security audit; export \
@@ -104,7 +109,7 @@ impl SecurityState {
 
 	fn degradation(self) -> Option<SecurityDegradation> {
 		match self {
-			Self::Trusted => None,
+			Self::Trusted | Self::Unverified => None,
 			Self::Degraded(degradation) => Some(degradation),
 		}
 	}
@@ -253,7 +258,9 @@ pub(crate) mod tests {
 	fn degradation(state: SecurityState) -> SecurityDegradation {
 		match state {
 			SecurityState::Degraded(degradation) => degradation,
-			SecurityState::Trusted => panic!("the Plane vouches for its audit"),
+			SecurityState::Trusted | SecurityState::Unverified => {
+				panic!("the Plane has no degradation to show")
+			}
 		}
 	}
 

@@ -144,6 +144,13 @@ pub(crate) fn command_outcome(
 		CommandOutcome::AuditEpochBegun { epoch } => {
 			wire::CommandResponse::AuditEpochBegun { epoch: epoch.0 }
 		}
+		CommandOutcome::RecoverySnapshotRestored(restored) => {
+			wire::CommandResponse::RecoverySnapshotRestored {
+				snapshot: restored.snapshot,
+				replaced: restored.replaced,
+			}
+		}
+
 		CommandOutcome::PairingGateSet { gate } => {
 			wire::CommandResponse::PairingGateSet {
 				gate: pairing::gate(gate),

@@ -168,6 +168,7 @@ impl Core {
 				.map(QueryResult::RunExecution),
 			Query::Status => {
 				let security = *self.security.read().await;
+				let recovery = self.recovery_status()?;
 				self.store
 					.read(async |tx| {
 						let plane = tx.plane().await?;
@@ -179,6 +180,7 @@ impl Core {
 							started_at: self.started_at,
 							core_version: CORE_VERSION,
 							security,
+							recovery,
 						}))
 					})
 					.await

@@ -31,6 +31,8 @@ const APPROVAL_RETRY_OUTCOME_VERSION: u32 = 9;
 /// Older releases cannot replay Auto-continue policy Commands.
 const AUTO_CONTINUE_OUTCOME_VERSION: u32 = 10;
 const GIT_DELIVERY_OUTCOME_VERSION: u32 = 11;
+/// Older releases cannot replay a snapshot restoration.
+const STORE_RECOVERY_OUTCOME_VERSION: u32 = 12;
 
 /// Uses the rollback release's encoding whenever that release can understand
 /// the result. Version 2 is reserved for name-only variants introduced here;
@@ -40,6 +42,9 @@ pub(crate) fn outcome_version(
 	result: &Result<CommandOutcome, CoreError>,
 ) -> u32 {
 	match result {
+		Ok(CommandOutcome::RecoverySnapshotRestored(_)) => {
+			STORE_RECOVERY_OUTCOME_VERSION
+		}
 		Ok(CommandOutcome::AutoContinueConfigured) => {
 			AUTO_CONTINUE_OUTCOME_VERSION
 		}

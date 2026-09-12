@@ -9,6 +9,7 @@ pub use query::{QueryRequest, QueryResponse};
 use crate::{
 	audit::SecurityState,
 	conversation::{CommandRequest, CommandResponse, event::Event},
+	store_recovery::RecoveryStatus,
 	transport::control::{ControlError, decode_control},
 };
 use serde::{Deserialize, Serialize};
@@ -182,9 +183,15 @@ pub struct PlaneStatus {
 	/// Version of the running core.
 	pub core_version: String,
 	/// Whether the Plane can vouch for its own Security audit. Absent on a
-	/// minor that does not name the Security audit.
+	/// minor that does not name the Security audit, and while the Plane is
+	/// in read-only Recovery mode and the audit could not be validated.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub security: Option<SecurityState>,
+	/// Whether the Plane store serves or answers reads only, and the
+	/// snapshots it can restore. Absent on a minor that does not name
+	/// store Recovery.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub recovery: Option<RecoveryStatus>,
 }
 
 #[cfg(test)]
@@ -303,6 +310,7 @@ mod tests {
 				started_at_unix_ms: 1_700_000_000_000,
 				core_version: "0.1.0".into(),
 				security: None,
+				recovery: None,
 			}),
 		};
 		assert_eq!(
@@ -674,6 +682,7 @@ mod tests {
 				}),
 				store_sequence: 1,
 			}),
+			recovery: None,
 		};
 		assert_eq!(
 			json(&status),

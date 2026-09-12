@@ -1,5 +1,6 @@
 //! Plane status snapshot.
 
+use crate::store_recovery::RecoveryStatus;
 use crate::{EventSequence, PlaneId, security::SecurityState};
 use std::time::SystemTime;
 
@@ -19,4 +20,7 @@ pub struct PlaneStatus {
 	pub core_version: &'static str,
 	/// Whether the Plane can vouch for its own Security audit (ADR-0105).
 	pub security: SecurityState,
+	/// Whether the store serves or answers reads only, and the snapshots
+	/// it could restore (ADR-0077).
+	pub recovery: RecoveryStatus,
 }

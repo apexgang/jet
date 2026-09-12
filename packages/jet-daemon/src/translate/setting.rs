@@ -257,6 +257,10 @@ mod tests {
 			daemon_starts: 2,
 			started_at: UNIX_EPOCH + Duration::from_secs(1),
 			core_version: "0.2.0",
+			recovery: jet_core::RecoveryStatus {
+				mode: jet_core::RecoveryMode::Serving,
+				snapshots: vec![],
+			},
 			security: SecurityState::Degraded(SecurityDegradation {
 				breach: AuditBreach::HeadNotInStore,
 				epoch: AuditEpoch(1),

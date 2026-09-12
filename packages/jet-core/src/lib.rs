@@ -83,6 +83,11 @@ pub use schedule::{
 	ScheduleFiring, ScheduleFiringOutcome, ScheduledTask, ScheduledTasks,
 };
 mod status;
+mod store_recovery;
+pub use store_recovery::{
+	IntegrityFailureReason, RecoveryMode, RecoverySnapshot, RecoveryStatus,
+	RestoredStore, SnapshotReason,
+};
 mod terminal;
 #[cfg(test)]
 mod test_support;
@@ -294,6 +299,10 @@ pub struct Core {
 	/// decided once, when the daemon starts, and changes only when an owner
 	/// begins a new audit epoch (ADR-0105).
 	security: tokio::sync::RwLock<SecurityState>,
+	/// Whether the store serves or answers reads only. Decided when the
+	/// store is opened, and changed only by restoring a snapshot
+	/// (ADR-0077). Workers wait on it before touching the store.
+	recovery: tokio::sync::watch::Sender<store_recovery::RecoveryMode>,
 	started_at: SystemTime,
 	/// Serializes every Effect decision, so two workers never perform the
 	/// same durable request at once (ADR-0067).

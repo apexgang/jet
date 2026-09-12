@@ -100,6 +100,7 @@ pub(crate) fn requires_disk_admission(command: &Command) -> bool {
 		| Command::BindAccount { .. }
 		| Command::UnbindAccount { .. }
 		| Command::BeginAuditEpoch
+		| Command::RestoreRecoverySnapshot { .. }
 		| Command::SetPairingGate { .. }
 		| Command::OpenPairing { .. }
 		| Command::ClaimPairing { .. }

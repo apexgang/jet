@@ -477,6 +477,11 @@ pub(super) async fn execute_new(
 		Command::BeginAuditEpoch => {
 			security::begin_epoch(tx, actor, security, now_unix_ms).await
 		}
+		// Intercepted before the pipeline in `Core::execute`; a serving
+		// Plane answers the same way it would there.
+		Command::RestoreRecoverySnapshot { .. } => {
+			Err(crate::store_recovery::not_read_only())
+		}
 		Command::SetPairingGate { gate } => {
 			pairing::set_gate(tx, actor, gate, now_unix_ms).await
 		}

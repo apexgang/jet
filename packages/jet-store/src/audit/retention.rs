@@ -46,7 +46,7 @@ impl Store {
 		&self,
 		cutoff_unix_ms: i64,
 	) -> Result<usize, StoreError> {
-		let Some(head) = audit_head::read(&self.database, self.plane_id)?
+		let Some(head) = audit_head::read(&self.database, self.plane_id())?
 		else {
 			return Ok(0);
 		};

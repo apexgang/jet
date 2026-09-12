@@ -100,6 +100,146 @@ pub(crate) async fn run(
 			return ExitCode::from(EXIT_FAILURE);
 		}
 	};
+	match core.recovery_mode() {
+		jet_core::RecoveryMode::Serving => reconcile_at_start(&core).await,
+		jet_core::RecoveryMode::ReadOnly(reason) => {
+			// ADR-0077: the damaged store is served read-only, exactly as
+			// found, until an owner restores a verified snapshot. Nothing
+			// reconciles or reconnects before that; the workers below wait
+			// for it and run the start-time reconciliation then.
+			eprintln!(
+				"jetd: the Plane store failed its checks ({reason:?}); serving \
+				 read-only Recovery mode until a snapshot is restored"
+			);
+		}
+	}
+	let utility_core = Arc::clone(&core);
+	let utility_work = tokio::spawn(async move {
+		utility_core.wait_until_serving().await;
+		loop {
+			if let Err(error) = utility_core.perform_git_deliveries().await {
+				eprintln!("jetd: cannot settle Utility work: {error}");
+				tokio::time::sleep(Duration::from_secs(5)).await;
+				continue;
+			}
+			utility_core.wait_for_utility_work().await;
+		}
+	});
+	let recovery_core = Arc::clone(&core);
+	let work_core = Arc::clone(&core);
+	let run_work = tokio::spawn(async move {
+		work_core.wait_until_serving().await;
+		loop {
+			work_core.wait_for_run_work().await;
+			if let Err(error) = work_core.perform_runs().await {
+				eprintln!("jetd: cannot dispatch queued Run work: {error}");
+			}
+		}
+	});
+	let recovery = tokio::spawn(async move {
+		if recovery_core.recovery_mode() != jet_core::RecoveryMode::Serving {
+			recovery_core.wait_until_serving().await;
+			reconcile_at_start(&recovery_core).await;
+		}
+		loop {
+			let mut retry = false;
+			if let Err(error) = recovery_core.reconcile_crafts().await {
+				retry = true;
+				eprintln!("jetd: cannot reconcile Crafts: {error}");
+			}
+
+			if let Err(error) =
+				recovery_core.perform_craft_installations().await
+			{
+				retry = true;
+				eprintln!(
+					"jetd: cannot reconcile Craft installations: {error}"
+				);
+			}
+			if let Err(error) = recovery_core.perform_extension_changes().await
+			{
+				retry = true;
+				eprintln!(
+					"jetd: cannot apply native extension changes: {error}"
+				);
+			}
+			if let Err(error) = recovery_core.perform_schedules().await {
+				retry = true;
+				eprintln!("jetd: cannot advance schedules: {error}");
+			}
+			if let Err(error) = recovery_core.perform_terminals().await {
+				retry = true;
+				eprintln!("jetd: cannot recover terminals: {error}");
+			}
+			if let Err(error) = recovery_core.recover_runs().await {
+				retry = true;
+				eprintln!("jetd: cannot recover executions: {error}");
+			}
+			if let Err(error) = recovery_core.constrain_child_work().await {
+				retry = true;
+				eprintln!("jetd: cannot apply child Energy policy: {error}");
+			}
+			// Every Command and Effect commit wakes this loop, so the first
+			// meaningful change of a day is copied soon after it lands
+			// (ADR-0097). A failed copy is retried on the next wake.
+			match recovery_core.snapshot_if_due().await {
+				Ok(Some(snapshot)) => {
+					eprintln!("jetd: took Recovery snapshot {}", snapshot.name);
+				}
+				Ok(None) => {}
+				Err(error) => {
+					eprintln!(
+						"jetd: cannot take the Recovery snapshot: {error}"
+					);
+				}
+			}
+			// Sweep once on startup, including durable extension/install work that
+			// has no active Run or schedule to supply the first wakeup.
+			if retry {
+				tokio::time::sleep(Duration::from_secs(1)).await;
+			} else if let Err(error) =
+				recovery_core.wait_for_maintenance().await
+			{
+				eprintln!(
+					"jetd: cannot determine maintenance deadline: {error}"
+				);
+				tokio::time::sleep(Duration::from_secs(1)).await;
+			}
+		}
+	});
+	// ADR-0086: the Plane reports what it can do at startup, on the one
+	// line a launcher reads, and on demand afterwards.
+	let capabilities = crate::translate::capabilities(
+		core.capabilities().await,
+		jet_protocol::PROTOCOL_MINOR,
+	);
+	let recovery_mode = match core.recovery_mode() {
+		jet_core::RecoveryMode::Serving => "serving",
+		jet_core::RecoveryMode::ReadOnly(_) => "read_only",
+	};
+	println!(
+		"{}",
+		serde_json::json!({
+			"status": "ready",
+			"socket": listener.socket_path().display().to_string(),
+			"capabilities": capabilities,
+			"recovery": recovery_mode,
+		})
+	);
+	let exit = serve(listener, &core).await;
+	recovery.abort();
+	run_work.abort();
+	utility_work.abort();
+	let _ = utility_work.await;
+	close_store(&core).await;
+	drop(lock);
+	exit
+}
+
+/// Settles what a previous daemon left unfinished before new Commands are
+/// served, in the order the durable state requires. Each step reports its
+/// own failure and the next still runs.
+async fn reconcile_at_start(core: &Arc<Core>) {
 	if let Err(error) = core.reconcile_crafts().await {
 		eprintln!("jetd: cannot reconcile Crafts: {error}");
 	}
@@ -139,102 +279,6 @@ pub(crate) async fn run(
 	if let Err(error) = core.recover_runs().await {
 		eprintln!("jetd: cannot recover executions: {error}");
 	}
-	let utility_core = Arc::clone(&core);
-	let utility_work = tokio::spawn(async move {
-		loop {
-			if let Err(error) = utility_core.perform_git_deliveries().await {
-				eprintln!("jetd: cannot settle Utility work: {error}");
-				tokio::time::sleep(Duration::from_secs(5)).await;
-				continue;
-			}
-			utility_core.wait_for_utility_work().await;
-		}
-	});
-	let recovery_core = Arc::clone(&core);
-	let work_core = Arc::clone(&core);
-	let run_work = tokio::spawn(async move {
-		loop {
-			work_core.wait_for_run_work().await;
-			if let Err(error) = work_core.perform_runs().await {
-				eprintln!("jetd: cannot dispatch queued Run work: {error}");
-			}
-		}
-	});
-	let recovery = tokio::spawn(async move {
-		loop {
-			let mut retry = false;
-			if let Err(error) = recovery_core.reconcile_crafts().await {
-				retry = true;
-				eprintln!("jetd: cannot reconcile Crafts: {error}");
-			}
-
-			if let Err(error) =
-				recovery_core.perform_craft_installations().await
-			{
-				retry = true;
-				eprintln!(
-					"jetd: cannot reconcile Craft installations: {error}"
-				);
-			}
-			if let Err(error) = recovery_core.perform_extension_changes().await
-			{
-				retry = true;
-				eprintln!(
-					"jetd: cannot apply native extension changes: {error}"
-				);
-			}
-			if let Err(error) = recovery_core.perform_schedules().await {
-				retry = true;
-				eprintln!("jetd: cannot advance schedules: {error}");
-			}
-			if let Err(error) = recovery_core.perform_terminals().await {
-				retry = true;
-				eprintln!("jetd: cannot recover terminals: {error}");
-			}
-			if let Err(error) = recovery_core.recover_runs().await {
-				retry = true;
-				eprintln!("jetd: cannot recover executions: {error}");
-			}
-			if let Err(error) = recovery_core.constrain_child_work().await {
-				retry = true;
-				eprintln!("jetd: cannot apply child Energy policy: {error}");
-			}
-			// Sweep once on startup, including durable extension/install work that
-			// has no active Run or schedule to supply the first wakeup.
-			if retry {
-				tokio::time::sleep(Duration::from_secs(1)).await;
-			} else if let Err(error) =
-				recovery_core.wait_for_maintenance().await
-			{
-				eprintln!(
-					"jetd: cannot determine maintenance deadline: {error}"
-				);
-				tokio::time::sleep(Duration::from_secs(1)).await;
-			}
-		}
-	});
-	// ADR-0086: the Plane reports what it can do at startup, on the one
-	// line a launcher reads, and on demand afterwards.
-	let capabilities = crate::translate::capabilities(
-		core.capabilities().await,
-		jet_protocol::PROTOCOL_MINOR,
-	);
-	println!(
-		"{}",
-		serde_json::json!({
-			"status": "ready",
-			"socket": listener.socket_path().display().to_string(),
-			"capabilities": capabilities,
-		})
-	);
-	let exit = serve(listener, &core).await;
-	recovery.abort();
-	run_work.abort();
-	utility_work.abort();
-	let _ = utility_work.await;
-	close_store(&core).await;
-	drop(lock);
-	exit
 }
 
 /// Closes the store so SQLite checkpoints its write-ahead log on the way

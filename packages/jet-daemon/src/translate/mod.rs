@@ -47,6 +47,7 @@ mod run;
 mod schedule;
 mod search;
 mod setting;
+mod store_recovery;
 mod terminal;
 mod turn;
 pub(crate) mod usage;

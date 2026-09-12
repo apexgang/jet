@@ -1,6 +1,6 @@
 //! Conversation, Working-tree, and Run snapshots.
 
-use super::{audit, import, name, promotion, unix_ms};
+use super::{audit, import, name, promotion, store_recovery, unix_ms};
 use jet_core::{
 	BaseSelection, Conversation, ConversationList, ConversationOrigin,
 	ConversationSnapshot, CoreError, PlaneStatus, ProjectId, RelativePath,
@@ -23,7 +23,10 @@ pub(super) fn plane_status(
 		// Security audit, so it is not told about its state either
 		// (ADR-0019).
 		security: (minor >= wire::SECURITY_AUDIT_MINOR)
-			.then(|| audit::security(status.security)),
+			.then(|| audit::security(status.security))
+			.flatten(),
+		recovery: (minor >= wire::STORE_RECOVERY_MINOR)
+			.then(|| store_recovery::recovery_status(&status.recovery)),
 	}
 }
 

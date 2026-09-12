@@ -316,6 +316,11 @@ pub(crate) fn command(
 			}
 		}
 		wire::CommandRequest::BeginAuditEpoch => Command::BeginAuditEpoch,
+		wire::CommandRequest::RestoreRecoverySnapshot { snapshot } => {
+			Command::RestoreRecoverySnapshot {
+				snapshot: snapshot.clone(),
+			}
+		}
 		wire::CommandRequest::SetPairingGate { gate } => {
 			Command::SetPairingGate {
 				gate: pairing::gate_from_wire(*gate),

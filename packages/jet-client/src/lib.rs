@@ -10,3 +10,4 @@ mod requests;
 pub use connection::handshake::ClientIdentity;
 pub use connection::ssh::SshEndpoint;
 pub use connection::{Client, ClientError};
+pub use requests::RestoredSnapshot;
