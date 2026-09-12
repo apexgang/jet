@@ -6,6 +6,7 @@
 use crate::{
 	Store, StoreError,
 	audit::head::{self as audit_head, AuditHead},
+	deletion::{self, PendingDeletion},
 };
 use sqlx::{SqliteConnection, SqliteTransaction};
 use std::ops::{Deref, DerefMut};
@@ -23,6 +24,10 @@ pub struct WriteTransaction {
 	/// can, and it is published only after the commit that earned it
 	/// (ADR-0105).
 	audit_head: Option<AuditHead>,
+	/// The permanent deletions this transaction has made. They reach the
+	/// Deletion ledger just before the commit, so no deletion is
+	/// acknowledged that a restoration could undo (ADR-0102).
+	deletions: Vec<PendingDeletion>,
 }
 
 impl WriteTransaction {
@@ -30,6 +35,12 @@ impl WriteTransaction {
 	/// commits.
 	pub(crate) fn publish_audit_head(&mut self, head: AuditHead) {
 		self.audit_head = Some(head);
+	}
+
+	/// Records a permanent deletion for the ledger. Every method that
+	/// removes an identity a restoration could bring back calls this.
+	pub(crate) fn record_deletion(&mut self, deletion: PendingDeletion) {
+		self.deletions.push(deletion);
 	}
 }
 
@@ -110,10 +121,25 @@ impl Store {
 		let mut transaction = WriteTransaction {
 			read: ReadTransaction { transaction },
 			audit_head: None,
+			deletions: vec![],
 		};
 		match work(&mut transaction).await {
 			Ok(value) => {
 				let head = transaction.audit_head;
+				// The ledger precedes the commit it describes. A crash in
+				// between leaves a deletion the ledger holds and the store
+				// does not, which the next open finishes; a commit first
+				// would leave a deletion a restoration could undo
+				// (ADR-0102).
+				if !transaction.deletions.is_empty()
+					&& let Err(error) = deletion::append(
+						&self.database,
+						self.plane_id(),
+						&transaction.deletions,
+					) {
+					let _ = transaction.read.transaction.rollback().await;
+					return Err(E::from(error));
+				}
 				transaction
 					.read
 					.transaction

@@ -16,6 +16,8 @@ mod checkpoint;
 mod command;
 mod conversation;
 pub use craft::lifecycle::CraftDisableMode;
+mod deletion;
+pub use deletion::{DeletedIdentityKind, DeletionLedger, DeletionRecord};
 mod effect;
 mod journal;
 mod migrations;
@@ -217,7 +219,9 @@ impl Store {
 	/// damaged database, keeping the damaged files beside it under a name
 	/// that carries `now_unix_ms`, and reopens the result through the same
 	/// checks as any open (ADR-0077). The Security audit head stays where
-	/// it is, so the audit sees that state moved backwards (ADR-0105).
+	/// it is, so the audit sees that state moved backwards (ADR-0105), and
+	/// the Deletion ledger is reapplied to the restored copy, so a deletion
+	/// made after the snapshot stays made (ADR-0102).
 	///
 	/// Every connection this store held is closed first; a read in flight
 	/// fails as unavailable.
@@ -225,7 +229,8 @@ impl Store {
 	/// # Errors
 	///
 	/// Returns [`StoreError::Integrity`] when no verified snapshot has that
-	/// name or a damaged file of that stamp already exists, and
+	/// name, a damaged file of that stamp already exists, or the Deletion
+	/// ledger cannot be trusted, and
 	/// [`StoreError::Unavailable`] when the files cannot be moved or the
 	/// restored database cannot be opened. The store then keeps serving
 	/// whatever it could open.
@@ -234,6 +239,14 @@ impl Store {
 		name: &str,
 		now_unix_ms: i64,
 	) -> Result<RestoredStore, StoreError> {
+		// The snapshot may predate a deletion only the ledger remembers, so
+		// a ledger that vouches for nothing keeps the store as it is
+		// (ADR-0102).
+		if let DeletionLedger::Corrupt(detail) = self.deletion_ledger()? {
+			return Err(StoreError::Integrity(format!(
+				"the Deletion ledger cannot be trusted: {detail}"
+			)));
+		}
 		self.pool().close().await;
 		let (opened, restored) = recovery::restore(
 			&self.database,
@@ -298,6 +311,17 @@ impl Store {
 		} else {
 			Ok(None)
 		}
+	}
+
+	/// The Deletion ledger of this store: every permanent deletion it
+	/// vouches for, or the finding that it vouches for nothing (ADR-0102).
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Unavailable`] when the ledger files cannot be
+	/// read.
+	pub fn deletion_ledger(&self) -> Result<DeletionLedger, StoreError> {
+		deletion::read(&self.database, self.plane_id())
 	}
 
 	/// Every verified Recovery snapshot of this store, newest first.

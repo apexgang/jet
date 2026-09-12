@@ -78,7 +78,7 @@ pub(crate) async fn revoke(
 	now_unix_ms: i64,
 ) -> Result<CommandOutcome, CoreError> {
 	paired(tx, client_id).await?;
-	tx.delete_paired_client(client_id.0).await?;
+	tx.delete_paired_client(client_id.0, now_unix_ms).await?;
 	tx.append_event(EventKind::PairedClientRevoked { client_id }.to_record(
 		actor,
 		EventSubject::Plane,

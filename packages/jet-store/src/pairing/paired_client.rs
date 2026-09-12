@@ -7,6 +7,7 @@
 
 use crate::{
 	StoreError,
+	deletion::{DeletedIdentityKind, PendingDeletion},
 	pairing::offer::PairingKeyAlgorithm,
 	records::{column_error, parse_bytes, parse_uuid},
 	transaction::{ReadTransaction, WriteTransaction},
@@ -238,11 +239,17 @@ impl WriteTransaction {
 	pub async fn delete_paired_client(
 		&mut self,
 		client_id: Uuid,
+		deleted_at_unix_ms: i64,
 	) -> Result<(), StoreError> {
 		let id = client_id.to_string();
 		sqlx::query!("DELETE FROM paired_clients WHERE client_id = ?1", id)
 			.execute(self.connection())
 			.await?;
+		self.record_deletion(PendingDeletion {
+			kind: DeletedIdentityKind::PairedClient,
+			identity: client_id,
+			deleted_at_unix_ms,
+		});
 		Ok(())
 	}
 }
@@ -355,7 +362,7 @@ mod tests {
 					PairedClientAccess::Disabled,
 				)
 				.await?;
-				tx.delete_paired_client(revoked).await
+				tx.delete_paired_client(revoked, NOW_UNIX_MS + 2).await
 			})
 			.await
 			.unwrap();

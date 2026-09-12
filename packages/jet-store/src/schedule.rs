@@ -1,5 +1,8 @@
 //! Indexed deadlines with core-owned schedule documents.
-use crate::{ReadTransaction, StoreError, WriteTransaction};
+use crate::{
+	ReadTransaction, StoreError, WriteTransaction,
+	deletion::{DeletedIdentityKind, PendingDeletion},
+};
 use uuid::Uuid;
 
 impl ReadTransaction {
@@ -73,11 +76,17 @@ impl WriteTransaction {
 	pub async fn delete_schedule(
 		&mut self,
 		schedule_id: Uuid,
+		deleted_at_unix_ms: i64,
 	) -> Result<(), StoreError> {
 		let id = schedule_id.to_string();
 		sqlx::query!("DELETE FROM scheduled_tasks WHERE schedule_id = ?1", id)
 			.execute(self.connection())
 			.await?;
+		self.record_deletion(PendingDeletion {
+			kind: DeletedIdentityKind::Schedule,
+			identity: schedule_id,
+			deleted_at_unix_ms,
+		});
 		Ok(())
 	}
 }
