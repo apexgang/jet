@@ -1,0 +1,14 @@
+{
+  "enabledPlugins": {
+    "code-security-skills@agent-security-playbook": true,
+    "ai-security-skills@agent-security-playbook": true
+  },
+  "extraKnownMarketplaces": {
+    "agent-security-playbook": {
+      "source": {
+        "source": "github",
+        "repo": "OWASP/secure-agent-playbook"
+      }
+    }
+  }
+}
