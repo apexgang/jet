@@ -154,12 +154,12 @@ snapshot was taken does not come back with it.
 ## Deletion ledger
 
 A permanent deletion is an Account binding unbound, a Paired client
-revoked, or a schedule cancelled: the identities whose return from an
-old snapshot would re-admit a credential, a key, or unattended work.
-Conversation forgetting and Jet Trash arrive with #53 and join the
-ledger then; until they do, a restoration can bring back a Conversation
-deleted after the snapshot was taken, which is why deleted content is
-bounded by the retention above.
+revoked, a schedule cancelled, or a Conversation whose Jet Trash grace
+period ended: the identities whose return from an old snapshot would
+re-admit a credential, a key, unattended work, or content its owner
+chose to lose (see [Retention](retention.md)). Deleted content still
+lives in older snapshots until they expire, which is why it is bounded
+by the retention above and why the purge below exists.
 
 Before the store commits such a deletion, `jetd` appends it to
 `~/.jet/recovery/plane.sqlite3.deletions`, an owner-only text file with
@@ -190,10 +190,12 @@ deletion the store committed and the ledger never saw.
 Every open of an authoritative store, and therefore every restoration,
 reapplies the ledger: each identity it names is deleted again if the
 store still holds it, and the count catches up. Only the identity's own
-row is removed. The old journal and turn queues come back with the
+row is removed, except for a Conversation, which takes its Runs,
+Workspace, journal, and queue with it. The old journal and turn queues
+of everything else come back with the
 snapshot regardless: a Run a cancelled schedule had already queued may
 run once more from a restored snapshot, because the queue is
-Conversation state, which #53 owns. The ledger is never rolled back and
+Conversation state. The ledger is never rolled back and
 never shortened; its lines are small and their number is the number of
 deletions the Plane has ever made.
 

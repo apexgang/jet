@@ -73,6 +73,14 @@ pub enum QueryRequest {
 		/// Owning Conversation.
 		conversation_id: Uuid,
 	},
+	/// Everything in Jet Trash.
+	ConversationTrash,
+	/// What protects one Conversation from forgetting and what its
+	/// deletion would leave behind.
+	RetentionPreview {
+		/// The Conversation asked about.
+		conversation_id: Uuid,
+	},
 	/// Read bounded UTF-8 file content through a registered root.
 	EditableFile {
 		/// Registered Project or Workspace root.
@@ -247,6 +255,10 @@ pub enum QueryResponse {
 	CraftInstallationPreview(crate::CraftInstallationPreview),
 	/// Fenced schedule snapshot.
 	ScheduledTasks(crate::ScheduledTasks),
+	/// Staged Conversations, soonest expiry first.
+	ConversationTrash(crate::ConversationTrash),
+	/// Protections and disclosures for one Conversation.
+	RetentionPreview(crate::RetentionPreview),
 	/// Bounded editable content and its exact file Revision.
 	EditableFile(crate::EditableFile),
 	/// Terminal lifecycle snapshots, separate from Runs.

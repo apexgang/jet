@@ -22,6 +22,11 @@ impl Core {
 						due.saturating_sub(self.now_unix_ms()).max(1000) as u64,
 					)
 				});
+				let trash = tx.next_trash_expiry().await?.map(|due| {
+					Duration::from_millis(
+						due.saturating_sub(self.now_unix_ms()).max(1000) as u64,
+					)
+				});
 				let recovery = if active {
 					Some(Duration::from_secs(1))
 				} else if pending {
@@ -29,7 +34,9 @@ impl Core {
 				} else {
 					None
 				};
-				Ok::<_, CoreError>(schedule.into_iter().chain(recovery).min())
+				Ok::<_, CoreError>(
+					schedule.into_iter().chain(recovery).chain(trash).min(),
+				)
 			})
 			.await?;
 		let retirement = match &self.run_host {

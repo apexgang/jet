@@ -16,7 +16,7 @@
 //! deleted and which records were about the same one, and nothing else.
 
 use crate::{
-	Store, StoreError,
+	ReadTransaction, Store, StoreError,
 	audit::{
 		chain::{AuditEntryHash, target_reference},
 		epoch::{counter_column, parse_counter},
@@ -60,6 +60,31 @@ impl Store {
 			}
 			removed += batch;
 		}
+	}
+}
+
+impl ReadTransaction {
+	/// How many records name the target `kind`/`id` today, which is what a
+	/// deletion preview discloses before anything is anonymized.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the rows cannot be read.
+	pub async fn audit_target_records(
+		&mut self,
+		kind: &str,
+		id: &str,
+	) -> Result<usize, StoreError> {
+		let plane_id = self.plane().await?.plane_id;
+		let reference = target_reference(plane_id, kind, Some(id)).0.to_vec();
+		let count = sqlx::query_scalar!(
+			r#"SELECT COUNT(*) AS "count!: i64" FROM security_audit
+			 WHERE target_reference = ?1 AND target_id IS NOT NULL"#,
+			reference
+		)
+		.fetch_one(self.connection())
+		.await?;
+		Ok(usize::try_from(count).unwrap_or(usize::MAX))
 	}
 }
 

@@ -2,6 +2,8 @@
 
 pub(crate) mod fork;
 pub(crate) mod import;
+pub(crate) mod purge;
+pub(crate) mod trash;
 
 use crate::{
 	StoreError,

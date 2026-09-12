@@ -7,7 +7,7 @@ use crate::{
 	audit::AuditEpoch,
 	capability::HarnessId,
 	conversation::{
-		ConversationOrigin,
+		ConversationId, ConversationOrigin,
 		import::{ImportId, NativeConversationId},
 	},
 	pairing::{PairingEnd, PairingOfferId},
@@ -52,6 +52,22 @@ pub enum EventKind {
 	ScheduleCanceled {
 		/// Immutable schedule identity.
 		schedule_id: Uuid,
+	},
+	/// The Conversation was staged in Jet Trash (ADR-0015).
+	#[serde(rename = "conversation.trashed")]
+	ConversationTrashed {
+		/// The Conversation staged.
+		conversation_id: ConversationId,
+		/// Why it was staged.
+		reason: crate::retention::TrashReason,
+		/// When its grace period ends.
+		expires_at_unix_ms: i64,
+	},
+	/// The Conversation was taken back out of Jet Trash.
+	#[serde(rename = "conversation.restored")]
+	ConversationRestored {
+		/// The Conversation restored.
+		conversation_id: ConversationId,
 	},
 	/// Each elapsed occurrence retains its selection and admission outcome.
 	#[serde(rename = "schedule.fired")]

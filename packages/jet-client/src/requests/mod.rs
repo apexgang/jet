@@ -2,6 +2,7 @@
 
 mod audit;
 
+mod retention;
 mod store_recovery;
 pub use store_recovery::{PurgedSnapshots, RestoredSnapshot};
 
@@ -66,6 +67,8 @@ impl Client {
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::AutoContinue(_)
 			| QueryResponse::ScheduledTasks(_)
+			| QueryResponse::ConversationTrash(_)
+			| QueryResponse::RetentionPreview(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -113,6 +116,8 @@ impl Client {
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::AutoContinue(_)
 			| QueryResponse::ScheduledTasks(_)
+			| QueryResponse::ConversationTrash(_)
+			| QueryResponse::RetentionPreview(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -167,6 +172,8 @@ impl Client {
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::AutoContinue(_)
 			| QueryResponse::ScheduledTasks(_)
+			| QueryResponse::ConversationTrash(_)
+			| QueryResponse::RetentionPreview(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)

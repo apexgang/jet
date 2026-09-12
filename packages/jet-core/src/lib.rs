@@ -53,6 +53,11 @@ mod project;
 mod promotion;
 mod query;
 mod remote;
+mod retention;
+pub use retention::{
+	ConversationTrash, Protection, RetentionPreview, RetentionSweep,
+	TrashEntry, TrashReason,
+};
 mod review;
 pub use review::{
 	ApprovalRequest, ApprovalReview, AutomaticReviewPolicy,

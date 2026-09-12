@@ -284,6 +284,9 @@ impl Core {
 			| Command::BeginAuditEpoch
 			| Command::RestoreRecoverySnapshot { .. }
 			| Command::PurgeRecoverySnapshots
+			| Command::ForgetConversation { .. }
+			| Command::DeleteConversationEverywhere { .. }
+			| Command::RestoreConversation { .. }
 			| Command::SetPairingGate { .. }
 			| Command::OpenPairing { .. }
 			| Command::ClaimPairing { .. }

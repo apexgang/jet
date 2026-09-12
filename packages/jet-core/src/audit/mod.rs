@@ -14,10 +14,12 @@
 //! something Jet already keeps — never a value somebody typed.
 
 mod retention;
-pub(crate) use retention::sweep_retention;
+pub(crate) use retention::{anonymize, sweep_retention};
 
 mod recording;
-pub(crate) use recording::{record, record_craft_revocation, record_refusal};
+pub(crate) use recording::{
+	record, record_as, record_craft_revocation, record_refusal,
+};
 
 mod policy;
 pub(crate) use policy::{
@@ -158,6 +160,23 @@ pub enum AuditDecision {
 	/// The owner changed whether, or through which binding, this Plane
 	/// reviews approval requests automatically.
 	ReviewPolicyChanged,
+	/// A Conversation was staged in Jet Trash to be forgotten: by its
+	/// owner, or by its own retention policy once nothing protected it
+	/// (ADR-0011, ADR-0015).
+	ConversationForgotten,
+	/// An owner authorized deleting a Conversation everywhere, native
+	/// history included where its Harness supports that (ADR-0011).
+	ConversationDeletionAuthorized,
+	/// A Conversation was taken back out of Jet Trash.
+	ConversationRestored,
+	/// A Conversation's grace period ended and its Jet-owned state is
+	/// gone; the records about it keep only this opaque identity
+	/// (ADR-0105).
+	ConversationDeleted,
+	/// The owner changed how long Jet Trash keeps a Conversation.
+	TrashGraceChanged,
+	/// The owner returned the Trash grace period to its default.
+	TrashGraceCleared,
 }
 
 /// What a decision is about. The core turns each one into the durable kind

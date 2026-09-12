@@ -104,6 +104,12 @@ pub(crate) fn query(
 				conversation_id: ConversationId(*conversation_id),
 			}
 		}
+		wire::QueryRequest::ConversationTrash => Query::ConversationTrash,
+		wire::QueryRequest::RetentionPreview { conversation_id } => {
+			Query::RetentionPreview {
+				conversation_id: ConversationId(*conversation_id),
+			}
+		}
 		wire::QueryRequest::TurnQueue { conversation_id } => Query::TurnQueue {
 			conversation_id: ConversationId(*conversation_id),
 		},
@@ -258,6 +264,16 @@ pub(crate) fn query_result(
 				cursor: snapshot.cursor.0,
 				tasks: snapshot.tasks.into_iter().map(schedule::task).collect(),
 			})
+		}
+		QueryResult::ConversationTrash(trash) => {
+			wire::QueryResponse::ConversationTrash(super::retention::trash(
+				trash,
+			))
+		}
+		QueryResult::RetentionPreview(preview) => {
+			wire::QueryResponse::RetentionPreview(super::retention::preview(
+				preview,
+			))
 		}
 		QueryResult::TurnQueue(queue) => {
 			wire::QueryResponse::TurnQueue(wire::TurnQueue {

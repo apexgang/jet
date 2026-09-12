@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM orphaned_executions WHERE execution_id IN (\n\t\t\tSELECT run_id FROM runs WHERE conversation_id = ?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "9200a2b5f66f2bc18c640338f2da52ad8d1a7257b19cbc4a4c4676cca1abedc1"
+}

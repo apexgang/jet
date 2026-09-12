@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT conversation_id AS \"conversation_id!\", reason,\n\t\t\t\ttrashed_at_unix_ms, expires_at_unix_ms\n\t\t\t FROM conversation_trash\n\t\t\t ORDER BY expires_at_unix_ms, conversation_id\n\t\t\t LIMIT ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "conversation_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversation_trash",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "name": "reason",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversation_trash",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "name": "trashed_at_unix_ms",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "conversation_trash",
+            "name": "trashed_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "expires_at_unix_ms",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "conversation_trash",
+            "name": "expires_at_unix_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c5e96ef2f07af88aad8b4b008dc7214701dba72affe842989f976cda636acf1e"
+}

@@ -54,6 +54,7 @@ public struct ArtifactDescriptor {
 public enum AuditActor {
     case `interactive_client`(AuditActorInteractiveClient)
     case `craft_revocation`(AuditActorCraftRevocation)
+    case `retention`(AuditActorRetention)
 }
 
 public enum AuditBreach {
@@ -304,6 +305,9 @@ public enum CommandRequest {
     case `begin_audit_epoch`(CommandRequestBeginAuditEpoch)
     case `restore_recovery_snapshot`(CommandRequestRestoreRecoverySnapshot)
     case `purge_recovery_snapshots`(CommandRequestPurgeRecoverySnapshots)
+    case `forget_conversation`(CommandRequestForgetConversation)
+    case `delete_conversation_everywhere`(CommandRequestDeleteConversationEverywhere)
+    case `restore_conversation`(CommandRequestRestoreConversation)
     case `set_pairing_gate`(CommandRequestSetPairingGate)
     case `open_pairing`(CommandRequestOpenPairing)
     case `claim_pairing`(CommandRequestClaimPairing)
@@ -353,6 +357,8 @@ public enum CommandResponse {
     case `paired_client_access_set`(CommandResponsePairedClientAccessSet)
     case `paired_client_revoked`(CommandResponsePairedClientRevoked)
     case `recovery_snapshot_restored`(CommandResponseRecoverySnapshotRestored)
+    case `conversation_trashed`(CommandResponseConversationTrashed)
+    case `conversation_restored`(CommandResponseConversationRestored)
     case `recovery_snapshots_purged`(CommandResponseRecoverySnapshotsPurged)
     case `audit_epoch_begun`(CommandResponseAuditEpochBegun)
     case `project_registered`(CommandResponseProjectRegistered)
@@ -402,6 +408,11 @@ public struct ConversationSnapshot {
     public let `cursor`: String
     public let `runs`: [Run]
     public let `workspace`: Workspace?
+}
+
+public struct ConversationTrash {
+    public let `cursor`: String
+    public let `entries`: [TrashEntry]
 }
 
 public enum CraftDisableMode: String {
@@ -989,6 +1000,8 @@ public enum QueryRequest {
     case `utility`(QueryRequestUtility)
     case `discover_craft`(QueryRequestDiscoverCraft)
     case `scheduled_tasks`(QueryRequestScheduledTasks)
+    case `conversation_trash`(QueryRequestConversationTrash)
+    case `retention_preview`(QueryRequestRetentionPreview)
     case `editable_file`(QueryRequestEditableFile)
     case `workspace_terminals`(QueryRequestWorkspaceTerminals)
     case `change_artifact`(QueryRequestChangeArtifact)
@@ -1025,6 +1038,8 @@ public enum QueryResponse {
     case `utility`(QueryResponseUtility)
     case `craft_installation_preview`(QueryResponseCraftInstallationPreview)
     case `scheduled_tasks`(QueryResponseScheduledTasks)
+    case `conversation_trash`(QueryResponseConversationTrash)
+    case `retention_preview`(QueryResponseRetentionPreview)
     case `editable_file`(QueryResponseEditableFile)
     case `workspace_terminals`(QueryResponseWorkspaceTerminals)
     case `change_artifact`(QueryResponseChangeArtifact)
@@ -1208,6 +1223,22 @@ public enum RetentionPolicy: String {
     case `forget_after_final_run` = "forget_after_final_run"
 }
 
+public struct RetentionPreview {
+    public let `audit_records`: UInt64
+    public let `conversation_id`: String
+    public let `protections`: [RetentionProtection]
+    public let `trash`: TrashEntry?
+}
+
+public enum RetentionProtection: String {
+    case `active_run` = "active_run"
+    case `pending_turn` = "pending_turn"
+    case `enabled_schedule` = "enabled_schedule"
+    case `dirty_workspace` = "dirty_workspace"
+    case `unpushed_work` = "unpushed_work"
+    case `unresolved_effect` = "unresolved_effect"
+}
+
 public struct ReviewComment {
     public let `comment`: String
     public let `line`: UInt32
@@ -1363,6 +1394,7 @@ public enum SettingKey: String {
     case `git.branch_prefix` = "git.branch_prefix"
     case `git.message_instructions` = "git.message_instructions"
     case `security.audit_retention_days` = "security.audit_retention_days"
+    case `retention.trash_grace_days` = "retention.trash_grace_days"
     case `craft.developer_mode` = "craft.developer_mode"
     case `review.automatic` = "review.automatic"
     case `review.account_binding` = "review.account_binding"
@@ -1436,6 +1468,19 @@ public enum TerminationStage: String {
 public enum ToolAvailability {
     case `present`(ToolAvailabilityPresent)
     case `missing`(ToolAvailabilityMissing)
+}
+
+public struct TrashEntry {
+    public let `conversation_id`: String
+    public let `expires_at_unix_ms`: Int64
+    public let `reason`: TrashReason
+    public let `trashed_at_unix_ms`: Int64
+}
+
+public enum TrashReason: String {
+    case `manual_forget` = "manual_forget"
+    case `automatic_forget` = "automatic_forget"
+    case `delete_everywhere` = "delete_everywhere"
 }
 
 public struct Turn {
@@ -1659,6 +1704,10 @@ public struct AuditActorInteractiveClient {
 }
 
 public struct AuditActorCraftRevocation {
+
+}
+
+public struct AuditActorRetention {
 
 }
 
@@ -1959,6 +2008,18 @@ public struct CommandRequestPurgeRecoverySnapshots {
 
 }
 
+public struct CommandRequestForgetConversation {
+    public let `conversation_id`: String
+}
+
+public struct CommandRequestDeleteConversationEverywhere {
+    public let `conversation_id`: String
+}
+
+public struct CommandRequestRestoreConversation {
+    public let `conversation_id`: String
+}
+
 public struct CommandRequestSetPairingGate {
     public let `gate`: PairingGate
 }
@@ -2199,6 +2260,14 @@ public struct CommandResponsePairedClientRevoked {
 public struct CommandResponseRecoverySnapshotRestored {
     public let `replaced`: String
     public let `snapshot`: String
+}
+
+public struct CommandResponseConversationTrashed {
+    public let `entry`: TrashEntry
+}
+
+public struct CommandResponseConversationRestored {
+    public let `conversation_id`: String
 }
 
 public struct CommandResponseRecoverySnapshotsPurged {
@@ -2574,6 +2643,14 @@ public struct QueryRequestScheduledTasks {
     public let `conversation_id`: String
 }
 
+public struct QueryRequestConversationTrash {
+
+}
+
+public struct QueryRequestRetentionPreview {
+    public let `conversation_id`: String
+}
+
 public struct QueryRequestEditableFile {
     public let `path`: String
     public let `target`: FileTarget
@@ -2735,6 +2812,18 @@ public struct QueryResponseCraftInstallationPreview {
 public struct QueryResponseScheduledTasks {
     public let `cursor`: String
     public let `tasks`: [ScheduledTask]
+}
+
+public struct QueryResponseConversationTrash {
+    public let `cursor`: String
+    public let `entries`: [TrashEntry]
+}
+
+public struct QueryResponseRetentionPreview {
+    public let `audit_records`: UInt64
+    public let `conversation_id`: String
+    public let `protections`: [RetentionProtection]
+    public let `trash`: TrashEntry?
 }
 
 public struct QueryResponseEditableFile {

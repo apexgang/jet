@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MIN(expires_at_unix_ms) AS \"expires_at_unix_ms?: i64\"\n\t\t\t FROM conversation_trash",
+  "describe": {
+    "columns": [
+      {
+        "name": "expires_at_unix_ms?: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "704adac126a7f7df56146aa1620033d4935bb1deebca2165c4469ed6ac21c121"
+}

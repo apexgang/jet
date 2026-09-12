@@ -197,6 +197,16 @@ pub enum CommandResponse {
 		/// failed migration.
 		replaced: String,
 	},
+	/// The Conversation is in Jet Trash.
+	ConversationTrashed {
+		/// The entry, with its reason and grace period.
+		entry: crate::TrashEntry,
+	},
+	/// The Conversation is out of Jet Trash again.
+	ConversationRestored {
+		/// The Conversation restored.
+		conversation_id: Uuid,
+	},
 	/// The post-deletion snapshot is taken and the older ones are gone.
 	RecoverySnapshotsPurged {
 		/// The snapshot taken after every recorded deletion.

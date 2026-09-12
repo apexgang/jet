@@ -394,6 +394,19 @@
           "required": [
             "type"
           ]
+        },
+        {
+          "description": "The retention sweep forgot or deleted a Conversation on its own\npolicy or grace period (ADR-0015).",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "retention"
+            }
+          },
+          "required": [
+            "type"
+          ]
         }
       ]
     },
@@ -2595,6 +2608,63 @@
           ]
         },
         {
+          "description": "Forget a Conversation: stage it in Jet Trash, from where its\nJet-owned state is deleted when the grace period ends, leaving the\nHarness's own history in place (ADR-0011, ADR-0015). A live Run or\nqueued turn refuses it.",
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "description": "The Conversation to forget.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "forget_conversation"
+            }
+          },
+          "required": [
+            "type",
+            "conversation_id"
+          ]
+        },
+        {
+          "description": "Delete a Conversation everywhere: stop its active Run, cancel its\nqueued turns, and stage it so that its native history is requested\nfrom its Harness too when the grace period ends (ADR-0011).",
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "description": "The Conversation to delete.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "delete_conversation_everywhere"
+            }
+          },
+          "required": [
+            "type",
+            "conversation_id"
+          ]
+        },
+        {
+          "description": "Take a Conversation back out of Jet Trash before its grace period\nends.",
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "description": "The Conversation to restore.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "restore_conversation"
+            }
+          },
+          "required": [
+            "type",
+            "conversation_id"
+          ]
+        },
+        {
           "description": "Open or close the Plane's Pairing gate, which decides whether a new\nGUI client may begin Pairing at all. It does not alter the clients\nthat are already Paired.",
           "type": "object",
           "properties": {
@@ -3519,6 +3589,43 @@
           ]
         },
         {
+          "description": "The Conversation is in Jet Trash.",
+          "type": "object",
+          "properties": {
+            "entry": {
+              "description": "The entry, with its reason and grace period.",
+              "$ref": "#/$defs/TrashEntry"
+            },
+            "type": {
+              "type": "string",
+              "const": "conversation_trashed"
+            }
+          },
+          "required": [
+            "type",
+            "entry"
+          ]
+        },
+        {
+          "description": "The Conversation is out of Jet Trash again.",
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "description": "The Conversation restored.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "conversation_restored"
+            }
+          },
+          "required": [
+            "type",
+            "conversation_id"
+          ]
+        },
+        {
           "description": "The post-deletion snapshot is taken and the older ones are gone.",
           "type": "object",
           "properties": {
@@ -3887,6 +3994,28 @@
         "cursor",
         "conversation",
         "runs"
+      ]
+    },
+    "ConversationTrash": {
+      "description": "Everything in Jet Trash, soonest expiry first.",
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "description": "Plane Event high-water cursor in this read transaction.",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "entries": {
+          "description": "The staged Conversations, bounded to 256.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TrashEntry"
+          }
+        }
+      },
+      "required": [
+        "cursor",
+        "entries"
       ]
     },
     "CraftDisableMode": {
@@ -7272,6 +7401,38 @@
           ]
         },
         {
+          "description": "Everything in Jet Trash.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "conversation_trash"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "What protects one Conversation from forgetting and what its\ndeletion would leave behind.",
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "description": "The Conversation asked about.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "retention_preview"
+            }
+          },
+          "required": [
+            "type",
+            "conversation_id"
+          ]
+        },
+        {
           "description": "Read bounded UTF-8 file content through a registered root.",
           "type": "object",
           "properties": {
@@ -7916,6 +8077,34 @@
             }
           },
           "$ref": "#/$defs/ScheduledTasks",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Staged Conversations, soonest expiry first.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "conversation_trash"
+            }
+          },
+          "$ref": "#/$defs/ConversationTrash",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Protections and disclosures for one Conversation.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "retention_preview"
+            }
+          },
+          "$ref": "#/$defs/RetentionPreview",
           "required": [
             "type"
           ]
@@ -9400,6 +9589,81 @@
         }
       ]
     },
+    "RetentionPreview": {
+      "description": "What forgetting or deleting one Conversation would meet and leave\nbehind.",
+      "type": "object",
+      "properties": {
+        "audit_records": {
+          "description": "How many Security-audit records name it. The deletion keeps them as\ncontent-free metadata under an opaque identifier until they expire.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "conversation_id": {
+          "description": "The Conversation asked about.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "protections": {
+          "description": "What protects it today, in a fixed order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RetentionProtection"
+          }
+        },
+        "trash": {
+          "description": "Its Trash entry, if it is already staged.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrashEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "conversation_id",
+        "protections",
+        "audit_records"
+      ]
+    },
+    "RetentionProtection": {
+      "description": "One reason a Conversation is not eligible for automatic forgetting.\nManual forgetting refuses only the first two.",
+      "oneOf": [
+        {
+          "description": "A Run of the Conversation has not ended.",
+          "type": "string",
+          "const": "active_run"
+        },
+        {
+          "description": "A turn is queued or claimed and not yet settled.",
+          "type": "string",
+          "const": "pending_turn"
+        },
+        {
+          "description": "An enabled Scheduled task will queue more turns.",
+          "type": "string",
+          "const": "enabled_schedule"
+        },
+        {
+          "description": "Its Workspace has changes that are not committed.",
+          "type": "string",
+          "const": "dirty_workspace"
+        },
+        {
+          "description": "Its Workspace has commits no remote branch holds.",
+          "type": "string",
+          "const": "unpushed_work"
+        },
+        {
+          "description": "An Effect of one of its Runs or deliveries is pending or in flight.",
+          "type": "string",
+          "const": "unresolved_effect"
+        }
+      ]
+    },
     "ReviewComment": {
       "description": "One submitted inline review comment.",
       "type": "object",
@@ -10349,6 +10613,11 @@
           "const": "security.audit_retention_days"
         },
         {
+          "description": "How many days a Conversation stays in Jet Trash before it is\ndeleted.",
+          "type": "string",
+          "const": "retention.trash_grace_days"
+        },
+        {
           "description": "Whether local and source-built third-party Crafts may be installed.",
           "type": "string",
           "const": "craft.developer_mode"
@@ -10808,6 +11077,57 @@
           "required": [
             "status"
           ]
+        }
+      ]
+    },
+    "TrashEntry": {
+      "description": "One Conversation in Jet Trash: why it is there and how long it stays.",
+      "type": "object",
+      "properties": {
+        "conversation_id": {
+          "description": "The Conversation staged for deletion.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "expires_at_unix_ms": {
+          "description": "When its grace period ends and the deletion happens.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "reason": {
+          "description": "Why it was staged.",
+          "$ref": "#/$defs/TrashReason"
+        },
+        "trashed_at_unix_ms": {
+          "description": "When it was staged, in signed Unix milliseconds.",
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "reason",
+        "trashed_at_unix_ms",
+        "expires_at_unix_ms"
+      ]
+    },
+    "TrashReason": {
+      "description": "Why a Conversation is in Jet Trash.",
+      "oneOf": [
+        {
+          "description": "Its owner asked Jet to forget it.",
+          "type": "string",
+          "const": "manual_forget"
+        },
+        {
+          "description": "Its retention policy forgets it after its final Run, and nothing\nprotected it any longer.",
+          "type": "string",
+          "const": "automatic_forget"
+        },
+        {
+          "description": "Its owner asked for it to be deleted everywhere, native history\nincluded where the Harness supports that.",
+          "type": "string",
+          "const": "delete_everywhere"
         }
       ]
     },

@@ -58,10 +58,6 @@ pub(crate) async fn sweep_retention(
 ///
 /// Returns a store category [`CoreError`] when the records cannot be
 /// updated.
-#[allow(
-	dead_code,
-	reason = "called by Conversation deletion in follow-up issue #53"
-)]
 pub(crate) async fn anonymize(
 	tx: &mut WriteTransaction,
 	subject: AuditSubject,

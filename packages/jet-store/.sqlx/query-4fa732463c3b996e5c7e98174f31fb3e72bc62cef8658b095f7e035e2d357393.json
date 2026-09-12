@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM workspace_promotion_conflicts WHERE promotion_id IN (\n\t\t\tSELECT p.promotion_id FROM workspace_promotions p\n\t\t\tJOIN workspaces w ON w.workspace_id = p.workspace_id\n\t\t\tWHERE w.conversation_id = ?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "4fa732463c3b996e5c7e98174f31fb3e72bc62cef8658b095f7e035e2d357393"
+}

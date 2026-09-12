@@ -90,6 +90,9 @@ pub(crate) fn requires_disk_admission(command: &Command) -> bool {
 		| Command::SetAutoContinue { .. }
 		| Command::CreateSchedule { .. }
 		| Command::CancelSchedule { .. }
+		| Command::ForgetConversation { .. }
+		| Command::DeleteConversationEverywhere { .. }
+		| Command::RestoreConversation { .. }
 		| Command::SubmitTurn { .. }
 		| Command::ResolveExecution(_)
 		| Command::ControlRun { .. }

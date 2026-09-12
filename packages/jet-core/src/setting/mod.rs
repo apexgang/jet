@@ -474,6 +474,11 @@ pub(crate) mod tests {
 						SettingSource::Scope(SettingScope::Plane)
 					),
 					resolved(
+						SettingKey::RetentionTrashGraceDays,
+						SettingValue::Count(30),
+						SettingSource::BuiltIn
+					),
+					resolved(
 						SettingKey::SecurityAuditRetentionDays,
 						SettingValue::Count(365),
 						SettingSource::BuiltIn
@@ -591,6 +596,11 @@ pub(crate) mod tests {
 						SettingKey::GitMessageInstructions,
 						SettingValue::Text("Explain why, not what".into()),
 						SettingSource::Scope(SettingScope::Plane)
+					),
+					resolved(
+						SettingKey::RetentionTrashGraceDays,
+						SettingValue::Count(30),
+						SettingSource::BuiltIn
 					),
 					resolved(
 						SettingKey::SecurityAuditRetentionDays,

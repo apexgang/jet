@@ -150,6 +150,10 @@ impl Core {
 				})
 				.await
 				.map(QueryResult::ScheduledTasks),
+			Query::ConversationTrash => self.conversation_trash().await,
+			Query::RetentionPreview { conversation_id } => {
+				self.retention_preview(conversation_id).await
+			}
 			Query::TurnQueue { conversation_id } => self
 				.store
 				.read(async |tx| {

@@ -487,6 +487,24 @@ pub(super) async fn execute_new(
 			"recovery.purge_misrouted",
 			"a Recovery purge reached the receipt pipeline",
 		)),
+		Command::ForgetConversation { conversation_id } => {
+			crate::retention::forget(tx, actor, conversation_id, now_unix_ms)
+				.await
+		}
+		Command::DeleteConversationEverywhere { conversation_id } => {
+			crate::retention::delete_everywhere(
+				tx,
+				actor,
+				command_id,
+				conversation_id,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::RestoreConversation { conversation_id } => {
+			crate::retention::restore(tx, actor, conversation_id, now_unix_ms)
+				.await
+		}
 		Command::SetPairingGate { gate } => {
 			pairing::set_gate(tx, actor, gate, now_unix_ms).await
 		}

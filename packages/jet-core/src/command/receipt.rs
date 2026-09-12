@@ -33,6 +33,8 @@ const AUTO_CONTINUE_OUTCOME_VERSION: u32 = 10;
 const GIT_DELIVERY_OUTCOME_VERSION: u32 = 11;
 /// Older releases cannot replay a snapshot restoration.
 const STORE_RECOVERY_OUTCOME_VERSION: u32 = 12;
+/// Older releases cannot replay Jet Trash Commands.
+const RETENTION_OUTCOME_VERSION: u32 = 13;
 
 /// Uses the rollback release's encoding whenever that release can understand
 /// the result. Version 2 is reserved for name-only variants introduced here;
@@ -46,6 +48,10 @@ pub(crate) fn outcome_version(
 			CommandOutcome::RecoverySnapshotRestored(_)
 			| CommandOutcome::RecoverySnapshotsPurged(_),
 		) => STORE_RECOVERY_OUTCOME_VERSION,
+		Ok(
+			CommandOutcome::ConversationTrashed(_)
+			| CommandOutcome::ConversationRestored { .. },
+		) => RETENTION_OUTCOME_VERSION,
 		Ok(CommandOutcome::AutoContinueConfigured) => {
 			AUTO_CONTINUE_OUTCOME_VERSION
 		}

@@ -12,6 +12,9 @@ pub enum AuditActorRecord {
 	},
 	/// Jet applied verified release metadata on this Plane.
 	CraftRevocation,
+	/// The retention sweep acted on a Conversation's own policy or a
+	/// grace period that ended (ADR-0015).
+	Retention,
 }
 
 impl AuditActorRecord {
@@ -21,12 +24,17 @@ impl AuditActorRecord {
 				("interactive_client", client_id)
 			}
 			Self::CraftRevocation => ("craft_revocation", Uuid::nil()),
+			Self::Retention => ("retention", Uuid::nil()),
 		}
 	}
 
 	pub(crate) fn parse(kind: &str, id: &str) -> Result<Self, StoreError> {
-		if kind == "craft_revocation" && id == Uuid::nil().to_string() {
-			return Ok(Self::CraftRevocation);
+		if id == Uuid::nil().to_string() {
+			match kind {
+				"craft_revocation" => return Ok(Self::CraftRevocation),
+				"retention" => return Ok(Self::Retention),
+				_ => {}
+			}
 		}
 		ActorRecord::parse(kind, id).map(Self::from)
 	}

@@ -130,6 +130,8 @@ pub(crate) fn documents_of(event: &Event) -> Vec<NewSearchDocument> {
 		| EventKind::AutoContinueChanged { .. }
 		| EventKind::AutoContinueConfigured { .. }
 		| EventKind::ScheduleCreated { .. } | EventKind::ScheduleCanceled { .. } | EventKind::ScheduleFired { .. } | EventKind::TurnChanged { .. }
+		| EventKind::ConversationTrashed { .. }
+		| EventKind::ConversationRestored { .. }
 		| EventKind::RunControlRequested { .. }
 		| EventKind::RunTerminated { .. }
 		| EventKind::UsageRecorded { .. }

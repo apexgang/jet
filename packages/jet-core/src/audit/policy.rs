@@ -61,6 +61,15 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::PurgeRecoverySnapshots => {
 			Some(AuditDecision::RecoverySnapshotsPurged)
 		}
+		Command::ForgetConversation { .. } => {
+			Some(AuditDecision::ConversationForgotten)
+		}
+		Command::DeleteConversationEverywhere { .. } => {
+			Some(AuditDecision::ConversationDeletionAuthorized)
+		}
+		Command::RestoreConversation { .. } => {
+			Some(AuditDecision::ConversationRestored)
+		}
 		Command::BeginAuditEpoch
 		| Command::ApplyUserEdit { .. }
 		| Command::SetConversationName { .. }
@@ -119,6 +128,11 @@ pub(super) fn refused_subject(command: &Command) -> AuditSubject {
 		}
 		Command::UnbindAccount { binding_id } => {
 			AuditSubject::AccountBinding(*binding_id)
+		}
+		Command::ForgetConversation { conversation_id }
+		| Command::DeleteConversationEverywhere { conversation_id }
+		| Command::RestoreConversation { conversation_id } => {
+			AuditSubject::Conversation(*conversation_id)
 		}
 		Command::SetPairedClientAccess { client_id, .. }
 		| Command::RevokePairedClient { client_id } => {
@@ -221,6 +235,9 @@ pub(crate) fn stored_setting(
 		(SettingKey::SecurityAuditRetentionDays, SettingValue::Count(_)) => {
 			Some(AuditDecision::AuditRetentionChanged)
 		}
+		(SettingKey::RetentionTrashGraceDays, SettingValue::Count(_)) => {
+			Some(AuditDecision::TrashGraceChanged)
+		}
 		(SettingKey::DeveloperMode, SettingValue::Flag(true)) => {
 			Some(AuditDecision::DeveloperModeEnabled)
 		}
@@ -235,7 +252,8 @@ pub(crate) fn stored_setting(
 			SettingValue::Text(_) | SettingValue::Count(_),
 		)
 		| (
-			SettingKey::SecurityAuditRetentionDays,
+			SettingKey::SecurityAuditRetentionDays
+			| SettingKey::RetentionTrashGraceDays,
 			SettingValue::Flag(_) | SettingValue::Text(_),
 		)
 		| (
@@ -285,6 +303,9 @@ pub(crate) fn cleared_setting(key: SettingKey) -> Option<AuditDecision> {
 		}
 		SettingKey::SecurityAuditRetentionDays => {
 			Some(AuditDecision::AuditRetentionCleared)
+		}
+		SettingKey::RetentionTrashGraceDays => {
+			Some(AuditDecision::TrashGraceCleared)
 		}
 		SettingKey::DeveloperMode => Some(AuditDecision::DeveloperModeCleared),
 		SettingKey::EnergyConcurrency

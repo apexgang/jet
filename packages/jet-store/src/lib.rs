@@ -66,6 +66,7 @@ pub use conversation::fork::ForkLaunchContextRecord;
 pub use conversation::import::{
 	ImportedConversationRecord, NewImportedConversation,
 };
+pub use conversation::trash::{TrashReasonRecord, TrashRecord};
 pub use journal::{EVENT_COMPACTION_BATCH_LIMIT, ForkContextEvents};
 pub use pairing::PairingGate;
 pub use pairing::offer::{

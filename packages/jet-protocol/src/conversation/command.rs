@@ -279,6 +279,27 @@ pub enum CommandRequest {
 	/// still hold what was deleted (ADR-0102). It is destructive: those
 	/// snapshots were the last copies.
 	PurgeRecoverySnapshots,
+	/// Forget a Conversation: stage it in Jet Trash, from where its
+	/// Jet-owned state is deleted when the grace period ends, leaving the
+	/// Harness's own history in place (ADR-0011, ADR-0015). A live Run or
+	/// queued turn refuses it.
+	ForgetConversation {
+		/// The Conversation to forget.
+		conversation_id: Uuid,
+	},
+	/// Delete a Conversation everywhere: stop its active Run, cancel its
+	/// queued turns, and stage it so that its native history is requested
+	/// from its Harness too when the grace period ends (ADR-0011).
+	DeleteConversationEverywhere {
+		/// The Conversation to delete.
+		conversation_id: Uuid,
+	},
+	/// Take a Conversation back out of Jet Trash before its grace period
+	/// ends.
+	RestoreConversation {
+		/// The Conversation to restore.
+		conversation_id: Uuid,
+	},
 	/// Open or close the Plane's Pairing gate, which decides whether a new
 	/// GUI client may begin Pairing at all. It does not alter the clients
 	/// that are already Paired.

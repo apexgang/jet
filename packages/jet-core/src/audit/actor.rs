@@ -11,6 +11,8 @@ pub enum AuditActor {
 	},
 	/// Jet applied signed release revocations on this Plane.
 	CraftRevocation,
+	/// The retention sweep forgot or deleted a Conversation (ADR-0015).
+	Retention,
 }
 
 impl From<jet_store::AuditActorRecord> for AuditActor {
@@ -24,6 +26,7 @@ impl From<jet_store::AuditActorRecord> for AuditActor {
 			jet_store::AuditActorRecord::CraftRevocation => {
 				Self::CraftRevocation
 			}
+			jet_store::AuditActorRecord::Retention => Self::Retention,
 		}
 	}
 }

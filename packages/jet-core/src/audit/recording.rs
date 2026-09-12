@@ -64,10 +64,21 @@ pub(crate) async fn record(
 	decision: Decision,
 	now_unix_ms: i64,
 ) -> Result<(), CoreError> {
+	record_as(tx, actor.record().into(), decision, now_unix_ms).await
+}
+
+/// The same record under an attribution that is not a Command's Actor,
+/// for decisions Jet takes on its own, such as the retention sweep's.
+pub(crate) async fn record_as(
+	tx: &mut WriteTransaction,
+	actor: jet_store::AuditActorRecord,
+	decision: Decision,
+	now_unix_ms: i64,
+) -> Result<(), CoreError> {
 	tx.append_audit_record(NewAuditRecord {
 		record_id: Uuid::now_v7(),
 		recorded_at_unix_ms: now_unix_ms,
-		actor: actor.record().into(),
+		actor,
 		target_kind: decision.subject.kind().into(),
 		target_id: decision.subject.identity(),
 		decision: decision.decision.as_str().into(),

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT c.conversation_id AS \"conversation_id!\"\n\t\t\t FROM conversations c\n\t\t\t WHERE c.retention = 'forget_after_final_run'\n\t\t\t\tAND c.conversation_id > ?1\n\t\t\t\tAND EXISTS (SELECT 1 FROM runs r\n\t\t\t\t\tWHERE r.conversation_id = c.conversation_id)\n\t\t\t\tAND NOT EXISTS (SELECT 1 FROM conversation_trash t\n\t\t\t\t\tWHERE t.conversation_id = c.conversation_id)\n\t\t\t ORDER BY c.conversation_id LIMIT 100",
+  "describe": {
+    "columns": [
+      {
+        "name": "conversation_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "conversation_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "9bb4f3624450b040d1e9698a4a0a1603671446172b54141ee7c3d1c2c774b416"
+}

@@ -27,6 +27,8 @@ impl Client {
 			CommandResponse::AuditEpochBegun { epoch } => Ok(epoch),
 			other @ (CommandResponse::RecoverySnapshotRestored { .. }
 			| CommandResponse::RecoverySnapshotsPurged { .. }
+			| CommandResponse::ConversationTrashed { .. }
+			| CommandResponse::ConversationRestored { .. }
 			| CommandResponse::GitDeliveryAcknowledged { .. }
 			| CommandResponse::GitDeliveryQueued { .. }
 			| CommandResponse::ApprovalRetryAuthorized { .. }
@@ -93,6 +95,8 @@ impl Client {
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::AutoContinue(_)
 			| QueryResponse::ScheduledTasks(_)
+			| QueryResponse::ConversationTrash(_)
+			| QueryResponse::RetentionPreview(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)

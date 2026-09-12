@@ -31,6 +31,18 @@ pub(super) fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 		QueryRequest::Settings {
 			selection:
 				jet_protocol::SettingSelection::Key {
+					key: jet_protocol::SettingKey::RetentionTrashGraceDays,
+				},
+			..
+		}
+		| QueryRequest::ConversationTrash
+		| QueryRequest::RetentionPreview { .. } => Some(MinorRequirement {
+			minor: jet_protocol::RETENTION_MINOR,
+			feature: "Jet Trash",
+		}),
+		QueryRequest::Settings {
+			selection:
+				jet_protocol::SettingSelection::Key {
 					key:
 						jet_protocol::SettingKey::GitAutoBranch
 						| jet_protocol::SettingKey::GitAutoPush
@@ -206,6 +218,20 @@ pub(super) fn command_minor(
 		CommandRequest::ReviewRemoteTool { .. } => Some(MinorRequirement {
 			minor: jet_protocol::NO_VISA_MINOR,
 			feature: "No-Visa review",
+		}),
+		CommandRequest::SetSetting {
+			key: jet_protocol::SettingKey::RetentionTrashGraceDays,
+			..
+		}
+		| CommandRequest::ClearSetting {
+			key: jet_protocol::SettingKey::RetentionTrashGraceDays,
+			..
+		}
+		| CommandRequest::ForgetConversation { .. }
+		| CommandRequest::DeleteConversationEverywhere { .. }
+		| CommandRequest::RestoreConversation { .. } => Some(MinorRequirement {
+			minor: jet_protocol::RETENTION_MINOR,
+			feature: "Jet Trash",
 		}),
 		CommandRequest::SetSetting {
 			key: jet_protocol::SettingKey::StorageDisposableMiB,

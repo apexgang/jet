@@ -284,6 +284,27 @@ pub enum Command {
 	/// and remove every older snapshot that may still hold what was
 	/// deleted (ADR-0102). Only an interactive owner asks for this.
 	PurgeRecoverySnapshots,
+	/// Forget a Conversation: stage it in Jet Trash, from where its
+	/// Jet-owned state is deleted when the grace period ends, leaving the
+	/// Harness's own history in place (ADR-0011, ADR-0015). Live work is
+	/// refused rather than stopped.
+	ForgetConversation {
+		/// The Conversation to forget.
+		conversation_id: ConversationId,
+	},
+	/// Delete a Conversation everywhere: stop its active Run, cancel its
+	/// queued turns, and stage it so that its native history is requested
+	/// from its Harness too when the grace period ends (ADR-0011).
+	DeleteConversationEverywhere {
+		/// The Conversation to delete.
+		conversation_id: ConversationId,
+	},
+	/// Take a Conversation back out of Jet Trash before its grace period
+	/// ends.
+	RestoreConversation {
+		/// The Conversation to restore.
+		conversation_id: ConversationId,
+	},
 	/// Open or close this Plane's Pairing gate, which decides whether a new
 	/// GUI client may begin Pairing at all (ADR-0017). It does not alter the
 	/// clients that are already Paired.
@@ -441,6 +462,9 @@ impl Command {
 			| Self::BeginAuditEpoch
 			| Self::RestoreRecoverySnapshot { .. }
 			| Self::PurgeRecoverySnapshots
+			| Self::ForgetConversation { .. }
+			| Self::DeleteConversationEverywhere { .. }
+			| Self::RestoreConversation { .. }
 			| Self::SetPairingGate { .. }
 			| Self::OpenPairing { .. }
 			| Self::ClaimPairing { .. }
