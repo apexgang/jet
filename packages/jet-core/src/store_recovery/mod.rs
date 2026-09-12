@@ -15,13 +15,16 @@
 //! person. Nothing that writes runs meanwhile, and surviving `jetfueld`
 //! executions are reconnected only after the restoration succeeds.
 
+mod purge;
 mod restore;
 pub(crate) use restore::{not_read_only, read_only};
 
 use crate::{Core, error::CoreError};
 use jet_store::StoreIntegrity;
 pub use jet_store::{
-	IntegrityFailureReason, RecoverySnapshot, RestoredStore, SnapshotReason,
+	DeletedIdentityKind, DeletionLedger, DeletionRecord,
+	IntegrityFailureReason, RecoverySnapshot, RestoredStore, SnapshotPurge,
+	SnapshotReason,
 };
 
 /// Whether the Plane store serves or answers reads only.
@@ -51,6 +54,9 @@ pub struct RecoveryStatus {
 	pub mode: RecoveryMode,
 	/// Every verified snapshot, newest first.
 	pub snapshots: Vec<RecoverySnapshot>,
+	/// The Deletion ledger: what a restoration will reapply, or the
+	/// finding that it vouches for nothing (ADR-0102).
+	pub deletions: DeletionLedger,
 }
 
 impl Core {
@@ -76,6 +82,7 @@ impl Core {
 		Ok(RecoveryStatus {
 			mode: self.recovery_mode(),
 			snapshots: self.recovery_snapshots()?,
+			deletions: self.store.deletion_ledger()?,
 		})
 	}
 

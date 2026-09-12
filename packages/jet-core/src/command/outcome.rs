@@ -1,6 +1,6 @@
 //! Durable results of admitted Commands.
 
-use crate::store_recovery::RestoredStore;
+use crate::store_recovery::{RestoredStore, SnapshotPurge};
 use crate::{
 	ClientId,
 	account::{AccountBinding, AccountBindingId, CredentialReference},
@@ -164,6 +164,9 @@ pub enum CommandOutcome {
 	},
 	/// The Plane serves again from the restored snapshot (ADR-0077).
 	RecoverySnapshotRestored(RestoredStore),
+	/// A post-deletion snapshot was taken and the older snapshots that may
+	/// hold what was deleted are gone (ADR-0102).
+	RecoverySnapshotsPurged(SnapshotPurge),
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {
 		/// The epoch that holds the chain the Plane vouches for.

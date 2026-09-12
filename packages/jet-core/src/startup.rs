@@ -214,8 +214,8 @@ mod tests {
 
 	use crate::test_support::{actor, start_core};
 	use crate::{
-		CORE_VERSION, PlaneStatus, Query, QueryResult, RecoveryMode,
-		RecoveryStatus, SecurityState,
+		CORE_VERSION, DeletionLedger, PlaneStatus, Query, QueryResult,
+		RecoveryMode, RecoveryStatus, SecurityState,
 	};
 
 	#[tokio::test]
@@ -251,6 +251,7 @@ mod tests {
 					recovery: RecoveryStatus {
 						mode: RecoveryMode::Serving,
 						snapshots: vec![],
+						deletions: DeletionLedger::Verified(vec![]),
 					},
 				},
 				&PlaneStatus {
@@ -265,6 +266,7 @@ mod tests {
 					recovery: RecoveryStatus {
 						mode: RecoveryMode::Serving,
 						snapshots: after.recovery.snapshots.clone(),
+						deletions: DeletionLedger::Verified(vec![]),
 					},
 				}
 			)

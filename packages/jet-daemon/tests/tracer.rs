@@ -6,9 +6,10 @@
 mod support;
 
 use jet_protocol::{
-	CODEC_JSON_V1, ClientHello, ErrorCategory, MAX_DATA_FRAME, PROTOCOL_MINOR,
-	PROTOCOL_VERSION, PlaneStatus, RecoveryState, RecoveryStatus,
-	RetentionPolicy, SecurityState, ServerHello, ServerMessage, WireError,
+	CODEC_JSON_V1, ClientHello, DeletionLedgerStatus, ErrorCategory,
+	MAX_DATA_FRAME, PROTOCOL_MINOR, PROTOCOL_VERSION, PlaneStatus,
+	RecoveryState, RecoveryStatus, RetentionPolicy, SecurityState, ServerHello,
+	ServerMessage, WireError,
 };
 use pretty_assertions::assert_eq;
 use support::{Daemon, connect_raw, handshake_raw, hello, jetd, start_jetd};
@@ -62,6 +63,9 @@ async fn status_is_answered_before_and_after_a_daemon_crash_and_restart() {
 					state: RecoveryState::Serving,
 					reason: None,
 					snapshots: vec![],
+					deletion_ledger: Some(DeletionLedgerStatus::Verified {
+						deletions: 0,
+					}),
 				}),
 			},
 			&PlaneStatus {
@@ -75,6 +79,9 @@ async fn status_is_answered_before_and_after_a_daemon_crash_and_restart() {
 					state: RecoveryState::Serving,
 					reason: None,
 					snapshots: after.recovery.clone().unwrap().snapshots,
+					deletion_ledger: Some(DeletionLedgerStatus::Verified {
+						deletions: 0,
+					}),
 				}),
 			}
 		)

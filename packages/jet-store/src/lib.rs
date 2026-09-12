@@ -30,6 +30,7 @@ mod recovery;
 pub use recovery::{
 	IntegrityFailure, IntegrityFailureReason, RestoredStore, StoreIntegrity,
 };
+pub use snapshot::SnapshotPurge;
 mod remote_operation;
 pub use remote_operation::RemoteOperationRecord;
 mod run;
@@ -311,6 +312,45 @@ impl Store {
 		} else {
 			Ok(None)
 		}
+	}
+
+	/// Takes a verified snapshot of the store as it is now, after every
+	/// deletion the ledger records, and removes every older snapshot taken
+	/// at or before the newest of those deletions, which may still hold
+	/// what was deleted (ADR-0102). Snapshots newer than the newest
+	/// deletion, and rollback points taken after it, stay.
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Integrity`] when the Deletion ledger cannot be
+	/// trusted or the new snapshot fails verification, and
+	/// [`StoreError::Unavailable`] when the files cannot be written or
+	/// removed.
+	pub async fn purge_recovery_snapshots(
+		&self,
+		now_unix_ms: i64,
+	) -> Result<SnapshotPurge, StoreError> {
+		let ledger = self.deletion_ledger()?;
+		if let DeletionLedger::Corrupt(detail) = &ledger {
+			return Err(StoreError::Integrity(format!(
+				"the Deletion ledger cannot be trusted: {detail}"
+			)));
+		}
+		// What is affected is decided before the copy: rotation may already
+		// drop some of it when the copy is published, and the reply names
+		// every snapshot the purge ended, however it ended.
+		let removed = snapshot::affected_by(
+			&self.database,
+			ledger.newest_deletion_unix_ms(),
+		)?;
+		let snapshot = self
+			.snapshot(SnapshotReason::Maintenance, now_unix_ms)
+			.await?;
+		snapshot::remove(&self.database, &removed)?;
+		Ok(SnapshotPurge {
+			snapshot: snapshot.name,
+			removed,
+		})
 	}
 
 	/// The Deletion ledger of this store: every permanent deletion it

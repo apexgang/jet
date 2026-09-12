@@ -197,6 +197,13 @@ pub enum CommandResponse {
 		/// failed migration.
 		replaced: String,
 	},
+	/// The post-deletion snapshot is taken and the older ones are gone.
+	RecoverySnapshotsPurged {
+		/// The snapshot taken after every recorded deletion.
+		snapshot: String,
+		/// The snapshots removed, newest first.
+		removed: Vec<String>,
+	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {
 		/// The epoch that holds the chain the Plane vouches for, carried as

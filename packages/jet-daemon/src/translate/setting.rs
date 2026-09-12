@@ -260,6 +260,7 @@ mod tests {
 			recovery: jet_core::RecoveryStatus {
 				mode: jet_core::RecoveryMode::Serving,
 				snapshots: vec![],
+				deletions: jet_core::DeletionLedger::Verified(vec![]),
 			},
 			security: SecurityState::Degraded(SecurityDegradation {
 				breach: AuditBreach::HeadNotInStore,

@@ -1,7 +1,8 @@
 # Store Recovery
 
 Issue #49 implements ADR-0097, ADR-0073, and ADR-0077 through Jet
-protocol minor 37. A Recovery
+protocol minor 37, and #52 adds the Deletion ledger of ADR-0102 through
+minor 38. A Recovery
 snapshot is a complete copy of the Plane store that SQLite wrote with
 `VACUUM INTO`, that passed a full `PRAGMA integrity_check` on its own
 connection, and that was then given its final name durably: owner-only,
@@ -146,10 +147,90 @@ publish a new head over that, so nothing is appended, the next
 validation reports `head_not_in_store`, and the Plane is
 Security-degraded until an owner begins a new audit epoch, whose first
 record says so. That degradation survives restarts; it is the record of
-the rollback the audit itself keeps (ADR-0105). The Deletion ledger of ADR-0102 arrives
-with #53; until then a restoration can bring back a Conversation deleted
-after the snapshot was taken, which is why deleted content is bounded by
-the retention above.
+the rollback the audit itself keeps (ADR-0105). Every restoration also
+reapplies the Deletion ledger below, so an identity deleted after the
+snapshot was taken does not come back with it.
+
+## Deletion ledger
+
+A permanent deletion is an Account binding unbound, a Paired client
+revoked, or a schedule cancelled: the identities whose return from an
+old snapshot would re-admit a credential, a key, or unattended work.
+Conversation forgetting and Jet Trash arrive with #53 and join the
+ledger then; until they do, a restoration can bring back a Conversation
+deleted after the snapshot was taken, which is why deleted content is
+bounded by the retention above.
+
+Before the store commits such a deletion, `jetd` appends it to
+`~/.jet/recovery/plane.sqlite3.deletions`, an owner-only text file with
+one line per deletion:
+
+```
+jet-deletion-ledger 1
+plane 018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e71
+1 1757000000000 paired_client 6f9619ff-8b86-d011-b42d-00c04fc964ff 3b0c…
+```
+
+Each line carries a sequence, the time, the kind of identity, which one,
+and a SHA-256 link folding the line before it, rooted in the Plane
+identity. Nothing of what was deleted is kept. The ledger is synced, and
+then `plane.sqlite3.deletions.head`, which names the newest sequence and
+link, is written to a pending file, renamed over the old head, and the
+directory synced, the same way the Security audit head is published.
+Only then does the store commit. A crash between the two leaves a ledger
+line for a row the store still holds, and the next open removes that row;
+a crash between the ledger and its head leaves at most one line past the
+head, which the next append discards. The order rules out the one gap
+that matters, a deletion the store committed and the ledger never saw.
+
+Every open of an authoritative store, and therefore every restoration,
+reapplies the ledger: each identity it names is deleted again if the
+store still holds it. Only the identity's own row is removed; the old
+journal and queues come back with the snapshot regardless, and the
+workers that read them find the identity gone. The ledger is never
+rolled back and never shortened; its lines are small and their number is
+the number of deletions the Plane has ever made.
+
+A ledger that does not fold through its head vouches for nothing: a
+missing ledger under a head, a missing head over more than one line, an
+edited line, a shortened file, or a ledger of another Plane. The status
+then reports `"deletion_ledger": {"state": "corrupt"}` instead of
+`{"state": "verified", "deletions": 3}`, no new deletion is accepted,
+because it could not be chained, and restoring a snapshot is refused
+with `recovery.deletion_ledger_corrupt` in the `unavailable` category,
+because the snapshot may predate a deletion nothing else remembers. The
+Plane stays in Recovery mode with its damaged store untouched. Like the
+audit head, the ledger is no defence against code running as the same
+operating-system user; what it makes visible is a store put back to
+before a deletion.
+
+## Recovery purge
+
+Routine retention keeps a deleted identity in bounded snapshots until
+their disclosed expiry. The `purge_recovery_snapshots` Command ends that
+early: on a serving Plane whose audit is trusted, it takes a verified
+`maintenance` snapshot of the store as it is now, after every recorded
+deletion, and removes every snapshot taken at or before the newest
+deletion in the ledger, whatever its reason, rollback points included.
+The reply names both:
+
+```json
+{"type": "recovery_snapshots_purged",
+ "snapshot": "plane-1757100000000-maintenance.sqlite3",
+ "removed": ["plane-1757000000000-daily.sqlite3"]}
+```
+
+The purge belongs to the person. Harnesses, Crafts, schedules, Utility
+models, and Autodelete rules issue no Commands, so only an interactive
+client reaches it, and it is recorded in the Security audit as
+`recovery.snapshots_purged` with destructive risk, which also means a
+Security-degraded Plane refuses it until an owner begins a new epoch.
+Like restoration, it runs beside the receipt pipeline, because copying
+the store needs the one connection a receipt transaction would hold, so
+a retry takes another snapshot and removes nothing. A Plane with no
+recorded deletions gets a fresh snapshot and an empty `removed`. The
+damaged copies a restoration moved aside under `plane.sqlite3.damaged-`
+are evidence, not snapshots, and the purge does not touch them.
 
 ## Recovery mode is not the other degradations
 
@@ -162,6 +243,12 @@ the store itself being in doubt: it blocks every mutation, and its way
 out replaces the store.
 
 ## Validation
+
+`just test -p jet-store deletion` covers the ledger's format, chain,
+crash tails, reapplication at open and restoration, and the refusals;
+`just test -p jet-core store_recovery` covers the ledger through the
+core, the purge, and its audit; `just test -p jet-daemon --test
+deletion_ledger` drives a real daemon through a deletion and a purge.
 
 `just test -p jet-store snapshot` covers naming, verification,
 publication, the once-per-day rule, and retention tiers;

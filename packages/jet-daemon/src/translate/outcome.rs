@@ -150,6 +150,12 @@ pub(crate) fn command_outcome(
 				replaced: restored.replaced,
 			}
 		}
+		CommandOutcome::RecoverySnapshotsPurged(purge) => {
+			wire::CommandResponse::RecoverySnapshotsPurged {
+				snapshot: purge.snapshot,
+				removed: purge.removed,
+			}
+		}
 
 		CommandOutcome::PairingGateSet { gate } => {
 			wire::CommandResponse::PairingGateSet {

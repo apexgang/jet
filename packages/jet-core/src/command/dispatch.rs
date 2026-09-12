@@ -482,6 +482,11 @@ pub(super) async fn execute_new(
 		Command::RestoreRecoverySnapshot { .. } => {
 			Err(crate::store_recovery::not_read_only())
 		}
+		// Intercepted before the pipeline as well; it never gets here.
+		Command::PurgeRecoverySnapshots => Err(CoreError::internal(
+			"recovery.purge_misrouted",
+			"a Recovery purge reached the receipt pipeline",
+		)),
 		Command::SetPairingGate { gate } => {
 			pairing::set_gate(tx, actor, gate, now_unix_ms).await
 		}

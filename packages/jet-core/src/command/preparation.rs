@@ -283,6 +283,7 @@ impl Core {
 			| Command::UnbindAccount { .. }
 			| Command::BeginAuditEpoch
 			| Command::RestoreRecoverySnapshot { .. }
+			| Command::PurgeRecoverySnapshots
 			| Command::SetPairingGate { .. }
 			| Command::OpenPairing { .. }
 			| Command::ClaimPairing { .. }

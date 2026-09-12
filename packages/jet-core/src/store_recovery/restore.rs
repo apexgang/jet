@@ -233,6 +233,7 @@ mod tests {
 						IntegrityFailureReason::IntegrityCheck
 					),
 					snapshots: vec![snapshot.clone()],
+					deletions: DeletionLedger::Verified(vec![]),
 				},
 				SecurityState::Trusted,
 			)
@@ -268,6 +269,7 @@ mod tests {
 				RecoveryStatus {
 					mode: RecoveryMode::Serving,
 					snapshots: vec![snapshot.clone()],
+					deletions: DeletionLedger::Verified(vec![]),
 				},
 				SecurityState::Trusted,
 			)

@@ -48,6 +48,12 @@ impl Core {
 			Command::RestoreRecoverySnapshot { snapshot } => {
 				return self.restore_recovery_snapshot(actor, snapshot).await;
 			}
+			// A purge copies the whole store with the one connection a
+			// receipt transaction would hold, so it runs beside the
+			// pipeline too (ADR-0102).
+			Command::PurgeRecoverySnapshots => {
+				return self.purge_recovery_snapshots(actor).await;
+			}
 			other => other,
 		};
 		if let crate::RecoveryMode::ReadOnly(reason) = self.recovery_mode() {
@@ -208,6 +214,7 @@ pub(super) fn redacted_for_receipt(
 			| CommandOutcome::AccountUnbound { .. }
 			| CommandOutcome::AuditEpochBegun { .. }
 			| CommandOutcome::RecoverySnapshotRestored(_)
+			| CommandOutcome::RecoverySnapshotsPurged(_)
 			| CommandOutcome::PairingGateSet { .. }
 			| CommandOutcome::PairingClaimed { .. }
 			| CommandOutcome::PairingConfirmed { .. }

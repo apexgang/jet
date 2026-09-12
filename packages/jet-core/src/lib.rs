@@ -85,8 +85,9 @@ pub use schedule::{
 mod status;
 mod store_recovery;
 pub use store_recovery::{
+	DeletedIdentityKind, DeletionLedger, DeletionRecord,
 	IntegrityFailureReason, RecoveryMode, RecoverySnapshot, RecoveryStatus,
-	RestoredStore, SnapshotReason,
+	RestoredStore, SnapshotPurge, SnapshotReason,
 };
 mod terminal;
 #[cfg(test)]

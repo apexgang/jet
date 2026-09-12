@@ -303,6 +303,7 @@ public enum CommandRequest {
     case `unbind_account`(CommandRequestUnbindAccount)
     case `begin_audit_epoch`(CommandRequestBeginAuditEpoch)
     case `restore_recovery_snapshot`(CommandRequestRestoreRecoverySnapshot)
+    case `purge_recovery_snapshots`(CommandRequestPurgeRecoverySnapshots)
     case `set_pairing_gate`(CommandRequestSetPairingGate)
     case `open_pairing`(CommandRequestOpenPairing)
     case `claim_pairing`(CommandRequestClaimPairing)
@@ -352,6 +353,7 @@ public enum CommandResponse {
     case `paired_client_access_set`(CommandResponsePairedClientAccessSet)
     case `paired_client_revoked`(CommandResponsePairedClientRevoked)
     case `recovery_snapshot_restored`(CommandResponseRecoverySnapshotRestored)
+    case `recovery_snapshots_purged`(CommandResponseRecoverySnapshotsPurged)
     case `audit_epoch_begun`(CommandResponseAuditEpochBegun)
     case `project_registered`(CommandResponseProjectRegistered)
     case `workspace_promotion_recorded`(CommandResponseWorkspacePromotionRecorded)
@@ -491,6 +493,11 @@ public enum DegradedCondition {
     case `no_harness_available`(DegradedConditionNoHarnessAvailable)
     case `credential_store_unavailable`(DegradedConditionCredentialStoreUnavailable)
     case `credential_store_locked`(DegradedConditionCredentialStoreLocked)
+}
+
+public enum DeletionLedgerStatus {
+    case `verified`(DeletionLedgerStatusVerified)
+    case `corrupt`(DeletionLedgerStatusCorrupt)
 }
 
 public enum DiffScope {
@@ -1102,6 +1109,7 @@ public enum RecoveryState: String {
 }
 
 public struct RecoveryStatus {
+    public let `deletion_ledger`: DeletionLedgerStatus?
     public let `reason`: RecoveryReason?
     public let `snapshots`: [RecoverySnapshot]
     public let `state`: RecoveryState
@@ -1947,6 +1955,10 @@ public struct CommandRequestRestoreRecoverySnapshot {
     public let `snapshot`: String
 }
 
+public struct CommandRequestPurgeRecoverySnapshots {
+
+}
+
 public struct CommandRequestSetPairingGate {
     public let `gate`: PairingGate
 }
@@ -2189,6 +2201,11 @@ public struct CommandResponseRecoverySnapshotRestored {
     public let `snapshot`: String
 }
 
+public struct CommandResponseRecoverySnapshotsPurged {
+    public let `removed`: [String]
+    public let `snapshot`: String
+}
+
 public struct CommandResponseAuditEpochBegun {
     public let `epoch`: String
 }
@@ -2345,6 +2362,14 @@ public struct DegradedConditionCredentialStoreUnavailable {
 
 public struct DegradedConditionCredentialStoreLocked {
     public let `kind`: CredentialStoreKind
+}
+
+public struct DeletionLedgerStatusVerified {
+    public let `deletions`: UInt64
+}
+
+public struct DeletionLedgerStatusCorrupt {
+
 }
 
 public struct DiffScopeCurrent {
