@@ -202,6 +202,23 @@ pub(crate) async fn run(
 					eprintln!("jetd: cannot sweep retention: {error}");
 				}
 			}
+			// Approved Autodelete rules stage their matches on the same
+			// wakeups; drafts and refused compilations select nothing
+			// (ADR-0015).
+			match recovery_core.sweep_autodelete().await {
+				Ok(sweep) => {
+					for matched in sweep.trashed {
+						eprintln!(
+							"jetd: Autodelete rule {} staged Conversation {}",
+							matched.rule_id.0, matched.conversation_id.0
+						);
+					}
+				}
+				Err(error) => {
+					retry = true;
+					eprintln!("jetd: cannot sweep Autodelete rules: {error}");
+				}
+			}
 			// Every Command and Effect commit wakes this loop, so the first
 			// meaningful change of a day is copied soon after it lands
 			// (ADR-0097). A failed copy is retried on the next wake.

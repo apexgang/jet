@@ -70,6 +70,21 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::RestoreConversation { .. } => {
 			Some(AuditDecision::ConversationRestored)
 		}
+		Command::CompileAutodeleteRule { .. } => {
+			Some(AuditDecision::AutodeleteRuleCompiled)
+		}
+		Command::SetAutodeleteRuleInactiveDays { .. } => {
+			Some(AuditDecision::AutodeleteRuleEdited)
+		}
+		Command::ApproveAutodeleteRule { .. } => {
+			Some(AuditDecision::AutodeleteRuleApproved)
+		}
+		Command::AuthorizeAutodeleteEverywhere { .. } => {
+			Some(AuditDecision::AutodeleteEverywhereAuthorized)
+		}
+		Command::DeleteAutodeleteRule { .. } => {
+			Some(AuditDecision::AutodeleteRuleDeleted)
+		}
 		Command::BeginAuditEpoch
 		| Command::ApplyUserEdit { .. }
 		| Command::SetConversationName { .. }
@@ -133,6 +148,13 @@ pub(super) fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::DeleteConversationEverywhere { conversation_id }
 		| Command::RestoreConversation { conversation_id } => {
 			AuditSubject::Conversation(*conversation_id)
+		}
+		Command::CompileAutodeleteRule { rule_id, .. }
+		| Command::SetAutodeleteRuleInactiveDays { rule_id, .. }
+		| Command::ApproveAutodeleteRule { rule_id, .. }
+		| Command::AuthorizeAutodeleteEverywhere { rule_id }
+		| Command::DeleteAutodeleteRule { rule_id } => {
+			AuditSubject::AutodeleteRule(*rule_id)
 		}
 		Command::SetPairedClientAccess { client_id, .. }
 		| Command::RevokePairedClient { client_id } => {

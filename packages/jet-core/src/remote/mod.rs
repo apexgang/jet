@@ -67,6 +67,8 @@ pub(crate) fn invalidated_client(
 		| CommandOutcome::RecoverySnapshotsPurged(_)
 		| CommandOutcome::ConversationTrashed(_)
 		| CommandOutcome::ConversationRestored { .. }
+		| CommandOutcome::AutodeleteRuleRecorded(_)
+		| CommandOutcome::AutodeleteRuleDeleted { .. }
 		| CommandOutcome::ProjectRegistered(_)
 		| CommandOutcome::WorkspacePromotionRecorded(_)
 		| CommandOutcome::Terminal(_)

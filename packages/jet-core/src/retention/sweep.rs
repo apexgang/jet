@@ -66,7 +66,14 @@ impl Core {
 			};
 			after = last.to_string();
 			for conversation_id in candidates.into_iter().map(ConversationId) {
-				if self.stage_automatically(conversation_id, now).await? {
+				if self
+					.stage_if_unprotected(
+						conversation_id,
+						Staging::Policy(TrashReason::AutomaticForget),
+						now,
+					)
+					.await?
+				{
 					sweep.trashed.push(conversation_id);
 				}
 			}
@@ -88,13 +95,16 @@ impl Core {
 		Ok(sweep)
 	}
 
-	/// Stages one candidate if nothing protects it, and says whether it
-	/// did. The store is checked twice: once to decide, outside any lock,
-	/// and again in the transaction that stages, so work admitted in
-	/// between is not forgotten.
-	async fn stage_automatically(
+	/// Stages one candidate if nothing protects it and `staging`, asked
+	/// again inside the staging transaction, still names a reason; says
+	/// whether it did. The store is checked twice: once to decide, outside
+	/// any lock, and again in the transaction that stages, so work
+	/// admitted in between is not forgotten. The Autodelete sweep stages
+	/// its matches through here too (ADR-0015).
+	pub(crate) async fn stage_if_unprotected(
 		&self,
 		conversation_id: ConversationId,
+		staging: Staging,
 		now: i64,
 	) -> Result<bool, CoreError> {
 		let (unprotected, workspace) = self
@@ -122,14 +132,13 @@ impl Core {
 				{
 					return Ok(false);
 				}
-				stage(
-					tx,
-					StagedBy::Retention,
-					conversation_id,
-					TrashReason::AutomaticForget,
-					now,
-				)
-				.await?;
+				let Some(reason) =
+					staging.reason(tx, conversation_id, now).await?
+				else {
+					return Ok(false);
+				};
+				stage(tx, StagedBy::Retention, conversation_id, reason, now)
+					.await?;
 				Ok::<_, CoreError>(true)
 			})
 			.await
@@ -203,6 +212,39 @@ impl Core {
 			}
 			Some(None) => Ok(true),
 			None => Ok(false),
+		}
+	}
+}
+
+/// Who is asking to stage, and so what decides the reason inside the
+/// staging transaction.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Staging {
+	/// The Conversation's own retention policy: the reason is settled.
+	Policy(TrashReason),
+	/// An Autodelete rule, read again inside the transaction so an edit or
+	/// deletion since the page was read is respected (ADR-0015).
+	Autodelete(crate::AutodeleteRuleId),
+}
+
+impl Staging {
+	async fn reason(
+		self,
+		tx: &mut jet_store::WriteTransaction,
+		conversation_id: ConversationId,
+		now: i64,
+	) -> Result<Option<TrashReason>, CoreError> {
+		match self {
+			Self::Policy(reason) => Ok(Some(reason)),
+			Self::Autodelete(rule_id) => {
+				crate::autodelete::still_matches(
+					tx,
+					rule_id,
+					conversation_id,
+					now,
+				)
+				.await
+			}
 		}
 	}
 }

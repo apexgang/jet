@@ -20,10 +20,37 @@ fn reason(reason: TrashReason) -> wire::TrashReason {
 		TrashReason::ManualForget => wire::TrashReason::ManualForget,
 		TrashReason::AutomaticForget => wire::TrashReason::AutomaticForget,
 		TrashReason::DeleteEverywhere => wire::TrashReason::DeleteEverywhere,
+		TrashReason::AutodeleteRule => wire::TrashReason::AutodeleteRule,
+		TrashReason::AutodeleteEverywhere => {
+			wire::TrashReason::AutodeleteEverywhere
+		}
 	}
 }
 
-fn protection(protection: Protection) -> wire::RetentionProtection {
+/// Whether a peer at `minor` can read `entries`. The two Autodelete
+/// reasons arrived with minor 40; an older peer is refused the page rather
+/// than shown a reason it would misread (ADR-0019).
+fn readable(
+	entries: &[TrashEntry],
+	minor: u32,
+) -> Result<(), jet_core::CoreError> {
+	let needs_newer_peer = minor < wire::AUTODELETE_MINOR
+		&& entries.iter().any(|entry| {
+			matches!(
+				entry.reason,
+				TrashReason::AutodeleteRule | TrashReason::AutodeleteEverywhere
+			)
+		});
+	if needs_newer_peer {
+		return Err(jet_core::CoreError::incompatible(
+			"retention.reason_incompatible",
+			"Jet Trash holds Conversations staged by an Autodelete rule; upgrade the client to read it",
+		));
+	}
+	Ok(())
+}
+
+pub(super) fn protection(protection: Protection) -> wire::RetentionProtection {
 	match protection {
 		Protection::ActiveRun => wire::RetentionProtection::ActiveRun,
 		Protection::PendingTurn => wire::RetentionProtection::PendingTurn,
@@ -38,18 +65,26 @@ fn protection(protection: Protection) -> wire::RetentionProtection {
 	}
 }
 
-pub(super) fn trash(trash: ConversationTrash) -> wire::ConversationTrash {
-	wire::ConversationTrash {
+pub(super) fn trash(
+	trash: ConversationTrash,
+	minor: u32,
+) -> Result<wire::ConversationTrash, jet_core::CoreError> {
+	readable(&trash.entries, minor)?;
+	Ok(wire::ConversationTrash {
 		cursor: trash.cursor.0,
 		entries: trash.entries.into_iter().map(entry).collect(),
-	}
+	})
 }
 
-pub(super) fn preview(preview: RetentionPreview) -> wire::RetentionPreview {
-	wire::RetentionPreview {
+pub(super) fn preview(
+	preview: RetentionPreview,
+	minor: u32,
+) -> Result<wire::RetentionPreview, jet_core::CoreError> {
+	readable(preview.trash.as_slice(), minor)?;
+	Ok(wire::RetentionPreview {
 		conversation_id: preview.conversation_id.0,
 		protections: preview.protections.into_iter().map(protection).collect(),
 		trash: preview.trash.map(entry),
 		audit_records: u64::try_from(preview.audit_records).unwrap_or(u64::MAX),
-	}
+	})
 }

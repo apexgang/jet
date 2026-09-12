@@ -56,6 +56,8 @@ fields, duplicate fields, malformed JSON, invalid values, and a reported Model
 that differs from the selection. It never decodes model output as a Command.
 
 The first Autodelete draft schema supports only an inactivity-day predicate.
+[Autodelete rules](autodelete.md) describes how a draft becomes a stored
+rule its owner approves.
 The Craft requests null for ambiguous prompts, additional conditions, or other
 predicates; the core refuses null. A well-formed draft still requires separate
 review and approval under ADR-0015.

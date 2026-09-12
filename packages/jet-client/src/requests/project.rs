@@ -47,6 +47,7 @@ impl Client {
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::ConversationTrash(_)
 			| QueryResponse::RetentionPreview(_)
+			| QueryResponse::AutodeleteRules(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -135,6 +136,8 @@ impl Client {
 			| CommandResponse::RecoverySnapshotsPurged { .. }
 			| CommandResponse::ConversationTrashed { .. }
 			| CommandResponse::ConversationRestored { .. }
+			| CommandResponse::AutodeleteRuleRecorded { .. }
+			| CommandResponse::AutodeleteRuleDeleted { .. }
 			| CommandResponse::PairingGateSet { .. }
 			| CommandResponse::PairingOpened { .. }
 			| CommandResponse::PairingClaimed { .. }
@@ -183,6 +186,7 @@ impl Client {
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::ConversationTrash(_)
 			| QueryResponse::RetentionPreview(_)
+			| QueryResponse::AutodeleteRules(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -229,6 +233,7 @@ impl Client {
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::ConversationTrash(_)
 			| QueryResponse::RetentionPreview(_)
+			| QueryResponse::AutodeleteRules(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)

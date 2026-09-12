@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MIN(last_active_at_unix_ms) AS \"last_active_at_unix_ms?: i64\"\n\t\t\t FROM (\n\t\t\t\tSELECT MAX(c.created_at_unix_ms, COALESCE((\n\t\t\t\t\tSELECT MAX(COALESCE(r.ended_at_unix_ms, r.created_at_unix_ms))\n\t\t\t\t\tFROM runs r WHERE r.conversation_id = c.conversation_id\n\t\t\t\t), 0)) AS last_active_at_unix_ms\n\t\t\t\tFROM conversations c\n\t\t\t\tWHERE NOT EXISTS (SELECT 1 FROM conversation_trash t\n\t\t\t\t\t\tWHERE t.conversation_id = c.conversation_id)\n\t\t\t\t\tAND NOT EXISTS (SELECT 1 FROM runs r\n\t\t\t\t\t\tWHERE r.conversation_id = c.conversation_id\n\t\t\t\t\t\t\tAND r.ended_at_unix_ms IS NULL)\n\t\t\t )\n\t\t\t WHERE last_active_at_unix_ms > ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "last_active_at_unix_ms?: i64",
+        "ordinal": 0,
+        "type_info": "Null",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "471f84cc3691272a4379a91b832488ca999ca0d3065d338e546bcd1a4a26f55e"
+}

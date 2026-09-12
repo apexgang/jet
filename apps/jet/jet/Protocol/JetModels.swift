@@ -150,6 +150,44 @@ public struct AutoContinueUsage {
     public let `window_seconds`: UInt64?
 }
 
+public struct AutodeleteCandidate {
+    public let `conversation_id`: String
+    public let `last_active_at_unix_ms`: Int64
+    public let `protections`: [RetentionProtection]
+}
+
+public struct AutodeleteRule {
+    public let `created_at_unix_ms`: Int64
+    public let `prompt`: String
+    public let `rule_id`: String
+    public let `scope`: AutodeleteScope
+    public let `state`: AutodeleteRuleState
+    public let `updated_at_unix_ms`: Int64
+    public let `utility_job_id`: String
+}
+
+public struct AutodeleteRulePreview {
+    public let `candidates`: [AutodeleteCandidate]
+    public let `rule`: AutodeleteRule
+}
+
+public enum AutodeleteRuleState {
+    case `compiling`(AutodeleteRuleStateCompiling)
+    case `refused`(AutodeleteRuleStateRefused)
+    case `draft`(AutodeleteRuleStateDraft)
+    case `approved`(AutodeleteRuleStateApproved)
+}
+
+public struct AutodeleteRules {
+    public let `cursor`: String
+    public let `rules`: [AutodeleteRulePreview]
+}
+
+public enum AutodeleteScope: String {
+    case `forget` = "forget"
+    case `everywhere` = "everywhere"
+}
+
 public enum BaseSelection {
     case `head`(BaseSelectionHead)
     case `revision`(BaseSelectionRevision)
@@ -308,6 +346,11 @@ public enum CommandRequest {
     case `forget_conversation`(CommandRequestForgetConversation)
     case `delete_conversation_everywhere`(CommandRequestDeleteConversationEverywhere)
     case `restore_conversation`(CommandRequestRestoreConversation)
+    case `compile_autodelete_rule`(CommandRequestCompileAutodeleteRule)
+    case `set_autodelete_rule_inactive_days`(CommandRequestSetAutodeleteRuleInactiveDays)
+    case `approve_autodelete_rule`(CommandRequestApproveAutodeleteRule)
+    case `authorize_autodelete_everywhere`(CommandRequestAuthorizeAutodeleteEverywhere)
+    case `delete_autodelete_rule`(CommandRequestDeleteAutodeleteRule)
     case `set_pairing_gate`(CommandRequestSetPairingGate)
     case `open_pairing`(CommandRequestOpenPairing)
     case `claim_pairing`(CommandRequestClaimPairing)
@@ -359,6 +402,8 @@ public enum CommandResponse {
     case `recovery_snapshot_restored`(CommandResponseRecoverySnapshotRestored)
     case `conversation_trashed`(CommandResponseConversationTrashed)
     case `conversation_restored`(CommandResponseConversationRestored)
+    case `autodelete_rule_recorded`(CommandResponseAutodeleteRuleRecorded)
+    case `autodelete_rule_deleted`(CommandResponseAutodeleteRuleDeleted)
     case `recovery_snapshots_purged`(CommandResponseRecoverySnapshotsPurged)
     case `audit_epoch_begun`(CommandResponseAuditEpochBegun)
     case `project_registered`(CommandResponseProjectRegistered)
@@ -1001,6 +1046,7 @@ public enum QueryRequest {
     case `discover_craft`(QueryRequestDiscoverCraft)
     case `scheduled_tasks`(QueryRequestScheduledTasks)
     case `conversation_trash`(QueryRequestConversationTrash)
+    case `autodelete_rules`(QueryRequestAutodeleteRules)
     case `retention_preview`(QueryRequestRetentionPreview)
     case `editable_file`(QueryRequestEditableFile)
     case `workspace_terminals`(QueryRequestWorkspaceTerminals)
@@ -1039,6 +1085,7 @@ public enum QueryResponse {
     case `craft_installation_preview`(QueryResponseCraftInstallationPreview)
     case `scheduled_tasks`(QueryResponseScheduledTasks)
     case `conversation_trash`(QueryResponseConversationTrash)
+    case `autodelete_rules`(QueryResponseAutodeleteRules)
     case `retention_preview`(QueryResponseRetentionPreview)
     case `editable_file`(QueryResponseEditableFile)
     case `workspace_terminals`(QueryResponseWorkspaceTerminals)
@@ -1481,6 +1528,8 @@ public enum TrashReason: String {
     case `manual_forget` = "manual_forget"
     case `automatic_forget` = "automatic_forget"
     case `delete_everywhere` = "delete_everywhere"
+    case `autodelete_rule` = "autodelete_rule"
+    case `autodelete_everywhere` = "autodelete_everywhere"
 }
 
 public struct Turn {
@@ -1748,6 +1797,23 @@ public struct AutoContinueTargetVariant0 {
 
 public struct AutoContinueTargetVariant1 {
     public let `conversation`: String
+}
+
+public struct AutodeleteRuleStateCompiling {
+
+}
+
+public struct AutodeleteRuleStateRefused {
+    public let `reason`: String
+}
+
+public struct AutodeleteRuleStateDraft {
+    public let `inactive_days`: UInt32
+}
+
+public struct AutodeleteRuleStateApproved {
+    public let `approved_at_unix_ms`: Int64
+    public let `inactive_days`: UInt32
 }
 
 public struct BaseSelectionHead {
@@ -2020,6 +2086,29 @@ public struct CommandRequestRestoreConversation {
     public let `conversation_id`: String
 }
 
+public struct CommandRequestCompileAutodeleteRule {
+    public let `prompt`: String
+    public let `rule_id`: String
+}
+
+public struct CommandRequestSetAutodeleteRuleInactiveDays {
+    public let `inactive_days`: UInt32
+    public let `rule_id`: String
+}
+
+public struct CommandRequestApproveAutodeleteRule {
+    public let `inactive_days`: UInt32
+    public let `rule_id`: String
+}
+
+public struct CommandRequestAuthorizeAutodeleteEverywhere {
+    public let `rule_id`: String
+}
+
+public struct CommandRequestDeleteAutodeleteRule {
+    public let `rule_id`: String
+}
+
 public struct CommandRequestSetPairingGate {
     public let `gate`: PairingGate
 }
@@ -2268,6 +2357,14 @@ public struct CommandResponseConversationTrashed {
 
 public struct CommandResponseConversationRestored {
     public let `conversation_id`: String
+}
+
+public struct CommandResponseAutodeleteRuleRecorded {
+    public let `rule`: AutodeleteRule
+}
+
+public struct CommandResponseAutodeleteRuleDeleted {
+    public let `rule_id`: String
 }
 
 public struct CommandResponseRecoverySnapshotsPurged {
@@ -2647,6 +2744,10 @@ public struct QueryRequestConversationTrash {
 
 }
 
+public struct QueryRequestAutodeleteRules {
+
+}
+
 public struct QueryRequestRetentionPreview {
     public let `conversation_id`: String
 }
@@ -2817,6 +2918,11 @@ public struct QueryResponseScheduledTasks {
 public struct QueryResponseConversationTrash {
     public let `cursor`: String
     public let `entries`: [TrashEntry]
+}
+
+public struct QueryResponseAutodeleteRules {
+    public let `cursor`: String
+    public let `rules`: [AutodeleteRulePreview]
 }
 
 public struct QueryResponseRetentionPreview {

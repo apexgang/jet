@@ -1,7 +1,7 @@
 //! Command inputs and admission requirements.
 
 use crate::{
-	ClientId,
+	AutodeleteRuleId, ClientId,
 	account::{
 		AccountBindingId, CredentialSource, ProviderAccount, ProviderId,
 	},
@@ -305,6 +305,43 @@ pub enum Command {
 		/// The Conversation to restore.
 		conversation_id: ConversationId,
 	},
+	/// Compile a natural-language Autodelete prompt into a draft rule, or
+	/// recompile an existing rule's source, which returns it to a draft
+	/// (ADR-0015). The draft executes nothing until approved.
+	CompileAutodeleteRule {
+		/// The rule, chosen by the client.
+		rule_id: AutodeleteRuleId,
+		/// The source, 1 to 4096 UTF-8 bytes.
+		prompt: String,
+	},
+	/// Set a rule's interpretation by hand, keeping its source. The rule
+	/// becomes a draft of exactly this inactivity.
+	SetAutodeleteRuleInactiveDays {
+		/// The rule to edit.
+		rule_id: AutodeleteRuleId,
+		/// Whole days of inactivity, 1 to 36500.
+		inactive_days: u32,
+	},
+	/// Approve the interpretation a draft rule shows, so the sweep
+	/// evaluates it. The interpretation is named so that a draft another
+	/// client changed in between is refused rather than approved unseen.
+	ApproveAutodeleteRule {
+		/// The rule to approve.
+		rule_id: AutodeleteRuleId,
+		/// The inactivity the owner was shown, in whole days.
+		inactive_days: u32,
+	},
+	/// Authorize an approved rule to request native deletion of its
+	/// matches too, when their grace period ends (ADR-0011).
+	AuthorizeAutodeleteEverywhere {
+		/// The approved rule.
+		rule_id: AutodeleteRuleId,
+	},
+	/// Remove a rule. What it already staged stays in Jet Trash.
+	DeleteAutodeleteRule {
+		/// The rule to remove.
+		rule_id: AutodeleteRuleId,
+	},
 	/// Open or close this Plane's Pairing gate, which decides whether a new
 	/// GUI client may begin Pairing at all (ADR-0017). It does not alter the
 	/// clients that are already Paired.
@@ -465,6 +502,11 @@ impl Command {
 			| Self::ForgetConversation { .. }
 			| Self::DeleteConversationEverywhere { .. }
 			| Self::RestoreConversation { .. }
+			| Self::CompileAutodeleteRule { .. }
+			| Self::SetAutodeleteRuleInactiveDays { .. }
+			| Self::ApproveAutodeleteRule { .. }
+			| Self::AuthorizeAutodeleteEverywhere { .. }
+			| Self::DeleteAutodeleteRule { .. }
 			| Self::SetPairingGate { .. }
 			| Self::OpenPairing { .. }
 			| Self::ClaimPairing { .. }

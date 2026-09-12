@@ -63,6 +63,8 @@ impl Client {
 			| CommandResponse::RecoverySnapshotRestored { .. }
 			| CommandResponse::RecoverySnapshotsPurged { .. }
 			| CommandResponse::ConversationRestored { .. }
+			| CommandResponse::AutodeleteRuleRecorded { .. }
+			| CommandResponse::AutodeleteRuleDeleted { .. }
 			| CommandResponse::GitDeliveryAcknowledged { .. }
 			| CommandResponse::GitDeliveryQueued { .. }
 			| CommandResponse::ApprovalRetryAuthorized { .. }
@@ -125,6 +127,8 @@ impl Client {
 		{
 			CommandResponse::ConversationRestored { .. } => Ok(()),
 			other @ (CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::AutodeleteRuleRecorded { .. }
+			| CommandResponse::AutodeleteRuleDeleted { .. }
 			| CommandResponse::RecoverySnapshotRestored { .. }
 			| CommandResponse::RecoverySnapshotsPurged { .. }
 			| CommandResponse::ConversationTrashed { .. }
@@ -190,6 +194,7 @@ impl Client {
 			| QueryResponse::AutoContinue(_)
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::RetentionPreview(_)
+			| QueryResponse::AutodeleteRules(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -232,6 +237,7 @@ impl Client {
 		{
 			QueryResponse::RetentionPreview(preview) => Ok(preview),
 			other @ (QueryResponse::Conversations(_)
+			| QueryResponse::AutodeleteRules(_)
 			| QueryResponse::GitDeliveries { .. }
 			| QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)

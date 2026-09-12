@@ -165,10 +165,11 @@ pub(crate) async fn stage(
 	tx.insert_trash(record).await?;
 	let decision = Decision::succeeded(
 		match reason {
-			TrashReason::ManualForget | TrashReason::AutomaticForget => {
-				AuditDecision::ConversationForgotten
-			}
-			TrashReason::DeleteEverywhere => {
+			TrashReason::ManualForget
+			| TrashReason::AutomaticForget
+			| TrashReason::AutodeleteRule => AuditDecision::ConversationForgotten,
+			TrashReason::DeleteEverywhere
+			| TrashReason::AutodeleteEverywhere => {
 				AuditDecision::ConversationDeletionAuthorized
 			}
 		},

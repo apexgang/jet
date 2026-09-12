@@ -40,6 +40,10 @@ pub(super) fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::RETENTION_MINOR,
 			feature: "Jet Trash",
 		}),
+		QueryRequest::AutodeleteRules => Some(MinorRequirement {
+			minor: jet_protocol::AUTODELETE_MINOR,
+			feature: "Autodelete rules",
+		}),
 		QueryRequest::Settings {
 			selection:
 				jet_protocol::SettingSelection::Key {
@@ -232,6 +236,14 @@ pub(super) fn command_minor(
 		| CommandRequest::RestoreConversation { .. } => Some(MinorRequirement {
 			minor: jet_protocol::RETENTION_MINOR,
 			feature: "Jet Trash",
+		}),
+		CommandRequest::CompileAutodeleteRule { .. }
+		| CommandRequest::SetAutodeleteRuleInactiveDays { .. }
+		| CommandRequest::ApproveAutodeleteRule { .. }
+		| CommandRequest::AuthorizeAutodeleteEverywhere { .. }
+		| CommandRequest::DeleteAutodeleteRule { .. } => Some(MinorRequirement {
+			minor: jet_protocol::AUTODELETE_MINOR,
+			feature: "Autodelete rules",
 		}),
 		CommandRequest::SetSetting {
 			key: jet_protocol::SettingKey::StorageDisposableMiB,

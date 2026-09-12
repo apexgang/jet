@@ -106,6 +106,8 @@ async fn apply(
 		| CommandOutcome::RecoverySnapshotsPurged(_)
 		| CommandOutcome::ConversationTrashed(_)
 		| CommandOutcome::ConversationRestored { .. }
+		| CommandOutcome::AutodeleteRuleRecorded(_)
+		| CommandOutcome::AutodeleteRuleDeleted { .. }
 		| CommandOutcome::PairedClientRevoked { .. }
 		| CommandOutcome::ProjectRegistered(_)
 		| CommandOutcome::WorkspacePromotionRecorded(_)

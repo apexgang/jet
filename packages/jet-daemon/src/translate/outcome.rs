@@ -160,6 +160,14 @@ pub(crate) fn command_outcome(
 				conversation_id: conversation_id.0,
 			}
 		}
+		CommandOutcome::AutodeleteRuleRecorded(rule) => {
+			wire::CommandResponse::AutodeleteRuleRecorded {
+				rule: super::autodelete::rule(rule),
+			}
+		}
+		CommandOutcome::AutodeleteRuleDeleted { rule_id } => {
+			wire::CommandResponse::AutodeleteRuleDeleted { rule_id: rule_id.0 }
+		}
 		CommandOutcome::RecoverySnapshotsPurged(purge) => {
 			wire::CommandResponse::RecoverySnapshotsPurged {
 				snapshot: purge.snapshot,

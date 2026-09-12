@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT rule_id AS \"rule_id!\", prompt, utility_job_id,\n\t\t\t\tinactive_days, approved_at_unix_ms, everywhere,\n\t\t\t\tcreated_at_unix_ms, updated_at_unix_ms\n\t\t\t FROM autodelete_rules WHERE rule_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "rule_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "autodelete_rules",
+            "name": "rule_id"
+          }
+        }
+      },
+      {
+        "name": "prompt",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "autodelete_rules",
+            "name": "prompt"
+          }
+        }
+      },
+      {
+        "name": "utility_job_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "autodelete_rules",
+            "name": "utility_job_id"
+          }
+        }
+      },
+      {
+        "name": "inactive_days",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "autodelete_rules",
+            "name": "inactive_days"
+          }
+        }
+      },
+      {
+        "name": "approved_at_unix_ms",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "autodelete_rules",
+            "name": "approved_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "everywhere",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "autodelete_rules",
+            "name": "everywhere"
+          }
+        }
+      },
+      {
+        "name": "created_at_unix_ms",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "autodelete_rules",
+            "name": "created_at_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "updated_at_unix_ms",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "autodelete_rules",
+            "name": "updated_at_unix_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7f74fcef0ec4bb125a42b50fccc4761b6abedd9f0529e79cb9a4879a2463d2c8"
+}

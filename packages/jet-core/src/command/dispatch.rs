@@ -505,6 +505,55 @@ pub(super) async fn execute_new(
 			crate::retention::restore(tx, actor, conversation_id, now_unix_ms)
 				.await
 		}
+		Command::CompileAutodeleteRule { rule_id, prompt } => {
+			crate::autodelete::compile(
+				tx,
+				actor,
+				command_id,
+				rule_id,
+				prompt,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::SetAutodeleteRuleInactiveDays {
+			rule_id,
+			inactive_days,
+		} => {
+			crate::autodelete::set_inactive_days(
+				tx,
+				actor,
+				rule_id,
+				inactive_days,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::ApproveAutodeleteRule {
+			rule_id,
+			inactive_days,
+		} => {
+			crate::autodelete::approve(
+				tx,
+				actor,
+				rule_id,
+				inactive_days,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::AuthorizeAutodeleteEverywhere { rule_id } => {
+			crate::autodelete::authorize_everywhere(
+				tx,
+				actor,
+				rule_id,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::DeleteAutodeleteRule { rule_id } => {
+			crate::autodelete::delete(tx, actor, rule_id, now_unix_ms).await
+		}
 		Command::SetPairingGate { gate } => {
 			pairing::set_gate(tx, actor, gate, now_unix_ms).await
 		}

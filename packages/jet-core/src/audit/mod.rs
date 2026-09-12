@@ -31,7 +31,7 @@ mod encoding;
 pub(crate) mod actor;
 
 use crate::{
-	ClientId, PlaneId, ProjectId, account::AccountBindingId,
+	AutodeleteRuleId, ClientId, PlaneId, ProjectId, account::AccountBindingId,
 	conversation::ConversationId, pairing::PairingOfferId,
 };
 use jet_store::{AuditOutcome, AuditRisk, AuditTargetRef};
@@ -177,6 +177,20 @@ pub enum AuditDecision {
 	TrashGraceChanged,
 	/// The owner returned the Trash grace period to its default.
 	TrashGraceCleared,
+	/// A natural-language Autodelete prompt was sent for compilation into
+	/// a draft rule, new or recompiled (ADR-0015).
+	AutodeleteRuleCompiled,
+	/// An owner set a rule's interpretation by hand, returning it to a
+	/// draft.
+	AutodeleteRuleEdited,
+	/// An owner approved a rule's interpretation, so the sweep now stages
+	/// what it matches.
+	AutodeleteRuleApproved,
+	/// An owner authorized an approved rule to request native deletion of
+	/// its matches too (ADR-0011).
+	AutodeleteEverywhereAuthorized,
+	/// An owner removed a rule.
+	AutodeleteRuleDeleted,
 }
 
 /// What a decision is about. The core turns each one into the durable kind
@@ -202,6 +216,8 @@ pub(crate) enum AuditSubject {
 	PairingOffer(PairingOfferId),
 	/// One Paired client.
 	PairedClient(ClientId),
+	/// One Autodelete rule.
+	AutodeleteRule(AutodeleteRuleId),
 }
 
 /// One decision to record beside the change that carried it out.

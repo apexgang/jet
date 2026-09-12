@@ -75,6 +75,8 @@ pub enum QueryRequest {
 	},
 	/// Everything in Jet Trash.
 	ConversationTrash,
+	/// Every Autodelete rule with the matches it selects today.
+	AutodeleteRules,
 	/// What protects one Conversation from forgetting and what its
 	/// deletion would leave behind.
 	RetentionPreview {
@@ -257,6 +259,8 @@ pub enum QueryResponse {
 	ScheduledTasks(crate::ScheduledTasks),
 	/// Staged Conversations, soonest expiry first.
 	ConversationTrash(crate::ConversationTrash),
+	/// Autodelete rules with their candidate matches.
+	AutodeleteRules(crate::AutodeleteRules),
 	/// Protections and disclosures for one Conversation.
 	RetentionPreview(crate::RetentionPreview),
 	/// Bounded editable content and its exact file Revision.

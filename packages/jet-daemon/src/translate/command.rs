@@ -339,6 +339,36 @@ pub(crate) fn command(
 				conversation_id: ConversationId(*conversation_id),
 			}
 		}
+		wire::CommandRequest::CompileAutodeleteRule { rule_id, prompt } => {
+			Command::CompileAutodeleteRule {
+				rule_id: jet_core::AutodeleteRuleId(*rule_id),
+				prompt: prompt.clone(),
+			}
+		}
+		wire::CommandRequest::SetAutodeleteRuleInactiveDays {
+			rule_id,
+			inactive_days,
+		} => Command::SetAutodeleteRuleInactiveDays {
+			rule_id: jet_core::AutodeleteRuleId(*rule_id),
+			inactive_days: *inactive_days,
+		},
+		wire::CommandRequest::ApproveAutodeleteRule {
+			rule_id,
+			inactive_days,
+		} => Command::ApproveAutodeleteRule {
+			rule_id: jet_core::AutodeleteRuleId(*rule_id),
+			inactive_days: *inactive_days,
+		},
+		wire::CommandRequest::AuthorizeAutodeleteEverywhere { rule_id } => {
+			Command::AuthorizeAutodeleteEverywhere {
+				rule_id: jet_core::AutodeleteRuleId(*rule_id),
+			}
+		}
+		wire::CommandRequest::DeleteAutodeleteRule { rule_id } => {
+			Command::DeleteAutodeleteRule {
+				rule_id: jet_core::AutodeleteRuleId(*rule_id),
+			}
+		}
 		wire::CommandRequest::SetPairingGate { gate } => {
 			Command::SetPairingGate {
 				gate: pairing::gate_from_wire(*gate),

@@ -269,7 +269,9 @@ impl CoreError {
 	}
 
 	/// A stable refusal because the peers' cores or protocols disagree.
-	pub(crate) fn incompatible(
+	/// A stable refusal because the negotiated peer cannot read what the
+	/// Plane holds; a newer client can.
+	pub fn incompatible(
 		code: &'static str,
 		message: impl Into<String>,
 	) -> Self {

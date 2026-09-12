@@ -688,5 +688,70 @@
     "schema": "ServerMessage",
     "valid": false,
     "payload": "{\"kind\":\"command_result\",\"id\":4,\"result\":{\"type\":\"conversation_trashed\",\"entry\":{\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"reason\":\"purged\",\"trashed_at_unix_ms\":1757000000000,\"expires_at_unix_ms\":1759592000000}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":9,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e73\",\"command\":{\"type\":\"compile_autodelete_rule\",\"rule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"prompt\":\"Forget anything idle for three months\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":9,\"result\":{\"type\":\"autodelete_rule_recorded\",\"rule\":{\"rule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"prompt\":\"Forget anything idle for three months\",\"utility_job_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e74\",\"state\":{\"state\":\"compiling\"},\"scope\":\"forget\",\"created_at_unix_ms\":1757000000000,\"updated_at_unix_ms\":1757000000000}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":10,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e73\",\"command\":{\"type\":\"set_autodelete_rule_inactive_days\",\"rule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"inactive_days\":90}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":11,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e73\",\"command\":{\"type\":\"approve_autodelete_rule\",\"rule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"inactive_days\":90}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":11,\"result\":{\"type\":\"autodelete_rule_recorded\",\"rule\":{\"rule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"prompt\":\"Forget anything idle for three months\",\"utility_job_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e74\",\"state\":{\"state\":\"approved\",\"inactive_days\":90,\"approved_at_unix_ms\":1757000001000},\"scope\":\"forget\",\"created_at_unix_ms\":1757000000000,\"updated_at_unix_ms\":1757000001000}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":12,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e73\",\"command\":{\"type\":\"authorize_autodelete_everywhere\",\"rule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":13,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e73\",\"command\":{\"type\":\"delete_autodelete_rule\",\"rule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":13,\"result\":{\"type\":\"autodelete_rule_deleted\",\"rule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":14,\"query\":{\"type\":\"autodelete_rules\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":14,\"result\":{\"type\":\"autodelete_rules\",\"cursor\":\"123\",\"rules\":[{\"rule\":{\"rule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"prompt\":\"Forget anything idle for three months\",\"utility_job_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e74\",\"state\":{\"state\":\"draft\",\"inactive_days\":90},\"scope\":\"forget\",\"created_at_unix_ms\":1757000000000,\"updated_at_unix_ms\":1757000000000},\"candidates\":[{\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"last_active_at_unix_ms\":1749000000000,\"protections\":[\"dirty_workspace\"]}]},{\"rule\":{\"rule_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e74\",\"prompt\":\"Old stuff\",\"utility_job_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e74\",\"state\":{\"state\":\"refused\",\"reason\":\"utility.disabled\"},\"scope\":\"forget\",\"created_at_unix_ms\":1757000000000,\"updated_at_unix_ms\":1757000000000},\"candidates\":[]}]}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":7,\"result\":{\"type\":\"conversation_trash\",\"cursor\":\"123\",\"entries\":[{\"conversation_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"reason\":\"autodelete_everywhere\",\"trashed_at_unix_ms\":1757000000000,\"expires_at_unix_ms\":1759592000000}]}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"command_result\",\"id\":9,\"result\":{\"type\":\"autodelete_rule_recorded\",\"rule\":{\"rule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"prompt\":\"x\",\"utility_job_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e74\",\"state\":{\"state\":\"draft\"},\"scope\":\"forget\",\"created_at_unix_ms\":1,\"updated_at_unix_ms\":1}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"command_result\",\"id\":9,\"result\":{\"type\":\"autodelete_rule_recorded\",\"rule\":{\"rule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"prompt\":\"x\",\"utility_job_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e74\",\"state\":{\"state\":\"compiling\"},\"scope\":\"purge\",\"created_at_unix_ms\":1,\"updated_at_unix_ms\":1}}}"
   }
 ]

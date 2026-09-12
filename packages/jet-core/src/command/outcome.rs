@@ -175,6 +175,13 @@ pub enum CommandOutcome {
 		/// The Conversation restored.
 		conversation_id: crate::ConversationId,
 	},
+	/// The Autodelete rule as it now reads (ADR-0015).
+	AutodeleteRuleRecorded(crate::AutodeleteRule),
+	/// The Autodelete rule is gone.
+	AutodeleteRuleDeleted {
+		/// The rule removed.
+		rule_id: crate::AutodeleteRuleId,
+	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {
 		/// The epoch that holds the chain the Plane vouches for.

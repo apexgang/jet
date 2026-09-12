@@ -105,6 +105,7 @@ pub(crate) fn query(
 			}
 		}
 		wire::QueryRequest::ConversationTrash => Query::ConversationTrash,
+		wire::QueryRequest::AutodeleteRules => Query::AutodeleteRules,
 		wire::QueryRequest::RetentionPreview { conversation_id } => {
 			Query::RetentionPreview {
 				conversation_id: ConversationId(*conversation_id),
@@ -267,12 +268,17 @@ pub(crate) fn query_result(
 		}
 		QueryResult::ConversationTrash(trash) => {
 			wire::QueryResponse::ConversationTrash(super::retention::trash(
-				trash,
-			))
+				trash, minor,
+			)?)
 		}
 		QueryResult::RetentionPreview(preview) => {
 			wire::QueryResponse::RetentionPreview(super::retention::preview(
-				preview,
+				preview, minor,
+			)?)
+		}
+		QueryResult::AutodeleteRules(rules) => {
+			wire::QueryResponse::AutodeleteRules(super::autodelete::rules(
+				rules,
 			))
 		}
 		QueryResult::TurnQueue(queue) => {

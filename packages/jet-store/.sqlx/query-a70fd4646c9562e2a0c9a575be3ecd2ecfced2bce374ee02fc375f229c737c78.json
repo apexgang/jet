@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT c.conversation_id AS \"conversation_id!\",\n\t\t\t\tMAX(c.created_at_unix_ms, COALESCE((\n\t\t\t\t\tSELECT MAX(COALESCE(r.ended_at_unix_ms, r.created_at_unix_ms))\n\t\t\t\t\tFROM runs r WHERE r.conversation_id = c.conversation_id\n\t\t\t\t), 0)) AS \"last_active_at_unix_ms!: i64\"\n\t\t\t FROM conversations c\n\t\t\t WHERE c.conversation_id > ?1\n\t\t\t\tAND NOT EXISTS (SELECT 1 FROM conversation_trash t\n\t\t\t\t\tWHERE t.conversation_id = c.conversation_id)\n\t\t\t\tAND NOT EXISTS (SELECT 1 FROM runs r\n\t\t\t\t\tWHERE r.conversation_id = c.conversation_id\n\t\t\t\t\t\tAND r.ended_at_unix_ms IS NULL)\n\t\t\t\tAND MAX(c.created_at_unix_ms, COALESCE((\n\t\t\t\t\tSELECT MAX(COALESCE(r.ended_at_unix_ms, r.created_at_unix_ms))\n\t\t\t\t\tFROM runs r WHERE r.conversation_id = c.conversation_id\n\t\t\t\t), 0)) <= ?2\n\t\t\t ORDER BY c.conversation_id LIMIT ?3",
+  "describe": {
+    "columns": [
+      {
+        "name": "conversation_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "name": "last_active_at_unix_ms!: i64",
+        "ordinal": 1,
+        "type_info": "Null",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "a70fd4646c9562e2a0c9a575be3ecd2ecfced2bce374ee02fc375f229c737c78"
+}

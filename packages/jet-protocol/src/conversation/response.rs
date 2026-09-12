@@ -207,6 +207,16 @@ pub enum CommandResponse {
 		/// The Conversation restored.
 		conversation_id: Uuid,
 	},
+	/// The Autodelete rule as it now reads.
+	AutodeleteRuleRecorded {
+		/// The rule, without its candidates.
+		rule: crate::AutodeleteRule,
+	},
+	/// The Autodelete rule is gone.
+	AutodeleteRuleDeleted {
+		/// The rule removed.
+		rule_id: Uuid,
+	},
 	/// The post-deletion snapshot is taken and the older ones are gone.
 	RecoverySnapshotsPurged {
 		/// The snapshot taken after every recorded deletion.
