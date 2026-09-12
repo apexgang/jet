@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM artifact_references WHERE run_id IN (\n\t\t\tSELECT run_id FROM runs WHERE conversation_id = ?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1b629155ca1cd26a470b535bb72fdbf6d9948677cea4148bdc93f8914c35f657"
+}

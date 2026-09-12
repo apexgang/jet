@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM scheduled_tasks WHERE conversation_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "d916f42705865d57cf85ff845f6875f1505d3af4c3e148fef2d516808505492c"
+}

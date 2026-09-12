@@ -48,6 +48,7 @@ fn introduced_in(key: SettingKey) -> u32 {
 		| SettingKey::GitAutoCommit
 		| SettingKey::GitMessageInstructions => wire::SETTINGS_AND_CAPABILITIES_MINOR,
 		SettingKey::SecurityAuditRetentionDays => wire::SECURITY_AUDIT_MINOR,
+		SettingKey::RetentionTrashGraceDays => wire::RETENTION_MINOR,
 		SettingKey::DeveloperMode => wire::CRAFT_INSTALLATION_MINOR,
 		SettingKey::AutomaticReview
 		| SettingKey::AutomaticReviewBinding
@@ -111,6 +112,9 @@ pub(super) fn key(key: SettingKey) -> wire::SettingKey {
 		SettingKey::SecurityAuditRetentionDays => {
 			wire::SettingKey::SecurityAuditRetentionDays
 		}
+		SettingKey::RetentionTrashGraceDays => {
+			wire::SettingKey::RetentionTrashGraceDays
+		}
 		SettingKey::DeveloperMode => wire::SettingKey::DeveloperMode,
 		SettingKey::AutomaticReview => wire::SettingKey::AutomaticReview,
 		SettingKey::AutomaticReviewBinding => {
@@ -164,6 +168,9 @@ pub(super) fn key_from_wire(key: wire::SettingKey) -> SettingKey {
 		}
 		wire::SettingKey::SecurityAuditRetentionDays => {
 			SettingKey::SecurityAuditRetentionDays
+		}
+		wire::SettingKey::RetentionTrashGraceDays => {
+			SettingKey::RetentionTrashGraceDays
 		}
 		wire::SettingKey::DeveloperMode => SettingKey::DeveloperMode,
 		wire::SettingKey::AutomaticReview => SettingKey::AutomaticReview,

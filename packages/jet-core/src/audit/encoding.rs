@@ -36,6 +36,14 @@ impl AuditDecision {
 			Self::AuditEpochBegun => "audit.epoch_begun",
 			Self::RecoverySnapshotRestored => "recovery.snapshot_restored",
 			Self::RecoverySnapshotsPurged => "recovery.snapshots_purged",
+			Self::ConversationForgotten => "conversation.forgotten",
+			Self::ConversationDeletionAuthorized => {
+				"conversation.deletion_authorized"
+			}
+			Self::ConversationRestored => "conversation.restored",
+			Self::ConversationDeleted => "conversation.deleted",
+			Self::TrashGraceChanged => "policy.trash_grace_changed",
+			Self::TrashGraceCleared => "policy.trash_grace_cleared",
 			Self::PairingGateOpened => "pairing.gate_opened",
 			Self::PairingGateClosed => "pairing.gate_closed",
 			Self::PairingOffered => "pairing.offered",
@@ -116,6 +124,17 @@ impl AuditDecision {
 			// The snapshots removed were the last copies of what was
 			// deleted, which is the point; nothing brings them back.
 			Self::RecoverySnapshotsPurged => AuditRisk::Destructive,
+			// Staging is reversible for the whole grace period, so it is
+			// elevated; authorizing native deletion and the deletion itself
+			// are not.
+			Self::ConversationForgotten => AuditRisk::Elevated,
+			Self::ConversationDeletionAuthorized
+			| Self::ConversationDeleted => AuditRisk::Destructive,
+			// Shortening the grace period brings deletions forward.
+			Self::TrashGraceChanged => AuditRisk::Elevated,
+			Self::ConversationRestored | Self::TrashGraceCleared => {
+				AuditRisk::Routine
+			}
 			// Shortening the window destroys evidence the Plane already
 			// holds, which is the one policy change the audit itself is at
 			// stake in.

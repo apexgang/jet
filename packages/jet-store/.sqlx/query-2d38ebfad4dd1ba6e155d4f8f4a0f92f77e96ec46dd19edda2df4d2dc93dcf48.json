@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO conversation_trash\n\t\t\t\t(conversation_id, reason, trashed_at_unix_ms, expires_at_unix_ms)\n\t\t\t VALUES (?1, ?2, ?3, ?4)\n\t\t\t ON CONFLICT (conversation_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "2d38ebfad4dd1ba6e155d4f8f4a0f92f77e96ec46dd19edda2df4d2dc93dcf48"
+}

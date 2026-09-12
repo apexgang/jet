@@ -47,8 +47,13 @@ mod message;
 mod pairing;
 mod presentation;
 mod project;
+mod retention;
 mod search;
 mod setting;
+pub use retention::{
+	ConversationTrash, RetentionPreview, RetentionProtection, TrashEntry,
+	TrashReason,
+};
 mod store_recovery;
 pub use conversation::schedule::{
 	ScheduleFiring, ScheduledTask, ScheduledTasks,
@@ -133,7 +138,7 @@ pub use transport::handshake::{
 	FENCED_READS_MINOR, IMPORTED_CONVERSATIONS_MINOR, MANAGED_RUNS_MINOR,
 	MULTIPLEXED_STREAMS_MINOR, NAMES_MINOR, PAIRING_MINOR, PREFACE,
 	PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR,
-	SCHEDULES_MINOR, SEARCH_MINOR, SECURITY_AUDIT_MINOR,
+	RETENTION_MINOR, SCHEDULES_MINOR, SEARCH_MINOR, SECURITY_AUDIT_MINOR,
 	SEEDED_WORKSPACES_MINOR, SETTINGS_AND_CAPABILITIES_MINOR,
 	STORE_RECOVERY_MINOR, ServerHello, TURN_QUEUE_MINOR, USAGE_RECORDS_MINOR,
 	USER_INPUT_MINOR, UTILITY_MINOR, VersionRange, WORKSPACE_PROMOTION_MINOR,

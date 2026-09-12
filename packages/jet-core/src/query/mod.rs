@@ -75,6 +75,14 @@ pub enum Query {
 		/// Owning Conversation.
 		conversation_id: crate::ConversationId,
 	},
+	/// Everything in Jet Trash (ADR-0015).
+	ConversationTrash,
+	/// What protects one Conversation from forgetting and what its
+	/// deletion would leave behind (ADR-0011, ADR-0105).
+	RetentionPreview {
+		/// The Conversation asked about.
+		conversation_id: ConversationId,
+	},
 	/// Read bounded UTF-8 content through a registered root.
 	EditableFile {
 		/// Registered Project or Workspace root.
@@ -246,6 +254,10 @@ pub enum QueryResult {
 	CraftInstallationPreview(Box<crate::CraftInstallationPreview>),
 	/// Fenced schedule snapshot.
 	ScheduledTasks(crate::ScheduledTasks),
+	/// Staged Conversations, soonest expiry first.
+	ConversationTrash(crate::ConversationTrash),
+	/// Protections and disclosures for one Conversation.
+	RetentionPreview(crate::RetentionPreview),
 	/// Bounded editable content and its exact file Revision.
 	EditableFile(crate::EditableFile),
 	/// Workspace terminal lifecycle snapshots.

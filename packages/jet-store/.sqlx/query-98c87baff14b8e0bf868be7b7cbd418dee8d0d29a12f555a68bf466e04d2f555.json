@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM git_deliveries WHERE conversation_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "98c87baff14b8e0bf868be7b7cbd418dee8d0d29a12f555a68bf466e04d2f555"
+}

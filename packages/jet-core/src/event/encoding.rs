@@ -30,6 +30,8 @@ impl EventKind {
 			| Self::AutoContinueConfigured { .. }
 			| Self::ScheduleCreated { .. }
 			| Self::ScheduleCanceled { .. }
+			| Self::ConversationTrashed { .. }
+			| Self::ConversationRestored { .. }
 			| Self::ScheduleFired { .. }
 			| Self::UserEditApplied { .. }
 			| Self::ReviewSubmitted { .. }

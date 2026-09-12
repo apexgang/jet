@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM remote_operations WHERE origin_conversation_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "e685483ed6209ce702c81a7b82985a2c20870f4fe7302acc5e6ee13261e01fd5"
+}

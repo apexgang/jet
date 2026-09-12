@@ -67,6 +67,8 @@ impl Client {
 			| CommandResponse::AuditEpochBegun { .. }
 			| CommandResponse::RecoverySnapshotRestored { .. }
 			| CommandResponse::RecoverySnapshotsPurged { .. }
+			| CommandResponse::ConversationTrashed { .. }
+			| CommandResponse::ConversationRestored { .. }
 			| CommandResponse::PairingGateSet { .. }
 			| CommandResponse::PairingOpened { .. }
 			| CommandResponse::PairingClaimed { .. }
@@ -134,6 +136,8 @@ impl Client {
 			| CommandResponse::AuditEpochBegun { .. }
 			| CommandResponse::RecoverySnapshotRestored { .. }
 			| CommandResponse::RecoverySnapshotsPurged { .. }
+			| CommandResponse::ConversationTrashed { .. }
+			| CommandResponse::ConversationRestored { .. }
 			| CommandResponse::PairingGateSet { .. }
 			| CommandResponse::PairingOpened { .. }
 			| CommandResponse::PairingClaimed { .. }

@@ -60,6 +60,9 @@ pub enum SettingKey {
 	/// Persistent consent to review through that binding when it is not the
 	/// Run's own Provider.
 	AutomaticReviewConsent,
+	/// How many days a Conversation stays in Jet Trash before it is
+	/// deleted (ADR-0015).
+	RetentionTrashGraceDays,
 }
 
 /// Fewest days a Plane may keep its Security audit. Below this the audit
@@ -92,7 +95,7 @@ pub(super) struct Catalog {
 }
 
 /// Every Setting this core resolves, in the order a snapshot reports them.
-pub(super) const CATALOG: [Catalog; 23] = [
+pub(super) const CATALOG: [Catalog; 24] = [
 	Catalog {
 		key: SettingKey::StorageDisposableMiB,
 		spelling: "storage.disposable_mib",
@@ -147,6 +150,12 @@ pub(super) const CATALOG: [Catalog; 23] = [
 		spelling: "git.message_instructions",
 		scopes: &[SettingScopeKind::Plane],
 		built_in: BuiltIn::Text(""),
+	},
+	Catalog {
+		key: SettingKey::RetentionTrashGraceDays,
+		spelling: "retention.trash_grace_days",
+		scopes: &[SettingScopeKind::Plane],
+		built_in: BuiltIn::Count(crate::retention::DEFAULT_TRASH_GRACE_DAYS),
 	},
 	Catalog {
 		// One audit covers the whole Plane, so its window is Plane-wide.
@@ -386,6 +395,18 @@ impl SettingKey {
 					format!(
 						"the Security audit is kept at least \
 						 {MINIMUM_AUDIT_RETENTION_DAYS} days"
+					),
+				))
+			}
+			SettingValue::Count(days)
+				if self == Self::RetentionTrashGraceDays
+					&& *days < crate::retention::MINIMUM_TRASH_GRACE_DAYS =>
+			{
+				Err(CoreError::invalid_input(
+					"setting.value_below_minimum",
+					format!(
+						"Jet Trash keeps a Conversation at least {} day",
+						crate::retention::MINIMUM_TRASH_GRACE_DAYS
 					),
 				))
 			}

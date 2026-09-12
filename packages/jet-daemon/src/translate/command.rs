@@ -324,6 +324,21 @@ pub(crate) fn command(
 		wire::CommandRequest::PurgeRecoverySnapshots => {
 			Command::PurgeRecoverySnapshots
 		}
+		wire::CommandRequest::ForgetConversation { conversation_id } => {
+			Command::ForgetConversation {
+				conversation_id: ConversationId(*conversation_id),
+			}
+		}
+		wire::CommandRequest::DeleteConversationEverywhere {
+			conversation_id,
+		} => Command::DeleteConversationEverywhere {
+			conversation_id: ConversationId(*conversation_id),
+		},
+		wire::CommandRequest::RestoreConversation { conversation_id } => {
+			Command::RestoreConversation {
+				conversation_id: ConversationId(*conversation_id),
+			}
+		}
 		wire::CommandRequest::SetPairingGate { gate } => {
 			Command::SetPairingGate {
 				gate: pairing::gate_from_wire(*gate),

@@ -89,6 +89,10 @@ pub enum SettingKey {
 	/// How many days the Plane keeps its Security audit.
 	#[serde(rename = "security.audit_retention_days")]
 	SecurityAuditRetentionDays,
+	/// How many days a Conversation stays in Jet Trash before it is
+	/// deleted.
+	#[serde(rename = "retention.trash_grace_days")]
+	RetentionTrashGraceDays,
 	/// Whether local and source-built third-party Crafts may be installed.
 	#[serde(rename = "craft.developer_mode")]
 	DeveloperMode,

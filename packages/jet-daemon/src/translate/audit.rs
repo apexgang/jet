@@ -11,17 +11,20 @@ pub(super) fn page(
 	page: AuditPage,
 	minor: u32,
 ) -> Result<wire::SecurityAudit, jet_core::CoreError> {
-	if minor < wire::CRAFT_LIFECYCLE_MINOR
-		&& page
-			.entries
-			.iter()
-			.any(|entry| entry.actor == AuditActor::CraftRevocation)
+	let needs_newer_peer = |minor_needed, actor| {
+		minor < minor_needed
+			&& page.entries.iter().any(|entry| entry.actor == actor)
+	};
+	if needs_newer_peer(
+		wire::CRAFT_LIFECYCLE_MINOR,
+		AuditActor::CraftRevocation,
+	) || needs_newer_peer(wire::RETENTION_MINOR, AuditActor::Retention)
 	{
 		return Err(jet_core::CoreError {
             category: jet_core::ErrorCategory::Incompatible,
             code: "audit.actor_incompatible".into(),
             retryable: false,
-            message: "this audit page includes internal Craft revocations; upgrade the client to read it".into(),
+            message: "this audit page includes decisions Jet made on its own; upgrade the client to read it".into(),
             detail: None,
             revision_conflict: None,
             recovery_actions: vec![],
@@ -47,6 +50,7 @@ fn entry(entry: AuditEntry) -> wire::AuditEntry {
 				}
 			}
 			AuditActor::CraftRevocation => wire::AuditActor::CraftRevocation,
+			AuditActor::Retention => wire::AuditActor::Retention,
 		},
 		target: target(entry.target),
 		decision: entry.decision,

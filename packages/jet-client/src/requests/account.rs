@@ -43,6 +43,8 @@ impl Client {
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::AutoContinue(_)
 			| QueryResponse::ScheduledTasks(_)
+			| QueryResponse::ConversationTrash(_)
+			| QueryResponse::RetentionPreview(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -132,6 +134,8 @@ impl Client {
 			| CommandResponse::AuditEpochBegun { .. }
 			| CommandResponse::RecoverySnapshotRestored { .. }
 			| CommandResponse::RecoverySnapshotsPurged { .. }
+			| CommandResponse::ConversationTrashed { .. }
+			| CommandResponse::ConversationRestored { .. }
 			| CommandResponse::PairingGateSet { .. }
 			| CommandResponse::PairingOpened { .. }
 			| CommandResponse::PairingClaimed { .. }
@@ -201,6 +205,8 @@ impl Client {
 			| CommandResponse::AuditEpochBegun { .. }
 			| CommandResponse::RecoverySnapshotRestored { .. }
 			| CommandResponse::RecoverySnapshotsPurged { .. }
+			| CommandResponse::ConversationTrashed { .. }
+			| CommandResponse::ConversationRestored { .. }
 			| CommandResponse::PairingGateSet { .. }
 			| CommandResponse::PairingOpened { .. }
 			| CommandResponse::PairingClaimed { .. }

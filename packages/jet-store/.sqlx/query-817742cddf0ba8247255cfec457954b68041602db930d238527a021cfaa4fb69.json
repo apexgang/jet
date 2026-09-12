@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS (\n\t\t\t\tSELECT 1 FROM effects e JOIN runs r ON r.run_id = e.run_id\n\t\t\t\tWHERE r.conversation_id = ?1\n\t\t\t\t\tAND e.state IN ('pending', 'in_flight')\n\t\t\t) AS \"found!: bool\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "found!: bool",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "817742cddf0ba8247255cfec457954b68041602db930d238527a021cfaa4fb69"
+}

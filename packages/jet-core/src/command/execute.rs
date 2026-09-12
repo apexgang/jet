@@ -215,6 +215,8 @@ pub(super) fn redacted_for_receipt(
 			| CommandOutcome::AuditEpochBegun { .. }
 			| CommandOutcome::RecoverySnapshotRestored(_)
 			| CommandOutcome::RecoverySnapshotsPurged(_)
+			| CommandOutcome::ConversationTrashed(_)
+			| CommandOutcome::ConversationRestored { .. }
 			| CommandOutcome::PairingGateSet { .. }
 			| CommandOutcome::PairingClaimed { .. }
 			| CommandOutcome::PairingConfirmed { .. }

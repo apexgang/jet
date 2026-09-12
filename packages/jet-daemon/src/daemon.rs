@@ -179,6 +179,29 @@ pub(crate) async fn run(
 				retry = true;
 				eprintln!("jetd: cannot apply child Energy policy: {error}");
 			}
+			// Retention policies stage into Jet Trash and grace periods end
+			// on the same wakeups; the sweep is idle when nothing is due
+			// (ADR-0015).
+			match recovery_core.sweep_retention().await {
+				Ok(sweep) => {
+					for conversation_id in sweep.trashed {
+						eprintln!(
+							"jetd: forgot Conversation {}",
+							conversation_id.0
+						);
+					}
+					for conversation_id in sweep.deleted {
+						eprintln!(
+							"jetd: deleted Conversation {}",
+							conversation_id.0
+						);
+					}
+				}
+				Err(error) => {
+					retry = true;
+					eprintln!("jetd: cannot sweep retention: {error}");
+				}
+			}
 			// Every Command and Effect commit wakes this loop, so the first
 			// meaningful change of a day is copied soon after it lands
 			// (ADR-0097). A failed copy is retried on the next wake.

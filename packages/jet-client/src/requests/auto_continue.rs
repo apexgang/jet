@@ -26,6 +26,8 @@ impl Client {
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::TurnQueue(_)
 			| QueryResponse::ScheduledTasks(_)
+			| QueryResponse::ConversationTrash(_)
+			| QueryResponse::RetentionPreview(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::Status(_)

@@ -40,6 +40,15 @@ they cover optional fields an older reader ignores, rejected unknown message
 kinds, duplicate discriminators a dictionary would discard, non-canonical
 decimal strings, and hexadecimal of the wrong width or case (ADR-0094).
 
+## Retention negotiation
+
+Jet 1.39 adds `forget_conversation`, `delete_conversation_everywhere`,
+`restore_conversation`, the `conversation_trash` and `retention_preview`
+Queries, the `retention.trash_grace_days` Setting, and the `retention`
+audit actor. Older peers cannot admit the Commands or Queries, do not see
+the Setting, and are refused an audit page that names the actor. See
+[Retention](retention.md).
+
 ## Usage negotiation
 
 Jet 1.32 adds `authorize_approval_retry` and `approval_retry_authorized`.

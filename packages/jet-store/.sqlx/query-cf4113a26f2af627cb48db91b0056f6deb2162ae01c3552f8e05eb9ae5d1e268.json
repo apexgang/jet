@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM effects WHERE effect_id IN (\n\t\t\tSELECT delivery_id FROM git_deliveries WHERE conversation_id = ?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "cf4113a26f2af627cb48db91b0056f6deb2162ae01c3552f8e05eb9ae5d1e268"
+}

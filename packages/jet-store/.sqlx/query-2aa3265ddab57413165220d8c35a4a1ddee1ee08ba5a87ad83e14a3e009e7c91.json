@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM events WHERE conversation_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "2aa3265ddab57413165220d8c35a4a1ddee1ee08ba5a87ad83e14a3e009e7c91"
+}

@@ -13,7 +13,11 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 38;
+pub const PROTOCOL_MINOR: u32 = 39;
+
+/// Forgetting, deleting everywhere, restoring, Jet Trash, the retention
+/// preview, and the Trash grace-period Setting.
+pub const RETENTION_MINOR: u32 = 39;
 
 /// The Deletion ledger in the Plane status and the interactive Recovery
 /// purge.

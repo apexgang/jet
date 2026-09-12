@@ -104,6 +104,8 @@ async fn apply(
 		| CommandOutcome::AuditEpochBegun { .. }
 		| CommandOutcome::RecoverySnapshotRestored(_)
 		| CommandOutcome::RecoverySnapshotsPurged(_)
+		| CommandOutcome::ConversationTrashed(_)
+		| CommandOutcome::ConversationRestored { .. }
 		| CommandOutcome::PairedClientRevoked { .. }
 		| CommandOutcome::ProjectRegistered(_)
 		| CommandOutcome::WorkspacePromotionRecorded(_)

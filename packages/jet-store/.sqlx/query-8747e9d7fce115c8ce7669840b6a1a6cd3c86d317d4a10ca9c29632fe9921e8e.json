@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT import_id FROM conversations WHERE conversation_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "import_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "import_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "8747e9d7fce115c8ce7669840b6a1a6cd3c86d317d4a10ca9c29632fe9921e8e"
+}

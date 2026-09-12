@@ -24,32 +24,38 @@ pub(crate) async fn reapply(
 	for record in records {
 		let identity = record.identity.to_string();
 		let result = match record.kind {
-			DeletedIdentityKind::AccountBinding => {
-				sqlx::query!(
-					"DELETE FROM account_bindings WHERE binding_id = ?1",
-					identity
+			DeletedIdentityKind::AccountBinding => sqlx::query!(
+				"DELETE FROM account_bindings WHERE binding_id = ?1",
+				identity
+			)
+			.execute(&mut *transaction)
+			.await?
+			.rows_affected(),
+			DeletedIdentityKind::PairedClient => sqlx::query!(
+				"DELETE FROM paired_clients WHERE client_id = ?1",
+				identity
+			)
+			.execute(&mut *transaction)
+			.await?
+			.rows_affected(),
+			DeletedIdentityKind::Schedule => sqlx::query!(
+				"DELETE FROM scheduled_tasks WHERE schedule_id = ?1",
+				identity
+			)
+			.execute(&mut *transaction)
+			.await?
+			.rows_affected(),
+			// A Conversation takes every Jet-owned row it reaches with it,
+			// the same rows its deletion removed (ADR-0011).
+			DeletedIdentityKind::Conversation => {
+				crate::conversation::purge::purge_rows(
+					&mut transaction,
+					&identity,
 				)
-				.execute(&mut *transaction)
-				.await?
-			}
-			DeletedIdentityKind::PairedClient => {
-				sqlx::query!(
-					"DELETE FROM paired_clients WHERE client_id = ?1",
-					identity
-				)
-				.execute(&mut *transaction)
-				.await?
-			}
-			DeletedIdentityKind::Schedule => {
-				sqlx::query!(
-					"DELETE FROM scheduled_tasks WHERE schedule_id = ?1",
-					identity
-				)
-				.execute(&mut *transaction)
 				.await?
 			}
 		};
-		changed += result.rows_affected();
+		changed += result;
 	}
 	let vouched = u64::try_from(records.len()).unwrap_or(u64::MAX);
 	// A store behind the ledger catches up; one ahead of it is left

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM change_checkpoints WHERE run_id IN (\n\t\t\tSELECT run_id FROM runs WHERE conversation_id = ?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "4db18579c99410dbca9c2d7f26a315be1bb7143368909913f1805833472dcf73"
+}

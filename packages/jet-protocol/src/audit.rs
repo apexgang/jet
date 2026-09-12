@@ -20,6 +20,9 @@ pub enum AuditActor {
 	},
 	/// Jet applied signed release revocations on this Plane.
 	CraftRevocation,
+	/// The retention sweep forgot or deleted a Conversation on its own
+	/// policy or grace period (ADR-0015).
+	Retention,
 }
 
 /// How much a decision could cost if it was not the one the owner intended,

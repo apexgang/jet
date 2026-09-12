@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM run_executions WHERE run_id IN (\n\t\t\tSELECT run_id FROM runs WHERE conversation_id = ?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "82327ddd5f2ec831959b108d65f7d119b3f191254b8353cc8b12f62536c4d105"
+}

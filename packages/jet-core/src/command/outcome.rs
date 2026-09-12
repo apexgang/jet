@@ -167,6 +167,14 @@ pub enum CommandOutcome {
 	/// A post-deletion snapshot was taken and the older snapshots that may
 	/// hold what was deleted are gone (ADR-0102).
 	RecoverySnapshotsPurged(SnapshotPurge),
+	/// The Conversation is in Jet Trash, with the reason and the grace
+	/// period recorded (ADR-0015).
+	ConversationTrashed(crate::retention::TrashEntry),
+	/// The Conversation is out of Jet Trash again.
+	ConversationRestored {
+		/// The Conversation restored.
+		conversation_id: crate::ConversationId,
+	},
 	/// The authority epoch the Security audit now records in.
 	AuditEpochBegun {
 		/// The epoch that holds the chain the Plane vouches for.

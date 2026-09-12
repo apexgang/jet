@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM execution_resolutions WHERE effect_id IN (\n\t\t\tSELECT e.effect_id FROM effects e JOIN runs r ON r.run_id = e.run_id\n\t\t\tWHERE r.conversation_id = ?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "4955cba838d8802ac1e58bc7afb49c5da27aa1e1a02b55b920955f8f892871d3"
+}

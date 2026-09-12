@@ -150,6 +150,16 @@ pub(crate) fn command_outcome(
 				replaced: restored.replaced,
 			}
 		}
+		CommandOutcome::ConversationTrashed(entry) => {
+			wire::CommandResponse::ConversationTrashed {
+				entry: super::retention::entry(entry),
+			}
+		}
+		CommandOutcome::ConversationRestored { conversation_id } => {
+			wire::CommandResponse::ConversationRestored {
+				conversation_id: conversation_id.0,
+			}
+		}
 		CommandOutcome::RecoverySnapshotsPurged(purge) => {
 			wire::CommandResponse::RecoverySnapshotsPurged {
 				snapshot: purge.snapshot,
