@@ -62,6 +62,40 @@ pub(crate) async fn read(
 	})
 }
 
+/// How many Deletion-ledger records the store behind `executor` has
+/// applied. It is copied with every snapshot, so a copy says which
+/// deletions it predates (ADR-0102).
+pub(crate) async fn deletions_applied(
+	executor: impl SqliteExecutor<'_>,
+) -> Result<u64, StoreError> {
+	let applied = sqlx::query_scalar!(
+		"SELECT deletions_applied FROM plane WHERE singleton = 1"
+	)
+	.fetch_one(executor)
+	.await?;
+	u64::try_from(applied).map_err(|_| {
+		StoreError::Integrity("deletions_applied is negative".into())
+	})
+}
+
+/// Records that the store behind `executor` has applied the ledger up to
+/// `applied`, inside whatever transaction the caller holds.
+pub(crate) async fn record_deletions_applied(
+	executor: impl SqliteExecutor<'_>,
+	applied: u64,
+) -> Result<(), StoreError> {
+	let applied = i64::try_from(applied).map_err(|_| {
+		StoreError::Integrity("deletions_applied overflows".into())
+	})?;
+	sqlx::query!(
+		"UPDATE plane SET deletions_applied = ?1 WHERE singleton = 1",
+		applied
+	)
+	.execute(executor)
+	.await?;
+	Ok(())
+}
+
 pub(crate) async fn record_daemon_start(
 	pool: &SqlitePool,
 ) -> Result<PlaneRecord, StoreError> {

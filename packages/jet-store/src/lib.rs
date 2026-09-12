@@ -30,7 +30,6 @@ mod recovery;
 pub use recovery::{
 	IntegrityFailure, IntegrityFailureReason, RestoredStore, StoreIntegrity,
 };
-pub use snapshot::SnapshotPurge;
 mod remote_operation;
 pub use remote_operation::RemoteOperationRecord;
 mod run;
@@ -176,6 +175,9 @@ struct Opened {
 	/// then.
 	plane_id: Uuid,
 	integrity: StoreIntegrity,
+	/// How many Deletion-ledger records the store had applied when it was
+	/// opened, when its Plane row could say (ADR-0102).
+	deletions_applied: Option<u64>,
 }
 
 impl Store {
@@ -277,7 +279,12 @@ impl Store {
 
 	/// Takes a verified Recovery snapshot for `reason`, stamped
 	/// `now_unix_ms`, and rotates the retained set (ADR-0097).
-	pub(crate) async fn snapshot(
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Unavailable`] when the copy cannot be written
+	/// and [`StoreError::Integrity`] when it fails verification.
+	pub async fn snapshot(
 		&self,
 		reason: SnapshotReason,
 		now_unix_ms: i64,
@@ -314,54 +321,48 @@ impl Store {
 		}
 	}
 
-	/// Takes a verified snapshot of the store as it is now, after every
-	/// deletion the ledger records, and removes every older snapshot taken
-	/// at or before the newest of those deletions, which may still hold
-	/// what was deleted (ADR-0102). Snapshots newer than the newest
-	/// deletion, and rollback points taken after it, stay.
+	/// The snapshots that may still hold an identity the Deletion ledger
+	/// says is gone: every one taken while the store had applied fewer
+	/// ledger records than the ledger now vouches for (ADR-0102).
 	///
 	/// # Errors
 	///
-	/// Returns [`StoreError::Integrity`] when the Deletion ledger cannot be
-	/// trusted or the new snapshot fails verification, and
-	/// [`StoreError::Unavailable`] when the files cannot be written or
-	/// removed.
-	pub async fn purge_recovery_snapshots(
-		&self,
-		now_unix_ms: i64,
-	) -> Result<SnapshotPurge, StoreError> {
-		let ledger = self.deletion_ledger()?;
-		if let DeletionLedger::Corrupt(detail) = &ledger {
-			return Err(StoreError::Integrity(format!(
-				"the Deletion ledger cannot be trusted: {detail}"
-			)));
-		}
-		// What is affected is decided before the copy: rotation may already
-		// drop some of it when the copy is published, and the reply names
-		// every snapshot the purge ended, however it ended.
-		let removed = snapshot::affected_by(
+	/// Returns [`StoreError::Integrity`] when the ledger cannot be trusted
+	/// and [`StoreError::Unavailable`] when the directory cannot be read.
+	pub async fn affected_snapshots(&self) -> Result<Vec<String>, StoreError> {
+		let vouched = self.deletion_ledger()?.trusted()?.len();
+		deletion::affected_snapshots(
 			&self.database,
-			ledger.newest_deletion_unix_ms(),
-		)?;
-		let snapshot = self
-			.snapshot(SnapshotReason::Maintenance, now_unix_ms)
-			.await?;
-		snapshot::remove(&self.database, &removed)?;
-		Ok(SnapshotPurge {
-			snapshot: snapshot.name,
-			removed,
-		})
+			u64::try_from(vouched).unwrap_or(u64::MAX),
+		)
+		.await
+	}
+
+	/// Removes the snapshots called `names`, whichever of them still exist.
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Unavailable`] when a file cannot be removed.
+	pub fn remove_snapshots(&self, names: &[String]) -> Result<(), StoreError> {
+		deletion::remove_snapshots(&self.database, names)
 	}
 
 	/// The Deletion ledger of this store: every permanent deletion it
-	/// vouches for, or the finding that it vouches for nothing (ADR-0102).
+	/// vouches for, or the finding that it vouches for nothing, which
+	/// includes a ledger with fewer records than this store has applied
+	/// (ADR-0102).
 	///
 	/// # Errors
 	///
 	/// Returns [`StoreError::Unavailable`] when the ledger files cannot be
 	/// read.
 	pub fn deletion_ledger(&self) -> Result<DeletionLedger, StoreError> {
-		deletion::read(&self.database, self.plane_id())
+		let opened = self.opened();
+		deletion::read(
+			&self.database,
+			opened.plane_id,
+			opened.deletions_applied.unwrap_or(0),
+		)
 	}
 
 	/// Every verified Recovery snapshot of this store, newest first.

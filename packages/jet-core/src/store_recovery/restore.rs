@@ -10,7 +10,7 @@ use crate::{
 	error::CoreError,
 	security::SecurityState,
 };
-use jet_store::{DeletionLedger, IntegrityFailureReason, StoreIntegrity};
+use jet_store::{IntegrityFailureReason, StoreIntegrity};
 
 /// The refusal a Command meets in read-only Recovery mode. It is
 /// `unavailable` and retryable: the same Command succeeds once a snapshot
@@ -25,19 +25,6 @@ pub(crate) fn read_only(reason: IntegrityFailureReason) -> CoreError {
 			IntegrityFailureReason::IntegrityCheck => "integrity check failed",
 			IntegrityFailureReason::Migration => "schema migration failed",
 		},
-	)
-}
-
-/// The refusal a restoration meets while the Deletion ledger vouches for
-/// nothing: the snapshot may predate a deletion nothing else remembers,
-/// so writable restoration stays refused (ADR-0102).
-pub(crate) fn deletion_ledger_corrupt(detail: String) -> CoreError {
-	CoreError::unavailable(
-		"recovery.deletion_ledger_corrupt",
-		"this Plane's Deletion ledger cannot be trusted, so no snapshot is \
-		 restored over its store: restoring one could bring back what was \
-		 deleted after it was taken",
-		detail,
 	)
 }
 
@@ -94,9 +81,7 @@ impl Core {
 		};
 		// Nothing else decides an Effect while the store is being replaced.
 		let _reconciliation = self.effect_reconciliation.lock().await;
-		if let DeletionLedger::Corrupt(detail) = self.store.deletion_ledger()? {
-			return Err(deletion_ledger_corrupt(detail));
-		}
+		self.require_trusted_deletion_ledger()?;
 		let now_unix_ms = self.now_unix_ms();
 		let restored = self.store.restore(&snapshot, now_unix_ms).await?;
 		if let StoreIntegrity::Failed(failure) = self.store.integrity() {
@@ -142,8 +127,8 @@ impl Core {
 mod tests {
 	use super::*;
 	use crate::{
-		Command, ErrorCategory, PairingGate, Query, QueryResult,
-		RecoveryStatus, RestoredStore, SnapshotReason,
+		Command, DeletionLedger, ErrorCategory, PairingGate, Query,
+		QueryResult, RecoveryStatus, RestoredStore, SnapshotReason,
 		test_support::{
 			FixedProbe, ManualClock, actor, bind_native_account, equipped,
 			request, start_core_with,

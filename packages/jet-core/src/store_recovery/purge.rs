@@ -9,7 +9,7 @@
 //! client can reach it, and it is recorded in the Security audit as the
 //! destructive decision it is.
 
-use super::{RecoveryMode, read_only, restore::deletion_ledger_corrupt};
+use super::{RecoveryMode, read_only};
 use crate::{
 	Actor, Core,
 	audit::{self, AuditDecision, AuditSubject, Decision},
@@ -17,12 +17,24 @@ use crate::{
 	error::CoreError,
 	security::SecurityClass,
 };
-use jet_store::DeletionLedger;
+use jet_store::SnapshotReason;
+use serde::{Deserialize, Serialize};
+
+/// What a Recovery purge did: the verified post-deletion snapshot it took,
+/// and the older snapshots it removed because they may hold an identity
+/// the Deletion ledger says is gone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotPurge {
+	/// The snapshot taken after every recorded deletion.
+	pub snapshot: String,
+	/// The snapshots removed, newest first.
+	pub removed: Vec<String>,
+}
 
 impl Core {
-	/// Takes a verified snapshot of the store as it is now and removes
-	/// every older snapshot taken at or before the newest deletion the
-	/// ledger records, then records the purge in the Security audit.
+	/// Takes a verified snapshot of the store as it is now, records the
+	/// purge in the Security audit, and removes every snapshot taken while
+	/// the store had applied fewer deletions than the ledger holds.
 	///
 	/// This Command runs outside the receipt pipeline, because copying the
 	/// store needs the one connection a receipt transaction would hold. It
@@ -46,11 +58,20 @@ impl Core {
 		// ASVS 16.2.1: a destructive decision waits for an audit the Plane
 		// can vouch for (ADR-0105).
 		self.security.read().await.admit(SecurityClass::Guarded)?;
-		if let DeletionLedger::Corrupt(detail) = self.store.deletion_ledger()? {
-			return Err(deletion_ledger_corrupt(detail));
-		}
+		self.require_trusted_deletion_ledger()?;
 		let now_unix_ms = self.now_unix_ms();
-		let purge = self.store.purge_recovery_snapshots(now_unix_ms).await?;
+		// What is affected is decided before the copy: rotation may already
+		// drop some of it when the copy is published, and the reply names
+		// every snapshot the purge ended, however it ended.
+		let removed = self.store.affected_snapshots().await?;
+		let snapshot = self
+			.store
+			.snapshot(SnapshotReason::Maintenance, now_unix_ms)
+			.await?;
+		// The decision is recorded before the copies go (ADR-0105). A crash
+		// in between leaves the audit saying what was about to happen and
+		// the files for the next purge; the other order would destroy the
+		// last copies with no record of who asked.
 		self.store
 			.write(async |tx| {
 				audit::record(
@@ -65,7 +86,11 @@ impl Core {
 				.await
 			})
 			.await?;
-		Ok(CommandOutcome::RecoverySnapshotsPurged(purge))
+		self.store.remove_snapshots(&removed)?;
+		Ok(CommandOutcome::RecoverySnapshotsPurged(SnapshotPurge {
+			snapshot: snapshot.name,
+			removed,
+		}))
 	}
 }
 
@@ -73,8 +98,8 @@ impl Core {
 mod tests {
 	use super::*;
 	use crate::{
-		Command, ErrorCategory, Query, QueryResult, RecoveryStatus,
-		SecurityState, SnapshotPurge,
+		Command, DeletionLedger, ErrorCategory, Query, QueryResult,
+		RecoveryStatus, SecurityState,
 		test_support::{
 			FixedProbe, ManualClock, actor, bind_native_account, equipped,
 			request, start_core_with,

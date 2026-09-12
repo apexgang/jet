@@ -7,6 +7,7 @@ use crate::{
 	Store, StoreError,
 	audit::head::{self as audit_head, AuditHead},
 	deletion::{self, PendingDeletion},
+	plane,
 };
 use sqlx::{SqliteConnection, SqliteTransaction};
 use std::ops::{Deref, DerefMut};
@@ -131,14 +132,40 @@ impl Store {
 				// does not, which the next open finishes; a commit first
 				// would leave a deletion a restoration could undo
 				// (ADR-0102).
-				if !transaction.deletions.is_empty()
-					&& let Err(error) = deletion::append(
-						&self.database,
-						self.plane_id(),
-						&transaction.deletions,
-					) {
-					let _ = transaction.read.transaction.rollback().await;
-					return Err(E::from(error));
+				let mut ledgered = None;
+				if !transaction.deletions.is_empty() {
+					let applied = match plane::deletions_applied(
+						transaction.read.connection(),
+					)
+					.await
+					.and_then(|applied| {
+						deletion::append(
+							&self.database,
+							self.plane_id(),
+							applied,
+							&transaction.deletions,
+						)
+					}) {
+						Ok(applied) => applied,
+						Err(error) => {
+							let _ =
+								transaction.read.transaction.rollback().await;
+							return Err(E::from(error));
+						}
+					};
+					// The store commits how far it has applied the ledger
+					// with the deletion itself, which is what tells a copy
+					// of it which deletions it predates.
+					if let Err(error) = plane::record_deletions_applied(
+						transaction.read.connection(),
+						applied,
+					)
+					.await
+					{
+						let _ = transaction.read.transaction.rollback().await;
+						return Err(E::from(error));
+					}
+					ledgered = Some(applied);
 				}
 				transaction
 					.read
@@ -154,6 +181,12 @@ impl Store {
 				if let Some(head) = head {
 					audit_head::write(&self.database, self.plane_id(), head)
 						.map_err(E::from)?;
+				}
+				if let Some(applied) = ledgered {
+					self.opened
+						.write()
+						.expect("store state is not poisoned")
+						.deletions_applied = Some(applied);
 				}
 				self.snapshots.mark_dirty();
 				Ok(value)

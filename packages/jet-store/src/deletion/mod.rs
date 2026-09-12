@@ -15,11 +15,14 @@
 //! code already running as the same operating-system user (ADR-0105). What
 //! they make visible is a store that was put back to before a deletion.
 
+mod files;
 mod ledger;
+mod purge;
 mod reapply;
 
 pub use ledger::{DeletedIdentityKind, DeletionLedger, DeletionRecord};
 pub(crate) use ledger::{append, read};
+pub(crate) use purge::{affected_snapshots, remove_snapshots};
 pub(crate) use reapply::reapply;
 
 use uuid::Uuid;
@@ -36,7 +39,7 @@ pub(crate) struct PendingDeletion {
 
 #[cfg(test)]
 mod tests {
-	use super::{ledger::recovery_dir, *};
+	use super::{files::recovery_dir, *};
 	use crate::{
 		NewPairedClient, PairingKeyAlgorithm, SnapshotReason, Store,
 		StoreError, StoreIntegrity,
@@ -112,28 +115,15 @@ mod tests {
 			})
 			.await
 			.unwrap();
-		assert_eq!(
-			store.deletion_ledger().unwrap(),
-			DeletionLedger::Verified(vec![DeletionRecord {
-				sequence: 1,
-				deleted_at_unix_ms: NOW_UNIX_MS + 1,
-				kind: DeletedIdentityKind::PairedClient,
-				identity: revoked,
-			}])
-		);
-		assert_eq!(
-			fs::read_to_string(
-				recovery_dir(&path).join("plane.sqlite3.deletions")
-			)
-			.unwrap()
-			.lines()
-			.take(2)
-			.collect::<Vec<_>>(),
-			vec![
-				"jet-deletion-ledger 1".to_string(),
-				format!("plane {plane_id}")
-			]
-		);
+		let ledger = store.deletion_ledger().unwrap();
+		let header = fs::read_to_string(
+			recovery_dir(&path).join("plane.sqlite3.deletions"),
+		)
+		.unwrap()
+		.lines()
+		.take(2)
+		.map(ToOwned::to_owned)
+		.collect::<Vec<_>>();
 		store.close().await;
 		damage(&path);
 
@@ -144,8 +134,26 @@ mod tests {
 			.unwrap();
 
 		assert_eq!(
-			(store.integrity(), paired_clients(&store).await),
-			(StoreIntegrity::Verified, vec![kept])
+			(
+				ledger,
+				header,
+				store.integrity(),
+				paired_clients(&store).await
+			),
+			(
+				DeletionLedger::Verified(vec![DeletionRecord {
+					sequence: 1,
+					deleted_at_unix_ms: NOW_UNIX_MS + 1,
+					kind: DeletedIdentityKind::PairedClient,
+					identity: revoked,
+				}]),
+				vec![
+					"jet-deletion-ledger 1".to_string(),
+					format!("plane {plane_id}")
+				],
+				StoreIntegrity::Verified,
+				vec![kept]
+			)
 		);
 	}
 
@@ -162,6 +170,7 @@ mod tests {
 		append(
 			&path,
 			plane_id,
+			0,
 			&[PendingDeletion {
 				kind: DeletedIdentityKind::PairedClient,
 				identity: client_id,
@@ -175,6 +184,54 @@ mod tests {
 		let store = Store::open(&path).await.unwrap();
 
 		assert_eq!(paired_clients(&store).await, Vec::<Uuid>::new());
+	}
+
+	/// The store counts the deletions it has applied, so a ledger that has
+	/// gone missing altogether, files and all, is still noticed: the count
+	/// is ahead of a ledger that vouches for nothing (ADR-0102).
+	#[tokio::test]
+	async fn a_lost_ledger_is_noticed_by_the_store_that_applied_it() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("plane.sqlite3");
+		let store = Store::open(&path).await.unwrap();
+		let client_id = Uuid::now_v7();
+		pair(&store, client_id).await;
+		store
+			.write(async |tx| {
+				tx.delete_paired_client(client_id, NOW_UNIX_MS).await
+			})
+			.await
+			.unwrap();
+		let before = store.deletion_ledger().unwrap();
+		fs::remove_dir_all(recovery_dir(&path)).unwrap();
+
+		let refused = store
+			.write(async |tx| {
+				tx.delete_paired_client(Uuid::now_v7(), NOW_UNIX_MS + 1)
+					.await
+			})
+			.await
+			.unwrap_err();
+
+		assert_eq!(
+			(
+				matches!(before, DeletionLedger::Verified(_)),
+				store.deletion_ledger().unwrap(),
+				refused.to_string()
+			),
+			(
+				true,
+				DeletionLedger::Corrupt(
+					"the store has applied 1 deletions, but the ledger \
+					 vouches for 0"
+						.into()
+				),
+				"store integrity failure: the Deletion ledger cannot be \
+				 trusted: the store has applied 1 deletions, but the ledger \
+				 vouches for 0"
+					.to_string()
+			)
+		);
 	}
 
 	/// A ledger that cannot be trusted refuses a restoration, because the

@@ -14,7 +14,6 @@
 //! left in place is what makes that visible to the audit (ADR-0105).
 
 use crate::StoreError;
-use serde::{Deserialize, Serialize};
 use sqlx::{
 	Connection as _, SqliteConnection, SqlitePool, sqlite::SqliteConnectOptions,
 };
@@ -139,17 +138,6 @@ impl RecoverySnapshot {
 			bytes,
 		})
 	}
-}
-
-/// What an interactive Recovery purge did: the verified post-deletion
-/// snapshot it took, and the older snapshots it removed because they may
-/// hold an identity the Deletion ledger says is gone (ADR-0102).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SnapshotPurge {
-	/// The snapshot taken after every recorded deletion.
-	pub snapshot: String,
-	/// The snapshots removed, newest first.
-	pub removed: Vec<String>,
 }
 
 /// Where the snapshots of the store at `database` live.
@@ -341,35 +329,6 @@ pub(crate) fn locate(
 	}
 }
 
-/// The names of every snapshot taken at or before `cutoff`, newest first:
-/// the ones that may still hold an identity deleted by then. With no
-/// cutoff nothing is affected.
-pub(crate) fn affected_by(
-	database: &Path,
-	cutoff: Option<i64>,
-) -> Result<Vec<String>, StoreError> {
-	let Some(cutoff) = cutoff else {
-		return Ok(vec![]);
-	};
-	Ok(list(database)?
-		.into_iter()
-		.filter(|snapshot| snapshot.taken_at_unix_ms <= cutoff)
-		.map(|snapshot| snapshot.name)
-		.collect())
-}
-
-/// Removes the snapshots called `names`, whichever of them still exist.
-pub(crate) fn remove(
-	database: &Path,
-	names: &[String],
-) -> Result<(), StoreError> {
-	let directory = snapshots_dir(database);
-	for name in names {
-		remove_if_present(&directory.join(name))?;
-	}
-	Ok(())
-}
-
 /// Removes every snapshot the retention tiers no longer cover, plus any
 /// pending file a crash left behind.
 pub(crate) fn rotate(database: &Path) -> Result<(), StoreError> {
@@ -491,7 +450,7 @@ fn prepare_directory(directory: &Path) -> Result<(), StoreError> {
 		.map_err(|error| unavailable(directory, &error))
 }
 
-fn remove_if_present(path: &Path) -> Result<(), StoreError> {
+pub(crate) fn remove_if_present(path: &Path) -> Result<(), StoreError> {
 	match fs::remove_file(path) {
 		Ok(()) => Ok(()),
 		Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -536,45 +495,6 @@ mod tests {
 
 	fn names(snapshots: &[RecoverySnapshot]) -> Vec<&str> {
 		snapshots.iter().map(|s| s.name.as_str()).collect()
-	}
-
-	/// What was taken up to the newest deletion is affected, whatever its
-	/// reason; what came after is not, and a Plane with no deletions has
-	/// nothing affected at all.
-	#[tokio::test]
-	async fn the_snapshots_a_deletion_may_survive_in_are_the_older_ones() {
-		let dir = tempfile::tempdir().unwrap();
-		let path = dir.path().join("plane.sqlite3");
-		let store = Store::open(&path).await.unwrap();
-		for (offset, reason) in [
-			(2, SnapshotReason::Daily),
-			(1, MIGRATION),
-			(0, SnapshotReason::Daily),
-		] {
-			store
-				.snapshot(reason, NOW_UNIX_MS - offset * DAY_MS)
-				.await
-				.unwrap();
-		}
-		let untouched = affected_by(&path, None).unwrap();
-
-		let affected = affected_by(&path, Some(NOW_UNIX_MS - DAY_MS)).unwrap();
-		remove(&path, &affected).unwrap();
-
-		assert_eq!(
-			(untouched, affected, names(&list(&path).unwrap())),
-			(
-				vec![],
-				vec![
-					snapshot(NOW_UNIX_MS - DAY_MS, MIGRATION).name,
-					snapshot(NOW_UNIX_MS - 2 * DAY_MS, SnapshotReason::Daily)
-						.name,
-				],
-				vec![
-					snapshot(NOW_UNIX_MS, SnapshotReason::Daily).name.as_str()
-				]
-			)
-		);
 	}
 
 	#[test]

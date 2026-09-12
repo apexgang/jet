@@ -19,13 +19,26 @@ mod purge;
 mod restore;
 pub(crate) use restore::{not_read_only, read_only};
 
+/// The refusal a restoration or a purge meets while the Deletion ledger
+/// vouches for nothing: a snapshot may predate a deletion nothing else
+/// remembers, so nothing that depends on the ledger runs (ADR-0102).
+fn deletion_ledger_corrupt(detail: String) -> CoreError {
+	CoreError::unavailable(
+		"recovery.deletion_ledger_corrupt",
+		"this Plane's Deletion ledger cannot be trusted, so no snapshot is \
+		 restored over its store or purged: restoring one could bring back \
+		 what was deleted after it was taken",
+		detail,
+	)
+}
+
 use crate::{Core, error::CoreError};
 use jet_store::StoreIntegrity;
 pub use jet_store::{
 	DeletedIdentityKind, DeletionLedger, DeletionRecord,
-	IntegrityFailureReason, RecoverySnapshot, RestoredStore, SnapshotPurge,
-	SnapshotReason,
+	IntegrityFailureReason, RecoverySnapshot, RestoredStore, SnapshotReason,
 };
+pub use purge::SnapshotPurge;
 
 /// Whether the Plane store serves or answers reads only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +73,16 @@ pub struct RecoveryStatus {
 }
 
 impl Core {
+	/// Refuses to go on while the Deletion ledger vouches for nothing.
+	fn require_trusted_deletion_ledger(&self) -> Result<(), CoreError> {
+		match self.store.deletion_ledger()? {
+			DeletionLedger::Verified(_) => Ok(()),
+			DeletionLedger::Corrupt(detail) => {
+				Err(deletion_ledger_corrupt(detail))
+			}
+		}
+	}
+
 	/// Whether the Plane store serves or answers reads only, right now
 	/// (ADR-0077).
 	#[must_use]

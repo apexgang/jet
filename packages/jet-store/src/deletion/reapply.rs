@@ -6,23 +6,21 @@
 use crate::{
 	StoreError,
 	deletion::{DeletedIdentityKind, DeletionRecord},
+	plane,
 };
 use sqlx::SqlitePool;
 
-/// Removes the identity each record names, in one transaction, and
-/// returns how many rows that took: zero when the store already agreed
-/// with the ledger. Only the identity's own row is removed; a restoration
-/// brings back the old journal and queues regardless, and the workers
-/// that read them find the identity gone.
+/// Removes the identity each record names and records the ledger as
+/// applied, in one transaction, and returns how many rows that changed:
+/// zero when the store already agreed with the ledger. Only the
+/// identity's own row is removed; a restoration brings back the old
+/// journal and queues regardless.
 pub(crate) async fn reapply(
 	pool: &SqlitePool,
 	records: &[DeletionRecord],
 ) -> Result<u64, StoreError> {
-	if records.is_empty() {
-		return Ok(0);
-	}
 	let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
-	let mut removed = 0;
+	let mut changed = 0;
 	for record in records {
 		let identity = record.identity.to_string();
 		let result = match record.kind {
@@ -51,8 +49,15 @@ pub(crate) async fn reapply(
 				.await?
 			}
 		};
-		removed += result.rows_affected();
+		changed += result.rows_affected();
+	}
+	let vouched = u64::try_from(records.len()).unwrap_or(u64::MAX);
+	// A store behind the ledger catches up; one ahead of it is left
+	// saying so, which is how a lost ledger is noticed.
+	if plane::deletions_applied(&mut *transaction).await? < vouched {
+		plane::record_deletions_applied(&mut *transaction, vouched).await?;
+		changed += 1;
 	}
 	transaction.commit().await?;
-	Ok(removed)
+	Ok(changed)
 }

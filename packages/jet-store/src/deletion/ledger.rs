@@ -1,41 +1,16 @@
-//! The ledger file and its head: two owner-only text files under the
-//! store's `recovery` directory, read whole and appended to durably
-//! (ADR-0102).
-//!
-//! The ledger holds one line per deletion, each folding the line before it
-//! into a link. The head names the newest link the ledger vouches for and
-//! is replaced atomically after the ledger has reached the disk, so a
-//! crash between the two leaves at most one line past the head, which the
-//! next append discards. Anything else that does not fold through the head
-//! is corruption, and the ledger then vouches for nothing.
+//! The ledger's chain: what a record is, what the head vouches for, and
+//! how a deletion is appended so that it folds through the head
+//! (ADR-0102). The files themselves live in [`files`](super::files).
 
-use crate::{StoreError, deletion::PendingDeletion};
-use sha2::{Digest as _, Sha256};
-use std::{
-	fmt,
-	fs::{self, File},
-	io::{Seek as _, SeekFrom, Write as _},
-	os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _},
-	path::{Path, PathBuf},
+use crate::{
+	StoreError,
+	deletion::{
+		PendingDeletion,
+		files::{self, Head, Link},
+	},
 };
+use std::path::Path;
 use uuid::Uuid;
-
-/// Directory beside the database that holds Recovery evidence outside it.
-const DIRECTORY: &str = "recovery";
-
-/// Suffixes appended to the database file name. Deriving them keeps two
-/// stores in one directory from sharing a ledger.
-const LEDGER_SUFFIX: &str = ".deletions";
-const HEAD_SUFFIX: &str = ".deletions.head";
-const PENDING_HEAD_SUFFIX: &str = ".deletions.head.pending";
-
-/// First lines of the files, so a future format is recognized rather than
-/// misread.
-const LEDGER_FORMAT: &str = "jet-deletion-ledger 1";
-const HEAD_FORMAT: &str = "jet-deletion-ledger-head 1";
-
-const GENESIS_DOMAIN: &[u8] = b"jet-deletion-ledger-genesis-v1";
-const RECORD_DOMAIN: &[u8] = b"jet-deletion-ledger-record-v1";
 
 /// What kind of identity a deletion removed. The ledger names the kind so
 /// a restoration knows which row to remove again.
@@ -60,7 +35,7 @@ impl DeletedIdentityKind {
 		}
 	}
 
-	fn parse(text: &str) -> Option<Self> {
+	pub(super) fn parse(text: &str) -> Option<Self> {
 		match text {
 			"account_binding" => Some(Self::AccountBinding),
 			"paired_client" => Some(Self::PairedClient),
@@ -96,109 +71,35 @@ pub enum DeletionLedger {
 }
 
 impl DeletionLedger {
-	/// When the newest recorded deletion was acknowledged, or `None` when
-	/// there is none the ledger vouches for.
-	#[must_use]
-	pub fn newest_deletion_unix_ms(&self) -> Option<i64> {
+	/// The records, or the refusal every write that depends on the ledger
+	/// meets when it vouches for nothing.
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Integrity`] naming what was found.
+	pub(crate) fn trusted(self) -> Result<Vec<DeletionRecord>, StoreError> {
 		match self {
-			Self::Verified(records) => {
-				records.iter().map(|record| record.deleted_at_unix_ms).max()
-			}
-			Self::Corrupt(_) => None,
+			Self::Verified(records) => Ok(records),
+			Self::Corrupt(detail) => Err(untrusted(&detail)),
 		}
 	}
 }
 
-/// One link of the chain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Link([u8; 32]);
-
-impl fmt::Display for Link {
-	fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-		for byte in self.0 {
-			write!(formatter, "{byte:02x}")?;
-		}
-		Ok(())
-	}
-}
-
-impl Link {
-	fn parse(text: &str) -> Option<Self> {
-		if text.len() != 64 {
-			return None;
-		}
-		let mut bytes = [0_u8; 32];
-		for (byte, pair) in bytes.iter_mut().zip(text.as_bytes().chunks(2)) {
-			*byte =
-				u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
-		}
-		Some(Self(bytes))
-	}
-
-	/// The link the first record follows. It binds the chain to its Plane.
-	fn genesis(plane_id: Uuid) -> Self {
-		let mut hasher = Sha256::new();
-		hasher.update(GENESIS_DOMAIN);
-		hasher.update(plane_id.as_bytes());
-		Self(hasher.finalize().into())
-	}
-
-	/// The link that follows `previous` for `record`.
-	fn after(previous: Self, record: &DeletionRecord) -> Self {
-		let mut hasher = Sha256::new();
-		hasher.update(RECORD_DOMAIN);
-		hasher.update(previous.0);
-		hasher.update(record.sequence.to_be_bytes());
-		hasher.update(record.deleted_at_unix_ms.to_be_bytes());
-		let kind = record.kind.as_str().as_bytes();
-		hasher.update(
-			u64::try_from(kind.len()).unwrap_or(u64::MAX).to_be_bytes(),
-		);
-		hasher.update(kind);
-		hasher.update(record.identity.as_bytes());
-		Self(hasher.finalize().into())
-	}
-}
-
-/// What the head vouches for.
-struct Confirmed {
+/// The head's view of the ledger: what it vouches for.
+struct Vouched {
 	/// The records the head reaches, with their links.
 	records: Vec<(DeletionRecord, Link)>,
-	/// Where the confirmed part of the ledger ends in the file, or `None`
-	/// when there is no file yet.
+	/// Where the vouched-for part of the ledger ends in the file, or
+	/// `None` when there is no file yet.
 	end: Option<u64>,
-}
-
-/// The ledger as read from disk, before the head has been consulted.
-struct Loaded {
-	/// Every well-formed record in file order, with the link it folds to.
-	records: Vec<(DeletionRecord, Link)>,
-	/// Where each record's line ends, so an unconfirmed tail can be cut.
-	ends: Vec<u64>,
-	/// Where the header ends.
-	header_end: u64,
-}
-
-/// Where the Recovery evidence of the store at `database` lives.
-#[must_use]
-pub(crate) fn recovery_dir(database: &Path) -> PathBuf {
-	database.parent().map_or_else(
-		|| PathBuf::from(DIRECTORY),
-		|parent| parent.join(DIRECTORY),
-	)
-}
-
-fn evidence_path(database: &Path, suffix: &str) -> PathBuf {
-	let mut name = database.file_name().unwrap_or_default().to_owned();
-	name.push(suffix);
-	recovery_dir(database).join(name)
 }
 
 /// Reads and verifies the ledger of the store at `database`.
 ///
-/// `plane_id` is the Plane the ledger must belong to. A damaged store
-/// whose Plane row cannot be read has a nil identity, and the ledger's own
-/// Plane line is then taken as read.
+/// `plane_id` is the Plane the ledger must belong to, or nil when the
+/// store is too damaged to say; see [`check_plane`]. `applied` is how
+/// many records the store says it has applied: a ledger that vouches for
+/// fewer is evidence gone missing, files and all.
 ///
 /// # Errors
 ///
@@ -208,10 +109,14 @@ fn evidence_path(database: &Path, suffix: &str) -> PathBuf {
 pub(crate) fn read(
 	database: &Path,
 	plane_id: Uuid,
+	applied: u64,
 ) -> Result<DeletionLedger, StoreError> {
-	match verified(database, plane_id) {
-		Ok(confirmed) => Ok(DeletionLedger::Verified(
-			confirmed
+	match vouched(database, plane_id).and_then(|vouched| {
+		behind_store(vouched.records.len(), applied)?;
+		Ok(vouched)
+	}) {
+		Ok(vouched) => Ok(DeletionLedger::Verified(
+			vouched
 				.records
 				.into_iter()
 				.map(|(record, _)| record)
@@ -224,7 +129,23 @@ pub(crate) fn read(
 	}
 }
 
-/// Appends `deletions` to the ledger durably and advances its head.
+/// Whether a ledger that vouches for `vouched` records is behind a store
+/// that has applied `applied` of them, which no crash ordering produces.
+fn behind_store(vouched: usize, applied: u64) -> Result<(), StoreError> {
+	let vouched = u64::try_from(vouched).unwrap_or(u64::MAX);
+	if vouched < applied {
+		return Err(StoreError::Integrity(format!(
+			"the store has applied {applied} deletions, but the ledger \
+			 vouches for {vouched}"
+		)));
+	}
+	Ok(())
+}
+
+/// Appends `deletions` to the ledger durably, advances its head, and
+/// returns the sequence the head now names, which the store records as
+/// applied in the commit that follows. `applied` is what the store has
+/// recorded so far; see [`read`].
 ///
 /// # Errors
 ///
@@ -235,284 +156,127 @@ pub(crate) fn read(
 pub(crate) fn append(
 	database: &Path,
 	plane_id: Uuid,
+	applied: u64,
 	deletions: &[PendingDeletion],
-) -> Result<(), StoreError> {
-	let Confirmed { records, end } =
-		verified(database, plane_id).map_err(|error| match error {
-			StoreError::Integrity(detail) => StoreError::Integrity(format!(
-				"the Deletion ledger cannot be trusted: {detail}"
-			)),
+) -> Result<u64, StoreError> {
+	let Vouched { records, end } = vouched(database, plane_id)
+		.and_then(|vouched| {
+			behind_store(vouched.records.len(), applied)?;
+			Ok(vouched)
+		})
+		.map_err(|error| match error {
+			StoreError::Integrity(detail) => untrusted(&detail),
 			other => other,
 		})?;
-	let path = evidence_path(database, LEDGER_SUFFIX);
-	let directory = recovery_dir(database);
-	// ASVS 16.3.1: the evidence is owner-only, like everything under ~/.jet.
-	fs::DirBuilder::new()
-		.recursive(true)
-		.mode(0o700)
-		.create(&directory)
-		.map_err(|error| unavailable(&directory, &error))?;
-	let mut file = fs::OpenOptions::new()
-		.write(true)
-		.create(true)
-		.truncate(false)
-		.mode(0o600)
-		.open(&path)
-		.map_err(|error| unavailable(&path, &error))?;
-	let (mut sequence, mut link) = records
-		.last()
-		.map_or((0, Link::genesis(plane_id)), |(record, link)| {
-			(record.sequence, *link)
-		});
+	let mut head = records.last().map_or(
+		Head {
+			sequence: 0,
+			link: Link::genesis(plane_id),
+		},
+		|(record, link)| Head {
+			sequence: record.sequence,
+			link: *link,
+		},
+	);
 	let mut body = String::new();
-	match end {
-		// The file is new: it starts with its header.
-		None => body.push_str(&format!("{LEDGER_FORMAT}\nplane {plane_id}\n")),
-		// A line past the head is a deletion no store commit followed;
-		// the ledger vouches for nothing past the head, so it goes.
-		Some(end) => file
-			.set_len(end)
-			.map_err(|error| unavailable(&path, &error))?,
-	}
 	for deletion in deletions {
-		sequence += 1;
 		let record = DeletionRecord {
-			sequence,
+			sequence: head.sequence + 1,
 			deleted_at_unix_ms: deletion.deleted_at_unix_ms,
 			kind: deletion.kind,
 			identity: deletion.identity,
 		};
-		link = Link::after(link, &record);
+		head = Head {
+			sequence: record.sequence,
+			link: Link::after(head.link, &record),
+		};
 		body.push_str(&format!(
-			"{sequence} {} {} {} {link}\n",
+			"{} {} {} {} {}\n",
+			record.sequence,
 			record.deleted_at_unix_ms,
 			record.kind.as_str(),
-			record.identity
+			record.identity,
+			head.link
 		));
 	}
-	file.seek(SeekFrom::End(0))
-		.and_then(|_| file.write_all(body.as_bytes()))
-		.and_then(|()| file.sync_all())
-		.map_err(|error| unavailable(&path, &error))?;
-	drop(file);
-	write_head(database, plane_id, sequence, link)
+	files::write_lines(database, plane_id, end, &body)?;
+	files::write_head(database, plane_id, head)?;
+	Ok(head.sequence)
 }
 
 /// The records the head vouches for and where they end in the file.
-fn verified(database: &Path, plane_id: Uuid) -> Result<Confirmed, StoreError> {
-	let head = read_head(database, plane_id)?;
-	let loaded = load(database, plane_id)?;
-	match (head, loaded) {
-		(None, None) => Ok(Confirmed {
+fn vouched(database: &Path, plane_id: Uuid) -> Result<Vouched, StoreError> {
+	let head = files::read_head(database, plane_id)?;
+	let file = files::read_ledger_file(database, plane_id)?;
+	match (head, file) {
+		(None, None) => Ok(Vouched {
 			records: vec![],
 			end: None,
 		}),
-		(Some((sequence, _)), None) => Err(StoreError::Integrity(format!(
-			"its head names deletion {sequence}, but the ledger is missing"
+		(Some(head), None) => Err(StoreError::Integrity(format!(
+			"its head names deletion {}, but the ledger is missing",
+			head.sequence
 		))),
 		// A single line past a missing head is the first deletion, written
 		// just before the crash that kept its head from following.
-		(None, Some(loaded)) => match loaded.records.len() {
-			0 | 1 => Ok(Confirmed {
+		(None, Some(file)) => match file.records.len() {
+			0 | 1 => Ok(Vouched {
 				records: vec![],
-				end: Some(loaded.header_end),
+				end: Some(file.header_end),
 			}),
 			count => Err(StoreError::Integrity(format!(
 				"it holds {count} deletions, but its head is missing"
 			))),
 		},
-		(Some((sequence, link)), Some(loaded)) => {
-			let confirmed = usize::try_from(sequence).unwrap_or(usize::MAX);
-			let count = loaded.records.len();
-			if count < confirmed {
+		(Some(head), Some(file)) => {
+			let sequence = head.sequence;
+			let vouched = usize::try_from(sequence).unwrap_or(usize::MAX);
+			let count = file.records.len();
+			if count < vouched {
 				return Err(StoreError::Integrity(format!(
 					"its head names deletion {sequence}, but the ledger ends \
 					 at {count}"
 				)));
 			}
-			if count > confirmed.saturating_add(1) {
+			if count > vouched.saturating_add(1) {
 				return Err(StoreError::Integrity(format!(
 					"its head names deletion {sequence}, but the ledger goes \
 					 on to {count}"
 				)));
 			}
-			let Some((_, newest)) = loaded.records.get(confirmed - 1) else {
-				return Err(StoreError::Integrity(
-					"its head names deletion 0".into(),
-				));
-			};
-			if *newest != link {
+			// The head never names sequence zero; `read_head` refuses it.
+			let newest = vouched.saturating_sub(1);
+			if file.records[newest].1 != head.link {
 				return Err(StoreError::Integrity(format!(
 					"deletion {sequence} is not the one its head names"
 				)));
 			}
-			let mut records = loaded.records;
-			records.truncate(confirmed);
-			Ok(Confirmed {
-				end: Some(loaded.ends[confirmed - 1]),
+			let mut records = file.records;
+			records.truncate(vouched);
+			Ok(Vouched {
+				end: Some(file.ends[newest]),
 				records,
 			})
 		}
 	}
 }
 
-/// Reads the ledger file and folds its chain, or `None` when there is
-/// none. Every line must fold to the link it carries; the head decides
-/// how many of them count.
-fn load(database: &Path, plane_id: Uuid) -> Result<Option<Loaded>, StoreError> {
-	let path = evidence_path(database, LEDGER_SUFFIX);
-	let text = match fs::read_to_string(&path) {
-		Ok(text) => text,
-		Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-			return Ok(None);
-		}
-		Err(error) => return Err(unavailable(&path, &error)),
-	};
-	let mut lines = text.split_inclusive('\n');
-	let mut offset = 0_u64;
-	let mut take = || {
-		lines.next().map(|line| {
-			offset += u64::try_from(line.len()).unwrap_or(u64::MAX);
-			(line.trim_end_matches('\n'), offset)
-		})
-	};
-	let (format, _) = take().unwrap_or_default();
-	if format != LEDGER_FORMAT {
-		return Err(StoreError::Integrity(format!(
-			"it is {format:?}, not {LEDGER_FORMAT:?}"
-		)));
-	}
-	let (plane_line, header_end) = take().unwrap_or_default();
-	check_plane(plane_line, plane_id)?;
-	let mut link = Link::genesis(plane_id);
-	let mut records = vec![];
-	let mut ends = vec![];
-	while let Some((line, end)) = take() {
-		let sequence = u64::try_from(records.len()).unwrap_or(u64::MAX) + 1;
-		let Some((record, recorded)) = parse_record(line) else {
-			return Err(StoreError::Integrity(format!(
-				"deletion {sequence} is malformed"
-			)));
-		};
-		link = Link::after(link, &record);
-		if record.sequence != sequence || recorded != link {
-			return Err(StoreError::Integrity(format!(
-				"deletion {sequence} was altered"
-			)));
-		}
-		records.push((record, link));
-		ends.push(end);
-	}
-	Ok(Some(Loaded {
-		records,
-		ends,
-		header_end,
-	}))
-}
-
-fn parse_record(line: &str) -> Option<(DeletionRecord, Link)> {
-	let mut fields = line.split(' ');
-	let record = DeletionRecord {
-		sequence: fields.next()?.parse().ok()?,
-		deleted_at_unix_ms: fields.next()?.parse().ok()?,
-		kind: DeletedIdentityKind::parse(fields.next()?)?,
-		identity: Uuid::parse_str(fields.next()?).ok()?,
-	};
-	let link = Link::parse(fields.next()?)?;
-	fields.next().is_none().then_some((record, link))
-}
-
-fn read_head(
-	database: &Path,
-	plane_id: Uuid,
-) -> Result<Option<(u64, Link)>, StoreError> {
-	let path = evidence_path(database, HEAD_SUFFIX);
-	let text = match fs::read_to_string(&path) {
-		Ok(text) => text,
-		Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-			return Ok(None);
-		}
-		Err(error) => return Err(unavailable(&path, &error)),
-	};
-	let mut lines = text.lines();
-	let format = lines.next().unwrap_or_default();
-	if format != HEAD_FORMAT {
-		return Err(StoreError::Integrity(format!(
-			"its head is {format:?}, not {HEAD_FORMAT:?}"
-		)));
-	}
-	check_plane(lines.next().unwrap_or_default(), plane_id)?;
-	let malformed = || StoreError::Integrity("its head is malformed".into());
-	let sequence = lines
-		.next()
-		.and_then(|line| line.strip_prefix("sequence "))
-		.and_then(|text| text.parse::<u64>().ok())
-		.ok_or_else(malformed)?;
-	let link = lines
-		.next()
-		.and_then(|line| line.strip_prefix("link "))
-		.and_then(Link::parse)
-		.ok_or_else(malformed)?;
-	if sequence == 0 {
-		return Err(malformed());
-	}
-	Ok(Some((sequence, link)))
-}
-
-fn write_head(
-	database: &Path,
-	plane_id: Uuid,
-	sequence: u64,
-	link: Link,
-) -> Result<(), StoreError> {
-	let path = evidence_path(database, HEAD_SUFFIX);
-	let pending = evidence_path(database, PENDING_HEAD_SUFFIX);
-	let body = format!(
-		"{HEAD_FORMAT}\nplane {plane_id}\nsequence {sequence}\nlink {link}\n"
-	);
-	let mut file = fs::OpenOptions::new()
-		.write(true)
-		.create(true)
-		.truncate(true)
-		.mode(0o600)
-		.open(&pending)
-		.map_err(|error| unavailable(&pending, &error))?;
-	file.write_all(body.as_bytes())
-		.and_then(|()| file.sync_all())
-		.map_err(|error| unavailable(&pending, &error))?;
-	drop(file);
-	fs::rename(&pending, &path).map_err(|error| unavailable(&path, &error))?;
-	// The rename itself has to reach the disk, or a power loss leaves the
-	// previous head in place while the store has already committed past it.
-	let directory = recovery_dir(database);
-	File::open(&directory)
-		.and_then(|directory| directory.sync_all())
-		.map_err(|error| unavailable(&directory, &error))
-}
-
-fn check_plane(line: &str, plane_id: Uuid) -> Result<(), StoreError> {
-	let Some(recorded) = line.strip_prefix("plane ") else {
-		return Err(StoreError::Integrity("it does not name its Plane".into()));
-	};
-	if plane_id != Uuid::nil() && recorded != plane_id.to_string() {
-		return Err(StoreError::Integrity(format!(
-			"it belongs to Plane {recorded}, not {plane_id}"
-		)));
-	}
-	Ok(())
-}
-
-fn unavailable(path: &Path, error: &std::io::Error) -> StoreError {
-	StoreError::Unavailable(format!(
-		"cannot use the Deletion ledger {}: {error}",
-		path.display()
+/// The refusal a ledger that vouches for nothing gives every write that
+/// depends on it.
+fn untrusted(detail: &str) -> StoreError {
+	StoreError::Integrity(format!(
+		"the Deletion ledger cannot be trusted: {detail}"
 	))
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::deletion::files::{
+		HEAD_SUFFIX, LEDGER_SUFFIX, evidence_path, recovery_dir,
+	};
 	use pretty_assertions::assert_eq;
+	use std::fs;
 
 	const NOW_UNIX_MS: i64 = 1_700_000_000_000;
 
@@ -534,7 +298,8 @@ mod tests {
 	}
 
 	/// Appends chain across calls, the files are owner-only, and reading
-	/// back gives every record in order.
+	/// back gives every record in order, whether or not the reader knows
+	/// its Plane.
 	#[test]
 	fn appended_deletions_are_read_back_in_order() {
 		use std::os::unix::fs::PermissionsExt as _;
@@ -546,8 +311,8 @@ mod tests {
 			deletion(DeletedIdentityKind::AccountBinding, NOW_UNIX_MS + 1);
 		let third = deletion(DeletedIdentityKind::Schedule, NOW_UNIX_MS + 2);
 
-		append(&database, plane_id, &[first, second]).unwrap();
-		append(&database, plane_id, &[third]).unwrap();
+		append(&database, plane_id, 0, &[first, second]).unwrap();
+		append(&database, plane_id, 0, &[third]).unwrap();
 
 		let mode = |suffix| {
 			fs::metadata(evidence_path(&database, suffix))
@@ -557,7 +322,10 @@ mod tests {
 		};
 		assert_eq!(
 			(
-				read(&database, plane_id).unwrap(),
+				read(&database, plane_id, 0).unwrap(),
+				// A store that cannot say which Plane it is reads the same
+				// ledger.
+				read(&database, Uuid::nil(), 0).unwrap(),
 				mode(LEDGER_SUFFIX),
 				mode(HEAD_SUFFIX),
 				fs::metadata(recovery_dir(&database))
@@ -566,6 +334,11 @@ mod tests {
 					.mode() & 0o777,
 			),
 			(
+				DeletionLedger::Verified(vec![
+					record(1, first),
+					record(2, second),
+					record(3, third),
+				]),
 				DeletionLedger::Verified(vec![
 					record(1, first),
 					record(2, second),
@@ -586,10 +359,11 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let database = dir.path().join("plane.sqlite3");
 		let plane_id = Uuid::now_v7();
-		let empty = read(&database, plane_id).unwrap();
+		let empty = read(&database, plane_id, 0).unwrap();
 		append(
 			&database,
 			plane_id,
+			0,
 			&[
 				deletion(DeletedIdentityKind::PairedClient, NOW_UNIX_MS),
 				deletion(DeletedIdentityKind::Schedule, NOW_UNIX_MS + 1),
@@ -599,24 +373,24 @@ mod tests {
 		let ledger = evidence_path(&database, LEDGER_SUFFIX);
 		let original = fs::read_to_string(&ledger).unwrap();
 		let other = Uuid::now_v7();
-		let other_plane = read(&database, other).unwrap();
+		let other_plane = read(&database, other, 0).unwrap();
 
 		let mut altered: Vec<String> =
 			original.lines().map(ToOwned::to_owned).collect();
 		altered[2] = altered[2].replacen("paired_client", "schedule", 1);
 		fs::write(&ledger, altered.join("\n") + "\n").unwrap();
-		let edited = read(&database, plane_id).unwrap();
+		let edited = read(&database, plane_id, 0).unwrap();
 
 		let shortened: Vec<&str> = original.lines().take(3).collect();
 		fs::write(&ledger, shortened.join("\n") + "\n").unwrap();
-		let cut = read(&database, plane_id).unwrap();
+		let cut = read(&database, plane_id, 0).unwrap();
 
 		fs::remove_file(&ledger).unwrap();
-		let headless_ledger = read(&database, plane_id).unwrap();
+		let headless_ledger = read(&database, plane_id, 0).unwrap();
 
 		fs::write(&ledger, &original).unwrap();
 		fs::remove_file(evidence_path(&database, HEAD_SUFFIX)).unwrap();
-		let ledger_without_head = read(&database, plane_id).unwrap();
+		let ledger_without_head = read(&database, plane_id, 0).unwrap();
 
 		assert_eq!(
 			(
@@ -657,19 +431,19 @@ mod tests {
 		let database = dir.path().join("plane.sqlite3");
 		let plane_id = Uuid::now_v7();
 		let first = deletion(DeletedIdentityKind::PairedClient, NOW_UNIX_MS);
-		append(&database, plane_id, &[first]).unwrap();
+		append(&database, plane_id, 0, &[first]).unwrap();
 		let head = fs::read(evidence_path(&database, HEAD_SUFFIX)).unwrap();
 		let lost = deletion(DeletedIdentityKind::Schedule, NOW_UNIX_MS + 1);
-		append(&database, plane_id, &[lost]).unwrap();
+		append(&database, plane_id, 0, &[lost]).unwrap();
 		fs::write(evidence_path(&database, HEAD_SUFFIX), head).unwrap();
-		let unconfirmed = read(&database, plane_id).unwrap();
+		let unconfirmed = read(&database, plane_id, 0).unwrap();
 
 		let next =
 			deletion(DeletedIdentityKind::AccountBinding, NOW_UNIX_MS + 2);
-		append(&database, plane_id, &[next]).unwrap();
+		append(&database, plane_id, 0, &[next]).unwrap();
 
 		assert_eq!(
-			(unconfirmed, read(&database, plane_id).unwrap()),
+			(unconfirmed, read(&database, plane_id, 0).unwrap()),
 			(
 				DeletionLedger::Verified(vec![record(1, first)]),
 				DeletionLedger::Verified(vec![

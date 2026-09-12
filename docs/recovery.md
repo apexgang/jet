@@ -177,32 +177,41 @@ identity. Nothing of what was deleted is kept. The ledger is synced, and
 then `plane.sqlite3.deletions.head`, which names the newest sequence and
 link, is written to a pending file, renamed over the old head, and the
 directory synced, the same way the Security audit head is published.
-Only then does the store commit. A crash between the two leaves a ledger
-line for a row the store still holds, and the next open removes that row;
-a crash between the ledger and its head leaves at most one line past the
-head, which the next append discards. The order rules out the one gap
-that matters, a deletion the store committed and the ledger never saw.
+Only then does the store commit, and the same commit records in the
+`plane` row how far the ledger has been applied, `deletions_applied`.
+That count travels inside every snapshot, so a copy says which
+deletions it predates without any clock being compared. A crash between
+the ledger and the commit leaves a ledger line for a row the store still
+holds, and the next open removes that row; a crash between the ledger
+and its head leaves at most one line past the head, which the next
+append discards. The order rules out the one gap that matters, a
+deletion the store committed and the ledger never saw.
 
 Every open of an authoritative store, and therefore every restoration,
 reapplies the ledger: each identity it names is deleted again if the
-store still holds it. Only the identity's own row is removed; the old
-journal and queues come back with the snapshot regardless, and the
-workers that read them find the identity gone. The ledger is never
-rolled back and never shortened; its lines are small and their number is
-the number of deletions the Plane has ever made.
+store still holds it, and the count catches up. Only the identity's own
+row is removed. The old journal and turn queues come back with the
+snapshot regardless: a Run a cancelled schedule had already queued may
+run once more from a restored snapshot, because the queue is
+Conversation state, which #53 owns. The ledger is never rolled back and
+never shortened; its lines are small and their number is the number of
+deletions the Plane has ever made.
 
 A ledger that does not fold through its head vouches for nothing: a
 missing ledger under a head, a missing head over more than one line, an
-edited line, a shortened file, or a ledger of another Plane. The status
-then reports `"deletion_ledger": {"state": "corrupt"}` instead of
+edited line, a shortened file, a ledger of another Plane, or a ledger
+with fewer records than the store says it has applied, which is what a
+`recovery/` directory lost altogether looks like. The status then
+reports `"deletion_ledger": {"state": "corrupt"}` instead of
 `{"state": "verified", "deletions": 3}`, no new deletion is accepted,
 because it could not be chained, and restoring a snapshot is refused
 with `recovery.deletion_ledger_corrupt` in the `unavailable` category,
 because the snapshot may predate a deletion nothing else remembers. The
-Plane stays in Recovery mode with its damaged store untouched. Like the
-audit head, the ledger is no defence against code running as the same
-operating-system user; what it makes visible is a store put back to
-before a deletion.
+Plane stays in Recovery mode with its damaged store untouched. A store
+too damaged to read its own Plane row reads the ledger by the Plane the
+ledger names. Like the audit head, the ledger is no defence against code
+running as the same operating-system user; what it makes visible is a
+store put back to before a deletion.
 
 ## Recovery purge
 
@@ -210,9 +219,11 @@ Routine retention keeps a deleted identity in bounded snapshots until
 their disclosed expiry. The `purge_recovery_snapshots` Command ends that
 early: on a serving Plane whose audit is trusted, it takes a verified
 `maintenance` snapshot of the store as it is now, after every recorded
-deletion, and removes every snapshot taken at or before the newest
-deletion in the ledger, whatever its reason, rollback points included.
-The reply names both:
+deletion, records the purge in the Security audit, and then removes
+every snapshot whose own `deletions_applied` is below what the ledger
+vouches for, whatever its reason or stamp, rollback points included. A
+snapshot from a release before this one carries no count and is treated
+as predating every deletion. The reply names both:
 
 ```json
 {"type": "recovery_snapshots_purged",
@@ -227,10 +238,13 @@ client reaches it, and it is recorded in the Security audit as
 Security-degraded Plane refuses it until an owner begins a new epoch.
 Like restoration, it runs beside the receipt pipeline, because copying
 the store needs the one connection a receipt transaction would hold, so
-a retry takes another snapshot and removes nothing. A Plane with no
-recorded deletions gets a fresh snapshot and an empty `removed`. The
-damaged copies a restoration moved aside under `plane.sqlite3.damaged-`
-are evidence, not snapshots, and the purge does not touch them.
+a retry takes another snapshot and removes nothing. The audit record
+precedes the removal: a crash between the two leaves the record and the
+files for the next purge, where the other order would destroy the last
+copies with no record of who asked. A Plane with no recorded deletions
+gets a fresh snapshot and an empty `removed`. The damaged copies a
+restoration moved aside under `plane.sqlite3.damaged-` are evidence,
+not snapshots, and the purge does not touch them.
 
 ## Recovery mode is not the other degradations
 
