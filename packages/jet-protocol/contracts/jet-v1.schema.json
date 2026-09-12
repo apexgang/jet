@@ -918,6 +918,221 @@
         "finality"
       ]
     },
+    "AutodeleteCandidate": {
+      "description": "A Conversation the rule's interpretation selects today, and what would\nkeep the sweep from staging it.",
+      "type": "object",
+      "properties": {
+        "conversation_id": {
+          "description": "The idle Conversation.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "last_active_at_unix_ms": {
+          "description": "When it was created or its latest Run ended, whichever is later.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "protections": {
+          "description": "What protects it, in a fixed order; empty means the sweep would\nstage it.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RetentionProtection"
+          }
+        }
+      },
+      "required": [
+        "conversation_id",
+        "last_active_at_unix_ms",
+        "protections"
+      ]
+    },
+    "AutodeleteRule": {
+      "description": "One rule as the Plane holds it.",
+      "type": "object",
+      "properties": {
+        "created_at_unix_ms": {
+          "description": "When it was first compiled, in signed Unix milliseconds.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "prompt": {
+          "description": "Its natural-language source.",
+          "type": "string"
+        },
+        "rule_id": {
+          "description": "The rule, chosen by the client that compiled it.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "description": "What its matches are staged for.",
+          "$ref": "#/$defs/AutodeleteScope"
+        },
+        "state": {
+          "description": "Where it stands.",
+          "$ref": "#/$defs/AutodeleteRuleState"
+        },
+        "updated_at_unix_ms": {
+          "description": "When it last changed.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "utility_job_id": {
+          "description": "The Utility job that compiled the source; its attribution is\nreadable through the `utility` Query.",
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "rule_id",
+        "prompt",
+        "utility_job_id",
+        "state",
+        "scope",
+        "created_at_unix_ms",
+        "updated_at_unix_ms"
+      ]
+    },
+    "AutodeleteRulePreview": {
+      "description": "One rule with the matches its interpretation selects.",
+      "type": "object",
+      "properties": {
+        "candidates": {
+          "description": "Its candidates, bounded to 32, in identity order; empty while the\nrule is compiling or refused.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AutodeleteCandidate"
+          }
+        },
+        "rule": {
+          "description": "The rule.",
+          "$ref": "#/$defs/AutodeleteRule"
+        }
+      },
+      "required": [
+        "rule",
+        "candidates"
+      ]
+    },
+    "AutodeleteRuleState": {
+      "description": "Where a rule stands between compilation and execution.",
+      "oneOf": [
+        {
+          "description": "The Utility job has not answered yet.",
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "compiling"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        },
+        {
+          "description": "Compilation produced no usable draft; the rule authorizes nothing\nuntil its source or interpretation is edited.",
+          "type": "object",
+          "properties": {
+            "reason": {
+              "description": "The stable, content-free reason the Utility job recorded.",
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ]
+        },
+        {
+          "description": "An interpretation awaits approval. Nothing executes it.",
+          "type": "object",
+          "properties": {
+            "inactive_days": {
+              "description": "Whole days a Conversation must have been idle to match.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "state": {
+              "type": "string",
+              "const": "draft"
+            }
+          },
+          "required": [
+            "state",
+            "inactive_days"
+          ]
+        },
+        {
+          "description": "The owner approved exactly this interpretation; the sweep evaluates\nit.",
+          "type": "object",
+          "properties": {
+            "approved_at_unix_ms": {
+              "description": "When it was approved, in signed Unix milliseconds.",
+              "type": "integer",
+              "format": "int64"
+            },
+            "inactive_days": {
+              "description": "Whole days a Conversation must have been idle to match.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "state": {
+              "type": "string",
+              "const": "approved"
+            }
+          },
+          "required": [
+            "state",
+            "inactive_days",
+            "approved_at_unix_ms"
+          ]
+        }
+      ]
+    },
+    "AutodeleteRules": {
+      "description": "Every rule on the Plane, oldest first.",
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "description": "Plane Event high-water cursor in this read transaction.",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "rules": {
+          "description": "The rules, bounded to 64.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AutodeleteRulePreview"
+          }
+        }
+      },
+      "required": [
+        "cursor",
+        "rules"
+      ]
+    },
+    "AutodeleteScope": {
+      "description": "What an approved rule may do with a match.",
+      "oneOf": [
+        {
+          "description": "Forget: Jet-owned state goes, native history stays.",
+          "type": "string",
+          "const": "forget"
+        },
+        {
+          "description": "Also request native deletion when the grace period ends, where the\nHarness supports that. Needs its own authorization.",
+          "type": "string",
+          "const": "everywhere"
+        }
+      ]
+    },
     "BaseSelection": {
       "description": "The base a Workspace starts from, as the user selects it. The Plane\nresolves it to one commit when the Workspace is created and never\nagain.",
       "oneOf": [
@@ -2665,6 +2880,120 @@
           ]
         },
         {
+          "description": "Compile a natural-language Autodelete prompt into a draft rule, or\nrecompile an existing rule's source, which returns it to a draft.\nThe draft executes nothing until approved.",
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "description": "The source, 1 to 4096 UTF-8 bytes.",
+              "type": "string"
+            },
+            "rule_id": {
+              "description": "The rule, chosen by the client.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "compile_autodelete_rule"
+            }
+          },
+          "required": [
+            "type",
+            "rule_id",
+            "prompt"
+          ]
+        },
+        {
+          "description": "Set a rule's interpretation by hand, keeping its source. The rule\nbecomes a draft of exactly this inactivity.",
+          "type": "object",
+          "properties": {
+            "inactive_days": {
+              "description": "Whole days of inactivity, 1 to 36500.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "rule_id": {
+              "description": "The rule to edit.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "set_autodelete_rule_inactive_days"
+            }
+          },
+          "required": [
+            "type",
+            "rule_id",
+            "inactive_days"
+          ]
+        },
+        {
+          "description": "Approve the interpretation a draft rule shows, so the sweep\nevaluates it. A draft that reads differently by then is refused\nwith `autodelete.interpretation_changed`.",
+          "type": "object",
+          "properties": {
+            "inactive_days": {
+              "description": "The inactivity the owner was shown, in whole days.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "rule_id": {
+              "description": "The rule to approve.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "approve_autodelete_rule"
+            }
+          },
+          "required": [
+            "type",
+            "rule_id",
+            "inactive_days"
+          ]
+        },
+        {
+          "description": "Authorize an approved rule to request native deletion of its\nmatches too, when their grace period ends.",
+          "type": "object",
+          "properties": {
+            "rule_id": {
+              "description": "The approved rule.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "authorize_autodelete_everywhere"
+            }
+          },
+          "required": [
+            "type",
+            "rule_id"
+          ]
+        },
+        {
+          "description": "Remove a rule. What it already staged stays in Jet Trash.",
+          "type": "object",
+          "properties": {
+            "rule_id": {
+              "description": "The rule to remove.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "delete_autodelete_rule"
+            }
+          },
+          "required": [
+            "type",
+            "rule_id"
+          ]
+        },
+        {
           "description": "Open or close the Plane's Pairing gate, which decides whether a new\nGUI client may begin Pairing at all. It does not alter the clients\nthat are already Paired.",
           "type": "object",
           "properties": {
@@ -3623,6 +3952,43 @@
           "required": [
             "type",
             "conversation_id"
+          ]
+        },
+        {
+          "description": "The Autodelete rule as it now reads.",
+          "type": "object",
+          "properties": {
+            "rule": {
+              "description": "The rule, without its candidates.",
+              "$ref": "#/$defs/AutodeleteRule"
+            },
+            "type": {
+              "type": "string",
+              "const": "autodelete_rule_recorded"
+            }
+          },
+          "required": [
+            "type",
+            "rule"
+          ]
+        },
+        {
+          "description": "The Autodelete rule is gone.",
+          "type": "object",
+          "properties": {
+            "rule_id": {
+              "description": "The rule removed.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "autodelete_rule_deleted"
+            }
+          },
+          "required": [
+            "type",
+            "rule_id"
           ]
         },
         {
@@ -7414,6 +7780,19 @@
           ]
         },
         {
+          "description": "Every Autodelete rule with the matches it selects today.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "autodelete_rules"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
           "description": "What protects one Conversation from forgetting and what its\ndeletion would leave behind.",
           "type": "object",
           "properties": {
@@ -8091,6 +8470,20 @@
             }
           },
           "$ref": "#/$defs/ConversationTrash",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Autodelete rules with their candidate matches.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "autodelete_rules"
+            }
+          },
+          "$ref": "#/$defs/AutodeleteRules",
           "required": [
             "type"
           ]
@@ -11128,6 +11521,16 @@
           "description": "Its owner asked for it to be deleted everywhere, native history\nincluded where the Harness supports that.",
           "type": "string",
           "const": "delete_everywhere"
+        },
+        {
+          "description": "An approved Autodelete rule matched it while nothing protected it.\nNeeds minor 40.",
+          "type": "string",
+          "const": "autodelete_rule"
+        },
+        {
+          "description": "An approved Autodelete rule separately authorized to delete\neverywhere matched it. Needs minor 40.",
+          "type": "string",
+          "const": "autodelete_everywhere"
         }
       ]
     },

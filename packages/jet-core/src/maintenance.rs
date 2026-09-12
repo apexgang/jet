@@ -27,6 +27,20 @@ impl Core {
 						due.saturating_sub(self.now_unix_ms()).max(1000) as u64,
 					)
 				});
+				// An approved Autodelete rule's next match is due when the
+				// first Conversation not yet idle long enough becomes so.
+				// Conversations already past the cutoff are the sweep's:
+				// one it declines to stage sets no deadline, so a protected
+				// match does not wake the Plane every second.
+				let autodelete =
+					crate::autodelete::next_deadline(tx, self.now_unix_ms())
+						.await?
+						.map(|due| {
+							Duration::from_millis(
+								due.saturating_sub(self.now_unix_ms()).max(1000)
+									as u64,
+							)
+						});
 				let recovery = if active {
 					Some(Duration::from_secs(1))
 				} else if pending {
@@ -35,7 +49,12 @@ impl Core {
 					None
 				};
 				Ok::<_, CoreError>(
-					schedule.into_iter().chain(recovery).chain(trash).min(),
+					schedule
+						.into_iter()
+						.chain(recovery)
+						.chain(trash)
+						.chain(autodelete)
+						.min(),
 				)
 			})
 			.await?;

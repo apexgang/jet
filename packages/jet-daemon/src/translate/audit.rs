@@ -20,15 +20,10 @@ pub(super) fn page(
 		AuditActor::CraftRevocation,
 	) || needs_newer_peer(wire::RETENTION_MINOR, AuditActor::Retention)
 	{
-		return Err(jet_core::CoreError {
-            category: jet_core::ErrorCategory::Incompatible,
-            code: "audit.actor_incompatible".into(),
-            retryable: false,
-            message: "this audit page includes decisions Jet made on its own; upgrade the client to read it".into(),
-            detail: None,
-            revision_conflict: None,
-            recovery_actions: vec![],
-        });
+		return Err(jet_core::CoreError::incompatible(
+			"audit.actor_incompatible",
+			"this audit page includes decisions Jet made on its own; upgrade the client to read it",
+		));
 	}
 	Ok(wire::SecurityAudit {
 		cursor: page.cursor.0,

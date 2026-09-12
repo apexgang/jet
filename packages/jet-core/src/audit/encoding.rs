@@ -5,7 +5,7 @@ use super::{
 	AuditSubject, AuditTarget,
 };
 use crate::{
-	ClientId, PlaneId, ProjectId, account::AccountBindingId,
+	AutodeleteRuleId, ClientId, PlaneId, ProjectId, account::AccountBindingId,
 	conversation::ConversationId, pairing::PairingOfferId,
 	setting::SettingScope, system_time,
 };
@@ -44,6 +44,13 @@ impl AuditDecision {
 			Self::ConversationDeleted => "conversation.deleted",
 			Self::TrashGraceChanged => "policy.trash_grace_changed",
 			Self::TrashGraceCleared => "policy.trash_grace_cleared",
+			Self::AutodeleteRuleCompiled => "autodelete.rule_compiled",
+			Self::AutodeleteRuleEdited => "autodelete.rule_edited",
+			Self::AutodeleteRuleApproved => "autodelete.rule_approved",
+			Self::AutodeleteEverywhereAuthorized => {
+				"autodelete.everywhere_authorized"
+			}
+			Self::AutodeleteRuleDeleted => "autodelete.rule_deleted",
 			Self::PairingGateOpened => "pairing.gate_opened",
 			Self::PairingGateClosed => "pairing.gate_closed",
 			Self::PairingOffered => "pairing.offered",
@@ -130,6 +137,14 @@ impl AuditDecision {
 			Self::ConversationForgotten => AuditRisk::Elevated,
 			Self::ConversationDeletionAuthorized
 			| Self::ConversationDeleted => AuditRisk::Destructive,
+			// Approving is what lets a rule stage Conversations on its own;
+			// authorizing native deletion reaches past what Jet can restore.
+			Self::AutodeleteRuleApproved => AuditRisk::Elevated,
+			Self::AutodeleteEverywhereAuthorized => AuditRisk::Destructive,
+			// A draft and a removed rule select nothing.
+			Self::AutodeleteRuleCompiled
+			| Self::AutodeleteRuleEdited
+			| Self::AutodeleteRuleDeleted => AuditRisk::Routine,
 			// Shortening the grace period brings deletions forward.
 			Self::TrashGraceChanged => AuditRisk::Elevated,
 			Self::ConversationRestored | Self::TrashGraceCleared => {
@@ -176,6 +191,7 @@ impl AuditSubject {
 			Self::AccountBinding(_) => "account_binding",
 			Self::PairingOffer(_) => "pairing_offer",
 			Self::PairedClient(_) => "paired_client",
+			Self::AutodeleteRule(_) => "autodelete_rule",
 		}
 	}
 
@@ -190,7 +206,8 @@ impl AuditSubject {
 			| Self::Conversation(ConversationId(id))
 			| Self::AccountBinding(AccountBindingId(id))
 			| Self::PairingOffer(PairingOfferId(id))
-			| Self::PairedClient(ClientId(id)) => Some(id.to_string()),
+			| Self::PairedClient(ClientId(id))
+			| Self::AutodeleteRule(AutodeleteRuleId(id)) => Some(id.to_string()),
 		}
 	}
 }

@@ -40,6 +40,15 @@ they cover optional fields an older reader ignores, rejected unknown message
 kinds, duplicate discriminators a dictionary would discard, non-canonical
 decimal strings, and hexadecimal of the wrong width or case (ADR-0094).
 
+## Autodelete negotiation
+
+Jet 1.40 adds `compile_autodelete_rule`, `set_autodelete_rule_inactive_days`,
+`approve_autodelete_rule`, `authorize_autodelete_everywhere`,
+`delete_autodelete_rule`, the `autodelete_rules` Query, and the Trash
+reasons `autodelete_rule` and `autodelete_everywhere`. Older peers cannot
+admit the Commands or the Query and are refused a Trash page that carries
+either reason. See [Autodelete rules](autodelete.md).
+
 ## Retention negotiation
 
 Jet 1.39 adds `forget_conversation`, `delete_conversation_everywhere`,

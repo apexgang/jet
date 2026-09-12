@@ -24,6 +24,12 @@ pub enum TrashReasonRecord {
 	/// Its owner asked for it to be deleted everywhere, native history
 	/// included where a Harness supports that.
 	Everywhere,
+	/// An approved Autodelete rule matched it while nothing protected it
+	/// (ADR-0015).
+	Autodelete,
+	/// An approved Autodelete rule separately authorized to delete
+	/// everywhere matched it.
+	AutodeleteEverywhere,
 }
 
 impl TrashReasonRecord {
@@ -34,16 +40,24 @@ impl TrashReasonRecord {
 			Self::Manual => "manual",
 			Self::Automatic => "automatic",
 			Self::Everywhere => "everywhere",
+			Self::Autodelete => "autodelete",
+			Self::AutodeleteEverywhere => "autodelete_everywhere",
 		}
 	}
 
 	fn parse(text: &str) -> Result<Self, StoreError> {
-		[Self::Manual, Self::Automatic, Self::Everywhere]
-			.into_iter()
-			.find(|reason| reason.as_str() == text)
-			.ok_or_else(|| {
-				StoreError::Integrity(format!("unknown Trash reason {text:?}"))
-			})
+		[
+			Self::Manual,
+			Self::Automatic,
+			Self::Everywhere,
+			Self::Autodelete,
+			Self::AutodeleteEverywhere,
+		]
+		.into_iter()
+		.find(|reason| reason.as_str() == text)
+		.ok_or_else(|| {
+			StoreError::Integrity(format!("unknown Trash reason {text:?}"))
+		})
 	}
 }
 

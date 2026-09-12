@@ -17,6 +17,7 @@ Conversation is restored first.
 | `forget_conversation` | an interactive or Paired client | a live Run or a queued turn (`retention.live_work`) | `manual_forget` |
 | `delete_conversation_everywhere` | an interactive or Paired client | a Run still launching (`retention.run_starting`) | `delete_everywhere` |
 | the retention sweep | the Plane, on the policy `forget_after_final_run` | any protection below | `automatic_forget` |
+| the Autodelete sweep | the Plane, on an approved [Autodelete rule](autodelete.md) | any protection below | `autodelete_rule`, or `autodelete_everywhere` |
 
 Forgetting removes what Jet owns about the Conversation and leaves the
 Harness's own history where it is. Deleting everywhere additionally stops

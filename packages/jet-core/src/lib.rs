@@ -48,11 +48,17 @@ mod maintenance;
 pub use energy::ChildWork;
 mod filesystem;
 pub use conversation::handoff::{HandoffProvenance, HandoffRequest};
+mod autodelete;
 mod pairing;
 mod project;
 mod promotion;
 mod query;
 mod remote;
+pub use autodelete::{
+	AutodeleteCandidate, AutodeleteMatch, AutodeleteRule, AutodeleteRuleId,
+	AutodeleteRulePreview, AutodeleteRuleState, AutodeleteRules,
+	AutodeleteScope, AutodeleteSweep,
+};
 mod retention;
 pub use retention::{
 	ConversationTrash, Protection, RetentionPreview, RetentionSweep,

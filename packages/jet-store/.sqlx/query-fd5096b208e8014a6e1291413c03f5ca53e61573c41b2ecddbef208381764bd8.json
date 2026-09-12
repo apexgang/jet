@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM autodelete_rules WHERE rule_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "fd5096b208e8014a6e1291413c03f5ca53e61573c41b2ecddbef208381764bd8"
+}

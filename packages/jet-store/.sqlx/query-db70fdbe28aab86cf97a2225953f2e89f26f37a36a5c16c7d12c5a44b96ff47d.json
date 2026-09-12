@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO autodelete_rules\n\t\t\t\t(rule_id, prompt, utility_job_id, inactive_days,\n\t\t\t\t approved_at_unix_ms, everywhere,\n\t\t\t\t created_at_unix_ms, updated_at_unix_ms)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)\n\t\t\t ON CONFLICT (rule_id) DO UPDATE SET\n\t\t\t\tprompt = excluded.prompt,\n\t\t\t\tutility_job_id = excluded.utility_job_id,\n\t\t\t\tinactive_days = excluded.inactive_days,\n\t\t\t\tapproved_at_unix_ms = excluded.approved_at_unix_ms,\n\t\t\t\teverywhere = excluded.everywhere,\n\t\t\t\tupdated_at_unix_ms = excluded.updated_at_unix_ms",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "db70fdbe28aab86cf97a2225953f2e89f26f37a36a5c16c7d12c5a44b96ff47d"
+}

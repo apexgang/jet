@@ -287,6 +287,11 @@ impl Core {
 			| Command::ForgetConversation { .. }
 			| Command::DeleteConversationEverywhere { .. }
 			| Command::RestoreConversation { .. }
+			| Command::CompileAutodeleteRule { .. }
+			| Command::SetAutodeleteRuleInactiveDays { .. }
+			| Command::ApproveAutodeleteRule { .. }
+			| Command::AuthorizeAutodeleteEverywhere { .. }
+			| Command::DeleteAutodeleteRule { .. }
 			| Command::SetPairingGate { .. }
 			| Command::OpenPairing { .. }
 			| Command::ClaimPairing { .. }

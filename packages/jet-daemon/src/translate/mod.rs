@@ -33,6 +33,7 @@ pub(crate) use query::{query, query_result};
 
 mod account;
 mod audit;
+mod autodelete;
 mod capability;
 mod checkpoint;
 mod craft_installation;

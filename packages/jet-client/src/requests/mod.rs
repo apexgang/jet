@@ -1,6 +1,7 @@
 //! The Queries and Commands a client can issue once connected.
 
 mod audit;
+mod autodelete;
 
 mod retention;
 mod store_recovery;
@@ -69,6 +70,7 @@ impl Client {
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::ConversationTrash(_)
 			| QueryResponse::RetentionPreview(_)
+			| QueryResponse::AutodeleteRules(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -118,6 +120,7 @@ impl Client {
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::ConversationTrash(_)
 			| QueryResponse::RetentionPreview(_)
+			| QueryResponse::AutodeleteRules(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)
@@ -174,6 +177,7 @@ impl Client {
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::ConversationTrash(_)
 			| QueryResponse::RetentionPreview(_)
+			| QueryResponse::AutodeleteRules(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::TurnQueue(_)

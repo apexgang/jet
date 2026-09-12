@@ -151,6 +151,7 @@ impl Core {
 				.await
 				.map(QueryResult::ScheduledTasks),
 			Query::ConversationTrash => self.conversation_trash().await,
+			Query::AutodeleteRules => self.autodelete_rules().await,
 			Query::RetentionPreview { conversation_id } => {
 				self.retention_preview(conversation_id).await
 			}

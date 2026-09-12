@@ -212,6 +212,8 @@ pub(super) fn redacted_for_receipt(
 			| CommandOutcome::SettingCleared { .. }
 			| CommandOutcome::AccountBound(_)
 			| CommandOutcome::AccountUnbound { .. }
+			| CommandOutcome::AutodeleteRuleRecorded(_)
+			| CommandOutcome::AutodeleteRuleDeleted { .. }
 			| CommandOutcome::AuditEpochBegun { .. }
 			| CommandOutcome::RecoverySnapshotRestored(_)
 			| CommandOutcome::RecoverySnapshotsPurged(_)

@@ -31,6 +31,7 @@ mod workspace_state;
 pub(crate) use command::{delete_everywhere, forget, restore};
 pub(crate) use protection::protections;
 pub use sweep::RetentionSweep;
+pub(crate) use sweep::Staging;
 pub(crate) use workspace_state::WorkspaceState;
 
 use crate::{ConversationId, EventSequence, setting::SettingKey};
@@ -79,6 +80,12 @@ pub enum TrashReason {
 	/// Its owner asked for it to be deleted everywhere, native history
 	/// included where the Harness supports that.
 	DeleteEverywhere,
+	/// An approved Autodelete rule matched it while nothing protected it
+	/// (ADR-0015).
+	AutodeleteRule,
+	/// An approved Autodelete rule separately authorized to delete
+	/// everywhere matched it (ADR-0011).
+	AutodeleteEverywhere,
 }
 
 impl TrashReason {
@@ -87,6 +94,10 @@ impl TrashReason {
 			Self::ManualForget => TrashReasonRecord::Manual,
 			Self::AutomaticForget => TrashReasonRecord::Automatic,
 			Self::DeleteEverywhere => TrashReasonRecord::Everywhere,
+			Self::AutodeleteRule => TrashReasonRecord::Autodelete,
+			Self::AutodeleteEverywhere => {
+				TrashReasonRecord::AutodeleteEverywhere
+			}
 		}
 	}
 
@@ -95,6 +106,10 @@ impl TrashReason {
 			TrashReasonRecord::Manual => Self::ManualForget,
 			TrashReasonRecord::Automatic => Self::AutomaticForget,
 			TrashReasonRecord::Everywhere => Self::DeleteEverywhere,
+			TrashReasonRecord::Autodelete => Self::AutodeleteRule,
+			TrashReasonRecord::AutodeleteEverywhere => {
+				Self::AutodeleteEverywhere
+			}
 		}
 	}
 }
@@ -165,7 +180,7 @@ pub(crate) async fn grace_ms(
 }
 
 #[cfg(test)]
-pub(super) mod fixtures {
+pub(crate) mod fixtures {
 	//! What the retention tests share: Conversations, ended Runs, and the
 	//! reads that show what became of them.
 

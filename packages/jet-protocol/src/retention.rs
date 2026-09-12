@@ -17,6 +17,12 @@ pub enum TrashReason {
 	/// Its owner asked for it to be deleted everywhere, native history
 	/// included where the Harness supports that.
 	DeleteEverywhere,
+	/// An approved Autodelete rule matched it while nothing protected it.
+	/// Needs minor 40.
+	AutodeleteRule,
+	/// An approved Autodelete rule separately authorized to delete
+	/// everywhere matched it. Needs minor 40.
+	AutodeleteEverywhere,
 }
 
 /// One Conversation in Jet Trash: why it is there and how long it stays.

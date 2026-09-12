@@ -29,6 +29,7 @@ impl Client {
 			| QueryResponse::ScheduledTasks(_)
 			| QueryResponse::ConversationTrash(_)
 			| QueryResponse::RetentionPreview(_)
+			| QueryResponse::AutodeleteRules(_)
 			| QueryResponse::EditableFile(_)
 			| QueryResponse::WorkspaceTerminals { .. }
 			| QueryResponse::Status(_)

@@ -25,6 +25,18 @@ pub(crate) async fn admit(
 	command_id: CommandId,
 	request: UtilityRequest,
 ) -> Result<CommandOutcome, CoreError> {
+	admit_job(tx, command_id, request)
+		.await
+		.map(|job_id| CommandOutcome::UtilityQueued { job_id })
+}
+
+/// Admits one Utility job under `command_id` and returns its identity. The
+/// job is durable once the transaction commits; the worker performs it.
+pub(crate) async fn admit_job(
+	tx: &mut WriteTransaction,
+	command_id: CommandId,
+	request: UtilityRequest,
+) -> Result<Uuid, CoreError> {
 	if let UtilityRequest::Autodelete { prompt } = &request
 		&& (prompt.trim().is_empty() || prompt.len() > 4096)
 	{
@@ -85,7 +97,7 @@ pub(crate) async fn admit(
 		safety: EffectSafetyRecord::Ambiguous,
 	})
 	.await?;
-	Ok(CommandOutcome::UtilityQueued { job_id: id })
+	Ok(id)
 }
 async fn scope(
 	tx: &mut ReadTransaction,

@@ -93,6 +93,11 @@ pub(crate) fn requires_disk_admission(command: &Command) -> bool {
 		| Command::ForgetConversation { .. }
 		| Command::DeleteConversationEverywhere { .. }
 		| Command::RestoreConversation { .. }
+		| Command::CompileAutodeleteRule { .. }
+		| Command::SetAutodeleteRuleInactiveDays { .. }
+		| Command::ApproveAutodeleteRule { .. }
+		| Command::AuthorizeAutodeleteEverywhere { .. }
+		| Command::DeleteAutodeleteRule { .. }
 		| Command::SubmitTurn { .. }
 		| Command::ResolveExecution(_)
 		| Command::ControlRun { .. }

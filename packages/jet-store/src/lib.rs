@@ -10,6 +10,10 @@
 
 mod account;
 mod artifact;
+mod autodelete;
+pub use autodelete::{
+	AUTODELETE_RULE_LIMIT, AutodeleteRuleRecord, InactiveConversation,
+};
 mod audit;
 pub use audit::actor::AuditActorRecord;
 mod checkpoint;
