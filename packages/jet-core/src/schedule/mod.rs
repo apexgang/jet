@@ -165,7 +165,7 @@ pub(crate) async fn cancel(
 	}
 	queue.entries = kept;
 	crate::turn::queue::save(tx, task.conversation_id, &queue).await?;
-	tx.delete_schedule(schedule_id).await?;
+	tx.delete_schedule(schedule_id, now).await?;
 	tx.append_event(EventKind::ScheduleCanceled { schedule_id }.to_record(
 		actor,
 		crate::event::EventSubject::Conversation(task.conversation_id),

@@ -55,6 +55,7 @@ impl Client {
 			| CommandResponse::AccountUnbound { .. }
 			| CommandResponse::AuditEpochBegun { .. }
 			| CommandResponse::RecoverySnapshotRestored { .. }
+			| CommandResponse::RecoverySnapshotsPurged { .. }
 			| CommandResponse::PairingGateSet { .. }
 			| CommandResponse::PairingOpened { .. }
 			| CommandResponse::PairingClaimed { .. }
@@ -124,6 +125,7 @@ impl Client {
 			| CommandResponse::AccountUnbound { .. }
 			| CommandResponse::AuditEpochBegun { .. }
 			| CommandResponse::RecoverySnapshotRestored { .. }
+			| CommandResponse::RecoverySnapshotsPurged { .. }
 			| CommandResponse::PairingGateSet { .. }
 			| CommandResponse::PairingOpened { .. }
 			| CommandResponse::PairingClaimed { .. }

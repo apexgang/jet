@@ -26,7 +26,7 @@ pub(super) fn plane_status(
 			.then(|| audit::security(status.security))
 			.flatten(),
 		recovery: (minor >= wire::STORE_RECOVERY_MINOR)
-			.then(|| store_recovery::recovery_status(&status.recovery)),
+			.then(|| store_recovery::recovery_status(&status.recovery, minor)),
 	}
 }
 

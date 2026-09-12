@@ -11,6 +11,7 @@
 
 use crate::{
 	StoreError,
+	deletion::{DeletedIdentityKind, PendingDeletion},
 	records::{column_error, parse_uuid},
 	transaction::{ReadTransaction, WriteTransaction},
 };
@@ -223,8 +224,10 @@ impl WriteTransaction {
 		})
 	}
 
-	/// Removes the Account binding `binding_id`. Removing one that is not
-	/// recorded changes nothing.
+	/// Removes the Account binding `binding_id`, acknowledged at
+	/// `deleted_at_unix_ms`. Removing one that is not recorded changes
+	/// nothing in the store, but the deletion is still ledgered, so a
+	/// snapshot that holds it cannot bring it back (ADR-0102).
 	///
 	/// # Errors
 	///
@@ -232,14 +235,17 @@ impl WriteTransaction {
 	pub async fn delete_account_binding(
 		&mut self,
 		binding_id: Uuid,
+		deleted_at_unix_ms: i64,
 	) -> Result<(), StoreError> {
-		let binding_id = binding_id.to_string();
-		sqlx::query!(
-			"DELETE FROM account_bindings WHERE binding_id = ?1",
-			binding_id
-		)
-		.execute(self.connection())
-		.await?;
+		let id = binding_id.to_string();
+		sqlx::query!("DELETE FROM account_bindings WHERE binding_id = ?1", id)
+			.execute(self.connection())
+			.await?;
+		self.record_deletion(PendingDeletion {
+			kind: DeletedIdentityKind::AccountBinding,
+			identity: binding_id,
+			deleted_at_unix_ms,
+		});
 		Ok(())
 	}
 }
@@ -338,7 +344,8 @@ mod tests {
 			.unwrap();
 		second
 			.write(async |tx| {
-				tx.delete_account_binding(session.binding_id).await
+				tx.delete_account_binding(session.binding_id, NOW_UNIX_MS)
+					.await
 			})
 			.await
 			.unwrap();

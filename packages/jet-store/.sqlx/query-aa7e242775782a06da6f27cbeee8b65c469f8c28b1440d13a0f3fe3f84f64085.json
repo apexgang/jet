@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE plane SET deletions_applied = ?1 WHERE singleton = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "aa7e242775782a06da6f27cbeee8b65c469f8c28b1440d13a0f3fe3f84f64085"
+}

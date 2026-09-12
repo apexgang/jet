@@ -1,12 +1,15 @@
 //! Store Recovery: mode, reason, and the snapshots a Plane can restore.
 
 use jet_core::{
-	IntegrityFailureReason, RecoveryMode, RecoverySnapshot, RecoveryStatus,
-	SnapshotReason,
+	DeletionLedger, IntegrityFailureReason, RecoveryMode, RecoverySnapshot,
+	RecoveryStatus, SnapshotReason,
 };
 use jet_protocol as wire;
 
-pub(super) fn recovery_status(status: &RecoveryStatus) -> wire::RecoveryStatus {
+pub(super) fn recovery_status(
+	status: &RecoveryStatus,
+	minor: u32,
+) -> wire::RecoveryStatus {
 	let (state, reason) = match status.mode {
 		RecoveryMode::Serving => (wire::RecoveryState::Serving, None),
 		RecoveryMode::ReadOnly(reason) => {
@@ -17,6 +20,23 @@ pub(super) fn recovery_status(status: &RecoveryStatus) -> wire::RecoveryStatus {
 		state,
 		reason,
 		snapshots: status.snapshots.iter().map(snapshot).collect(),
+		// A client that negotiated an older minor does not name the
+		// ledger, so it is not told about it either (ADR-0019).
+		deletion_ledger: (minor >= wire::DELETION_LEDGER_MINOR)
+			.then(|| deletion_ledger(&status.deletions)),
+	}
+}
+
+/// The ledger's state without its records: the wire carries how many
+/// deletions it vouches for, never which identities.
+fn deletion_ledger(ledger: &DeletionLedger) -> wire::DeletionLedgerStatus {
+	match ledger {
+		DeletionLedger::Verified(records) => {
+			wire::DeletionLedgerStatus::Verified {
+				deletions: u64::try_from(records.len()).unwrap_or(u64::MAX),
+			}
+		}
+		DeletionLedger::Corrupt(_) => wire::DeletionLedgerStatus::Corrupt,
 	}
 }
 

@@ -4,7 +4,7 @@
 
 use crate::{
 	IntegrityFailure, IntegrityFailureReason, Opened, StoreError,
-	StoreIntegrity, migrations, plane, recovery,
+	StoreIntegrity, deletion, migrations, plane, recovery,
 	snapshot::{self, SnapshotReason},
 };
 use sqlx::{
@@ -18,9 +18,9 @@ use std::{path::Path, time::Duration};
 use uuid::Uuid;
 
 /// Opens the database at `path`, checks it, snapshots it when a migration
-/// is pending, migrates it, and reads its Plane identity. A check or
-/// migration that fails leaves the result read-only rather than failing
-/// the open (ADR-0077).
+/// is pending, migrates it, reads its Plane identity, and reapplies the
+/// Deletion ledger. A check or migration that fails leaves the result
+/// read-only rather than failing the open (ADR-0077).
 pub(crate) async fn connect(
 	path: &Path,
 	snapshots: &snapshot::Tracker,
@@ -58,10 +58,23 @@ pub(crate) async fn connect(
 	}
 	plane::ensure_present(&pool).await?;
 	let plane_id = plane::read(&pool).await?.plane_id;
+	// What the ledger says is gone stays gone, whether the store is a
+	// restored snapshot or crashed between the ledger and its commit. A
+	// ledger that vouches for nothing is left for the status to report;
+	// the store itself is sound (ADR-0102).
+	let mut deletions_applied = plane::deletions_applied(&pool).await?;
+	if let deletion::DeletionLedger::Verified(records) =
+		deletion::read(path, plane_id, deletions_applied)?
+		&& deletion::reapply(&pool, &records).await? > 0
+	{
+		snapshots.mark_dirty();
+		deletions_applied = plane::deletions_applied(&pool).await?;
+	}
 	Ok(Opened {
 		pool,
 		plane_id,
 		integrity: StoreIntegrity::Verified,
+		deletions_applied: Some(deletions_applied),
 	})
 }
 
@@ -102,6 +115,7 @@ async fn open_read_only(
 		plane_id: plane::read(&pool)
 			.await
 			.map_or(Uuid::nil(), |plane| plane.plane_id),
+		deletions_applied: plane::deletions_applied(&pool).await.ok(),
 		pool,
 		integrity: StoreIntegrity::Failed(IntegrityFailure { reason, detail }),
 	}

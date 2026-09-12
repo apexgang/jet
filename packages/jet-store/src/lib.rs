@@ -16,6 +16,8 @@ mod checkpoint;
 mod command;
 mod conversation;
 pub use craft::lifecycle::CraftDisableMode;
+mod deletion;
+pub use deletion::{DeletedIdentityKind, DeletionLedger, DeletionRecord};
 mod effect;
 mod journal;
 mod migrations;
@@ -173,6 +175,9 @@ struct Opened {
 	/// then.
 	plane_id: Uuid,
 	integrity: StoreIntegrity,
+	/// How many Deletion-ledger records the store had applied when it was
+	/// opened, when its Plane row could say (ADR-0102).
+	deletions_applied: Option<u64>,
 }
 
 impl Store {
@@ -217,7 +222,9 @@ impl Store {
 	/// damaged database, keeping the damaged files beside it under a name
 	/// that carries `now_unix_ms`, and reopens the result through the same
 	/// checks as any open (ADR-0077). The Security audit head stays where
-	/// it is, so the audit sees that state moved backwards (ADR-0105).
+	/// it is, so the audit sees that state moved backwards (ADR-0105), and
+	/// the Deletion ledger is reapplied to the restored copy, so a deletion
+	/// made after the snapshot stays made (ADR-0102).
 	///
 	/// Every connection this store held is closed first; a read in flight
 	/// fails as unavailable.
@@ -225,7 +232,8 @@ impl Store {
 	/// # Errors
 	///
 	/// Returns [`StoreError::Integrity`] when no verified snapshot has that
-	/// name or a damaged file of that stamp already exists, and
+	/// name, a damaged file of that stamp already exists, or the Deletion
+	/// ledger cannot be trusted, and
 	/// [`StoreError::Unavailable`] when the files cannot be moved or the
 	/// restored database cannot be opened. The store then keeps serving
 	/// whatever it could open.
@@ -234,6 +242,14 @@ impl Store {
 		name: &str,
 		now_unix_ms: i64,
 	) -> Result<RestoredStore, StoreError> {
+		// The snapshot may predate a deletion only the ledger remembers, so
+		// a ledger that vouches for nothing keeps the store as it is
+		// (ADR-0102).
+		if let DeletionLedger::Corrupt(detail) = self.deletion_ledger()? {
+			return Err(StoreError::Integrity(format!(
+				"the Deletion ledger cannot be trusted: {detail}"
+			)));
+		}
 		self.pool().close().await;
 		let (opened, restored) = recovery::restore(
 			&self.database,
@@ -263,7 +279,12 @@ impl Store {
 
 	/// Takes a verified Recovery snapshot for `reason`, stamped
 	/// `now_unix_ms`, and rotates the retained set (ADR-0097).
-	pub(crate) async fn snapshot(
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Unavailable`] when the copy cannot be written
+	/// and [`StoreError::Integrity`] when it fails verification.
+	pub async fn snapshot(
 		&self,
 		reason: SnapshotReason,
 		now_unix_ms: i64,
@@ -298,6 +319,50 @@ impl Store {
 		} else {
 			Ok(None)
 		}
+	}
+
+	/// The snapshots that may still hold an identity the Deletion ledger
+	/// says is gone: every one taken while the store had applied fewer
+	/// ledger records than the ledger now vouches for (ADR-0102).
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Integrity`] when the ledger cannot be trusted
+	/// and [`StoreError::Unavailable`] when the directory cannot be read.
+	pub async fn affected_snapshots(&self) -> Result<Vec<String>, StoreError> {
+		let vouched = self.deletion_ledger()?.trusted()?.len();
+		deletion::affected_snapshots(
+			&self.database,
+			u64::try_from(vouched).unwrap_or(u64::MAX),
+		)
+		.await
+	}
+
+	/// Removes the snapshots called `names`, whichever of them still exist.
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Unavailable`] when a file cannot be removed.
+	pub fn remove_snapshots(&self, names: &[String]) -> Result<(), StoreError> {
+		deletion::remove_snapshots(&self.database, names)
+	}
+
+	/// The Deletion ledger of this store: every permanent deletion it
+	/// vouches for, or the finding that it vouches for nothing, which
+	/// includes a ledger with fewer records than this store has applied
+	/// (ADR-0102).
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Unavailable`] when the ledger files cannot be
+	/// read.
+	pub fn deletion_ledger(&self) -> Result<DeletionLedger, StoreError> {
+		let opened = self.opened();
+		deletion::read(
+			&self.database,
+			opened.plane_id,
+			opened.deletions_applied.unwrap_or(0),
+		)
 	}
 
 	/// Every verified Recovery snapshot of this store, newest first.

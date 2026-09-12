@@ -321,6 +321,9 @@ pub(crate) fn command(
 				snapshot: snapshot.clone(),
 			}
 		}
+		wire::CommandRequest::PurgeRecoverySnapshots => {
+			Command::PurgeRecoverySnapshots
+		}
 		wire::CommandRequest::SetPairingGate { gate } => {
 			Command::SetPairingGate {
 				gate: pairing::gate_from_wire(*gate),

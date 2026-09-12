@@ -3,7 +3,7 @@
 mod audit;
 
 mod store_recovery;
-pub use store_recovery::RestoredSnapshot;
+pub use store_recovery::{PurgedSnapshots, RestoredSnapshot};
 
 mod account;
 

@@ -35,6 +35,7 @@ impl AuditDecision {
 			Self::AuditRetentionCleared => "policy.audit_retention_cleared",
 			Self::AuditEpochBegun => "audit.epoch_begun",
 			Self::RecoverySnapshotRestored => "recovery.snapshot_restored",
+			Self::RecoverySnapshotsPurged => "recovery.snapshots_purged",
 			Self::PairingGateOpened => "pairing.gate_opened",
 			Self::PairingGateClosed => "pairing.gate_closed",
 			Self::PairingOffered => "pairing.offered",
@@ -112,6 +113,9 @@ impl AuditDecision {
 			// from the store, deliberately; the damaged copy stays beside
 			// it.
 			Self::RecoverySnapshotRestored => AuditRisk::Destructive,
+			// The snapshots removed were the last copies of what was
+			// deleted, which is the point; nothing brings them back.
+			Self::RecoverySnapshotsPurged => AuditRisk::Destructive,
 			// Shortening the window destroys evidence the Plane already
 			// holds, which is the one policy change the audit itself is at
 			// stake in.

@@ -274,6 +274,11 @@ pub enum CommandRequest {
 		/// The snapshot, by the name the status reports it under.
 		snapshot: String,
 	},
+	/// Take a verified snapshot of the store after every deletion the
+	/// Deletion ledger records, and remove every older snapshot that may
+	/// still hold what was deleted (ADR-0102). It is destructive: those
+	/// snapshots were the last copies.
+	PurgeRecoverySnapshots,
 	/// Open or close the Plane's Pairing gate, which decides whether a new
 	/// GUI client may begin Pairing at all. It does not alter the clients
 	/// that are already Paired.

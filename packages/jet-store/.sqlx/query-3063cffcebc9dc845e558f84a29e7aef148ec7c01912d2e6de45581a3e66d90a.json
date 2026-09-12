@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT deletions_applied FROM plane WHERE singleton = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "deletions_applied",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "plane",
+            "name": "deletions_applied"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3063cffcebc9dc845e558f84a29e7aef148ec7c01912d2e6de45581a3e66d90a"
+}

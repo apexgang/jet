@@ -8,8 +8,9 @@ mod support;
 
 use jet_client::ClientError;
 use jet_protocol::{
-	ErrorCategory, RecoveryReason, RecoverySnapshot, RecoveryState,
-	RecoveryStatus, RetentionPolicy, SecurityState, SnapshotReason,
+	DeletionLedgerStatus, ErrorCategory, RecoveryReason, RecoverySnapshot,
+	RecoveryState, RecoveryStatus, RetentionPolicy, SecurityState,
+	SnapshotReason,
 };
 use pretty_assertions::assert_eq;
 use std::{
@@ -99,6 +100,9 @@ async fn a_damaged_store_is_served_read_only_until_a_snapshot_is_restored() {
 					reason: SnapshotReason::Daily,
 					bytes: taken.bytes,
 				}],
+				deletion_ledger: Some(DeletionLedgerStatus::Verified {
+					deletions: 0,
+				}),
 			}
 		);
 		assert!(taken.bytes > 0);
@@ -136,6 +140,9 @@ async fn a_damaged_store_is_served_read_only_until_a_snapshot_is_restored() {
 					state: RecoveryState::Serving,
 					reason: None,
 					snapshots: vec![taken],
+					deletion_ledger: Some(DeletionLedgerStatus::Verified {
+						deletions: 0,
+					}),
 				}),
 				Some(SecurityState::Trusted),
 				2

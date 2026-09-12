@@ -98,6 +98,9 @@ pub enum AuditDecision {
 	/// store, moving authoritative state back to when it was taken
 	/// (ADR-0077).
 	RecoverySnapshotRestored,
+	/// An owner took a post-deletion snapshot and removed every older one
+	/// that may still hold what was deleted (ADR-0102).
+	RecoverySnapshotsPurged,
 	/// The Plane began accepting new Pairings, so a GUI client that holds a
 	/// current pairing code may take control of it (ADR-0017).
 	PairingGateOpened,

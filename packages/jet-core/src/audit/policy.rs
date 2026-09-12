@@ -58,6 +58,9 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::RestoreRecoverySnapshot { .. } => {
 			Some(AuditDecision::RecoverySnapshotRestored)
 		}
+		Command::PurgeRecoverySnapshots => {
+			Some(AuditDecision::RecoverySnapshotsPurged)
+		}
 		Command::BeginAuditEpoch
 		| Command::ApplyUserEdit { .. }
 		| Command::SetConversationName { .. }
@@ -129,6 +132,7 @@ pub(super) fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::PromoteWorkspace { .. }
 		| Command::BeginAuditEpoch
 		| Command::RestoreRecoverySnapshot { .. }
+		| Command::PurgeRecoverySnapshots
 		| Command::SetPairingGate { .. }
 		| Command::OpenPairing { .. }
 		| Command::ClaimPairing { .. }

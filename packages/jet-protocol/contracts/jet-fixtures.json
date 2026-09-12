@@ -608,5 +608,30 @@
     "schema": "ServerMessage",
     "valid": true,
     "payload": "{\"kind\":\"command_result\",\"id\":1,\"result\":{\"type\":\"recovery_snapshot_restored\",\"snapshot\":\"plane-1757000000000-daily.sqlite3\",\"replaced\":\"plane.sqlite3.damaged-1757000100000\"}}"
+  },
+  {
+    "schema": "PlaneStatus",
+    "valid": true,
+    "payload": "{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e71\",\"daemon_starts\":4,\"started_at_unix_ms\":1757000000000,\"core_version\":\"0.2.0\",\"cursor\":\"42\",\"security\":{\"state\":\"trusted\"},\"recovery\":{\"state\":\"serving\",\"snapshots\":[],\"deletion_ledger\":{\"state\":\"verified\",\"deletions\":3}}}"
+  },
+  {
+    "schema": "PlaneStatus",
+    "valid": true,
+    "payload": "{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e71\",\"daemon_starts\":4,\"started_at_unix_ms\":1757000000000,\"core_version\":\"0.2.0\",\"cursor\":\"42\",\"security\":{\"state\":\"trusted\"},\"recovery\":{\"state\":\"read_only\",\"reason\":\"integrity_check_failed\",\"snapshots\":[],\"deletion_ledger\":{\"state\":\"corrupt\"}}}"
+  },
+  {
+    "schema": "PlaneStatus",
+    "valid": false,
+    "payload": "{\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e71\",\"daemon_starts\":4,\"started_at_unix_ms\":1757000000000,\"core_version\":\"0.2.0\",\"cursor\":\"42\",\"recovery\":{\"state\":\"serving\",\"snapshots\":[],\"deletion_ledger\":{\"state\":\"verified\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":2,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e72\",\"command\":{\"type\":\"purge_recovery_snapshots\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":2,\"result\":{\"type\":\"recovery_snapshots_purged\",\"snapshot\":\"plane-1757100000000-maintenance.sqlite3\",\"removed\":[\"plane-1757000000000-daily.sqlite3\"]}}"
   }
 ]

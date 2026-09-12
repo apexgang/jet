@@ -280,6 +280,10 @@ pub enum Command {
 		/// The snapshot, by name.
 		snapshot: String,
 	},
+	/// Take a verified snapshot of the store after every recorded deletion
+	/// and remove every older snapshot that may still hold what was
+	/// deleted (ADR-0102). Only an interactive owner asks for this.
+	PurgeRecoverySnapshots,
 	/// Open or close this Plane's Pairing gate, which decides whether a new
 	/// GUI client may begin Pairing at all (ADR-0017). It does not alter the
 	/// clients that are already Paired.
@@ -436,6 +440,7 @@ impl Command {
 			| Self::UnbindAccount { .. }
 			| Self::BeginAuditEpoch
 			| Self::RestoreRecoverySnapshot { .. }
+			| Self::PurgeRecoverySnapshots
 			| Self::SetPairingGate { .. }
 			| Self::OpenPairing { .. }
 			| Self::ClaimPairing { .. }

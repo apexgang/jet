@@ -26,6 +26,7 @@ impl Client {
 		{
 			CommandResponse::AuditEpochBegun { epoch } => Ok(epoch),
 			other @ (CommandResponse::RecoverySnapshotRestored { .. }
+			| CommandResponse::RecoverySnapshotsPurged { .. }
 			| CommandResponse::GitDeliveryAcknowledged { .. }
 			| CommandResponse::GitDeliveryQueued { .. }
 			| CommandResponse::ApprovalRetryAuthorized { .. }

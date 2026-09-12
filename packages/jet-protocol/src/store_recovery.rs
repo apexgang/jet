@@ -1,6 +1,7 @@
 //! Recovery of the Plane store: whether it serves or answers reads only,
-//! and the verified Recovery snapshots it can restore (ADR-0077,
-//! ADR-0097). Introduced by protocol minor 37.
+//! the verified Recovery snapshots it can restore (ADR-0077, ADR-0097),
+//! and, from minor 38, the Deletion ledger a restoration reapplies
+//! (ADR-0102). Introduced by protocol minor 37.
 
 use serde::{Deserialize, Serialize};
 
@@ -56,6 +57,22 @@ pub struct RecoverySnapshot {
 	pub bytes: u64,
 }
 
+/// What the Deletion ledger vouches for: every permanent deletion a
+/// restoration reapplies, kept outside the store (ADR-0102).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum DeletionLedgerStatus {
+	/// Every recorded deletion folds through the ledger's durable head.
+	Verified {
+		/// How many deletions it records.
+		deletions: u64,
+	},
+	/// The ledger or its head is missing or altered, so no snapshot is
+	/// restored and no purge runs until the evidence is dealt with.
+	Corrupt,
+}
+
 /// The store's Recovery state and what it could be restored from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -67,6 +84,9 @@ pub struct RecoveryStatus {
 	pub reason: Option<RecoveryReason>,
 	/// Every verified snapshot, newest first.
 	pub snapshots: Vec<RecoverySnapshot>,
+	/// The Deletion ledger. Absent on a minor that does not name it.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub deletion_ledger: Option<DeletionLedgerStatus>,
 }
 
 #[cfg(test)]
@@ -85,11 +105,15 @@ mod tests {
 				reason: SnapshotReason::Daily,
 				bytes: 4096,
 			}],
+			deletion_ledger: Some(DeletionLedgerStatus::Verified {
+				deletions: 2,
+			}),
 		};
 		let serving = RecoveryStatus {
 			state: RecoveryState::Serving,
 			reason: None,
 			snapshots: vec![],
+			deletion_ledger: None,
 		};
 		assert_eq!(
 			(
@@ -97,7 +121,7 @@ mod tests {
 				serde_json::to_string(&serving).unwrap()
 			),
 			(
-				r#"{"state":"read_only","reason":"integrity_check_failed","snapshots":[{"name":"plane-1700000000000-daily.sqlite3","taken_at_unix_ms":1700000000000,"reason":"daily","bytes":4096}]}"#.to_string(),
+				r#"{"state":"read_only","reason":"integrity_check_failed","snapshots":[{"name":"plane-1700000000000-daily.sqlite3","taken_at_unix_ms":1700000000000,"reason":"daily","bytes":4096}],"deletion_ledger":{"state":"verified","deletions":2}}"#.to_string(),
 				r#"{"state":"serving","snapshots":[]}"#.to_string()
 			)
 		);

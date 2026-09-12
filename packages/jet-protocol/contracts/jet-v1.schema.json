@@ -2582,6 +2582,19 @@
           ]
         },
         {
+          "description": "Take a verified snapshot of the store after every deletion the\nDeletion ledger records, and remove every older snapshot that may\nstill hold what was deleted (ADR-0102). It is destructive: those\nsnapshots were the last copies.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "purge_recovery_snapshots"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
           "description": "Open or close the Plane's Pairing gate, which decides whether a new\nGUI client may begin Pairing at all. It does not alter the clients\nthat are already Paired.",
           "type": "object",
           "properties": {
@@ -3503,6 +3516,32 @@
             "type",
             "snapshot",
             "replaced"
+          ]
+        },
+        {
+          "description": "The post-deletion snapshot is taken and the older ones are gone.",
+          "type": "object",
+          "properties": {
+            "removed": {
+              "description": "The snapshots removed, newest first.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "snapshot": {
+              "description": "The snapshot taken after every recorded deletion.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "recovery_snapshots_purged"
+            }
+          },
+          "required": [
+            "type",
+            "snapshot",
+            "removed"
           ]
         },
         {
@@ -4492,6 +4531,44 @@
           "required": [
             "condition",
             "kind"
+          ]
+        }
+      ]
+    },
+    "DeletionLedgerStatus": {
+      "description": "What the Deletion ledger vouches for: every permanent deletion a\nrestoration reapplies, kept outside the store (ADR-0102).",
+      "oneOf": [
+        {
+          "description": "Every recorded deletion folds through the ledger's durable head.",
+          "type": "object",
+          "properties": {
+            "deletions": {
+              "description": "How many deletions it records.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "state": {
+              "type": "string",
+              "const": "verified"
+            }
+          },
+          "required": [
+            "state",
+            "deletions"
+          ]
+        },
+        {
+          "description": "The ledger or its head is missing or altered, so no snapshot is\nrestored and no purge runs until the evidence is dealt with.",
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "corrupt"
+            }
+          },
+          "required": [
+            "state"
           ]
         }
       ]
@@ -8513,6 +8590,17 @@
       "description": "The store's Recovery state and what it could be restored from.",
       "type": "object",
       "properties": {
+        "deletion_ledger": {
+          "description": "The Deletion ledger. Absent on a minor that does not name it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeletionLedgerStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "reason": {
           "description": "Why it is read-only. Present exactly when `state` is `read_only`.",
           "anyOf": [

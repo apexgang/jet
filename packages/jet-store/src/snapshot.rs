@@ -450,7 +450,7 @@ fn prepare_directory(directory: &Path) -> Result<(), StoreError> {
 		.map_err(|error| unavailable(directory, &error))
 }
 
-fn remove_if_present(path: &Path) -> Result<(), StoreError> {
+pub(crate) fn remove_if_present(path: &Path) -> Result<(), StoreError> {
 	match fs::remove_file(path) {
 		Ok(()) => Ok(()),
 		Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),

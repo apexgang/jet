@@ -45,6 +45,10 @@ impl Core {
 	/// whole, and the search index caught up, before workers waiting on
 	/// [`Core::wait_until_serving`] resume (ADR-0077).
 	///
+	/// The Deletion ledger is reapplied to the restored store, so an
+	/// identity deleted after the snapshot was taken does not come back
+	/// with it (ADR-0102).
+	///
 	/// A snapshot older than the newest audit record leaves the audit
 	/// head naming a record the store no longer holds. That is the audit's
 	/// own evidence of the rollback, and appending to the chain would
@@ -60,8 +64,9 @@ impl Core {
 	///
 	/// Returns a `conflict` [`CoreError`] when the Plane is serving, an
 	/// `internal` one when no verified snapshot has that name, and an
-	/// `unavailable` one when the restored store fails its own checks, in
-	/// which case the Plane stays in Recovery mode.
+	/// `unavailable` one when the Deletion ledger cannot be trusted or the
+	/// restored store fails its own checks, in which case the Plane stays
+	/// in Recovery mode.
 	#[expect(
 		clippy::await_holding_invalid_type,
 		reason = "serializes the store swap with Effect decisions and adoption"
@@ -76,6 +81,7 @@ impl Core {
 		};
 		// Nothing else decides an Effect while the store is being replaced.
 		let _reconciliation = self.effect_reconciliation.lock().await;
+		self.require_trusted_deletion_ledger()?;
 		let now_unix_ms = self.now_unix_ms();
 		let restored = self.store.restore(&snapshot, now_unix_ms).await?;
 		if let StoreIntegrity::Failed(failure) = self.store.integrity() {
@@ -121,10 +127,11 @@ impl Core {
 mod tests {
 	use super::*;
 	use crate::{
-		Command, ErrorCategory, PairingGate, Query, QueryResult,
-		RecoveryStatus, RestoredStore, SnapshotReason,
+		Command, DeletionLedger, ErrorCategory, PairingGate, Query,
+		QueryResult, RecoveryStatus, RestoredStore, SnapshotReason,
 		test_support::{
-			FixedProbe, ManualClock, actor, equipped, request, start_core_with,
+			FixedProbe, ManualClock, actor, bind_native_account, equipped,
+			request, start_core_with,
 		},
 	};
 	use pretty_assertions::assert_eq;
@@ -211,6 +218,7 @@ mod tests {
 						IntegrityFailureReason::IntegrityCheck
 					),
 					snapshots: vec![snapshot.clone()],
+					deletions: DeletionLedger::Verified(vec![]),
 				},
 				SecurityState::Trusted,
 			)
@@ -246,6 +254,7 @@ mod tests {
 				RecoveryStatus {
 					mode: RecoveryMode::Serving,
 					snapshots: vec![snapshot.clone()],
+					deletions: DeletionLedger::Verified(vec![]),
 				},
 				SecurityState::Trusted,
 			)
@@ -359,6 +368,133 @@ mod tests {
 			(
 				"store.integrity",
 				RecoveryMode::ReadOnly(IntegrityFailureReason::IntegrityCheck)
+			)
+		);
+	}
+
+	async fn binding_ids(core: &Core) -> Vec<crate::AccountBindingId> {
+		let QueryResult::AccountBindings(list) = core
+			.query(
+				&actor(),
+				Query::AccountBindings {
+					observation: crate::CapabilityObservation::LastObserved,
+				},
+			)
+			.await
+			.unwrap()
+		else {
+			panic!("expected an Account binding list");
+		};
+		list.bindings
+			.into_iter()
+			.map(|status| status.binding.binding_id)
+			.collect()
+	}
+
+	/// An Account binding unbound after the snapshot was taken is in the
+	/// Deletion ledger, and restoring the snapshot reapplies the ledger, so
+	/// the binding does not come back with the store (ADR-0102).
+	#[tokio::test]
+	async fn an_unbinding_made_after_the_snapshot_survives_its_restoration() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("plane.sqlite3");
+		let clock = ManualClock::at(UNIX_EPOCH + NOW);
+		let core = start(&path, &clock).await;
+		let unbound =
+			bind_native_account(&core, crate::ProviderId("anthropic".into()))
+				.await;
+		let kept =
+			bind_native_account(&core, crate::ProviderId("openai".into()))
+				.await;
+		let snapshot = core.snapshot_if_due().await.unwrap().unwrap();
+		core.execute(
+			&actor(),
+			request(Command::UnbindAccount {
+				binding_id: unbound,
+			}),
+		)
+		.await
+		.unwrap();
+		core.close().await;
+		drop(core);
+		damage(&path);
+
+		let core = start(&path, &clock).await;
+		core.execute(
+			&actor(),
+			request(Command::RestoreRecoverySnapshot {
+				snapshot: snapshot.name,
+			}),
+		)
+		.await
+		.unwrap();
+
+		assert_eq!(
+			(core.recovery_mode(), binding_ids(&core).await),
+			(RecoveryMode::Serving, vec![kept])
+		);
+	}
+
+	/// With the ledger gone, the snapshot may predate a deletion nothing
+	/// else remembers, so the restoration is refused and the damaged store
+	/// is left exactly where it was (ADR-0102).
+	#[tokio::test]
+	async fn a_corrupt_deletion_ledger_keeps_the_plane_in_recovery_mode() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("plane.sqlite3");
+		let clock = ManualClock::at(UNIX_EPOCH + NOW);
+		let core = start(&path, &clock).await;
+		let binding =
+			bind_native_account(&core, crate::ProviderId("anthropic".into()))
+				.await;
+		let snapshot = core.snapshot_if_due().await.unwrap().unwrap();
+		core.execute(
+			&actor(),
+			request(Command::UnbindAccount {
+				binding_id: binding,
+			}),
+		)
+		.await
+		.unwrap();
+		core.close().await;
+		drop(core);
+		std::fs::remove_file(
+			dir.path().join("recovery").join("plane.sqlite3.deletions"),
+		)
+		.unwrap();
+		damage(&path);
+
+		let core = start(&path, &clock).await;
+		let error = core
+			.execute(
+				&actor(),
+				request(Command::RestoreRecoverySnapshot {
+					snapshot: snapshot.name,
+				}),
+			)
+			.await
+			.unwrap_err();
+
+		assert_eq!(
+			(
+				error.code.as_str(),
+				error.category,
+				core.recovery_mode(),
+				std::fs::read_dir(dir.path())
+					.unwrap()
+					.filter_map(|entry| entry
+						.unwrap()
+						.file_name()
+						.into_string()
+						.ok())
+					.filter(|name| name.contains(".damaged-"))
+					.count(),
+			),
+			(
+				"recovery.deletion_ledger_corrupt",
+				ErrorCategory::Unavailable,
+				RecoveryMode::ReadOnly(IntegrityFailureReason::IntegrityCheck),
+				0,
 			)
 		);
 	}

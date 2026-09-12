@@ -431,7 +431,7 @@ pub(crate) async fn unbind(
 		));
 	};
 	let binding: AccountBinding = record.into();
-	tx.delete_account_binding(binding_id.0).await?;
+	tx.delete_account_binding(binding_id.0, now_unix_ms).await?;
 	let event = EventKind::AccountUnbound { binding_id };
 	tx.append_event(event.to_record(
 		actor,

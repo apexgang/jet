@@ -381,6 +381,10 @@ pub(super) fn command_minor(
 				feature: "restoring a Recovery snapshot",
 			})
 		}
+		CommandRequest::PurgeRecoverySnapshots => Some(MinorRequirement {
+			minor: jet_protocol::DELETION_LEDGER_MINOR,
+			feature: "purging Recovery snapshots",
+		}),
 		CommandRequest::SetPairingGate { .. }
 		| CommandRequest::OpenPairing { .. }
 		| CommandRequest::ClaimPairing { .. }
