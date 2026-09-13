@@ -20,6 +20,10 @@ use uuid::Uuid;
 /// The durable result of a [`Command`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandOutcome {
+	/// Verified Recovered copies staged outside live Plane authority.
+	RecoveredBundle(crate::RecoveredBundle),
+	/// Portable encrypted bytes, returned directly and never stored in receipts.
+	RecoveryBundle(Vec<u8>),
 	/// A user released the uncertainty barrier; Git was not changed.
 	GitDeliveryAcknowledged {
 		/// Exact Effect identity.

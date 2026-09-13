@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM usage_quota_snapshots",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "6728f1300d77499332c89a73245649edc0428e813d5e7344bae12a8f1fd87803"
+}

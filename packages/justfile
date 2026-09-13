@@ -170,3 +170,9 @@ sqlx-check: sqlx-migrations-check
 	cd jet-store
 	sqlx migrate run --source ./migrations
 	cargo sqlx prepare --check -- --lib --tests
+
+# Gate the incremental stripped development-profile cost of permitted age modes.
+# Release packaging still enforces the per-architecture budgets in ADR-0054.
+recovery-crypto-budget:
+	cargo build -p jet-core --example recovery-crypto-baseline --example recovery-crypto-budget
+	python3 ../scripts/recovery-crypto-budget.py target/debug/examples

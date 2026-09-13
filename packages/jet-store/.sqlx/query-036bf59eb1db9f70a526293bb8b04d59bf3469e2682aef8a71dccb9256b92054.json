@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM audit_epochs",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "036bf59eb1db9f70a526293bb8b04d59bf3469e2682aef8a71dccb9256b92054"
+}

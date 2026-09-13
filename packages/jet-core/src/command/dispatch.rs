@@ -479,7 +479,9 @@ pub(super) async fn execute_new(
 		}
 		// Intercepted before the pipeline in `Core::execute`; a serving
 		// Plane answers the same way it would there.
-		Command::RestoreRecoverySnapshot { .. } => {
+		Command::ImportRecoveryBundle { .. }
+		| Command::ExportRecoveryBundle { .. }
+		| Command::RestoreRecoverySnapshot { .. } => {
 			Err(crate::store_recovery::not_read_only())
 		}
 		// Intercepted before the pipeline as well; it never gets here.

@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT COUNT(*) FROM scheduled_tasks WHERE\n            json_type(state, '$.prompt') IS NOT 'text'\n            OR json_type(state, '$.time_zone') IS NOT 'text'\n            OR json_type(state, '$.local_time') IS NOT 'text'\n            OR json_extract(state, '$.conversation_id') IS NOT conversation_id\n            OR json_extract(state, '$.schedule_id') IS NOT schedule_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "98f645fde58cadd3d3bdf3f38e927472ddb37f18250c1ea71a311df2b67fcd7e"
+}

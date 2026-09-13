@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE scheduled_tasks SET conversation_id = ?1, state = json_set(state, '$.conversation_id', ?1) WHERE conversation_id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "f83fdd4c383d26b10d7fa976b3f459a8ff4512e94900c2f78d54f605e976e404"
+}

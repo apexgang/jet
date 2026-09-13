@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE runs SET conversation_id = ?1 WHERE conversation_id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "0126dbb253cf6bf603fc227ed97b1399c9c7302a2e08e54791682b15943f45dc"
+}

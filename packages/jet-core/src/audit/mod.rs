@@ -61,6 +61,10 @@ pub struct AuditRecordId(pub Uuid);
 /// what happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditDecision {
+	/// An owner acknowledged the included data and its unencrypted disclosure.
+	UnencryptedRecoveryExportAuthorized,
+	/// An owner authorized publication of verified, non-authoritative copies.
+	RecoveryImportAuthorized,
 	/// The owner changed an Account-binding default or one-shot retry policy.
 	AutoContinuePolicyChanged,
 	/// A user reviewed an exact remote action.

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM craft_installation_plans",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "0e47b98c13554f6da80c3d052290913adc27ed7192e2e4066de0061ae9997e2c"
+}

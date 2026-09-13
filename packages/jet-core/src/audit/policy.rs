@@ -14,6 +14,12 @@ use crate::{
 /// guards can never drift apart.
 pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 	match command {
+		Command::ImportRecoveryBundle { .. } => {
+			Some(AuditDecision::RecoveryImportAuthorized)
+		}
+		Command::ExportRecoveryBundle { protection } => protection
+			.is_unencrypted()
+			.then_some(AuditDecision::UnencryptedRecoveryExportAuthorized),
 		Command::SetAutoContinue { .. } => {
 			Some(AuditDecision::AutoContinuePolicyChanged)
 		}
@@ -168,6 +174,8 @@ pub(super) fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::PromoteWorkspace { .. }
 		| Command::BeginAuditEpoch
 		| Command::RestoreRecoverySnapshot { .. }
+		| Command::ImportRecoveryBundle { .. }
+		| Command::ExportRecoveryBundle { .. }
 		| Command::PurgeRecoverySnapshots
 		| Command::SetPairingGate { .. }
 		| Command::OpenPairing { .. }

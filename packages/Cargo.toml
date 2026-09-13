@@ -22,6 +22,7 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+age = { version = "=0.11.3", default-features = false }
 jet-client = { path = "jet-client" }
 jet-core = { path = "jet-core" }
 jet-craft-sdk = { path = "jet-craft-sdk" }

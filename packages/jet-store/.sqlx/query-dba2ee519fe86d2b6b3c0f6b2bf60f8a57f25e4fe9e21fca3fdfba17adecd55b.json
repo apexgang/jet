@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM extension_changes",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "dba2ee519fe86d2b6b3c0f6b2bf60f8a57f25e4fe9e21fca3fdfba17adecd55b"
+}

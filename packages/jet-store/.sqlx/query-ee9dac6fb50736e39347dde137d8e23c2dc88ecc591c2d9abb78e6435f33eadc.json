@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM events WHERE conversation_id IS NULL OR kind NOT IN ('turn.input', 'run.output', 'artifact.published')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "ee9dac6fb50736e39347dde137d8e23c2dc88ecc591c2d9abb78e6435f33eadc"
+}

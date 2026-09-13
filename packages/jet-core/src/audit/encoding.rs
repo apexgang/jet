@@ -16,6 +16,10 @@ impl AuditDecision {
 	#[must_use]
 	pub fn as_str(self) -> &'static str {
 		match self {
+			Self::UnencryptedRecoveryExportAuthorized => {
+				"recovery.unencrypted_export_authorized"
+			}
+			Self::RecoveryImportAuthorized => "recovery.import_authorized",
 			Self::RemoteToolReviewed => "remote.reviewed",
 			Self::ExecutionResolutionRequested => {
 				"execution.resolution_requested"
@@ -85,6 +89,7 @@ impl AuditDecision {
 	/// one a later release would assign.
 	pub(super) fn risk(self) -> AuditRisk {
 		match self {
+            Self::UnencryptedRecoveryExportAuthorized | Self::RecoveryImportAuthorized => AuditRisk::Elevated,
 			// Answering for a person is exactly what a review does, so
 			// every one of them is worth the same attention as the remote
 			// action a person reviews by hand.

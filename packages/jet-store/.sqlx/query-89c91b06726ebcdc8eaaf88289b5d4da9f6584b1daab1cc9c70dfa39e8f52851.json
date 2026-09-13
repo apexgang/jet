@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM turn_queues",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "89c91b06726ebcdc8eaaf88289b5d4da9f6584b1daab1cc9c70dfa39e8f52851"
+}

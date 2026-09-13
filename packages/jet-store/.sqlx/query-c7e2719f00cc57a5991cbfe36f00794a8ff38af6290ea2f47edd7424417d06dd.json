@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM git_deliveries",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "c7e2719f00cc57a5991cbfe36f00794a8ff38af6290ea2f47edd7424417d06dd"
+}

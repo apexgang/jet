@@ -283,6 +283,8 @@ impl Core {
 			| Command::UnbindAccount { .. }
 			| Command::BeginAuditEpoch
 			| Command::RestoreRecoverySnapshot { .. }
+			| Command::ImportRecoveryBundle { .. }
+			| Command::ExportRecoveryBundle { .. }
 			| Command::PurgeRecoverySnapshots
 			| Command::ForgetConversation { .. }
 			| Command::DeleteConversationEverywhere { .. }

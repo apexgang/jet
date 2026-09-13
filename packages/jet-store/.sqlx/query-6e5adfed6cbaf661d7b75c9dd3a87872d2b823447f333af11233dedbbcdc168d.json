@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM utility_jobs",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "6e5adfed6cbaf661d7b75c9dd3a87872d2b823447f333af11233dedbbcdc168d"
+}

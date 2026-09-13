@@ -100,6 +100,10 @@ pub use store_recovery::{
 	IntegrityFailureReason, RecoveryMode, RecoverySnapshot, RecoveryStatus,
 	RestoredStore, SnapshotPurge, SnapshotReason,
 };
+pub use store_recovery::{
+	RECOVERY_PLAINTEXT_WARNING, RecoveredBundle, RecoveredConversation,
+	RecoveryKey, RecoveryProtection,
+};
 mod terminal;
 #[cfg(test)]
 mod test_support;

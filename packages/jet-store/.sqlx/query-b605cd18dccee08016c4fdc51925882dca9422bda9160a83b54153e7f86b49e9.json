@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT COUNT(*) FROM events e WHERE\n            payload_version != 1 OR NOT json_valid(payload)\n            OR NOT EXISTS (SELECT 1 FROM conversations c WHERE c.conversation_id = e.conversation_id)\n            OR (run_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.run_id = e.run_id AND r.conversation_id = e.conversation_id))\n            OR CASE kind\n                WHEN 'turn.input' THEN json_type(payload, '$.text') IS NOT 'text' OR json_type(payload, '$.turn_id') IS NOT 'text'\n                WHEN 'run.output' THEN json_type(payload, '$.native_json') IS NOT 'text' OR json_type(payload, '$.presentation_json') IS NOT 'array'\n                    OR EXISTS (SELECT 1 FROM json_each(payload, '$.presentation_json') WHERE type != 'text')\n                WHEN 'artifact.published' THEN NOT EXISTS (\n                    SELECT 1 FROM artifact_references a WHERE a.run_id = e.run_id\n                    AND a.sha256 = json_extract(e.payload, '$.artifact.sha256')\n                    AND a.size = json_extract(e.payload, '$.artifact.size'))\n                ELSE 1 END\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b605cd18dccee08016c4fdc51925882dca9422bda9160a83b54153e7f86b49e9"
+}

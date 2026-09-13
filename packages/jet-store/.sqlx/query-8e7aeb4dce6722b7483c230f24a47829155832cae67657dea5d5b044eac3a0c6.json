@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM user_edit_intents",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "8e7aeb4dce6722b7483c230f24a47829155832cae67657dea5d5b044eac3a0c6"
+}

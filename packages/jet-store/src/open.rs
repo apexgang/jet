@@ -26,6 +26,17 @@ pub(crate) async fn connect(
 	snapshots: &snapshot::Tracker,
 ) -> Result<Opened, StoreError> {
 	let pool = connect_pool(path).await?;
+	// PRAGMA is exempt from compile-time SQLx checking. Portable copies never
+	// become writable Plane stores, regardless of how the path was selected.
+	let application: i64 = sqlx::query_scalar("PRAGMA application_id")
+		.fetch_one(&pool)
+		.await?;
+	if application == 1246057554 {
+		pool.close().await;
+		return Err(StoreError::Integrity(
+			"Recovered copies cannot become authoritative Plane stores".into(),
+		));
+	}
 	// Damage can surface in the first statement that touches the schema,
 	// before the check itself runs; any of them failing on content rather
 	// than reachability is the check failing.

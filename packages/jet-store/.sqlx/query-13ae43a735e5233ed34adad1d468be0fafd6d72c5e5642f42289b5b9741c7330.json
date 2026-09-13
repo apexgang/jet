@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE events SET payload = CASE kind WHEN 'turn.input' THEN json_object('text', json_extract(payload, '$.text'), 'turn_id', json_extract(payload, '$.turn_id')) WHEN 'run.output' THEN json_object('native_json', json_extract(payload, '$.native_json'), 'presentation_json', json_extract(payload, '$.presentation_json')) WHEN 'artifact.published' THEN json_object('artifact', json_object('sha256', json_extract(payload, '$.artifact.sha256'), 'size', json_extract(payload, '$.artifact.size'))) END",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "13ae43a735e5233ed34adad1d468be0fafd6d72c5e5642f42289b5b9741c7330"
+}

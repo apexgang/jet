@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE runs SET lifecycle = 'lost', ended_at_unix_ms = COALESCE(ended_at_unix_ms, created_at_unix_ms) WHERE lifecycle IN ('created', 'starting', 'active', 'stopping')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "494b04fe9bce49052639eccfd5c57903d7eb4050ba9be60bc299f520ca18d936"
+}

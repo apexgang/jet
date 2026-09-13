@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM command_receipts",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "5b7f25da9d0b82ed2b1a7e3fa58bf79f8f3de6c3accb342cb62a624f8d4578c6"
+}

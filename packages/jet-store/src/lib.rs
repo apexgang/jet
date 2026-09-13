@@ -28,6 +28,8 @@ mod migrations;
 mod open;
 mod pairing;
 mod plane;
+mod portable;
+pub use portable::RecoveredSnapshot;
 mod project;
 mod records;
 mod recovery;

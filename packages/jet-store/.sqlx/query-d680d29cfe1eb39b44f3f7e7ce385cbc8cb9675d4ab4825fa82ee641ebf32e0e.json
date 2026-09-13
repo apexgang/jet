@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM settings WHERE key NOT IN ('storage.disposable_mib', 'git.auto_branch', 'git.auto_push', 'git.auto_draft_pull_request', 'git.branch_prefix', 'utility.automatic_naming', 'git.auto_commit', 'git.message_instructions', 'retention.trash_grace_days', 'security.audit_retention_days', 'utility.git_text', 'utility.content_consent', 'utility.autodelete_compilation', 'craft.developer_mode', 'review.automatic', 'review.cross_provider_consent', 'artifact.max_mib', 'artifact.run_mib', 'energy.concurrency', 'energy.low_power_concurrency', 'energy.constrained', 'energy.foreground_override') OR scope = 'project'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "d680d29cfe1eb39b44f3f7e7ce385cbc8cb9675d4ab4825fa82ee641ebf32e0e"
+}

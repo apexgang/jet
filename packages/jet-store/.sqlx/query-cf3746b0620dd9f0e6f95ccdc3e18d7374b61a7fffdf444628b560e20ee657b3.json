@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM auto_continue_policies",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "cf3746b0620dd9f0e6f95ccdc3e18d7374b61a7fffdf444628b560e20ee657b3"
+}
