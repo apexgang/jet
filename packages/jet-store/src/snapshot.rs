@@ -394,7 +394,7 @@ fn retained(snapshots: &[RecoverySnapshot]) -> Vec<&str> {
 
 /// Opens the copy on its own and asks SQLite to check every page and
 /// index. Anything but a single `ok` means the copy is not a snapshot.
-async fn verify(pending: &Path) -> Result<(), StoreError> {
+pub(crate) async fn verify(pending: &Path) -> Result<(), StoreError> {
 	let options = SqliteConnectOptions::new()
 		.filename(pending)
 		.create_if_missing(false);

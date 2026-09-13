@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM craft_disables",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "74bb30972184058cebdde2f92a0abcc196684a2c9b97e46feaf5a8af30625233"
+}

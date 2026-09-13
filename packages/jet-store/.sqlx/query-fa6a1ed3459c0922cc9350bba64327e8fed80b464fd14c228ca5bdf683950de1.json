@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM git_branches",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "fa6a1ed3459c0922cc9350bba64327e8fed80b464fd14c228ca5bdf683950de1"
+}

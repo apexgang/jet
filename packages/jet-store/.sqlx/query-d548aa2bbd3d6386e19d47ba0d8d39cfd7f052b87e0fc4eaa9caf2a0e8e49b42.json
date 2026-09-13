@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM workspace_terminals",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "d548aa2bbd3d6386e19d47ba0d8d39cfd7f052b87e0fc4eaa9caf2a0e8e49b42"
+}

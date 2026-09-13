@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE settings SET scope_id = ?1 WHERE scope = 'conversation' AND scope_id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "4ce8036d8b4c2980dc435b49e7a8cfac255ccd5ac82527081dac9e94b751cc45"
+}

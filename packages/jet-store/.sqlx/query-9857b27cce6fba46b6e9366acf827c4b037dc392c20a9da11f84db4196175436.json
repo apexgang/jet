@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE conversations SET working_tree = 'none', project_id = NULL, import_id = NULL, fork_source_conversation_id = NULL, fork_source_run_id = NULL, fork_checkpoint_turn = NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "9857b27cce6fba46b6e9366acf827c4b037dc392c20a9da11f84db4196175436"
+}

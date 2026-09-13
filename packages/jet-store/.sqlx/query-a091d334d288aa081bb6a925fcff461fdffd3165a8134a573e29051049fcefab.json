@@ -1,0 +1,40 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sha256 AS \"sha256!\", MIN(size) AS \"minimum!\", MAX(size) AS \"maximum!\" FROM artifact_references GROUP BY sha256 ORDER BY sha256",
+  "describe": {
+    "columns": [
+      {
+        "name": "sha256!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "artifact_references",
+            "name": "sha256"
+          }
+        }
+      },
+      {
+        "name": "minimum!",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "maximum!",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "a091d334d288aa081bb6a925fcff461fdffd3165a8134a573e29051049fcefab"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE events SET actor_kind = 'recovery', actor_id = NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "b0e8f793ef456ef03066c50f6e5f3ad67495340410393445c0662f7ac12b6f59"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM effects",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "a86a5aa0ae751a166a6564ea7161fb5471baed940c0573070667e4bd25b4db2c"
+}

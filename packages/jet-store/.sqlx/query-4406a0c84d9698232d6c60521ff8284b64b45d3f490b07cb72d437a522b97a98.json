@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM change_checkpoints",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "4406a0c84d9698232d6c60521ff8284b64b45d3f490b07cb72d437a522b97a98"
+}

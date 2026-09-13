@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) FROM settings s WHERE scope = 'conversation' AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.conversation_id = s.scope_id)",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bd6a5758404e3284dad0f9568cc19bc9a89ec878b926ea140e0a8efd43877806"
+}

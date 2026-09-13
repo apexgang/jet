@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM paired_clients",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "dc444149b4a152ebfe67c8da0c7123c9e5f9a2707c8149328f22c31cfb30ef17"
+}

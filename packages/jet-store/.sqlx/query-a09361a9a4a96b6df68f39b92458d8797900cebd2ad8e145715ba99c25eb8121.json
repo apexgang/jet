@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE scheduled_tasks SET next_due_unix_ms = 9223372036854775807, state = json_set(json_remove(state, '$.authorized_by', '$.next'), '$.enabled', json('false'))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "a09361a9a4a96b6df68f39b92458d8797900cebd2ad8e145715ba99c25eb8121"
+}

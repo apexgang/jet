@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM usage_provider_reach",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "306268ccd5f9a981d7f39cccc03383fbf2bddcbf3d0beec3ba2c4cf93505c3dd"
+}

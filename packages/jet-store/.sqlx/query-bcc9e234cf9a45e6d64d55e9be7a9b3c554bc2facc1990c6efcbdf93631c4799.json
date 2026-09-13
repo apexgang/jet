@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM craft_revocations",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "bcc9e234cf9a45e6d64d55e9be7a9b3c554bc2facc1990c6efcbdf93631c4799"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM plane",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "aef129e4a79ce01211104dee37bef40bb16a43dcdd27d4f6081b52c3c0f31a57"
+}

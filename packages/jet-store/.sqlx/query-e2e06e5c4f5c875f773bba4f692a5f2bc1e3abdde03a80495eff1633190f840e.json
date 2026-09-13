@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM workspace_promotions",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "e2e06e5c4f5c875f773bba4f692a5f2bc1e3abdde03a80495eff1633190f840e"
+}

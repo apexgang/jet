@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM imported_conversations",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "86d010d32ab1787733fa50a490605bb80e2ac1dfe0930b7c5ee1ce1086c8205a"
+}
