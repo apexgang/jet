@@ -103,6 +103,8 @@ async fn apply(
 		| CommandOutcome::PairingConfirmed { .. }
 		| CommandOutcome::AuditEpochBegun { .. }
 		| CommandOutcome::RecoverySnapshotRestored(_)
+		| CommandOutcome::RecoveredBundle(_)
+		| CommandOutcome::RecoveryBundle(_)
 		| CommandOutcome::RecoverySnapshotsPurged(_)
 		| CommandOutcome::ConversationTrashed(_)
 		| CommandOutcome::ConversationRestored { .. }

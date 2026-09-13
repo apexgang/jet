@@ -15,6 +15,11 @@
 //! person. Nothing that writes runs meanwhile, and surviving `jetfueld`
 //! executions are reconnected only after the restoration succeeds.
 
+mod bundle;
+pub use bundle::{
+	RECOVERY_PLAINTEXT_WARNING, RecoveredBundle, RecoveredConversation,
+	RecoveryKey, RecoveryProtection,
+};
 mod purge;
 mod restore;
 pub(crate) use restore::{not_read_only, read_only};

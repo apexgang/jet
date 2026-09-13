@@ -13,6 +13,10 @@ pub(crate) fn command_outcome(
 	minor: u32,
 ) -> wire::CommandResponse {
 	match outcome {
+		CommandOutcome::RecoveredBundle(_)
+		| CommandOutcome::RecoveryBundle(_) => {
+			unreachable!("Recovery bundles use the core binary interface")
+		}
 		CommandOutcome::GitDeliveryAcknowledged { delivery_id } => {
 			wire::CommandResponse::GitDeliveryAcknowledged { delivery_id }
 		}

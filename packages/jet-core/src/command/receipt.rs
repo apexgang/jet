@@ -48,6 +48,8 @@ pub(crate) fn outcome_version(
 	match result {
 		Ok(
 			CommandOutcome::RecoverySnapshotRestored(_)
+			| CommandOutcome::RecoveredBundle(_)
+			| CommandOutcome::RecoveryBundle(_)
 			| CommandOutcome::RecoverySnapshotsPurged(_),
 		) => STORE_RECOVERY_OUTCOME_VERSION,
 		Ok(

@@ -45,6 +45,15 @@ impl Core {
 		// it runs beside the pipeline; everything else waits while the
 		// store is in doubt (ADR-0077).
 		let command = match command {
+			Command::ImportRecoveryBundle { bytes, key } => {
+				return self
+					.import_recovery_bundle(actor, bytes, key, command_id)
+					.await;
+			}
+			Command::ExportRecoveryBundle { protection } => {
+				drop(_access);
+				return self.export_recovery_bundle(actor, protection).await;
+			}
 			Command::RestoreRecoverySnapshot { snapshot } => {
 				return self.restore_recovery_snapshot(actor, snapshot).await;
 			}
@@ -216,6 +225,8 @@ pub(super) fn redacted_for_receipt(
 			| CommandOutcome::AutodeleteRuleDeleted { .. }
 			| CommandOutcome::AuditEpochBegun { .. }
 			| CommandOutcome::RecoverySnapshotRestored(_)
+			| CommandOutcome::RecoveredBundle(_)
+			| CommandOutcome::RecoveryBundle(_)
 			| CommandOutcome::RecoverySnapshotsPurged(_)
 			| CommandOutcome::ConversationTrashed(_)
 			| CommandOutcome::ConversationRestored { .. }

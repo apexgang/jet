@@ -45,6 +45,18 @@ pub(super) const CREDENTIAL_STORE: &[Capability] =
 /// A state-changing request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Command {
+	/// Imports an authenticated portable bundle as inert Recovered copies.
+	ImportRecoveryBundle {
+		/// Complete age v1 stream, bounded before decryption.
+		bytes: Vec<u8>,
+		/// Ephemeral decryption secret.
+		key: crate::RecoveryKey,
+	},
+	/// Exports a portable encrypted Recovery bundle, without a durable receipt.
+	ExportRecoveryBundle {
+		/// Required encryption; no implicit plaintext fallback.
+		protection: crate::RecoveryProtection,
+	},
 	/// Acknowledge a reviewed uncertain outcome without retrying its Git operation.
 	AcknowledgeGitDelivery {
 		/// Exact uncertain Effect the user reviewed.
@@ -498,6 +510,8 @@ impl Command {
 			| Self::UnbindAccount { .. }
 			| Self::BeginAuditEpoch
 			| Self::RestoreRecoverySnapshot { .. }
+			| Self::ImportRecoveryBundle { .. }
+			| Self::ExportRecoveryBundle { .. }
 			| Self::PurgeRecoverySnapshots
 			| Self::ForgetConversation { .. }
 			| Self::DeleteConversationEverywhere { .. }

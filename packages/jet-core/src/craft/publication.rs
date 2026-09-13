@@ -41,10 +41,15 @@ impl Core {
 struct CraftInstallations<'a>(&'a Core);
 
 impl EffectAdapter for CraftInstallations<'_> {
+	#[expect(
+		clippy::await_holding_invalid_type,
+		reason = "publication fence keeps Recovery snapshots consistent with installed Craft metadata"
+	)]
 	async fn execute(&mut self, effect: &Effect) -> EffectResult {
 		let Some(plan) = load_plan(self.0, effect.effect_id).await else {
 			return EffectResult::Failed;
 		};
+		let _publication = self.0.craft_artifact_publication.lock().await;
 		let home = self.0.run_home().join("crafts");
 		let effect_id = effect.effect_id;
 		crate::filesystem::blocking(move || publish(&home, effect_id, &plan))
