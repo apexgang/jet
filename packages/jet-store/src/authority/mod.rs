@@ -12,8 +12,9 @@
 mod fence;
 mod transfer;
 
-pub use fence::{AuthorityFenceRecord, AuthorityFences, PendingFence};
-pub(crate) use fence::{append, read};
+pub(crate) use fence::{
+	AuthorityFenceRecord, AuthorityFences, PendingFence, append, read,
+};
 pub use transfer::{
 	NewPlaneTransfer, PlaneTransferPhase, PlaneTransferRecord,
 	PlaneTransferRole,
@@ -27,7 +28,7 @@ use sqlx::SqlitePool;
 pub enum AuthorityState {
 	/// This Plane is its Home Plane.
 	Home,
-	/// A validated Prepared transfer: this Plane holds a copy that cannot
+	/// A validated Prepared transfer: this Plane holds it but cannot
 	/// run work or fire schedules until its source relinquishes.
 	Prepared,
 	/// This Plane retired its authority through a fence; what remains is
@@ -37,8 +38,7 @@ pub enum AuthorityState {
 
 impl AuthorityState {
 	/// The durable spelling.
-	#[must_use]
-	pub fn as_str(self) -> &'static str {
+	pub(crate) fn as_str(self) -> &'static str {
 		match self {
 			Self::Home => "home",
 			Self::Prepared => "prepared",
@@ -63,7 +63,7 @@ impl AuthorityState {
 pub struct AuthorityRecord {
 	/// Who owns the Conversation here.
 	pub state: AuthorityState,
-	/// The epoch this Plane's copy belongs to, from one.
+	/// The epoch this Plane holds it in, from one.
 	pub epoch: u64,
 }
 
@@ -241,8 +241,7 @@ mod tests {
 			store
 				.read(async |tx| tx.plane_transfer(transfer.transfer_id).await)
 				.await
-				.unwrap()
-				.map(|record| (record.phase, record.settled_at_unix_ms)),
+				.unwrap(),
 		);
 		let fences = store.authority_fences().unwrap();
 		let header = fs::read_to_string(
@@ -281,10 +280,11 @@ mod tests {
 						trashed_at_unix_ms: NOW_UNIX_MS + 1,
 						expires_at_unix_ms: NOW_UNIX_MS + 1 + 30 * DAY_MS,
 					}),
-					Some((
-						PlaneTransferPhase::Relinquished,
-						Some(NOW_UNIX_MS + 1)
-					)),
+					Some(PlaneTransferRecord {
+						phase: PlaneTransferPhase::Relinquished,
+						settled_at_unix_ms: Some(NOW_UNIX_MS + 1),
+						..transfer.clone()
+					}),
 				),
 				AuthorityFences::Verified(vec![AuthorityFenceRecord {
 					sequence: 1,
@@ -380,6 +380,75 @@ mod tests {
 		);
 	}
 
+	/// A relinquish retried after a crash between the fence and its commit
+	/// finishes the transfer, tombstone included, without raising the
+	/// fence a second time.
+	#[tokio::test]
+	async fn a_relinquish_retried_after_a_fence_crash_raises_no_second_fence() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("plane.sqlite3");
+		let store = Store::open(&path).await.unwrap();
+		let plane_id = store.plane().await.unwrap().plane_id;
+		let conversation_id = Uuid::now_v7();
+		let target = Uuid::now_v7();
+		converse(&store, conversation_id).await;
+		let transfer = prepare(&store, conversation_id, target).await;
+		append(
+			&path,
+			plane_id,
+			0,
+			&[PendingFence {
+				fenced_at_unix_ms: NOW_UNIX_MS + 1,
+				conversation_id,
+				retired_epoch: 1,
+				transfer_id: transfer.transfer_id,
+				target_plane_id: target,
+			}],
+		)
+		.unwrap();
+		store.close().await;
+
+		let store = Store::open(&path).await.unwrap();
+		store
+			.write(async |tx| {
+				tx.relinquish_plane_transfer(
+					&transfer,
+					NOW_UNIX_MS + 2,
+					NOW_UNIX_MS + 3,
+				)
+				.await
+			})
+			.await
+			.unwrap();
+
+		assert_eq!(
+			(
+				store.authority_fences().unwrap().trusted().unwrap().len(),
+				store
+					.read(async |tx| tx.trash_entry(conversation_id).await)
+					.await
+					.unwrap(),
+				store
+					.read(async |tx| tx
+						.plane_transfer(transfer.transfer_id)
+						.await)
+					.await
+					.unwrap()
+					.map(|record| record.phase),
+			),
+			(
+				1,
+				Some(TrashRecord {
+					conversation_id,
+					reason: TrashReasonRecord::Transferred,
+					trashed_at_unix_ms: NOW_UNIX_MS + 2,
+					expires_at_unix_ms: NOW_UNIX_MS + 3,
+				}),
+				Some(PlaneTransferPhase::Relinquished),
+			)
+		);
+	}
+
 	/// Fences that cannot be trusted refuse a restoration, because the
 	/// snapshot may still claim an authority nothing else remembers
 	/// retiring, and refuse a new relinquishment (ADR-0070).
@@ -410,7 +479,9 @@ mod tests {
 			crate::evidence::recovery_dir(&path).join("plane.sqlite3.fences"),
 		)
 		.unwrap();
-		let again = prepare(&store, conversation_id, Uuid::now_v7()).await;
+		let other = Uuid::now_v7();
+		converse(&store, other).await;
+		let again = prepare(&store, other, Uuid::now_v7()).await;
 		let refused = store
 			.write(async |tx| {
 				tx.relinquish_plane_transfer(

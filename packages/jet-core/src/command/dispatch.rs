@@ -176,6 +176,13 @@ pub(super) async fn execute_new(
 			expected_revision,
 			name,
 		} => {
+			// A name given after the bundle was prepared would not travel
+			// with it, so a frozen or foreign Conversation keeps its name.
+			crate::plane_transfer::require_authoritative_id(
+				tx,
+				conversation_id,
+			)
+			.await?;
 			crate::conversation::name::set_conversation(
 				tx,
 				actor,

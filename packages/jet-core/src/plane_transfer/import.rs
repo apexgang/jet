@@ -201,7 +201,7 @@ pub(crate) async fn record(
 		.ok_or_else(bundle::invalid_bundle)?;
 	if let Some(existing) = tx.conversation(conversation_id.0).await? {
 		// The Conversation lived here before and left; its tombstone gives
-		// way to the copy coming back in a later epoch.
+		// way to the Conversation coming back in a later epoch.
 		if existing.authority.state != AuthorityState::Relinquished
 			|| existing.authority.epoch >= epoch
 		{

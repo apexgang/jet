@@ -17,7 +17,7 @@ created on a Plane is `home` there in epoch 1. A transfer retires the
 source's epoch and opens the next one on the target; a Conversation moved
 twice is in epoch 3 wherever it ends up. The epoch is what the fence
 names, so a Conversation that later comes back to a Plane it left is not
-the copy that Plane fenced.
+the one that Plane fenced.
 
 | Authority | Meaning | New work |
 |-----------|---------|----------|
@@ -25,8 +25,9 @@ the copy that Plane fenced.
 | `prepared` | a validated import, waiting for its source to relinquish | refused |
 | `relinquished` | the Transfer tombstone left after relinquishing | refused |
 
-Run admission, turn admission from every source, dispatch of queued turns,
-and schedule firing all ask the same question first. A refused Command
+Run creation and admission, turn admission from every source, dispatch of
+queued turns, schedule firing, and renaming all ask the same question
+first. A refused Command
 answers `conversation.not_authoritative` or, for a source that has prepared
 a transfer, `conversation.transfer_prepared`; a schedule or a dispatch
 simply waits, and fires once the transfer is committed on the new Home
@@ -39,7 +40,9 @@ Conversation and the target Plane. It refuses a Conversation that is not
 this Plane's own (`conversation.not_authoritative`), a target that is this
 Plane (`transfer.same_plane`), live work, a Run that has not ended or a
 queued turn (`transfer.live_work`), and a transfer already prepared to
-another target (`transfer.in_progress`). It records the transfer with the
+another target (`transfer.in_progress`), and one in Jet Trash
+(`transfer.trashed`); while it stays prepared, forgetting or deleting the
+Conversation here is refused too (`conversation.transfer_prepared`). It records the transfer with the
 bundle's SHA-256, which freezes the Conversation, and returns the transfer
 and the bundle. The bundle is never receipted: a second prepare of the
 same Conversation to the same target reads the frozen Conversation again,
@@ -65,7 +68,8 @@ Settings, and its Artifact references, and the transfer itself. The
 Conversation continues in the named Project's Local checkout; a managed
 Workspace is not created for it, and its origin is recorded as new, with
 provenance in the transfer record and the journal. A Conversation this
-Plane relinquished earlier gives up its tombstone to the copy coming back;
+Plane relinquished earlier gives up its tombstone to the Conversation
+coming back in a later epoch;
 one it holds in any other authority refuses the import
 (`transfer.conversation_exists`). The same bundle imported again answers
 the same transfer.
@@ -83,14 +87,15 @@ Relinquishing again answers the same fence.
 the bundle hash, and the fence. The fence must name exactly this transfer,
 this Conversation, the epoch being retired, this Plane as its target, and
 the source the bundle was prepared from (`transfer.fence_invalid`). The
-copy becomes `home` in the next epoch, the transfer settles, and schedules
+Prepared transfer becomes `home` in the next epoch, the transfer settles,
+and schedules
 and queued turns resume. Committing again answers again.
 
 **Abort**, on the source: `abort_plane_transfer` forgets a transfer this
 Plane prepared and has not relinquished, and the Conversation takes new
 work again. After relinquishing there is nothing to abort
-(`transfer.relinquished`). A target's Prepared copy is not aborted; it is
-forgotten through Jet Trash like any Conversation.
+(`transfer.relinquished`). A target's Prepared transfer is not aborted; it
+is forgotten through Jet Trash like any Conversation.
 
 Every step is recorded in the journal as `conversation.transfer_prepared`,
 `conversation.transfer_imported`, `conversation.transfer_relinquished`,
@@ -128,7 +133,9 @@ says which fences it predates and a ledger gone missing is noticed.
 Every open of an authoritative store reapplies the fences: a Conversation
 still claiming a fenced epoch as `home` is set to `relinquished`. That is
 what a restored snapshot from before the transfer meets, and what a crash
-between the fence and its commit leaves for the next open to finish.
+between the fence and its commit leaves for the next open to finish; a
+relinquish retried after such a crash settles the transfer and leaves the
+tombstone without raising the fence a second time.
 Fences that cannot be trusted, because the file or its head is missing or
 altered, refuse a snapshot restoration and any new relinquishment, as a
 corrupt Deletion ledger does. The fence is content-free and permanent: the

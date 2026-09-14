@@ -21,8 +21,7 @@ pub enum PlaneTransferRole {
 
 impl PlaneTransferRole {
 	/// The durable spelling.
-	#[must_use]
-	pub fn as_str(self) -> &'static str {
+	pub(crate) fn as_str(self) -> &'static str {
 		match self {
 			Self::Source => "source",
 			Self::Target => "target",
@@ -52,8 +51,7 @@ pub enum PlaneTransferPhase {
 
 impl PlaneTransferPhase {
 	/// The durable spelling.
-	#[must_use]
-	pub fn as_str(self) -> &'static str {
+	pub(crate) fn as_str(self) -> &'static str {
 		match self {
 			Self::Prepared => "prepared",
 			Self::Relinquished => "relinquished",
@@ -85,8 +83,8 @@ pub struct PlaneTransferRecord {
 	pub role: PlaneTransferRole,
 	/// How far it has come here.
 	pub phase: PlaneTransferPhase,
-	/// The source's epoch, which the transfer retires; the target's copy
-	/// is in the epoch after it.
+	/// The source's epoch, which the transfer retires; the target holds
+	/// the epoch after it.
 	pub retired_epoch: u64,
 	/// The other Plane.
 	pub peer_plane_id: Uuid,
@@ -329,7 +327,7 @@ impl WriteTransaction {
 	}
 
 	/// Forgets a transfer that was prepared and then abandoned before the
-	/// source relinquished, and says whether it was there.
+	/// source relinquished.
 	///
 	/// # Errors
 	///
@@ -337,16 +335,15 @@ impl WriteTransaction {
 	pub async fn delete_plane_transfer(
 		&mut self,
 		transfer_id: Uuid,
-	) -> Result<bool, StoreError> {
+	) -> Result<(), StoreError> {
 		let transfer_id = transfer_id.to_string();
-		let removed = sqlx::query!(
+		sqlx::query!(
 			"DELETE FROM plane_transfers WHERE transfer_id = ?1",
 			transfer_id
 		)
 		.execute(self.connection())
-		.await?
-		.rows_affected();
-		Ok(removed > 0)
+		.await?;
+		Ok(())
 	}
 
 	/// Relinquishes the authority of a source transfer: raises the fence
@@ -364,6 +361,19 @@ impl WriteTransaction {
 		now_unix_ms: i64,
 		tombstone_expires_at_unix_ms: i64,
 	) -> Result<(), StoreError> {
+		// A fence the ledger already holds, reapplied at open after a crash
+		// between it and its commit, is not raised twice: this transaction
+		// finishes what that one did not.
+		let already_fenced = self
+			.conversation(transfer.conversation_id)
+			.await?
+			.is_some_and(|conversation| {
+				conversation.authority
+					== AuthorityRecord {
+						state: AuthorityState::Relinquished,
+						epoch: transfer.retired_epoch,
+					}
+			});
 		self.set_conversation_authority(
 			transfer.conversation_id,
 			AuthorityRecord {
@@ -385,13 +395,15 @@ impl WriteTransaction {
 			expires_at_unix_ms: tombstone_expires_at_unix_ms,
 		})
 		.await?;
-		self.record_fence(PendingFence {
-			fenced_at_unix_ms: now_unix_ms,
-			conversation_id: transfer.conversation_id,
-			retired_epoch: transfer.retired_epoch,
-			transfer_id: transfer.transfer_id,
-			target_plane_id: transfer.peer_plane_id,
-		});
+		if !already_fenced {
+			self.record_fence(PendingFence {
+				fenced_at_unix_ms: now_unix_ms,
+				conversation_id: transfer.conversation_id,
+				retired_epoch: transfer.retired_epoch,
+				transfer_id: transfer.transfer_id,
+				target_plane_id: transfer.peer_plane_id,
+			});
+		}
 		Ok(())
 	}
 }

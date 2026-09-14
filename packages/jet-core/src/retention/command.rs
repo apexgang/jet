@@ -252,6 +252,10 @@ async fn require_unstaged(
 			"the Conversation is already in Jet Trash",
 		));
 	}
+	// A source frozen for a Plane transfer is on its way out through the
+	// transfer, not through Jet Trash; a Prepared transfer may be
+	// forgotten like any Conversation (ADR-0070).
+	crate::plane_transfer::require_not_frozen(tx, conversation_id).await?;
 	Ok(protections)
 }
 

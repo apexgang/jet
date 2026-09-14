@@ -17,10 +17,10 @@ pub use autodelete::{
 mod audit;
 pub use audit::actor::AuditActorRecord;
 mod authority;
+pub(crate) use authority::AuthorityFences;
 pub use authority::{
-	AuthorityFenceRecord, AuthorityFences, AuthorityRecord, AuthorityState,
-	NewPlaneTransfer, PendingFence, PlaneTransferPhase, PlaneTransferRecord,
-	PlaneTransferRole,
+	AuthorityRecord, AuthorityState, NewPlaneTransfer, PlaneTransferPhase,
+	PlaneTransferRecord, PlaneTransferRole,
 };
 mod checkpoint;
 mod command;
@@ -393,7 +393,9 @@ impl Store {
 	/// # Errors
 	///
 	/// Returns [`StoreError::Unavailable`] when the files cannot be read.
-	pub fn authority_fences(&self) -> Result<AuthorityFences, StoreError> {
+	pub(crate) fn authority_fences(
+		&self,
+	) -> Result<AuthorityFences, StoreError> {
 		let opened = self.opened();
 		authority::read(
 			&self.database,

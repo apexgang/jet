@@ -219,6 +219,13 @@ async fn plan(
 			 withdraw them before moving its Home Plane",
 		));
 	}
+	if tx.trash_entry(conversation_id.0).await?.is_some() {
+		return Err(CoreError::conflict(
+			"transfer.trashed",
+			"the Conversation is in Jet Trash; restore it before moving \
+			 its Home Plane",
+		));
+	}
 	Ok(Planned {
 		transfer: PlaneTransferRecord {
 			transfer_id: Uuid::now_v7(),

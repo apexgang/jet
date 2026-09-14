@@ -214,7 +214,7 @@ pub(crate) async fn commit(
 
 /// The source gives up a transfer it prepared and has not relinquished:
 /// the record goes, and the Conversation takes new work again. A target's
-/// Prepared copy is not aborted here; it is forgotten through Jet Trash
+/// Prepared transfer is not aborted here; it is forgotten through Jet Trash
 /// like any Conversation.
 pub(crate) async fn abort(
 	tx: &mut WriteTransaction,

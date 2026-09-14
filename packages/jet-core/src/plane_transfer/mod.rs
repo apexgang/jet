@@ -4,11 +4,11 @@
 //! The source prepares a bundle of the Conversation's durable state and
 //! records the transfer, which freezes the Conversation there: no new
 //! work is admitted and its schedules wait. The target imports the bundle
-//! transactionally as a Prepared transfer, a copy that cannot run work or
-//! fire schedules. The source then relinquishes, raising a permanent,
+//! transactionally as a Prepared transfer, which cannot run work or fire
+//! schedules. The source then relinquishes, raising a permanent,
 //! content-free Authority fence before its commit and leaving its content
 //! as a thirty-day Transfer tombstone in Jet Trash. Only with that fence
-//! in hand does the target commit, and only then is its copy the Home
+//! in hand does the target commit, and only then is the target the Home
 //! Plane, in the epoch after the one the source retired. Every step is
 //! retryable by the same identity and bundle hash; a prepared transfer
 //! the source abandons is aborted explicitly.
@@ -69,8 +69,8 @@ pub struct PlaneTransfer {
 	pub role: TransferRole,
 	/// How far it has come here.
 	pub phase: TransferPhase,
-	/// The source's epoch, which the transfer retires; the target's copy
-	/// is in the epoch after it.
+	/// The source's epoch, which the transfer retires; the target holds
+	/// the epoch after it.
 	pub retired_epoch: u64,
 	/// The other Plane.
 	pub peer_plane_id: PlaneId,
@@ -149,7 +149,7 @@ pub(crate) const TOMBSTONE_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 /// # Errors
 ///
 /// Returns `conversation.not_authoritative` for a Prepared or
-/// relinquished copy and `conversation.transfer_prepared` for a frozen
+/// relinquished Conversation and `conversation.transfer_prepared` for a frozen
 /// source, and a store category [`CoreError`] when the rows cannot be
 /// read.
 pub(crate) async fn require_authoritative(
@@ -162,14 +162,22 @@ pub(crate) async fn require_authoritative(
 			return Err(not_authoritative());
 		}
 	}
-	if let Some(transfer) =
-		tx.open_plane_transfer(conversation.conversation_id).await?
+	require_not_frozen(tx, ConversationId(conversation.conversation_id)).await
+}
+
+/// Whether `conversation_id` is frozen as the source of a prepared
+/// transfer, whatever its authority says.
+pub(crate) async fn require_not_frozen(
+	tx: &mut ReadTransaction,
+	conversation_id: ConversationId,
+) -> Result<(), CoreError> {
+	if let Some(transfer) = tx.open_plane_transfer(conversation_id.0).await?
 		&& transfer.role == PlaneTransferRole::Source
 	{
 		return Err(CoreError::conflict(
 			"conversation.transfer_prepared",
 			"the Conversation is prepared for a Plane transfer; commit it \
-			 on the target or abort it before admitting new work",
+			 on the target or abort it before changing it here",
 		));
 	}
 	Ok(())
@@ -477,7 +485,7 @@ mod tests {
 	}
 
 	/// The whole transfer, phase by phase: the source freezes and bundles,
-	/// the target imports a copy that admits no work, the source fences
+	/// the target imports a Prepared transfer that admits no work, the source fences
 	/// and keeps a tombstone, the target commits into the next epoch and
 	/// takes work, and the source takes none (ADR-0070).
 	#[tokio::test]
@@ -512,6 +520,8 @@ mod tests {
 			relinquish(&source, &prepared.transfer).await.unwrap();
 		let committed =
 			commit(&target, &imported, fence.clone()).await.unwrap();
+		let committed_again =
+			commit(&target, &imported, fence.clone()).await.unwrap();
 		let target_runs = target
 			.store
 			.read(async |tx| tx.runs(conversation_id.0).await)
@@ -544,17 +554,10 @@ mod tests {
 				(
 					prepared.transfer.role,
 					prepared.transfer.phase,
-					again.transfer.transfer_id,
-					again.bundle == prepared.bundle,
+					again.clone(),
 					frozen_source.code,
 				),
-				(
-					(imported.role, imported.phase, imported.retired_epoch),
-					imported.peer_plane_id,
-					imported.bundle_sha256 == prepared.transfer.bundle_sha256,
-					frozen_target.code,
-					forged.code,
-				),
+				(imported.clone(), frozen_target.code, forged.code,),
 				(
 					(
 						fence.retired_epoch,
@@ -562,6 +565,7 @@ mod tests {
 						fence.target_plane_id
 					),
 					fence_again,
+					committed_again,
 					(committed.phase, committed.settled_at.is_some()),
 					authority(&target, conversation_id).await,
 					authority(&source, conversation_id).await,
@@ -584,20 +588,23 @@ mod tests {
 				(
 					TransferRole::Source,
 					TransferPhase::Prepared,
-					prepared.transfer.transfer_id,
-					true,
+					prepared.clone(),
 					"conversation.transfer_prepared".to_string(),
 				),
 				(
-					(TransferRole::Target, TransferPhase::Prepared, 1),
-					source_id,
-					true,
+					PlaneTransfer {
+						role: TransferRole::Target,
+						peer_plane_id: source_id,
+						prepared_at: imported.prepared_at,
+						..prepared.transfer.clone()
+					},
 					"conversation.not_authoritative".to_string(),
 					"transfer.fence_invalid".to_string(),
 				),
 				(
 					(1, source_id, target_id),
 					fence.clone(),
+					committed.clone(),
 					(TransferPhase::Committed, true),
 					AuthorityRecord {
 						state: jet_store::AuthorityState::Home,
@@ -708,6 +715,57 @@ mod tests {
 				},
 				true,
 				"transfer.not_found".to_string(),
+			)
+		);
+	}
+
+	/// A Conversation can come back to a Plane it left: its tombstone there
+	/// gives way to the returning Conversation in a later epoch, and the
+	/// fence that retired epoch 1 leaves epoch 3 alone. While a transfer is
+	/// prepared, the source refuses to forget the Conversation.
+	#[tokio::test]
+	async fn a_conversation_returns_to_the_plane_it_left_in_a_later_epoch() {
+		let dir = tempfile::tempdir().unwrap();
+		let (source, target, source_id, target_id) = planes(&dir).await;
+		let conversation_id = converse(&source).await;
+		let away = prepare(&source, conversation_id, target_id).await.unwrap();
+		let forget_refused = source
+			.execute(
+				&actor(),
+				request(Command::ForgetConversation { conversation_id }),
+			)
+			.await
+			.unwrap_err();
+		let imported = import(&target, away.bundle.clone()).await.unwrap();
+		let fence = relinquish(&source, &away.transfer).await.unwrap();
+		commit(&target, &imported, fence).await.unwrap();
+
+		let back = prepare(&target, conversation_id, source_id).await.unwrap();
+		let imported = import(&source, back.bundle.clone()).await.unwrap();
+		let fence = relinquish(&target, &back.transfer).await.unwrap();
+		let committed = commit(&source, &imported, fence).await.unwrap();
+		let source_works = submit(&source, conversation_id).await.is_ok();
+
+		assert_eq!(
+			(
+				forget_refused.code,
+				committed.retired_epoch,
+				authority(&source, conversation_id).await,
+				authority(&target, conversation_id).await,
+				source_works,
+			),
+			(
+				"conversation.transfer_prepared".to_string(),
+				2,
+				AuthorityRecord {
+					state: jet_store::AuthorityState::Home,
+					epoch: 3,
+				},
+				AuthorityRecord {
+					state: jet_store::AuthorityState::Relinquished,
+					epoch: 2,
+				},
+				true,
 			)
 		);
 	}
