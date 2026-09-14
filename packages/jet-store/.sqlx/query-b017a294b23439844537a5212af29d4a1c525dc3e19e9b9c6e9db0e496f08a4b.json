@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM plane_transfers WHERE transfer_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "b017a294b23439844537a5212af29d4a1c525dc3e19e9b9c6e9db0e496f08a4b"
+}

@@ -24,6 +24,20 @@ pub enum CommandOutcome {
 	RecoveredBundle(crate::RecoveredBundle),
 	/// Portable encrypted bytes, returned directly and never stored in receipts.
 	RecoveryBundle(Vec<u8>),
+	/// A Plane transfer prepared here, with the bundle the target imports;
+	/// returned directly and never stored in receipts (ADR-0070).
+	PlaneTransferPrepared(crate::PreparedPlaneTransfer),
+	/// A bundle imported here as a Prepared transfer.
+	PlaneTransferImported(crate::PlaneTransfer),
+	/// This Plane retired its authority; the fence the target validates.
+	PlaneTransferRelinquished(crate::AuthorityFence),
+	/// This Plane took authority in the epoch after the retired one.
+	PlaneTransferCommitted(crate::PlaneTransfer),
+	/// A prepared transfer was abandoned here before relinquishing.
+	PlaneTransferAborted {
+		/// The transfer that was abandoned.
+		transfer_id: crate::PlaneTransferId,
+	},
 	/// A user released the uncertainty barrier; Git was not changed.
 	GitDeliveryAcknowledged {
 		/// Exact Effect identity.

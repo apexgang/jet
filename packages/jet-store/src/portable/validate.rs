@@ -74,6 +74,8 @@ pub(super) async fn columns(
 				"fork_source_conversation_id",
 				"fork_source_run_id",
 				"fork_checkpoint_turn",
+				"authority",
+				"authority_epoch",
 			],
 		),
 		(

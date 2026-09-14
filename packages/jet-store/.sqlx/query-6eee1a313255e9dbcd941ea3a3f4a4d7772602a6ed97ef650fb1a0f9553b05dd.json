@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sha256, size FROM artifact_references WHERE run_id = ?1\n\t\t\t ORDER BY sha256",
+  "describe": {
+    "columns": [
+      {
+        "name": "sha256",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "artifact_references",
+            "name": "sha256"
+          }
+        }
+      },
+      {
+        "name": "size",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "artifact_references",
+            "name": "size"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "6eee1a313255e9dbcd941ea3a3f4a4d7772602a6ed97ef650fb1a0f9553b05dd"
+}

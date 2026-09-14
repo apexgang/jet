@@ -15,7 +15,6 @@
 //! code already running as the same operating-system user (ADR-0105). What
 //! they make visible is a store that was put back to before a deletion.
 
-mod files;
 mod ledger;
 mod purge;
 mod reapply;
@@ -39,7 +38,8 @@ pub(crate) struct PendingDeletion {
 
 #[cfg(test)]
 mod tests {
-	use super::{files::recovery_dir, *};
+	use super::*;
+	use crate::evidence::recovery_dir;
 	use crate::{
 		NewPairedClient, PairingKeyAlgorithm, SnapshotReason, Store,
 		StoreError, StoreIntegrity,

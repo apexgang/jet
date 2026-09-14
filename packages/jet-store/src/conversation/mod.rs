@@ -35,6 +35,8 @@ struct Row {
 	fork_checkpoint_turn: Option<i64>,
 	name: Option<String>,
 	name_source: Option<String>,
+	authority: String,
+	authority_epoch: i64,
 	created_at_unix_ms: i64,
 }
 
@@ -55,7 +57,7 @@ impl ReadTransaction {
 				working_tree, project_id, import_id,
 				fork_source_conversation_id, fork_source_run_id,
 				fork_checkpoint_turn, name, name_source,
-				created_at_unix_ms
+				authority, authority_epoch, created_at_unix_ms
 			 FROM conversations
 			 WHERE conversation_id = ?1"#,
 			conversation_id
@@ -79,7 +81,7 @@ impl ReadTransaction {
 				working_tree, project_id, import_id,
 				fork_source_conversation_id, fork_source_run_id,
 				fork_checkpoint_turn, name, name_source,
-				created_at_unix_ms
+				authority, authority_epoch, created_at_unix_ms
 			 FROM conversations
 			 ORDER BY rowid"#
 		)
@@ -115,7 +117,7 @@ impl ReadTransaction {
 				working_tree, project_id, import_id,
 				fork_source_conversation_id, fork_source_run_id,
 				fork_checkpoint_turn, name, name_source,
-				created_at_unix_ms
+				authority, authority_epoch, created_at_unix_ms
 			 FROM conversations
 			 WHERE rowid > ?1 ORDER BY rowid LIMIT ?2"#,
 			after,
@@ -141,6 +143,8 @@ impl ReadTransaction {
 						fork_checkpoint_turn: row.fork_checkpoint_turn,
 						name: row.name,
 						name_source: row.name_source,
+						authority: row.authority,
+						authority_epoch: row.authority_epoch,
 						created_at_unix_ms: row.created_at_unix_ms,
 					})?,
 				))
@@ -171,6 +175,7 @@ impl WriteTransaction {
 			working_tree: conversation.working_tree,
 			origin: conversation.origin,
 			name: fallback_name(conversation.conversation_id),
+			authority: crate::AuthorityRecord::HOME,
 			created_at_unix_ms: conversation.created_at_unix_ms,
 		};
 		let conversation_id = record.conversation_id.to_string();
@@ -272,6 +277,10 @@ fn read_row(row: Row) -> Result<ConversationRecord, StoreError> {
 			row.name,
 			row.name_source.as_deref(),
 			fallback_name(conversation_id),
+		)?,
+		authority: crate::AuthorityRecord::parse(
+			&row.authority,
+			row.authority_epoch,
 		)?,
 		created_at_unix_ms: row.created_at_unix_ms,
 	})

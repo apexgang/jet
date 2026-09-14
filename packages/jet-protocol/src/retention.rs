@@ -23,6 +23,9 @@ pub enum TrashReason {
 	/// An approved Autodelete rule separately authorized to delete
 	/// everywhere matched it. Needs minor 40.
 	AutodeleteEverywhere,
+	/// Its Home Plane authority moved to another Plane; the content stays
+	/// as the Transfer tombstone. Needs minor 42.
+	PlaneTransfer,
 }
 
 /// One Conversation in Jet Trash: why it is there and how long it stays.

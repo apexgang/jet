@@ -13,7 +13,11 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 41;
+pub const PROTOCOL_MINOR: u32 = 42;
+
+/// Plane transfer: preparing, importing, relinquishing, and committing a
+/// Conversation's Home Plane, and the Transfer tombstone Trash reason.
+pub const PLANE_TRANSFER_MINOR: u32 = 42;
 
 /// Project removal: the removal preview Query and the bound, typed-name
 /// `remove_project` Command with its two disposals.

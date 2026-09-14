@@ -197,6 +197,18 @@ pub enum AuditDecision {
 	AutodeleteEverywhereAuthorized,
 	/// An owner removed a rule.
 	AutodeleteRuleDeleted,
+	/// A Conversation was frozen and bundled to move its Home Plane
+	/// (ADR-0070).
+	PlaneTransferPrepared,
+	/// A bundle was imported as a Prepared transfer that cannot run.
+	PlaneTransferImported,
+	/// This Plane retired a Conversation authority behind a fence.
+	PlaneTransferRelinquished,
+	/// This Plane took a Conversation's authority after validating its
+	/// fence.
+	PlaneTransferCommitted,
+	/// A prepared transfer was abandoned before relinquishing.
+	PlaneTransferAborted,
 }
 
 /// What a decision is about. The core turns each one into the durable kind

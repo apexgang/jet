@@ -17,6 +17,13 @@ pub(crate) fn command_outcome(
 		| CommandOutcome::RecoveryBundle(_) => {
 			unreachable!("Recovery bundles use the core binary interface")
 		}
+		CommandOutcome::PlaneTransferPrepared(_)
+		| CommandOutcome::PlaneTransferImported(_)
+		| CommandOutcome::PlaneTransferRelinquished(_)
+		| CommandOutcome::PlaneTransferCommitted(_)
+		| CommandOutcome::PlaneTransferAborted { .. } => {
+			unreachable!("Plane transfers use the core binary interface")
+		}
 		CommandOutcome::GitDeliveryAcknowledged { delivery_id } => {
 			wire::CommandResponse::GitDeliveryAcknowledged { delivery_id }
 		}

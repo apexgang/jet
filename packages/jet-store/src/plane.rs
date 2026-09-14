@@ -96,6 +96,39 @@ pub(crate) async fn record_deletions_applied(
 	Ok(())
 }
 
+/// How many Authority-fence records the store behind `executor` has
+/// applied; it travels with every snapshot like the deletion count
+/// (ADR-0070).
+pub(crate) async fn fences_applied(
+	executor: impl SqliteExecutor<'_>,
+) -> Result<u64, StoreError> {
+	let applied = sqlx::query_scalar!(
+		"SELECT fences_applied FROM plane WHERE singleton = 1"
+	)
+	.fetch_one(executor)
+	.await?;
+	u64::try_from(applied)
+		.map_err(|_| StoreError::Integrity("fences_applied is negative".into()))
+}
+
+/// Records that the store behind `executor` has applied the fences up to
+/// `applied`, inside whatever transaction the caller holds.
+pub(crate) async fn record_fences_applied(
+	executor: impl SqliteExecutor<'_>,
+	applied: u64,
+) -> Result<(), StoreError> {
+	let applied = i64::try_from(applied).map_err(|_| {
+		StoreError::Integrity("fences_applied overflows".into())
+	})?;
+	sqlx::query!(
+		"UPDATE plane SET fences_applied = ?1 WHERE singleton = 1",
+		applied
+	)
+	.execute(executor)
+	.await?;
+	Ok(())
+}
+
 pub(crate) async fn record_daemon_start(
 	pool: &SqlitePool,
 ) -> Result<PlaneRecord, StoreError> {

@@ -55,6 +55,11 @@ impl AuditDecision {
 				"autodelete.everywhere_authorized"
 			}
 			Self::AutodeleteRuleDeleted => "autodelete.rule_deleted",
+			Self::PlaneTransferPrepared => "transfer.prepared",
+			Self::PlaneTransferImported => "transfer.imported",
+			Self::PlaneTransferRelinquished => "transfer.relinquished",
+			Self::PlaneTransferCommitted => "transfer.committed",
+			Self::PlaneTransferAborted => "transfer.aborted",
 			Self::PairingGateOpened => "pairing.gate_opened",
 			Self::PairingGateClosed => "pairing.gate_closed",
 			Self::PairingOffered => "pairing.offered",
@@ -154,6 +159,13 @@ impl AuditDecision {
 			Self::AutodeleteRuleCompiled
 			| Self::AutodeleteRuleEdited
 			| Self::AutodeleteRuleDeleted => AuditRisk::Routine,
+			// Relinquishing retires an authority for good; the rest of a
+			// transfer is reversible or adds nothing this Plane can lose.
+			Self::PlaneTransferRelinquished => AuditRisk::Destructive,
+			Self::PlaneTransferPrepared
+			| Self::PlaneTransferImported
+			| Self::PlaneTransferCommitted
+			| Self::PlaneTransferAborted => AuditRisk::Elevated,
 			// Shortening the grace period brings deletions forward.
 			Self::TrashGraceChanged => AuditRisk::Elevated,
 			Self::ConversationRestored | Self::TrashGraceCleared => {

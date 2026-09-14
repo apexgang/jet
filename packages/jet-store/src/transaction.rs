@@ -6,6 +6,7 @@
 use crate::{
 	Store, StoreError,
 	audit::head::{self as audit_head, AuditHead},
+	authority::{self, PendingFence},
 	deletion::{self, PendingDeletion},
 	plane,
 };
@@ -29,6 +30,11 @@ pub struct WriteTransaction {
 	/// Deletion ledger just before the commit, so no deletion is
 	/// acknowledged that a restoration could undo (ADR-0102).
 	deletions: Vec<PendingDeletion>,
+	/// The Conversation authorities this transaction has retired. They
+	/// reach the Authority fences just before the commit, so no
+	/// relinquishment is acknowledged that a restoration could undo
+	/// (ADR-0070).
+	fences: Vec<PendingFence>,
 }
 
 impl WriteTransaction {
@@ -42,6 +48,11 @@ impl WriteTransaction {
 	/// removes an identity a restoration could bring back calls this.
 	pub(crate) fn record_deletion(&mut self, deletion: PendingDeletion) {
 		self.deletions.push(deletion);
+	}
+
+	/// Records a retired authority for the fences.
+	pub(crate) fn record_fence(&mut self, fence: PendingFence) {
+		self.fences.push(fence);
 	}
 }
 
@@ -123,6 +134,7 @@ impl Store {
 			read: ReadTransaction { transaction },
 			audit_head: None,
 			deletions: vec![],
+			fences: vec![],
 		};
 		match work(&mut transaction).await {
 			Ok(value) => {
@@ -167,6 +179,40 @@ impl Store {
 					}
 					ledgered = Some(applied);
 				}
+				// The fences precede the commit for the same reason
+				// (ADR-0070).
+				let mut fenced = None;
+				if !transaction.fences.is_empty() {
+					let applied = match plane::fences_applied(
+						transaction.read.connection(),
+					)
+					.await
+					.and_then(|applied| {
+						authority::append(
+							&self.database,
+							self.plane_id(),
+							applied,
+							&transaction.fences,
+						)
+					}) {
+						Ok(applied) => applied,
+						Err(error) => {
+							let _ =
+								transaction.read.transaction.rollback().await;
+							return Err(E::from(error));
+						}
+					};
+					if let Err(error) = plane::record_fences_applied(
+						transaction.read.connection(),
+						applied,
+					)
+					.await
+					{
+						let _ = transaction.read.transaction.rollback().await;
+						return Err(E::from(error));
+					}
+					fenced = Some(applied);
+				}
 				transaction
 					.read
 					.transaction
@@ -187,6 +233,12 @@ impl Store {
 						.write()
 						.expect("store state is not poisoned")
 						.deletions_applied = Some(applied);
+				}
+				if let Some(applied) = fenced {
+					self.opened
+						.write()
+						.expect("store state is not poisoned")
+						.fences_applied = Some(applied);
 				}
 				self.snapshots.mark_dirty();
 				Ok(value)

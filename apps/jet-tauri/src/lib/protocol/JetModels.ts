@@ -410,7 +410,7 @@ export type ToolAvailability = { status: "present"; version: string } | { status
 
 export type TrashEntry = { conversation_id: string; expires_at_unix_ms: number; reason: TrashReason; trashed_at_unix_ms: number };
 
-export type TrashReason = "manual_forget" | "automatic_forget" | "delete_everywhere" | "autodelete_rule" | "autodelete_everywhere";
+export type TrashReason = "manual_forget" | "automatic_forget" | "delete_everywhere" | "autodelete_rule" | "autodelete_everywhere" | "plane_transfer";
 
 export type Turn = { client_id: string; run_id?: string | null; sequence: string; source: TurnSource; state: TurnState; turn_id: string };
 

@@ -30,6 +30,9 @@ pub enum TrashReasonRecord {
 	/// An approved Autodelete rule separately authorized to delete
 	/// everywhere matched it.
 	AutodeleteEverywhere,
+	/// Its authority moved to another Plane; the content stays as the
+	/// Transfer tombstone until the grace period ends (ADR-0070).
+	Transferred,
 }
 
 impl TrashReasonRecord {
@@ -42,6 +45,7 @@ impl TrashReasonRecord {
 			Self::Everywhere => "everywhere",
 			Self::Autodelete => "autodelete",
 			Self::AutodeleteEverywhere => "autodelete_everywhere",
+			Self::Transferred => "transferred",
 		}
 	}
 
@@ -52,6 +56,7 @@ impl TrashReasonRecord {
 			Self::Everywhere,
 			Self::Autodelete,
 			Self::AutodeleteEverywhere,
+			Self::Transferred,
 		]
 		.into_iter()
 		.find(|reason| reason.as_str() == text)

@@ -4,7 +4,7 @@
 
 use crate::{
 	IntegrityFailure, IntegrityFailureReason, Opened, StoreError,
-	StoreIntegrity, deletion, migrations, plane, recovery,
+	StoreIntegrity, authority, deletion, migrations, plane, recovery,
 	snapshot::{self, SnapshotReason},
 };
 use sqlx::{
@@ -81,11 +81,22 @@ pub(crate) async fn connect(
 		snapshots.mark_dirty();
 		deletions_applied = plane::deletions_applied(&pool).await?;
 	}
+	// An authority the fences retired stays retired, for the same reasons
+	// (ADR-0070).
+	let mut fences_applied = plane::fences_applied(&pool).await?;
+	if let authority::AuthorityFences::Verified(records) =
+		authority::read(path, plane_id, fences_applied)?
+		&& authority::reapply(&pool, &records).await? > 0
+	{
+		snapshots.mark_dirty();
+		fences_applied = plane::fences_applied(&pool).await?;
+	}
 	Ok(Opened {
 		pool,
 		plane_id,
 		integrity: StoreIntegrity::Verified,
 		deletions_applied: Some(deletions_applied),
+		fences_applied: Some(fences_applied),
 	})
 }
 
@@ -127,6 +138,7 @@ async fn open_read_only(
 			.await
 			.map_or(Uuid::nil(), |plane| plane.plane_id),
 		deletions_applied: plane::deletions_applied(&pool).await.ok(),
+		fences_applied: plane::fences_applied(&pool).await.ok(),
 		pool,
 		integrity: StoreIntegrity::Failed(IntegrityFailure { reason, detail }),
 	}

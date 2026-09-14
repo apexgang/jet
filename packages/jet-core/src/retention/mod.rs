@@ -24,7 +24,7 @@
 
 mod command;
 mod preview;
-mod protection;
+pub(crate) mod protection;
 mod sweep;
 mod workspace_state;
 
@@ -86,6 +86,9 @@ pub enum TrashReason {
 	/// An approved Autodelete rule separately authorized to delete
 	/// everywhere matched it (ADR-0011).
 	AutodeleteEverywhere,
+	/// Its Home Plane authority moved to another Plane; the content stays
+	/// as the Transfer tombstone until the grace period ends (ADR-0070).
+	PlaneTransfer,
 }
 
 impl TrashReason {
@@ -98,6 +101,7 @@ impl TrashReason {
 			Self::AutodeleteEverywhere => {
 				TrashReasonRecord::AutodeleteEverywhere
 			}
+			Self::PlaneTransfer => TrashReasonRecord::Transferred,
 		}
 	}
 
@@ -110,6 +114,7 @@ impl TrashReason {
 			TrashReasonRecord::AutodeleteEverywhere => {
 				Self::AutodeleteEverywhere
 			}
+			TrashReasonRecord::Transferred => Self::PlaneTransfer,
 		}
 	}
 }

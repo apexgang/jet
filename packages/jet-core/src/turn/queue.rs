@@ -327,6 +327,9 @@ pub(crate) async fn prepare(
 			"input must contain 1 to 65536 bytes",
 		));
 	}
+	// A Prepared or relinquished copy, or a source frozen for a transfer,
+	// admits no turn from anyone (ADR-0070).
+	crate::plane_transfer::require_authoritative_id(tx, id).await?;
 	let mut queue = load(tx, id).await?;
 	let mut kept = Vec::new();
 	let mut removed = Vec::new();

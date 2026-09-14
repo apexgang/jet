@@ -68,6 +68,7 @@ pub(crate) fn requires_disk_admission(command: &Command) -> bool {
 		| Command::ChangeExtension { .. }
 		| Command::PromoteWorkspace { .. }
 		| Command::OpenTerminal { .. }
+		| Command::ImportPlaneTransfer { .. }
 		| Command::DeliverGit { .. } => true,
 		Command::CreateConversation { working_tree, .. }
 		| Command::ResumeImportedConversation { working_tree, .. } => {
@@ -93,6 +94,10 @@ pub(crate) fn requires_disk_admission(command: &Command) -> bool {
 		| Command::ForgetConversation { .. }
 		| Command::DeleteConversationEverywhere { .. }
 		| Command::RestoreConversation { .. }
+		| Command::PreparePlaneTransfer { .. }
+		| Command::RelinquishPlaneTransfer { .. }
+		| Command::CommitPlaneTransfer { .. }
+		| Command::AbortPlaneTransfer { .. }
 		| Command::CompileAutodeleteRule { .. }
 		| Command::SetAutodeleteRuleInactiveDays { .. }
 		| Command::ApproveAutodeleteRule { .. }

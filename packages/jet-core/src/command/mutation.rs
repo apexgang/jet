@@ -62,6 +62,7 @@ pub(crate) async fn create_run(
 			"the Conversation does not exist",
 		));
 	};
+	crate::plane_transfer::require_authoritative(tx, &conversation).await?;
 	if lifecycle::any_live(&tx.runs(conversation_id.0).await?) {
 		return Err(CoreError::conflict(
 			"run.conversation_busy",

@@ -32,6 +32,11 @@ impl EventKind {
 			| Self::ScheduleCanceled { .. }
 			| Self::ConversationTrashed { .. }
 			| Self::ConversationRestored { .. }
+			| Self::ConversationTransferPrepared { .. }
+			| Self::ConversationTransferImported { .. }
+			| Self::ConversationTransferRelinquished { .. }
+			| Self::ConversationTransferCommitted { .. }
+			| Self::ConversationTransferAborted { .. }
 			| Self::ScheduleFired { .. }
 			| Self::UserEditApplied { .. }
 			| Self::ReviewSubmitted { .. }

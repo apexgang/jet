@@ -54,6 +54,22 @@ impl Core {
 				drop(_access);
 				return self.export_recovery_bundle(actor, protection).await;
 			}
+			// The bundle is returned directly, never receipted, and the
+			// prepare is idempotent by the frozen Conversation instead
+			// (ADR-0070).
+			Command::PreparePlaneTransfer {
+				conversation_id,
+				target_plane_id,
+			} => {
+				drop(_access);
+				return self
+					.prepare_plane_transfer(
+						actor,
+						conversation_id,
+						target_plane_id,
+					)
+					.await;
+			}
 			Command::RestoreRecoverySnapshot { snapshot } => {
 				return self.restore_recovery_snapshot(actor, snapshot).await;
 			}
@@ -230,6 +246,11 @@ pub(super) fn redacted_for_receipt(
 			| CommandOutcome::RecoverySnapshotsPurged(_)
 			| CommandOutcome::ConversationTrashed(_)
 			| CommandOutcome::ConversationRestored { .. }
+			| CommandOutcome::PlaneTransferPrepared(_)
+			| CommandOutcome::PlaneTransferImported(_)
+			| CommandOutcome::PlaneTransferRelinquished(_)
+			| CommandOutcome::PlaneTransferCommitted(_)
+			| CommandOutcome::PlaneTransferAborted { .. }
 			| CommandOutcome::PairingGateSet { .. }
 			| CommandOutcome::PairingClaimed { .. }
 			| CommandOutcome::PairingConfirmed { .. }

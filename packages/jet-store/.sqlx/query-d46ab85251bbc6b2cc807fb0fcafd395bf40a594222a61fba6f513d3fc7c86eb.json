@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE conversations SET authority = ?2, authority_epoch = ?3,\n\t\t\t\trevision = revision + 1\n\t\t\t WHERE conversation_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "d46ab85251bbc6b2cc807fb0fcafd395bf40a594222a61fba6f513d3fc7c86eb"
+}

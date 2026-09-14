@@ -60,6 +60,45 @@ pub enum Command {
 		/// Required encryption; no implicit plaintext fallback.
 		protection: crate::RecoveryProtection,
 	},
+	/// Prepares moving a Conversation's Home Plane: freezes it here and
+	/// returns the bundle the target imports (ADR-0070).
+	PreparePlaneTransfer {
+		/// The Conversation to move.
+		conversation_id: ConversationId,
+		/// The Plane that will own it.
+		target_plane_id: crate::PlaneId,
+	},
+	/// Imports a bundle as a Prepared transfer that cannot run work or fire
+	/// schedules until the source has relinquished.
+	ImportPlaneTransfer {
+		/// The complete bundle the source prepared.
+		bundle: Vec<u8>,
+		/// The Project on this Plane the Conversation continues in, when
+		/// it worked in one on the source.
+		project_id: Option<crate::ProjectId>,
+	},
+	/// The source retires its authority behind a permanent fence and keeps
+	/// its content as a Transfer tombstone.
+	RelinquishPlaneTransfer {
+		/// The transfer being settled.
+		transfer_id: crate::PlaneTransferId,
+		/// The bundle hash the target imported.
+		bundle_sha256: String,
+	},
+	/// The target takes authority once the source's fence checks out.
+	CommitPlaneTransfer {
+		/// The transfer being settled.
+		transfer_id: crate::PlaneTransferId,
+		/// The bundle hash this Plane imported.
+		bundle_sha256: String,
+		/// The fence the source returned when it relinquished.
+		fence: crate::AuthorityFence,
+	},
+	/// The source gives up a transfer it prepared and has not relinquished.
+	AbortPlaneTransfer {
+		/// The transfer to abandon.
+		transfer_id: crate::PlaneTransferId,
+	},
 	/// Acknowledge a reviewed uncertain outcome without retrying its Git operation.
 	AcknowledgeGitDelivery {
 		/// Exact uncertain Effect the user reviewed.
@@ -533,6 +572,11 @@ impl Command {
 			| Self::ForgetConversation { .. }
 			| Self::DeleteConversationEverywhere { .. }
 			| Self::RestoreConversation { .. }
+			| Self::PreparePlaneTransfer { .. }
+			| Self::ImportPlaneTransfer { .. }
+			| Self::RelinquishPlaneTransfer { .. }
+			| Self::CommitPlaneTransfer { .. }
+			| Self::AbortPlaneTransfer { .. }
 			| Self::CompileAutodeleteRule { .. }
 			| Self::SetAutodeleteRuleInactiveDays { .. }
 			| Self::ApproveAutodeleteRule { .. }

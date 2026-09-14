@@ -11817,6 +11817,11 @@
           "description": "An approved Autodelete rule separately authorized to delete\neverywhere matched it. Needs minor 40.",
           "type": "string",
           "const": "autodelete_everywhere"
+        },
+        {
+          "description": "Its Home Plane authority moved to another Plane; the content stays\nas the Transfer tombstone. Needs minor 42.",
+          "type": "string",
+          "const": "plane_transfer"
         }
       ]
     },

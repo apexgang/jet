@@ -72,7 +72,12 @@ async fn apply(
 				client: crate::translate::paired_client(client),
 			})
 		}
-		CommandOutcome::ApprovalRetryAuthorized { .. }
+		CommandOutcome::PlaneTransferPrepared(_)
+		| CommandOutcome::PlaneTransferImported(_)
+		| CommandOutcome::PlaneTransferRelinquished(_)
+		| CommandOutcome::PlaneTransferCommitted(_)
+		| CommandOutcome::PlaneTransferAborted { .. }
+		| CommandOutcome::ApprovalRetryAuthorized { .. }
 		| CommandOutcome::RemoteToolReviewed { .. }
 		| CommandOutcome::UserEditApplied(_)
 		| CommandOutcome::GitDeliveryAcknowledged { .. }

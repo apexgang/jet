@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE plane SET fences_applied = ?1 WHERE singleton = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "567df8e1b68e4b5f9dd24d4bb163bbdd3628e1e741b2ffaa3ee0f28e3a7e6c24"
+}

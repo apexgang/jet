@@ -37,6 +37,8 @@ const STORE_RECOVERY_OUTCOME_VERSION: u32 = 12;
 const RETENTION_OUTCOME_VERSION: u32 = 13;
 /// Older releases cannot replay Autodelete rule Commands.
 const AUTODELETE_OUTCOME_VERSION: u32 = 14;
+/// Older releases cannot replay Plane transfer Commands.
+const PLANE_TRANSFER_OUTCOME_VERSION: u32 = 15;
 
 /// Uses the rollback release's encoding whenever that release can understand
 /// the result. Version 2 is reserved for name-only variants introduced here;
@@ -52,6 +54,13 @@ pub(crate) fn outcome_version(
 			| CommandOutcome::RecoveryBundle(_)
 			| CommandOutcome::RecoverySnapshotsPurged(_),
 		) => STORE_RECOVERY_OUTCOME_VERSION,
+		Ok(
+			CommandOutcome::PlaneTransferPrepared(_)
+			| CommandOutcome::PlaneTransferImported(_)
+			| CommandOutcome::PlaneTransferRelinquished(_)
+			| CommandOutcome::PlaneTransferCommitted(_)
+			| CommandOutcome::PlaneTransferAborted { .. },
+		) => PLANE_TRANSFER_OUTCOME_VERSION,
 		Ok(
 			CommandOutcome::ConversationTrashed(_)
 			| CommandOutcome::ConversationRestored { .. },
@@ -178,7 +187,8 @@ pub(crate) fn replay(
 		| EXTENSION_OUTCOME_VERSION
 		| APPROVAL_RETRY_OUTCOME_VERSION
 		| AUTO_CONTINUE_OUTCOME_VERSION
-		| GIT_DELIVERY_OUTCOME_VERSION => decode_result(&outcome),
+		| GIT_DELIVERY_OUTCOME_VERSION
+		| PLANE_TRANSFER_OUTCOME_VERSION => decode_result(&outcome),
 		PREVIOUS_OUTCOME_VERSION => decode_previous_result(&outcome),
 		_ => Ok(Err(CoreError::incompatible(
 			"command.outcome_incompatible",
