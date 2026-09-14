@@ -6,6 +6,11 @@
 //! observed, not stored: it describes the working tree, which changes
 //! without Jet.
 
+mod removal;
+
+pub use removal::ProjectWork;
+pub(crate) use removal::purge_rows;
+
 use crate::{
 	StoreError,
 	records::{ActorRecord, parse_uuid},

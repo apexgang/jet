@@ -15,7 +15,10 @@ use crate::{
 	event::{EventPage, EventSequence},
 	filesystem::relative_path::RelativePath,
 	pairing::PairingSnapshot,
-	project::{PathGrant, ProjectList, ProjectPreview, entry::ProjectEntry},
+	project::{
+		PathGrant, ProjectList, ProjectPreview, entry::ProjectEntry,
+		removal::ProjectRemovalPreview,
+	},
 	promotion::{PromotionDestination, PromotionPreview},
 	search::{SearchResult, SearchTerms},
 	setting::{SettingScope, SettingSelection, SettingSnapshot},
@@ -212,6 +215,13 @@ pub enum Query {
 		/// The path, relative to the Project's root.
 		path: RelativePath,
 	},
+	/// What removing a Project would meet and lose, before it is done
+	/// (ADR-0011). The answer binds what it read, and a removal carries
+	/// that binding back.
+	PreviewProjectRemoval {
+		/// The Project to remove.
+		project_id: ProjectId,
+	},
 	/// What promoting a Workspace to a permanent checkout or branch of its
 	/// Project would do, before it is done (ADR-0025).
 	PreviewPromotion {
@@ -309,6 +319,8 @@ pub enum QueryResult {
 	ProjectPreview(ProjectPreview),
 	/// What one path inside a Project names.
 	ProjectEntry(ProjectEntry),
+	/// What removing a Project would meet and lose.
+	ProjectRemovalPreview(ProjectRemovalPreview),
 	/// What promoting a Workspace would do. Boxed: the preview carries
 	/// two lists and six object names, far more than any other snapshot.
 	PromotionPreview(Box<PromotionPreview>),

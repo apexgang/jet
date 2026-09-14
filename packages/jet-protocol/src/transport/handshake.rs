@@ -13,7 +13,11 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 40;
+pub const PROTOCOL_MINOR: u32 = 41;
+
+/// Project removal: the removal preview Query and the bound, typed-name
+/// `remove_project` Command with its two disposals.
+pub const PROJECT_REMOVAL_MINOR: u32 = 41;
 
 /// Autodelete rules: compiling, editing, approving, authorizing, and
 /// deleting them, the `autodelete_rules` Query, and the two Trash reasons

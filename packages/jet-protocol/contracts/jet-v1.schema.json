@@ -3193,6 +3193,34 @@
           ]
         },
         {
+          "description": "Remove a registered Project and its directory exactly as a preview\nshowed. The Plane computes the preview again and refuses a binding\nthe Project has moved past, live work in it, and a typed name that\nis not the directory's own. Interactive users only. Needs minor 41.",
+          "type": "object",
+          "properties": {
+            "binding": {
+              "description": "What the preview bound and the user confirmed.",
+              "$ref": "#/$defs/ProjectRemovalBinding"
+            },
+            "disposal": {
+              "description": "Where the directory goes.",
+              "$ref": "#/$defs/ProjectDisposal"
+            },
+            "type": {
+              "type": "string",
+              "const": "remove_project"
+            },
+            "typed_name": {
+              "description": "The Project directory's own name, typed by the user.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "binding",
+            "typed_name",
+            "disposal"
+          ]
+        },
+        {
           "description": "Promote a Workspace exactly as a preview showed. The Plane computes\nthe preview again and refuses a binding the Workspace or the\ndestination has moved past.",
           "type": "object",
           "properties": {
@@ -4046,6 +4074,20 @@
             }
           },
           "$ref": "#/$defs/Project",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "The Project as removed, with where its directory went. Needs\nminor 41.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "project_removed"
+            }
+          },
+          "$ref": "#/$defs/ProjectRemoved",
           "required": [
             "type"
           ]
@@ -5143,6 +5185,21 @@
             "kind",
             "turn"
           ]
+        }
+      ]
+    },
+    "Disposition": {
+      "description": "Where a removed Project's directory went.",
+      "oneOf": [
+        {
+          "description": "It is in the system Trash.",
+          "type": "string",
+          "const": "trashed"
+        },
+        {
+          "description": "It is deleted.",
+          "type": "string",
+          "const": "deleted"
         }
       ]
     },
@@ -7316,6 +7373,42 @@
         "registered_at_unix_ms"
       ]
     },
+    "ProjectDisposal": {
+      "description": "Where a removed Project's directory goes.",
+      "oneOf": [
+        {
+          "description": "To the system Trash, from where the user can restore it. Refused\nwith `project.trash_unavailable` where the Plane has none for the\ndirectory, and nothing is removed.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "system_trash"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "Deleted for good. The second authorization: the Plane's\npermanent-deletion warning, acknowledged word for word.",
+          "type": "object",
+          "properties": {
+            "acknowledged_warning": {
+              "description": "The warning, exactly as the Plane publishes it.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "permanent"
+            }
+          },
+          "required": [
+            "kind",
+            "acknowledged_warning"
+          ]
+        }
+      ]
+    },
     "ProjectEntry": {
       "description": "One entry inside a registered Project, addressed by the Project and a\npath relative to its root. It carries metadata and never content.",
       "type": "object",
@@ -7384,6 +7477,131 @@
       "required": [
         "root",
         "registrability"
+      ]
+    },
+    "ProjectRemovalBinding": {
+      "description": "What a removal preview showed and a removal carries back: the Project\nas it stood, the work it would lose, and the Actor it was shown to.\nThe Plane refuses a removal when any of it has changed since. Needs\nminor 41.",
+      "type": "object",
+      "properties": {
+        "actor": {
+          "description": "The Client identity the preview was shown to.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "dirty_files": {
+          "description": "Tracked files changed and untracked files present in its checkout,\nwhich the removal loses.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "live_runs": {
+          "description": "Runs of its Conversations that have not ended. Any refuses the\nremoval.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "project_id": {
+          "description": "The Project being removed.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "root": {
+          "description": "Its canonical root, the directory the removal takes.",
+          "type": "string"
+        },
+        "schedules": {
+          "description": "Scheduled tasks of its Conversations. Any refuses the removal.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "unpushed_commits": {
+          "description": "Commits in its repository that no remote branch holds, which the\nremoval loses with it.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "workspaces": {
+          "description": "The Workspaces created from it, which are removed with it.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "required": [
+        "project_id",
+        "root",
+        "live_runs",
+        "schedules",
+        "dirty_files",
+        "unpushed_commits",
+        "workspaces",
+        "actor"
+      ]
+    },
+    "ProjectRemovalPreview": {
+      "description": "What removing one Project would meet and lose, shown before it is\ndone. Needs minor 41.",
+      "type": "object",
+      "properties": {
+        "binding": {
+          "description": "What the removal is bound to.",
+          "$ref": "#/$defs/ProjectRemovalBinding"
+        },
+        "cursor": {
+          "description": "Newest Event sequence visible when the Project was read, carried as\na decimal string (ADR-0089).",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "disk_use_bytes": {
+          "description": "Bytes the files under the root occupy. Disclosed and not bound: a\nrepository's size moves on its own.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "obstacles": {
+          "description": "What refuses the removal today, in a fixed order; empty when it may\nproceed.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RemovalObstacle"
+          }
+        },
+        "permanent_removal_warning": {
+          "description": "The warning a permanent removal acknowledges, word for word. A\nclient shows it and sends it back as it is.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cursor",
+        "binding",
+        "disk_use_bytes",
+        "obstacles",
+        "permanent_removal_warning"
+      ]
+    },
+    "ProjectRemoved": {
+      "description": "The Project as removed.",
+      "type": "object",
+      "properties": {
+        "disposition": {
+          "description": "Where the directory went.",
+          "$ref": "#/$defs/Disposition"
+        },
+        "project_id": {
+          "description": "The Project that is no longer registered.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "root": {
+          "description": "The root its directory was at.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "root",
+        "disposition"
       ]
     },
     "PromotedChange": {
@@ -8231,6 +8449,25 @@
           ]
         },
         {
+          "description": "What removing a Project would meet and lose, before it is done. The\nanswer binds what it read, and a removal carries that binding\nback. Needs minor 41.",
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "description": "The Project to remove.",
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "preview_project_removal"
+            }
+          },
+          "required": [
+            "type",
+            "project_id"
+          ]
+        },
+        {
           "description": "What promoting a Workspace to a permanent checkout or branch of its\nProject would do, before it is done. The answer binds what it\ncompared, and a promotion carries that binding back.",
           "type": "object",
           "properties": {
@@ -8777,6 +9014,20 @@
             }
           },
           "$ref": "#/$defs/ProjectPreview",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "What removing a Project would meet and lose.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "project_removal_preview"
+            }
+          },
+          "$ref": "#/$defs/ProjectRemovalPreview",
           "required": [
             "type"
           ]
@@ -9794,6 +10045,41 @@
             "type",
             "content"
           ]
+        }
+      ]
+    },
+    "RemovalObstacle": {
+      "description": "One reason a Project cannot be removed as it stands. What keeps it is\ndata a client acts on, never a message it parses.",
+      "oneOf": [
+        {
+          "description": "A Run of one of its Conversations has not ended.",
+          "type": "string",
+          "const": "live_runs"
+        },
+        {
+          "description": "A Scheduled task of one of its Conversations would queue more work.",
+          "type": "string",
+          "const": "schedules"
+        },
+        {
+          "description": "Its root is a filesystem root.",
+          "type": "string",
+          "const": "filesystem_root"
+        },
+        {
+          "description": "Its root is the user's home directory.",
+          "type": "string",
+          "const": "user_home"
+        },
+        {
+          "description": "Its root is Jet's own home, or holds it, or lies inside it.",
+          "type": "string",
+          "const": "jet_home"
+        },
+        {
+          "description": "Another registered Project lies inside its root.",
+          "type": "string",
+          "const": "contains_project"
         }
       ]
     },

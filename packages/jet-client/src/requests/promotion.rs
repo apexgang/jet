@@ -68,6 +68,7 @@ impl Client {
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
+			| QueryResponse::ProjectRemovalPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::ChangeArtifact(_)
 			| QueryResponse::ChangeDiff(_)
@@ -153,6 +154,7 @@ impl Client {
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
 			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::ProjectRemoved(_)
 			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}
 	}

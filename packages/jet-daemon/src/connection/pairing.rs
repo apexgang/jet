@@ -112,6 +112,7 @@ async fn apply(
 		| CommandOutcome::AutodeleteRuleDeleted { .. }
 		| CommandOutcome::PairedClientRevoked { .. }
 		| CommandOutcome::ProjectRegistered(_)
+		| CommandOutcome::ProjectRemoved(_)
 		| CommandOutcome::WorkspacePromotionRecorded(_)
 		| CommandOutcome::Terminal(_)
 		| CommandOutcome::ConversationImported(_) => Err(malformed()),

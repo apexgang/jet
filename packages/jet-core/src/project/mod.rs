@@ -9,6 +9,7 @@
 //! carry a path like this; they name a Project and a relative path.
 
 pub(crate) mod entry;
+pub(crate) mod removal;
 pub(crate) mod repository;
 
 use crate::{
@@ -263,7 +264,7 @@ pub(crate) async fn prepare_registration(
 /// ADR-0101: a Path grant is an interactive user's to make, and so is the
 /// look before it. Both Actors this core knows are interactive; a Harness,
 /// Craft, Scheduled-task, or automatic Actor added later is refused here.
-fn require_interactive(actor: &Actor) {
+pub(crate) fn require_interactive(actor: &Actor) {
 	match actor {
 		Actor::InteractiveClient { .. } | Actor::RemoteClient { .. } => {}
 	}

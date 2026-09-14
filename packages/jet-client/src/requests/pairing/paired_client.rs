@@ -78,6 +78,7 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientRevoked { .. }
 			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::ProjectRemoved(_)
 			| CommandResponse::WorkspacePromotionRecorded(_)
 			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}
@@ -149,6 +150,7 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::ProjectRemoved(_)
 			| CommandResponse::WorkspacePromotionRecorded(_)
 			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}

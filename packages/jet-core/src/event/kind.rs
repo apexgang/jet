@@ -453,6 +453,15 @@ pub enum EventKind {
 		/// The canonical root the grant resolved to.
 		root: PathBuf,
 	},
+	/// An interactive user removed a Project and its directory
+	/// (ADR-0011).
+	#[serde(rename = "project.removed")]
+	ProjectRemoved {
+		/// The Project that is no longer registered.
+		project_id: ProjectId,
+		/// The root its directory was at.
+		root: PathBuf,
+	},
 	/// An Event this core cannot interpret: a kind or payload version
 	/// written by a newer core that shared the store (ADR-0073). It is
 	/// retained and forwarded as recorded so a previous release still serves

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM effects WHERE terminal_id IN (\n\t\t\tSELECT t.terminal_id FROM workspace_terminals t\n\t\t\tJOIN workspaces w ON w.workspace_id = t.workspace_id\n\t\t\tWHERE w.project_id = ?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "e70b091526d7618bef122baafdd97d549ceb678ffaeda67c60cb5494b438044b"
+}

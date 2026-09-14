@@ -102,6 +102,7 @@ pub(crate) fn requires_disk_admission(command: &Command) -> bool {
 		| Command::ResolveExecution(_)
 		| Command::ControlRun { .. }
 		| Command::RegisterProject { .. }
+		| Command::RemoveProject { .. }
 		| Command::ImportConversation { .. }
 		| Command::SetSetting { .. }
 		| Command::ClearSetting { .. }

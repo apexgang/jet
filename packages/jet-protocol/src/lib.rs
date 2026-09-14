@@ -142,9 +142,9 @@ pub use transport::handshake::{
 	ClientHello, DELETION_LEDGER_MINOR, EXECUTION_CONTROL_MINOR,
 	EXECUTION_RECOVERY_MINOR, FENCED_READS_MINOR, IMPORTED_CONVERSATIONS_MINOR,
 	MANAGED_RUNS_MINOR, MULTIPLEXED_STREAMS_MINOR, NAMES_MINOR, PAIRING_MINOR,
-	PREFACE, PROJECTS_MINOR, PROTOCOL_MINOR, PROTOCOL_VERSION,
-	REMOTE_AUTH_MINOR, RETENTION_MINOR, SCHEDULES_MINOR, SEARCH_MINOR,
-	SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
+	PREFACE, PROJECT_REMOVAL_MINOR, PROJECTS_MINOR, PROTOCOL_MINOR,
+	PROTOCOL_VERSION, REMOTE_AUTH_MINOR, RETENTION_MINOR, SCHEDULES_MINOR,
+	SEARCH_MINOR, SECURITY_AUDIT_MINOR, SEEDED_WORKSPACES_MINOR,
 	SETTINGS_AND_CAPABILITIES_MINOR, STORE_RECOVERY_MINOR, ServerHello,
 	TURN_QUEUE_MINOR, USAGE_RECORDS_MINOR, USER_INPUT_MINOR, UTILITY_MINOR,
 	VersionRange, WORKSPACE_PROMOTION_MINOR, WORKSPACE_TERMINALS_MINOR,
@@ -177,8 +177,10 @@ pub use pairing::{
 };
 pub use presentation::{Presentation, PresentationAction, PresentationBlock};
 pub use project::{
-	Checkout, EntryKind, GitLink, Project, ProjectEntry, ProjectList,
-	ProjectPreview, Registrability, Repository, Worktree,
+	Checkout, Disposition, EntryKind, GitLink, Project, ProjectDisposal,
+	ProjectEntry, ProjectList, ProjectPreview, ProjectRemovalBinding,
+	ProjectRemovalPreview, ProjectRemoved, Registrability, RemovalObstacle,
+	Repository, Worktree,
 };
 pub use remote::no_visa::{
 	CraftRemoteTool, NoVisaOrigin, RemoteEnvironment, RemoteGitOperation,

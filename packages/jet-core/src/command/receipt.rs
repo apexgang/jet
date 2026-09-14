@@ -113,6 +113,7 @@ pub(crate) fn outcome_version(
 			| CommandOutcome::AuditEpochBegun { .. }
 			| CommandOutcome::AccountUnbound { .. }
 			| CommandOutcome::ProjectRegistered(_)
+			| CommandOutcome::ProjectRemoved(_)
 			| CommandOutcome::WorkspacePromotionRecorded(_)
 			| CommandOutcome::ConversationImported(_),
 		) => PREVIOUS_OUTCOME_VERSION,

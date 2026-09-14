@@ -31,6 +31,8 @@ pub(crate) enum Prepared {
 	Nothing,
 	/// The root a Path grant resolved to and `git` accepted.
 	Registration(Registrable),
+	/// A removal whose binding still matches the Project.
+	Removal(project::removal::PreparedRemoval),
 	/// The Project, resolved base, and captured seed a new Workspace
 	/// starts from.
 	Workspace(PreparedWorkspace),
@@ -210,6 +212,14 @@ impl Core {
 			)),
 			Command::RegisterProject { grant } => Ok(Prepared::Registration(
 				project::prepare_registration(actor, grant).await?,
+			)),
+			Command::RemoveProject {
+				binding,
+				typed_name,
+				..
+			} => Ok(Prepared::Removal(
+				project::removal::prepare(self, actor, binding, typed_name)
+					.await?,
 			)),
 			Command::CreateConversation {
 				working_tree:

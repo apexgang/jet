@@ -753,5 +753,50 @@
     "schema": "ServerMessage",
     "valid": false,
     "payload": "{\"kind\":\"command_result\",\"id\":9,\"result\":{\"type\":\"autodelete_rule_recorded\",\"rule\":{\"rule_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"prompt\":\"x\",\"utility_job_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e74\",\"state\":{\"state\":\"compiling\"},\"scope\":\"purge\",\"created_at_unix_ms\":1,\"updated_at_unix_ms\":1}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":11,\"query\":{\"type\":\"preview_project_removal\",\"project_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":11,\"result\":{\"type\":\"project_removal_preview\",\"cursor\":\"42\",\"binding\":{\"project_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"root\":\"/home/jet/repo\",\"live_runs\":0,\"schedules\":0,\"dirty_files\":2,\"unpushed_commits\":1,\"workspaces\":[\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e75\"],\"actor\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"},\"disk_use_bytes\":1048576,\"obstacles\":[\"live_runs\",\"contains_project\"],\"permanent_removal_warning\":\"I authorize this permanent deletion.\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"query_result\",\"id\":11,\"result\":{\"type\":\"project_removal_preview\",\"cursor\":\"42\",\"binding\":{\"project_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"root\":\"/home/jet/repo\",\"live_runs\":0,\"schedules\":0,\"dirty_files\":2,\"unpushed_commits\":1,\"workspaces\":[\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e75\"],\"actor\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"},\"disk_use_bytes\":1048576,\"obstacles\":[\"pinned\"],\"permanent_removal_warning\":\"I authorize this permanent deletion.\"}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":12,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e75\",\"command\":{\"type\":\"remove_project\",\"binding\":{\"project_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"root\":\"/home/jet/repo\",\"live_runs\":0,\"schedules\":0,\"dirty_files\":2,\"unpushed_commits\":1,\"workspaces\":[\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e75\"],\"actor\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"},\"typed_name\":\"repo\",\"disposal\":{\"kind\":\"system_trash\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command\",\"id\":12,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e75\",\"command\":{\"type\":\"remove_project\",\"binding\":{\"project_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"root\":\"/home/jet/repo\",\"live_runs\":0,\"schedules\":0,\"dirty_files\":2,\"unpushed_commits\":1,\"workspaces\":[\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e75\"],\"actor\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"},\"typed_name\":\"repo\",\"disposal\":{\"kind\":\"permanent\",\"acknowledged_warning\":\"I authorize this permanent deletion.\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"command\",\"id\":12,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e75\",\"command\":{\"type\":\"remove_project\",\"binding\":{\"project_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"root\":\"/home/jet/repo\",\"live_runs\":0,\"schedules\":0,\"dirty_files\":2,\"unpushed_commits\":1,\"workspaces\":[\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e75\"],\"actor\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"},\"typed_name\":\"repo\",\"disposal\":{\"kind\":\"shred\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"command\",\"id\":12,\"command_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e75\",\"command\":{\"type\":\"remove_project\",\"binding\":{\"project_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"root\":\"/home/jet/repo\",\"live_runs\":0,\"schedules\":0,\"dirty_files\":2,\"unpushed_commits\":1,\"workspaces\":[\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e75\"],\"actor\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"},\"disposal\":{\"kind\":\"system_trash\"}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"command_result\",\"id\":12,\"result\":{\"type\":\"project_removed\",\"project_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"root\":\"/home/jet/repo\",\"disposition\":\"trashed\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"command_result\",\"id\":12,\"result\":{\"type\":\"project_removed\",\"project_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"root\":\"/home/jet/repo\",\"disposition\":\"forgotten\"}}"
   }
 ]

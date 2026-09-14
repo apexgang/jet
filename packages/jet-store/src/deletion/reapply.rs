@@ -54,6 +54,11 @@ pub(crate) async fn reapply(
 				)
 				.await?
 			}
+			// A Project takes its Workspaces with it and detaches its
+			// Conversations, the same rows its removal changed (ADR-0011).
+			DeletedIdentityKind::Project => {
+				crate::project::purge_rows(&mut transaction, &identity).await?
+			}
 		};
 		changed += result;
 	}

@@ -109,6 +109,31 @@ impl ReadTransaction {
 		row.map(read_row).transpose()
 	}
 
+	/// Every Workspace created from `project_id`, oldest first.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the rows cannot be read.
+	pub async fn workspaces_of_project(
+		&mut self,
+		project_id: Uuid,
+	) -> Result<Vec<WorkspaceRecord>, StoreError> {
+		let project_id = project_id.to_string();
+		let rows = sqlx::query_as!(
+			Row,
+			r#"SELECT workspace_id AS "workspace_id!", conversation_id,
+				project_id, root, base_selection, base_commit, seed_tree,
+				seed_changed_paths, created_at_unix_ms
+			 FROM workspaces
+			 WHERE project_id = ?1
+			 ORDER BY rowid"#,
+			project_id
+		)
+		.fetch_all(self.connection())
+		.await?;
+		rows.into_iter().map(read_row).collect()
+	}
+
 	/// The Workspace identified by `workspace_id`, if recorded.
 	///
 	/// # Errors

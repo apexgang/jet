@@ -186,6 +186,10 @@ pub(super) fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::PROJECTS_MINOR,
 			feature: "the Project preview Query",
 		}),
+		QueryRequest::PreviewProjectRemoval { .. } => Some(MinorRequirement {
+			minor: jet_protocol::PROJECT_REMOVAL_MINOR,
+			feature: "the Project removal preview Query",
+		}),
 		QueryRequest::ProjectEntry { .. } => Some(MinorRequirement {
 			minor: jet_protocol::PROJECTS_MINOR,
 			feature: "the Project entry Query",
@@ -436,6 +440,10 @@ pub(super) fn command_minor(
 		CommandRequest::RegisterProject { .. } => Some(MinorRequirement {
 			minor: jet_protocol::PROJECTS_MINOR,
 			feature: "Project registration",
+		}),
+		CommandRequest::RemoveProject { .. } => Some(MinorRequirement {
+			minor: jet_protocol::PROJECT_REMOVAL_MINOR,
+			feature: "Project removal",
 		}),
 		CommandRequest::PromoteWorkspace { .. } => Some(MinorRequirement {
 			minor: jet_protocol::WORKSPACE_PROMOTION_MINOR,

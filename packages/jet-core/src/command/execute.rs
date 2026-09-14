@@ -237,6 +237,7 @@ pub(super) fn redacted_for_receipt(
 			| CommandOutcome::PairedClientAccessSet { .. }
 			| CommandOutcome::PairedClientRevoked { .. }
 			| CommandOutcome::ProjectRegistered(_)
+			| CommandOutcome::ProjectRemoved(_)
 			| CommandOutcome::WorkspacePromotionRecorded(_)
 			| CommandOutcome::Terminal(_)
 			| CommandOutcome::ConversationImported(_)),

@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) AS \"count!: i64\" FROM runs\n\t\t\t JOIN conversations USING (conversation_id)\n\t\t\t WHERE conversations.project_id = ?1\n\t\t\t   AND runs.lifecycle IN ('created', 'starting', 'active', 'stopping')",
+  "describe": {
+    "columns": [
+      {
+        "name": "count!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "de9c20778eb33f3ca17167f4a364948b974f54517e71932c17b99d81b151b098"
+}

@@ -270,6 +270,9 @@ impl Core {
 			Query::ProjectEntry { project_id, path } => {
 				project_entry::entry(self, project_id, path).await
 			}
+			Query::PreviewProjectRemoval { project_id } => {
+				project::removal::preview(self, actor, project_id).await
+			}
 			Query::PreviewPromotion {
 				workspace_id,
 				destination,

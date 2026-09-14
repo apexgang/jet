@@ -6,7 +6,9 @@ use crate::{
 };
 use jet_protocol::{
 	CapabilityObservation, CommandRequest, CommandResponse, Project,
-	ProjectEntry, ProjectList, ProjectPreview, QueryRequest, QueryResponse,
+	ProjectDisposal, ProjectEntry, ProjectList, ProjectPreview,
+	ProjectRemovalBinding, ProjectRemovalPreview, ProjectRemoved, QueryRequest,
+	QueryResponse,
 };
 use uuid::Uuid;
 
@@ -62,6 +64,7 @@ impl Client {
 			| QueryResponse::Usage(_)
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
+			| QueryResponse::ProjectRemovalPreview(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
@@ -145,6 +148,7 @@ impl Client {
 			| CommandResponse::PairingCompleted { .. }
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
+			| CommandResponse::ProjectRemoved(_)
 			| CommandResponse::WorkspacePromotionRecorded(_)
 			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}
@@ -203,6 +207,7 @@ impl Client {
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
+			| QueryResponse::ProjectRemovalPreview(_)
 			| QueryResponse::PromotionPreview(_)
 			| QueryResponse::ChangeArtifact(_)
 			| QueryResponse::ChangeDiff(_)
@@ -249,6 +254,7 @@ impl Client {
 			| QueryResponse::SecurityAudit(_)
 			| QueryResponse::Pairing(_)
 			| QueryResponse::ProjectPreview(_)
+			| QueryResponse::ProjectRemovalPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
 			| QueryResponse::ChangeArtifact(_)
@@ -256,6 +262,140 @@ impl Client {
 			| QueryResponse::RunExecution(_)
 			| QueryResponse::Search(_)
 			| QueryResponse::ExternalConversations(_)) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Reads what removing the Project `project_id` would meet and lose,
+	/// and the binding a removal carries back.
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::FeatureUnavailable`] when the negotiated
+	/// minor predates Project removal, [`ClientError::Remote`] with
+	/// `project.not_found` when the Project is not registered, or the
+	/// transport failure otherwise.
+	pub async fn preview_project_removal(
+		&self,
+		project_id: Uuid,
+	) -> Result<ProjectRemovalPreview, ClientError> {
+		self.require_minor(jet_protocol::PROJECT_REMOVAL_MINOR)?;
+		match self
+			.query(QueryRequest::PreviewProjectRemoval { project_id })
+			.await?
+		{
+			QueryResponse::ProjectRemovalPreview(preview) => Ok(preview),
+			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::ExtensionCatalog(_)
+			| QueryResponse::ExtensionChange(_)
+			| QueryResponse::RemoteToolReview(_)
+			| QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
+			| QueryResponse::AutoContinue(_)
+			| QueryResponse::ScheduledTasks(_)
+			| QueryResponse::ConversationTrash(_)
+			| QueryResponse::RetentionPreview(_)
+			| QueryResponse::AutodeleteRules(_)
+			| QueryResponse::EditableFile(_)
+			| QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::TurnQueue(_)
+			| QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
+			| QueryResponse::Conversations(_)
+			| QueryResponse::Conversation(_)
+			| QueryResponse::Events(_)
+			| QueryResponse::Settings(_)
+			| QueryResponse::Capabilities(_)
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::Usage(_)
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)
+			| QueryResponse::ProjectPreview(_)
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::ChangeArtifact(_)
+			| QueryResponse::ChangeDiff(_)
+			| QueryResponse::RunExecution(_)
+			| QueryResponse::Search(_)
+			| QueryResponse::ExternalConversations(_)) => Err(unexpected(&other)),
+		}
+	}
+
+	/// Removes the Project exactly as `binding` previewed it, with the
+	/// directory's own name typed as `typed_name`, and disposes of its
+	/// directory as `disposal` asks.
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::FeatureUnavailable`] when the negotiated
+	/// minor predates Project removal, [`ClientError::Remote`] with a
+	/// stable `project.*` code when the removal is refused, or the
+	/// transport failure otherwise.
+	pub async fn remove_project(
+		&self,
+		command_id: Uuid,
+		binding: ProjectRemovalBinding,
+		typed_name: &str,
+		disposal: ProjectDisposal,
+	) -> Result<ProjectRemoved, ClientError> {
+		self.require_minor(jet_protocol::PROJECT_REMOVAL_MINOR)?;
+		match self
+			.execute_command(
+				command_id,
+				CommandRequest::RemoveProject {
+					binding,
+					typed_name: typed_name.into(),
+					disposal,
+				},
+			)
+			.await?
+		{
+			CommandResponse::ProjectRemoved(removed) => Ok(removed),
+			other @ (CommandResponse::ProjectRegistered(_)
+			| CommandResponse::GitDeliveryAcknowledged { .. }
+			| CommandResponse::GitDeliveryQueued { .. }
+			| CommandResponse::ApprovalRetryAuthorized { .. }
+			| CommandResponse::RemoteToolReviewed { .. }
+			| CommandResponse::UtilityQueued { .. }
+			| CommandResponse::ExtensionChangeQueued { .. }
+			| CommandResponse::CraftDisabled { .. }
+			| CommandResponse::CraftInstallationQueued(_)
+			| CommandResponse::AutoContinueConfigured
+			| CommandResponse::ScheduleCreated { .. }
+			| CommandResponse::ScheduleCanceled { .. }
+			| CommandResponse::UserEditApplied { .. }
+			| CommandResponse::ConversationNamed(_)
+			| CommandResponse::RunNamed(_)
+			| CommandResponse::Terminal { .. }
+			| CommandResponse::TurnAdmitted { .. }
+			| CommandResponse::TurnWithdrawn { .. }
+			| CommandResponse::RunControlAccepted { .. }
+			| CommandResponse::ExecutionResolutionRecorded {
+				..
+			}
+			| CommandResponse::ConversationCreated(_)
+			| CommandResponse::RunCreated(_)
+			| CommandResponse::RunTransitioned(_)
+			| CommandResponse::SettingSet { .. }
+			| CommandResponse::SettingCleared { .. }
+			| CommandResponse::AccountBound(_)
+			| CommandResponse::AccountUnbound { .. }
+			| CommandResponse::AuditEpochBegun { .. }
+			| CommandResponse::RecoverySnapshotRestored { .. }
+			| CommandResponse::RecoverySnapshotsPurged { .. }
+			| CommandResponse::ConversationTrashed { .. }
+			| CommandResponse::ConversationRestored { .. }
+			| CommandResponse::AutodeleteRuleRecorded { .. }
+			| CommandResponse::AutodeleteRuleDeleted { .. }
+			| CommandResponse::PairingGateSet { .. }
+			| CommandResponse::PairingOpened { .. }
+			| CommandResponse::PairingClaimed { .. }
+			| CommandResponse::PairingConfirmed { .. }
+			| CommandResponse::PairingCompleted { .. }
+			| CommandResponse::PairedClientAccessSet { .. }
+			| CommandResponse::PairedClientRevoked { .. }
+			| CommandResponse::WorkspacePromotionRecorded(_)
+			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}
 	}
 }

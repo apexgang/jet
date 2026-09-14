@@ -11,7 +11,9 @@ use crate::{
 		promotion::{PromotionDestination, PromotionPreview},
 	},
 	pairing::PairingSnapshot,
-	project::{ProjectEntry, ProjectList, ProjectPreview},
+	project::{
+		ProjectEntry, ProjectList, ProjectPreview, ProjectRemovalPreview,
+	},
 	search::SearchResult,
 	setting::{SettingScope, SettingSelection, SettingSnapshot},
 	usage::{PlaneUsage, UsageSelection},
@@ -211,6 +213,13 @@ pub enum QueryRequest {
 		/// components.
 		path: String,
 	},
+	/// What removing a Project would meet and lose, before it is done. The
+	/// answer binds what it read, and a removal carries that binding
+	/// back. Needs minor 41.
+	PreviewProjectRemoval {
+		/// The Project to remove.
+		project_id: Uuid,
+	},
 	/// What promoting a Workspace to a permanent checkout or branch of its
 	/// Project would do, before it is done. The answer binds what it
 	/// compared, and a promotion carries that binding back.
@@ -310,6 +319,8 @@ pub enum QueryResponse {
 	Projects(ProjectList),
 	/// What a Path grant would register.
 	ProjectPreview(ProjectPreview),
+	/// What removing a Project would meet and lose.
+	ProjectRemovalPreview(ProjectRemovalPreview),
 	/// What one path inside a Project names.
 	ProjectEntry(ProjectEntry),
 	/// What promoting a Workspace would do. Boxed: the preview carries

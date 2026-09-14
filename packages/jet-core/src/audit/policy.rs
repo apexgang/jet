@@ -61,6 +61,7 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::RegisterProject { .. } => {
 			Some(AuditDecision::ProjectRegistered)
 		}
+		Command::RemoveProject { .. } => Some(AuditDecision::ProjectRemoved),
 		Command::RestoreRecoverySnapshot { .. } => {
 			Some(AuditDecision::RecoverySnapshotRestored)
 		}
@@ -154,6 +155,9 @@ pub(super) fn refused_subject(command: &Command) -> AuditSubject {
 		| Command::DeleteConversationEverywhere { conversation_id }
 		| Command::RestoreConversation { conversation_id } => {
 			AuditSubject::Conversation(*conversation_id)
+		}
+		Command::RemoveProject { binding, .. } => {
+			AuditSubject::Project(binding.project_id)
 		}
 		Command::CompileAutodeleteRule { rule_id, .. }
 		| Command::SetAutodeleteRuleInactiveDays { rule_id, .. }

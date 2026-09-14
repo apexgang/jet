@@ -138,6 +138,8 @@ pub enum AuditDecision {
 	/// An interactive user granted Jet a directory as a Project, widening
 	/// what it may read and change on this Plane (ADR-0101).
 	ProjectRegistered,
+	/// A Project was removed with its directory (ADR-0011).
+	ProjectRemoved,
 	/// An owner accepted one third-party Craft's exact executable authority.
 	CraftInstallationApproved,
 	/// Native extension lifecycle request or outcome.
