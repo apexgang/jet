@@ -183,6 +183,11 @@ pub use pairing::{
 	PairingSecret, PairingSignature, PairingSnapshot, PendingPairing,
 };
 pub use project::entry::{EntryKind, ProjectEntry};
+pub use project::removal::{
+	Disposition, PERMANENT_REMOVAL_WARNING, PermanentRemoval, ProjectDisposal,
+	ProjectRemovalBinding, ProjectRemovalPreview, ProjectRemoved,
+	RemovalObstacle,
+};
 pub use project::{
 	Checkout, GitLink, PathGrant, Project, ProjectList, ProjectPreview,
 	Registrability, Repository, Worktree,

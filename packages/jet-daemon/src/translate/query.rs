@@ -176,6 +176,11 @@ pub(crate) fn query(
 				path: RelativePath::parse(path)?,
 			}
 		}
+		wire::QueryRequest::PreviewProjectRemoval { project_id } => {
+			Query::PreviewProjectRemoval {
+				project_id: ProjectId(*project_id),
+			}
+		}
 		wire::QueryRequest::PreviewPromotion {
 			workspace_id,
 			destination,
@@ -335,6 +340,11 @@ pub(crate) fn query_result(
 		}
 		QueryResult::ProjectEntry(entry) => {
 			wire::QueryResponse::ProjectEntry(project::entry(entry))
+		}
+		QueryResult::ProjectRemovalPreview(preview) => {
+			wire::QueryResponse::ProjectRemovalPreview(
+				project::removal_preview(preview),
+			)
 		}
 		QueryResult::PromotionPreview(preview) => {
 			wire::QueryResponse::PromotionPreview(Box::new(promotion::preview(

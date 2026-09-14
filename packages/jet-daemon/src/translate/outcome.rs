@@ -220,6 +220,9 @@ pub(crate) fn command_outcome(
 		CommandOutcome::ProjectRegistered(project) => {
 			wire::CommandResponse::ProjectRegistered(project::project(project))
 		}
+		CommandOutcome::ProjectRemoved(removed) => {
+			wire::CommandResponse::ProjectRemoved(project::removed(removed))
+		}
 		CommandOutcome::WorkspacePromotionRecorded(recorded) => {
 			wire::CommandResponse::WorkspacePromotionRecorded(
 				promotion::promotion(recorded),

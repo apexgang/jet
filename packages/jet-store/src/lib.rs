@@ -83,7 +83,7 @@ pub use pairing::paired_client::{
 	NewPairedClient, PairedClientAccess, PairedClientRecord,
 };
 pub use plane::PlaneRecord;
-pub use project::{NewProject, ProjectRecord};
+pub use project::{NewProject, ProjectRecord, ProjectWork};
 pub use records::{
 	ActorRecord, CommandReceiptRecord, ConversationOriginRecord,
 	ConversationPageKey, ConversationPageStart, ConversationRecord,

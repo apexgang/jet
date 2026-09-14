@@ -3,8 +3,8 @@
 use super::{
 	account, auto_continue, craft_installation, extension,
 	file_revision_from_wire, file_target_from_wire, git_delivery,
-	lifecycle_from_wire, pairing, promotion, retention_from_wire, run, setting,
-	turn, utility, working_tree_request,
+	lifecycle_from_wire, pairing, project, promotion, retention_from_wire, run,
+	setting, turn, utility, working_tree_request,
 };
 use jet_core::{
 	AccountBindingId, AuthenticationString, ClientId, Command, ConversationId,
@@ -424,6 +424,15 @@ pub(crate) fn command(
 				grant: PathGrant(PathBuf::from(path)),
 			}
 		}
+		wire::CommandRequest::RemoveProject {
+			binding,
+			typed_name,
+			disposal,
+		} => Command::RemoveProject {
+			binding: project::removal_binding_from_wire(binding),
+			typed_name: typed_name.clone(),
+			disposal: project::disposal_from_wire(disposal)?,
+		},
 		wire::CommandRequest::PromoteWorkspace { binding } => {
 			Command::PromoteWorkspace {
 				binding: promotion::binding_from_wire(binding),

@@ -360,6 +360,7 @@ public enum CommandRequest {
     case `revoke_paired_client`(CommandRequestRevokePairedClient)
     case `transition_run`(CommandRequestTransitionRun)
     case `register_project`(CommandRequestRegisterProject)
+    case `remove_project`(CommandRequestRemoveProject)
     case `promote_workspace`(CommandRequestPromoteWorkspace)
     case `import_conversation`(CommandRequestImportConversation)
     case `resume_imported_conversation`(CommandRequestResumeImportedConversation)
@@ -407,6 +408,7 @@ public enum CommandResponse {
     case `recovery_snapshots_purged`(CommandResponseRecoverySnapshotsPurged)
     case `audit_epoch_begun`(CommandResponseAuditEpochBegun)
     case `project_registered`(CommandResponseProjectRegistered)
+    case `project_removed`(CommandResponseProjectRemoved)
     case `workspace_promotion_recorded`(CommandResponseWorkspacePromotionRecorded)
     case `conversation_imported`(CommandResponseConversationImported)
 }
@@ -561,6 +563,11 @@ public enum DiffScope {
     case `final`(DiffScopeFinal)
     case `historical`(DiffScopeHistorical)
     case `turn`(DiffScopeTurn)
+}
+
+public enum Disposition: String {
+    case `trashed` = "trashed"
+    case `deleted` = "deleted"
 }
 
 public struct EditableFile {
@@ -975,6 +982,11 @@ public struct Project {
     public let `root`: String
 }
 
+public enum ProjectDisposal {
+    case `system_trash`(ProjectDisposalSystemTrash)
+    case `permanent`(ProjectDisposalPermanent)
+}
+
 public struct ProjectEntry {
     public let `cursor`: String
     public let `kind`: EntryKind
@@ -989,6 +1001,31 @@ public struct ProjectList {
 
 public struct ProjectPreview {
     public let `registrability`: Registrability
+    public let `root`: String
+}
+
+public struct ProjectRemovalBinding {
+    public let `actor`: String
+    public let `dirty_files`: UInt64
+    public let `live_runs`: UInt64
+    public let `project_id`: String
+    public let `root`: String
+    public let `schedules`: UInt64
+    public let `unpushed_commits`: UInt64
+    public let `workspaces`: [String]
+}
+
+public struct ProjectRemovalPreview {
+    public let `binding`: ProjectRemovalBinding
+    public let `cursor`: String
+    public let `disk_use_bytes`: UInt64
+    public let `obstacles`: [RemovalObstacle]
+    public let `permanent_removal_warning`: String
+}
+
+public struct ProjectRemoved {
+    public let `disposition`: Disposition
+    public let `project_id`: String
     public let `root`: String
 }
 
@@ -1070,6 +1107,7 @@ public enum QueryRequest {
     case `projects`(QueryRequestProjects)
     case `preview_project`(QueryRequestPreviewProject)
     case `project_entry`(QueryRequestProjectEntry)
+    case `preview_project_removal`(QueryRequestPreviewProjectRemoval)
     case `preview_promotion`(QueryRequestPreviewPromotion)
     case `search`(QueryRequestSearch)
     case `external_conversations`(QueryRequestExternalConversations)
@@ -1106,6 +1144,7 @@ public enum QueryResponse {
     case `security_audit`(QueryResponseSecurityAudit)
     case `projects`(QueryResponseProjects)
     case `project_preview`(QueryResponseProjectPreview)
+    case `project_removal_preview`(QueryResponseProjectRemovalPreview)
     case `project_entry`(QueryResponseProjectEntry)
     case `promotion_preview`(QueryResponsePromotionPreview)
     case `search`(QueryResponseSearch)
@@ -1235,6 +1274,15 @@ public enum RemoteToolResult {
     case `process`(RemoteToolResultProcess)
     case `written`(RemoteToolResultWritten)
     case `file`(RemoteToolResultFile)
+}
+
+public enum RemovalObstacle: String {
+    case `live_runs` = "live_runs"
+    case `schedules` = "schedules"
+    case `filesystem_root` = "filesystem_root"
+    case `user_home` = "user_home"
+    case `jet_home` = "jet_home"
+    case `contains_project` = "contains_project"
 }
 
 public struct Repository {
@@ -2151,6 +2199,12 @@ public struct CommandRequestRegisterProject {
     public let `path`: String
 }
 
+public struct CommandRequestRemoveProject {
+    public let `binding`: ProjectRemovalBinding
+    public let `disposal`: ProjectDisposal
+    public let `typed_name`: String
+}
+
 public struct CommandRequestPromoteWorkspace {
     public let `binding`: PromotionBinding
 }
@@ -2380,6 +2434,12 @@ public struct CommandResponseProjectRegistered {
     public let `project_id`: String
     public let `registered_at_unix_ms`: Int64
     public let `registered_by`: Actor
+    public let `root`: String
+}
+
+public struct CommandResponseProjectRemoved {
+    public let `disposition`: Disposition
+    public let `project_id`: String
     public let `root`: String
 }
 
@@ -2694,6 +2754,14 @@ public struct PairingProgressEnded {
     public let `reason`: PairingEnd
 }
 
+public struct ProjectDisposalSystemTrash {
+
+}
+
+public struct ProjectDisposalPermanent {
+    public let `acknowledged_warning`: String
+}
+
 public struct PromotionDestinationLocalCheckout {
 
 }
@@ -2843,6 +2911,10 @@ public struct QueryRequestPreviewProject {
 
 public struct QueryRequestProjectEntry {
     public let `path`: String
+    public let `project_id`: String
+}
+
+public struct QueryRequestPreviewProjectRemoval {
     public let `project_id`: String
 }
 
@@ -3070,6 +3142,14 @@ public struct QueryResponseProjects {
 public struct QueryResponseProjectPreview {
     public let `registrability`: Registrability
     public let `root`: String
+}
+
+public struct QueryResponseProjectRemovalPreview {
+    public let `binding`: ProjectRemovalBinding
+    public let `cursor`: String
+    public let `disk_use_bytes`: UInt64
+    public let `obstacles`: [RemovalObstacle]
+    public let `permanent_removal_warning`: String
 }
 
 public struct QueryResponseProjectEntry {

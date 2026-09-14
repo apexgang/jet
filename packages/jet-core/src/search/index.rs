@@ -169,6 +169,7 @@ pub(crate) fn documents_of(event: &Event) -> Vec<NewSearchDocument> {
 		| EventKind::PairedClientAccessChanged { .. }
 		| EventKind::PairedClientRevoked { .. }
 		| EventKind::ProjectRegistered { .. }
+		| EventKind::ProjectRemoved { .. }
 		// A kind this core cannot interpret is content it cannot vouch
 		// for; a core that knows the kind indexes it when it rebuilds.
 		| EventKind::Unrecognized(_) => Vec::new(),

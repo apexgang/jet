@@ -104,7 +104,8 @@ Removing journal Events moves the journal's replay floor past them, so a
 cursor from before the deletion is answered with an expiration and takes
 a fresh snapshot rather than being replayed across the gap (ADR-0078).
 Restoring a database snapshot reapplies the ledger, and a `conversation`
-line removes the same rows again.
+line removes the same rows again. Removing a Project is its own
+two-phase operation, described in [Project removal](project-removal.md).
 
 ## The grace period
 

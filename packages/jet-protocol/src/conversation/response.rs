@@ -7,7 +7,7 @@ use crate::{
 		import::ImportedConversation, promotion::WorkspacePromotion,
 	},
 	pairing::{PairedClient, PairingDisclosure, PairingGate, PendingPairing},
-	project::Project,
+	project::{Project, ProjectRemoved},
 	setting::{SettingKey, SettingScope, SettingValue},
 };
 use serde::{Deserialize, Serialize};
@@ -234,6 +234,9 @@ pub enum CommandResponse {
 	},
 	/// The Project as registered.
 	ProjectRegistered(Project),
+	/// The Project as removed, with where its directory went. Needs
+	/// minor 41.
+	ProjectRemoved(ProjectRemoved),
 	/// The promotion as recorded: applying, with its Effect committed, or
 	/// conflicted, with the paths that keep it from being applied.
 	WorkspacePromotionRecorded(WorkspacePromotion),

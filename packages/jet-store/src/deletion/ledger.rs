@@ -24,6 +24,8 @@ pub enum DeletedIdentityKind {
 	Schedule,
 	/// A Conversation whose Jet Trash grace period ended (ADR-0015).
 	Conversation,
+	/// A Project that was removed (ADR-0011).
+	Project,
 }
 
 impl DeletedIdentityKind {
@@ -35,6 +37,7 @@ impl DeletedIdentityKind {
 			Self::PairedClient => "paired_client",
 			Self::Schedule => "schedule",
 			Self::Conversation => "conversation",
+			Self::Project => "project",
 		}
 	}
 
@@ -44,6 +47,7 @@ impl DeletedIdentityKind {
 			"paired_client" => Some(Self::PairedClient),
 			"schedule" => Some(Self::Schedule),
 			"conversation" => Some(Self::Conversation),
+			"project" => Some(Self::Project),
 			_ => None,
 		}
 	}

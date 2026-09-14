@@ -9,6 +9,7 @@ use crate::{
 	pairing::{
 		ClientPublicKey, PairedClientAccess, PairingGate, PairingMethod,
 	},
+	project::{ProjectDisposal, ProjectRemovalBinding},
 	setting::{SettingKey, SettingScope, SettingValue},
 };
 use serde::{Deserialize, Serialize};
@@ -414,6 +415,18 @@ pub enum CommandRequest {
 	RegisterProject {
 		/// The absolute path the user granted.
 		path: String,
+	},
+	/// Remove a registered Project and its directory exactly as a preview
+	/// showed. The Plane computes the preview again and refuses a binding
+	/// the Project has moved past, live work in it, and a typed name that
+	/// is not the directory's own. Interactive users only. Needs minor 41.
+	RemoveProject {
+		/// What the preview bound and the user confirmed.
+		binding: ProjectRemovalBinding,
+		/// The Project directory's own name, typed by the user.
+		typed_name: String,
+		/// Where the directory goes.
+		disposal: ProjectDisposal,
 	},
 	/// Promote a Workspace exactly as a preview showed. The Plane computes
 	/// the preview again and refuses a binding the Workspace or the

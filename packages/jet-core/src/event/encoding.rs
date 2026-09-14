@@ -72,6 +72,7 @@ impl EventKind {
 			| Self::PairedClientAccessChanged { .. }
 			| Self::PairedClientRevoked { .. }
 			| Self::ProjectRegistered { .. }
+			| Self::ProjectRemoved { .. }
 			| Self::WorkspaceCreated { .. }
 			| Self::WorkspaceSeeded { .. }
 			| Self::WorkspacePromotionRecorded { .. }

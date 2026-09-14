@@ -74,6 +74,7 @@ impl Client {
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
 			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::ProjectRemoved(_)
 			| CommandResponse::WorkspacePromotionRecorded(_)
 			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}

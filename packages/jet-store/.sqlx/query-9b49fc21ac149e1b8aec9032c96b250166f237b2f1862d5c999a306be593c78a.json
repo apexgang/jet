@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE conversations SET working_tree = 'none', project_id = NULL\n\t\t WHERE project_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "9b49fc21ac149e1b8aec9032c96b250166f237b2f1862d5c999a306be593c78a"
+}

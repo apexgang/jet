@@ -9,10 +9,11 @@ use jet_client::ClientError;
 use std::os::unix::fs::symlink;
 
 use jet_protocol::{
-	Actor, CapabilityObservation, Checkout, ClientMessage, EntryKind,
-	ErrorCategory, ExternalTool, PAIRING_MINOR, Project, ProjectEntry,
-	ProjectPreview, QueryRequest, Registrability, Repository, ServerHello,
-	ServerMessage, Worktree,
+	Actor, CapabilityObservation, Checkout, ClientMessage, Disposition,
+	EntryKind, ErrorCategory, ExternalTool, PAIRING_MINOR, PROJECTS_MINOR,
+	Project, ProjectDisposal, ProjectEntry, ProjectPreview,
+	ProjectRemovalBinding, ProjectRemoved, QueryRequest, Registrability,
+	Repository, ServerHello, ServerMessage, Worktree,
 };
 use pretty_assertions::assert_eq;
 use support::{connect, handshake_raw, hello, init_repository, start_jetd};
@@ -256,6 +257,130 @@ async fn a_file_is_addressed_through_its_project_and_a_relative_path() {
 				(ErrorCategory::InvalidInput, "path.platform_form".into()),
 				(ErrorCategory::InvalidInput, "path.escapes_root".into()),
 			]
+		)
+	);
+}
+
+/// Removal is two phases at the protocol boundary: the preview binds what
+/// the removal would lose, and the Command carries it back with the
+/// directory's name typed out. A wrong name is refused with nothing
+/// removed; the bound removal takes the registration and the directory,
+/// here for good under the acknowledged warning (ADR-0011).
+#[tokio::test]
+async fn a_project_is_removed_through_its_bound_preview() {
+	let dir = tempfile::tempdir().unwrap();
+	let client_id = Uuid::new_v4();
+	let repository = init_repository(&dir.path().join("repo"));
+	std::fs::write(repository.join("scratch.txt"), "work in progress\n")
+		.unwrap();
+	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	let client = connect(&daemon, client_id).await;
+	let registered = client
+		.register_project(Uuid::now_v7(), repository.to_str().unwrap())
+		.await
+		.unwrap();
+
+	let preview = client
+		.preview_project_removal(registered.project_id)
+		.await
+		.unwrap();
+	let misnamed = client
+		.remove_project(
+			Uuid::now_v7(),
+			preview.binding.clone(),
+			"Repo",
+			ProjectDisposal::SystemTrash,
+		)
+		.await
+		.unwrap_err();
+	let removed = client
+		.remove_project(
+			Uuid::now_v7(),
+			preview.binding.clone(),
+			"repo",
+			ProjectDisposal::Permanent {
+				acknowledged_warning: preview.permanent_removal_warning.clone(),
+			},
+		)
+		.await
+		.unwrap();
+	let listed = client.projects().await.unwrap();
+
+	let ClientError::Remote(misnamed) = misnamed else {
+		panic!("expected a stable remote error, got {misnamed:?}");
+	};
+	assert_eq!(
+		(
+			preview.binding,
+			preview.obstacles,
+			preview.disk_use_bytes > 0,
+			preview.permanent_removal_warning.is_empty(),
+			misnamed.code.as_str(),
+			removed,
+			listed.projects,
+			repository.exists(),
+		),
+		(
+			ProjectRemovalBinding {
+				project_id: registered.project_id,
+				root: repository.display().to_string(),
+				live_runs: 0,
+				schedules: 0,
+				dirty_files: 1,
+				unpushed_commits: 1,
+				workspaces: vec![],
+				actor: client_id,
+			},
+			vec![],
+			true,
+			false,
+			"project.name_mismatch",
+			ProjectRemoved {
+				project_id: registered.project_id,
+				root: repository.display().to_string(),
+				disposition: Disposition::Deleted,
+			},
+			vec![],
+			false,
+		)
+	);
+}
+
+/// A client that negotiated a minor without Project removal is answered
+/// with a stable refusal (ADR-0019).
+#[tokio::test]
+async fn a_client_below_the_removal_minor_is_refused() {
+	let dir = tempfile::tempdir().unwrap();
+	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	let mut older = hello(Uuid::new_v4());
+	older.minor = PROJECTS_MINOR;
+
+	let (mut connection, _) = handshake_raw(&daemon, &older).await;
+	connection
+		.send(&ClientMessage::Query {
+			id: 1,
+			query: QueryRequest::PreviewProjectRemoval {
+				project_id: Uuid::nil(),
+			},
+			timeout_ms: None,
+		})
+		.await;
+
+	let ServerMessage::Error { id, error } = connection.receive().await else {
+		panic!("expected a refusal");
+	};
+	assert_eq!(
+		(
+			id,
+			error.category,
+			error.code.as_str(),
+			error.message.as_str()
+		),
+		(
+			Some(1),
+			ErrorCategory::Incompatible,
+			"protocol.unsupported_minor",
+			"the Project removal preview Query needs protocol minor 41"
 		)
 	);
 }

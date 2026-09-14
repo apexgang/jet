@@ -9,7 +9,7 @@ use crate::{
 	pairing::{
 		PairedClient, PairingChallenge, PairingDisclosure, PendingPairing,
 	},
-	project::Project,
+	project::{Project, removal::ProjectRemoved},
 	promotion::WorkspacePromotion,
 	setting::{SettingKey, SettingScope, SettingValue},
 };
@@ -201,6 +201,8 @@ pub enum CommandOutcome {
 	},
 	/// The Project as registered.
 	ProjectRegistered(Project),
+	/// The Project as removed, with where its directory went.
+	ProjectRemoved(ProjectRemoved),
 	/// The promotion as recorded: applying, with its Effect committed, or
 	/// conflicted, with the paths that keep it from being applied.
 	WorkspacePromotionRecorded(WorkspacePromotion),

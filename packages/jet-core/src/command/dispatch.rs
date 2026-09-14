@@ -349,6 +349,17 @@ pub(super) async fn execute_new(
 			};
 			project::register(tx, actor, registrable, now_unix_ms).await
 		}
+		Command::RemoveProject { disposal, .. } => {
+			let Prepared::Removal(prepared) = prepared else {
+				return Err(CoreError::internal(
+					"project.unprepared",
+					"a Project removal reached its transaction without its \
+					 prepared inspection",
+				));
+			};
+			project::removal::remove(tx, actor, prepared, disposal, now_unix_ms)
+				.await
+		}
 		Command::CreateConversation {
 			retention,
 			working_tree,

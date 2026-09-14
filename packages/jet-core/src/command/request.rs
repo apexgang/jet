@@ -15,7 +15,10 @@ use crate::{
 		AuthenticationString, ClientPublicKey, PairingOfferId, PairingSecret,
 		PairingSignature,
 	},
-	project::PathGrant,
+	project::{
+		PathGrant,
+		removal::{ProjectDisposal, ProjectRemovalBinding},
+	},
 	promotion::PromotionBinding,
 	security::SecurityClass,
 	setting::{SettingKey, SettingScope, SettingValue},
@@ -427,6 +430,19 @@ pub enum Command {
 		/// The user's explicit authorization for one absolute path.
 		grant: PathGrant,
 	},
+	/// Remove a registered Project and its directory, exactly as its
+	/// preview showed (ADR-0011). The preview is computed again before
+	/// the transaction opens; a Project that moved on makes it stale and
+	/// refused, and so does live work in it. Only an interactive user can
+	/// make this Command, and only with the directory's name typed out.
+	RemoveProject {
+		/// What the preview bound and the user confirmed.
+		binding: ProjectRemovalBinding,
+		/// The Project directory's own name, typed by the user.
+		typed_name: String,
+		/// Where the directory goes.
+		disposal: ProjectDisposal,
+	},
 	/// Promote a Workspace to the permanent checkout or branch its preview
 	/// was made for, exactly as previewed (ADR-0025). The preview is
 	/// computed again before the transaction opens, and a Workspace or
@@ -490,6 +506,7 @@ impl Command {
 				..
 			}
 			| Self::RegisterProject { .. }
+			| Self::RemoveProject { .. }
 			| Self::ApplyUserEdit { .. }
 			| Self::CreateConversation {
 				working_tree: WorkingTreeRequest::Workspace { .. },

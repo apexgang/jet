@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) AS \"count!: i64\" FROM scheduled_tasks\n\t\t\t JOIN conversations USING (conversation_id)\n\t\t\t WHERE conversations.project_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "count!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "27514094cbcba3d511a5361640ada157ff26f753a2ec3bb6fa07680a7f789d39"
+}

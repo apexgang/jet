@@ -58,6 +58,7 @@ impl Client {
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)
+			| QueryResponse::ProjectRemovalPreview(_)
 			| QueryResponse::ProjectEntry(_)
 			| QueryResponse::PromotionPreview(_)
 			| QueryResponse::ChangeArtifact(_)
@@ -139,6 +140,7 @@ impl Client {
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
 			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::ProjectRemoved(_)
 			| CommandResponse::WorkspacePromotionRecorded(_)) => Err(unexpected(&other)),
 		}
 	}
@@ -218,6 +220,7 @@ impl Client {
 			| CommandResponse::PairedClientAccessSet { .. }
 			| CommandResponse::PairedClientRevoked { .. }
 			| CommandResponse::ProjectRegistered(_)
+			| CommandResponse::ProjectRemoved(_)
 			| CommandResponse::WorkspacePromotionRecorded(_)
 			| CommandResponse::ConversationImported(_)) => Err(unexpected(&other)),
 		}

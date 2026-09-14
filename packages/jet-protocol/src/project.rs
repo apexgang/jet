@@ -161,3 +161,114 @@ pub struct ProjectList {
 	/// The Projects in the order they were registered.
 	pub projects: Vec<Project>,
 }
+
+/// What a removal preview showed and a removal carries back: the Project
+/// as it stood, the work it would lose, and the Actor it was shown to.
+/// The Plane refuses a removal when any of it has changed since. Needs
+/// minor 41.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ProjectRemovalBinding {
+	/// The Project being removed.
+	pub project_id: Uuid,
+	/// Its canonical root, the directory the removal takes.
+	pub root: String,
+	/// Runs of its Conversations that have not ended. Any refuses the
+	/// removal.
+	pub live_runs: u64,
+	/// Scheduled tasks of its Conversations. Any refuses the removal.
+	pub schedules: u64,
+	/// Tracked files changed and untracked files present in its checkout,
+	/// which the removal loses.
+	pub dirty_files: u64,
+	/// Commits in its repository that no remote branch holds, which the
+	/// removal loses with it.
+	pub unpushed_commits: u64,
+	/// The Workspaces created from it, which are removed with it.
+	pub workspaces: Vec<Uuid>,
+	/// The Client identity the preview was shown to.
+	pub actor: Uuid,
+}
+
+/// One reason a Project cannot be removed as it stands. What keeps it is
+/// data a client acts on, never a message it parses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RemovalObstacle {
+	/// A Run of one of its Conversations has not ended.
+	LiveRuns,
+	/// A Scheduled task of one of its Conversations would queue more work.
+	Schedules,
+	/// Its root is a filesystem root.
+	FilesystemRoot,
+	/// Its root is the user's home directory.
+	UserHome,
+	/// Its root is Jet's own home, or holds it, or lies inside it.
+	JetHome,
+	/// Another registered Project lies inside its root.
+	ContainsProject,
+}
+
+/// What removing one Project would meet and lose, shown before it is
+/// done. Needs minor 41.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ProjectRemovalPreview {
+	/// Newest Event sequence visible when the Project was read, carried as
+	/// a decimal string (ADR-0089).
+	#[serde(with = "crate::transport::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
+	pub cursor: u64,
+	/// What the removal is bound to.
+	pub binding: ProjectRemovalBinding,
+	/// Bytes the files under the root occupy. Disclosed and not bound: a
+	/// repository's size moves on its own.
+	pub disk_use_bytes: u64,
+	/// What refuses the removal today, in a fixed order; empty when it may
+	/// proceed.
+	pub obstacles: Vec<RemovalObstacle>,
+	/// The warning a permanent removal acknowledges, word for word. A
+	/// client shows it and sends it back as it is.
+	pub permanent_removal_warning: String,
+}
+
+/// Where a removed Project's directory goes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProjectDisposal {
+	/// To the system Trash, from where the user can restore it. Refused
+	/// with `project.trash_unavailable` where the Plane has none for the
+	/// directory, and nothing is removed.
+	SystemTrash,
+	/// Deleted for good. The second authorization: the Plane's
+	/// permanent-deletion warning, acknowledged word for word.
+	Permanent {
+		/// The warning, exactly as the Plane publishes it.
+		acknowledged_warning: String,
+	},
+}
+
+/// Where a removed Project's directory went.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Disposition {
+	/// It is in the system Trash.
+	Trashed,
+	/// It is deleted.
+	Deleted,
+}
+
+/// The Project as removed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ProjectRemoved {
+	/// The Project that is no longer registered.
+	pub project_id: Uuid,
+	/// The root its directory was at.
+	pub root: String,
+	/// Where the directory went.
+	pub disposition: Disposition,
+}

@@ -66,6 +66,7 @@ impl AuditDecision {
 			Self::PairedClientDisabled => "pairing.client_disabled",
 			Self::PairedClientRevoked => "pairing.client_revoked",
 			Self::ProjectRegistered => "project.registered",
+			Self::ProjectRemoved => "project.removed",
 			Self::CraftInstallationApproved => "craft.installation_approved",
 			Self::ExtensionInstall => "extension.install",
 			Self::ExtensionUpdate => "extension.update",
@@ -136,6 +137,9 @@ impl AuditDecision {
 			// The snapshots removed were the last copies of what was
 			// deleted, which is the point; nothing brings them back.
 			Self::RecoverySnapshotsPurged => AuditRisk::Destructive,
+			// The directory is in the system Trash at best, and Jet has no
+			// hand on it from there; at worst it is gone.
+			Self::ProjectRemoved => AuditRisk::Destructive,
 			// Staging is reversible for the whole grace period, so it is
 			// elevated; authorizing native deletion and the deletion itself
 			// are not.
