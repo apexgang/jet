@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT fences_applied FROM plane WHERE singleton = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "fences_applied",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "plane",
+            "name": "fences_applied"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1305a89b68499a01e76d823bbd5112b8cfbb595abc2396529d91ceb69343e543"
+}

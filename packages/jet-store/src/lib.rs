@@ -16,6 +16,12 @@ pub use autodelete::{
 };
 mod audit;
 pub use audit::actor::AuditActorRecord;
+mod authority;
+pub use authority::{
+	AuthorityFenceRecord, AuthorityFences, AuthorityRecord, AuthorityState,
+	NewPlaneTransfer, PendingFence, PlaneTransferPhase, PlaneTransferRecord,
+	PlaneTransferRole,
+};
 mod checkpoint;
 mod command;
 mod conversation;
@@ -23,6 +29,7 @@ pub use craft::lifecycle::CraftDisableMode;
 mod deletion;
 pub use deletion::{DeletedIdentityKind, DeletionLedger, DeletionRecord};
 mod effect;
+mod evidence;
 mod journal;
 mod migrations;
 mod open;
@@ -185,6 +192,8 @@ struct Opened {
 	/// How many Deletion-ledger records the store had applied when it was
 	/// opened, when its Plane row could say (ADR-0102).
 	deletions_applied: Option<u64>,
+	/// How many Authority fences it had applied, likewise (ADR-0070).
+	fences_applied: Option<u64>,
 }
 
 impl Store {
@@ -257,6 +266,9 @@ impl Store {
 				"the Deletion ledger cannot be trusted: {detail}"
 			)));
 		}
+		// Likewise an authority the snapshot still claims and only the
+		// fences remember retiring (ADR-0070).
+		self.authority_fences()?.trusted()?;
 		self.pool().close().await;
 		let (opened, restored) = recovery::restore(
 			&self.database,
@@ -369,6 +381,22 @@ impl Store {
 			&self.database,
 			opened.plane_id,
 			opened.deletions_applied.unwrap_or(0),
+		)
+	}
+
+	/// The Authority fences of this store: every Conversation authority it
+	/// retired through a Plane transfer, or the finding that the fences
+	/// vouch for nothing (ADR-0070).
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Unavailable`] when the files cannot be read.
+	pub fn authority_fences(&self) -> Result<AuthorityFences, StoreError> {
+		let opened = self.opened();
+		authority::read(
+			&self.database,
+			opened.plane_id,
+			opened.fences_applied.unwrap_or(0),
 		)
 	}
 
@@ -679,6 +707,7 @@ mod tests {
 					),
 					source: NameSourceRecord::Deterministic,
 				},
+				authority: crate::AuthorityRecord::HOME,
 				created_at_unix_ms: NOW_UNIX_MS,
 			}
 		);
@@ -1200,6 +1229,7 @@ mod tests {
 					),
 					source: NameSourceRecord::Deterministic,
 				},
+				authority: crate::AuthorityRecord::HOME,
 				created_at_unix_ms: NOW_UNIX_MS,
 			}
 		);

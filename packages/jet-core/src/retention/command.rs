@@ -8,7 +8,8 @@ use crate::{
 	run::execution_control::{self, RunControl},
 };
 use jet_store::{
-	AuditActorRecord, RunLifecycle, TrashRecord, WriteTransaction,
+	AuditActorRecord, RunLifecycle, TrashReasonRecord, TrashRecord,
+	WriteTransaction,
 };
 
 /// Stages a Conversation in Jet Trash because its owner asked Jet to
@@ -110,6 +111,19 @@ pub(crate) async fn restore(
 	conversation_id: ConversationId,
 	now: i64,
 ) -> Result<CommandOutcome, CoreError> {
+	// A Transfer tombstone is content whose authority left; the fence
+	// keeps it from becoming a Home Plane again (ADR-0070).
+	if tx
+		.trash_entry(conversation_id.0)
+		.await?
+		.is_some_and(|entry| entry.reason == TrashReasonRecord::Transferred)
+	{
+		return Err(CoreError::conflict(
+			"retention.transferred",
+			"the Conversation's authority moved to another Plane; its \
+			 tombstone cannot be restored here",
+		));
+	}
 	if !tx.delete_trash(conversation_id.0).await? {
 		return Err(CoreError::not_found(
 			"retention.not_trashed",
@@ -171,6 +185,15 @@ pub(crate) async fn stage(
 			TrashReason::DeleteEverywhere
 			| TrashReason::AutodeleteEverywhere => {
 				AuditDecision::ConversationDeletionAuthorized
+			}
+			// The Transfer tombstone is left by relinquishing a Plane
+			// transfer, which records its own decision (ADR-0070).
+			TrashReason::PlaneTransfer => {
+				return Err(CoreError::internal(
+					"retention.tombstone_not_staged",
+					"a Transfer tombstone is not staged; it is left by \
+					 relinquishing",
+				));
 			}
 		},
 		AuditSubject::Conversation(conversation_id),

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO plane_transfers\n\t\t\t\t(transfer_id, conversation_id, role, phase, retired_epoch,\n\t\t\t\t\tpeer_plane_id, bundle_sha256, prepared_at_unix_ms)\n\t\t\t VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "4c5843584dd1d394d11d49cfb66ca1a70ebaf85719dcf2dd07f7e4673253764c"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE plane_transfers SET phase = ?2, settled_at_unix_ms = ?3\n\t\t\t WHERE transfer_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "969783095c729f2acb293863f8bbcefeefcc20cfe93adabc32fe36f598d5b496"
+}

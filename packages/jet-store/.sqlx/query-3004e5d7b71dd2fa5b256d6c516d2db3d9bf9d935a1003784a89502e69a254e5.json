@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT rowid AS \"rowid!\",\n\t\t\t\tconversation_id AS \"conversation_id!\", revision, retention,\n\t\t\t\tworking_tree, project_id, import_id,\n\t\t\t\tfork_source_conversation_id, fork_source_run_id,\n\t\t\t\tfork_checkpoint_turn, name, name_source,\n\t\t\t\tcreated_at_unix_ms\n\t\t\t FROM conversations\n\t\t\t WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
+  "query": "SELECT rowid AS \"rowid!\",\n\t\t\t\tconversation_id AS \"conversation_id!\", revision, retention,\n\t\t\t\tworking_tree, project_id, import_id,\n\t\t\t\tfork_source_conversation_id, fork_source_run_id,\n\t\t\t\tfork_checkpoint_turn, name, name_source,\n\t\t\t\tauthority, authority_epoch, created_at_unix_ms\n\t\t\t FROM conversations\n\t\t\t WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
   "describe": {
     "columns": [
       {
@@ -136,8 +136,30 @@
         }
       },
       {
-        "name": "created_at_unix_ms",
+        "name": "authority",
         "ordinal": 12,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "authority"
+          }
+        }
+      },
+      {
+        "name": "authority_epoch",
+        "ordinal": 13,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "authority_epoch"
+          }
+        }
+      },
+      {
+        "name": "created_at_unix_ms",
+        "ordinal": 14,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -163,8 +185,10 @@
       true,
       true,
       true,
+      false,
+      false,
       false
     ]
   },
-  "hash": "7aee47d2c5c9a4bdcc08bdfed3db8d2fe18d0b33c83d940e055233bab4dd8a97"
+  "hash": "3004e5d7b71dd2fa5b256d6c516d2db3d9bf9d935a1003784a89502e69a254e5"
 }

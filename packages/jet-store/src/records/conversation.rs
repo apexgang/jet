@@ -172,6 +172,8 @@ pub struct ConversationRecord {
 	pub origin: ConversationOriginRecord,
 	/// Resolved user-facing name and its authority.
 	pub name: NameRecord,
+	/// Which Plane owns it, and in which epoch (ADR-0062).
+	pub authority: crate::AuthorityRecord,
 	/// When the Conversation was recorded.
 	pub created_at_unix_ms: i64,
 }

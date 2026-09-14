@@ -92,6 +92,9 @@ pub(super) async fn sanitize(
 	sqlx::query!("DELETE FROM pairing_offers")
 		.execute(&mut *connection)
 		.await?;
+	sqlx::query!("DELETE FROM plane_transfers")
+		.execute(&mut *connection)
+		.await?;
 	sqlx::query!("DELETE FROM plane")
 		.execute(&mut *connection)
 		.await?;
@@ -159,7 +162,9 @@ pub(super) async fn sanitize(
 	sqlx::query!("UPDATE events SET actor_kind = 'recovery', actor_id = NULL")
 		.execute(&mut *connection)
 		.await?;
-	sqlx::query!("UPDATE conversations SET working_tree = 'none', project_id = NULL, import_id = NULL, fork_source_conversation_id = NULL, fork_source_run_id = NULL, fork_checkpoint_turn = NULL").execute(&mut *connection).await?;
+	// A portable copy claims no authority: its Conversations get fresh
+	// identities on import, in a first epoch of their own (ADR-0070).
+	sqlx::query!("UPDATE conversations SET working_tree = 'none', project_id = NULL, import_id = NULL, fork_source_conversation_id = NULL, fork_source_run_id = NULL, fork_checkpoint_turn = NULL, authority = 'home', authority_epoch = 1").execute(&mut *connection).await?;
 	// Schedules survive as inert metadata, without the Client that authorized them.
 	sqlx::query!("UPDATE scheduled_tasks SET next_due_unix_ms = 9223372036854775807, state = json_set(json_remove(state, '$.authorized_by', '$.next'), '$.enabled', json('false'))").execute(&mut *connection).await?;
 	Ok(())
@@ -194,6 +199,7 @@ const TABLES: &[&str] = &[
 	"pairing_gate",
 	"pairing_offers",
 	"plane",
+	"plane_transfers",
 	"projects",
 	"remote_operations",
 	"run_executions",

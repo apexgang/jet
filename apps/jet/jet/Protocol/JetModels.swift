@@ -1578,6 +1578,7 @@ public enum TrashReason: String {
     case `delete_everywhere` = "delete_everywhere"
     case `autodelete_rule` = "autodelete_rule"
     case `autodelete_everywhere` = "autodelete_everywhere"
+    case `plane_transfer` = "plane_transfer"
 }
 
 public struct Turn {
