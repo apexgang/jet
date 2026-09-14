@@ -47,6 +47,13 @@ impl Core {
 					return Ok(None);
 				}
 				let id = ConversationId(run.conversation_id);
+				if let Err(error) =
+					crate::plane_transfer::require_authoritative_id(tx, id)
+						.await
+				{
+					crate::plane_transfer::paused_by_transfer(error)?;
+					return Ok(None);
+				}
 				if tx.git_delivery_blocks(id.0).await? {
 					return Ok(None);
 				}

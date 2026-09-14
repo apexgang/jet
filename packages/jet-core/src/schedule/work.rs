@@ -91,6 +91,17 @@ async fn advance(
 	mut task: ScheduledTask,
 	now: i64,
 ) -> Result<(), CoreError> {
+	// A schedule of a Conversation this Plane does not own, or one frozen
+	// for a transfer, waits unchanged: it fires where the authority is,
+	// or once the transfer is aborted (ADR-0070).
+	if let Err(error) = crate::plane_transfer::require_authoritative_id(
+		tx,
+		task.conversation_id,
+	)
+	.await
+	{
+		return crate::plane_transfer::paused_by_transfer(error);
+	}
 	let actor = Actor::InteractiveClient {
 		client_id: task.authorized_by,
 	};

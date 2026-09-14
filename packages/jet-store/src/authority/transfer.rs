@@ -299,6 +299,56 @@ impl WriteTransaction {
 		Ok(())
 	}
 
+	/// Removes the Transfer tombstone of a relinquished Conversation, rows
+	/// and Trash entry, so the Conversation can come back in a later epoch.
+	/// The identity is not deleted, so the Deletion ledger is not told: a
+	/// restored snapshot meets the fence instead (ADR-0070).
+	///
+	/// # Errors
+	///
+	/// Returns [`StoreError::Integrity`] when the Conversation is not
+	/// relinquished, or another [`StoreError`] when a row cannot be removed.
+	pub async fn discard_transfer_tombstone(
+		&mut self,
+		conversation_id: Uuid,
+	) -> Result<(), StoreError> {
+		let relinquished = self
+			.conversation(conversation_id)
+			.await?
+			.is_some_and(|conversation| {
+				conversation.authority.state == AuthorityState::Relinquished
+			});
+		if !relinquished {
+			return Err(StoreError::Integrity(format!(
+				"conversation {conversation_id} is not a Transfer tombstone"
+			)));
+		}
+		let id = conversation_id.to_string();
+		crate::conversation::purge::purge_rows(self.connection(), &id).await?;
+		Ok(())
+	}
+
+	/// Forgets a transfer that was prepared and then abandoned before the
+	/// source relinquished, and says whether it was there.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the row cannot be removed.
+	pub async fn delete_plane_transfer(
+		&mut self,
+		transfer_id: Uuid,
+	) -> Result<bool, StoreError> {
+		let transfer_id = transfer_id.to_string();
+		let removed = sqlx::query!(
+			"DELETE FROM plane_transfers WHERE transfer_id = ?1",
+			transfer_id
+		)
+		.execute(self.connection())
+		.await?
+		.rows_affected();
+		Ok(removed > 0)
+	}
+
 	/// Relinquishes the authority of a source transfer: raises the fence
 	/// for the ledger the transaction writes before it commits, marks the
 	/// Conversation relinquished, settles the transfer, and leaves the

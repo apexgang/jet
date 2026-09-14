@@ -106,6 +106,10 @@ pub(crate) async fn prepare(
 						"the Conversation does not exist",
 					)
 				})?;
+			// A copy that is not this Plane's own, or one frozen for a
+			// transfer, admits no Run (ADR-0070).
+			crate::plane_transfer::require_authoritative(tx, &conversation)
+				.await?;
 			let working_tree = WorkingTree::from(conversation.working_tree);
 			let project_id = match working_tree {
 				WorkingTree::NoProject => {

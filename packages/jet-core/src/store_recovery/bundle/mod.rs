@@ -1,7 +1,7 @@
 //! Portable Recovery bundles (ADR-0074).
 
-mod crypto;
-mod format;
+pub(crate) mod crypto;
+pub(crate) mod format;
 pub use crypto::{RECOVERY_PLAINTEXT_WARNING, RecoveryKey, RecoveryProtection};
 mod import;
 use crate::{Actor, CommandOutcome, Core, CoreError};
@@ -120,7 +120,7 @@ impl Core {
 	}
 }
 
-fn read_bounded(
+pub(crate) fn read_bounded(
 	mut reader: impl std::io::Read,
 	remaining: &mut usize,
 ) -> Result<Vec<u8>, CoreError> {

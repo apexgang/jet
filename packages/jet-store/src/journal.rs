@@ -20,6 +20,9 @@ const FORK_CONTEXT_EVENT_LIMIT: usize = 256;
 /// Most visible transcript Events one Automatic review is shown (ADR-0012).
 const REVIEW_TRANSCRIPT_EVENT_LIMIT: usize = 64;
 
+/// Most transcript Events one Plane transfer carries (ADR-0070).
+pub const TRANSCRIPT_EVENT_LIMIT: usize = 65_536;
+
 /// A bounded semantic Event slice for building a fork's launch context.
 pub struct ForkContextEvents {
 	/// Newest transcript Events through the selected checkpoint, in order.
@@ -164,6 +167,48 @@ impl ReadTransaction {
 		.fetch_all(self.connection())
 		.await?;
 		rows.reverse();
+		rows.into_iter().map(read_event_row).collect()
+	}
+
+	/// Every transcript Event of one Conversation, oldest first: the
+	/// turn inputs, Run output, and Artifact publications a Plane transfer
+	/// carries to the next Home Plane (ADR-0070). Authorization, execution,
+	/// and naming Events stay behind, as they do in a portable snapshot.
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the rows cannot be read, or
+	/// [`StoreError::Integrity`] when the Conversation has more transcript
+	/// Events than one transfer carries.
+	pub async fn transcript_events(
+		&mut self,
+		conversation_id: uuid::Uuid,
+	) -> Result<Vec<EventRecord>, StoreError> {
+		let conversation_id = conversation_id.to_string();
+		let limit =
+			i64::try_from(TRANSCRIPT_EVENT_LIMIT + 1).unwrap_or(i64::MAX);
+		// ASVS 1.2.4/2.2.2: the identity and the fixed allocation bound are
+		// both parameters, and only transcript kinds are selected.
+		let rows = sqlx::query_as!(
+			Row,
+			r#"SELECT sequence AS "sequence!", event_id, actor_kind,
+				actor_id, recorded_at_unix_ms, conversation_id, run_id, kind,
+				payload_version, payload
+			 FROM events
+			 WHERE conversation_id = ?1
+				AND kind IN ('turn.input', 'run.output', 'artifact.published')
+			 ORDER BY sequence LIMIT ?2"#,
+			conversation_id,
+			limit,
+		)
+		.fetch_all(self.connection())
+		.await?;
+		if rows.len() > TRANSCRIPT_EVENT_LIMIT {
+			return Err(StoreError::Integrity(format!(
+				"the Conversation holds more than {TRANSCRIPT_EVENT_LIMIT} \
+				 transcript Events"
+			)));
+		}
 		rows.into_iter().map(read_event_row).collect()
 	}
 

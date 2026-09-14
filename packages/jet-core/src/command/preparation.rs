@@ -44,6 +44,8 @@ pub(crate) enum Prepared {
 	Promotion(PreparedPromotion),
 	/// The identity an import names, as discovery reports it right now.
 	Import(DiscoveredConversation),
+	/// A transfer bundle read, mapped, and with its payloads published.
+	TransferImport(crate::plane_transfer::PreparedImport),
 }
 
 impl Core {
@@ -232,6 +234,12 @@ impl Core {
 			} => Ok(Prepared::Workspace(
 				workspace::prepare(self, *project_id, base, seed).await?,
 			)),
+			Command::ImportPlaneTransfer { bundle, project_id } => {
+				Ok(Prepared::TransferImport(
+					self.prepare_plane_transfer_import(bundle, *project_id)
+						.await?,
+				))
+			}
 			Command::HandoffConversation(request) => {
 				Ok(Prepared::Handoff(Box::new(
 					crate::conversation::handoff::prepare(self, actor, request)
@@ -299,6 +307,10 @@ impl Core {
 			| Command::ForgetConversation { .. }
 			| Command::DeleteConversationEverywhere { .. }
 			| Command::RestoreConversation { .. }
+			| Command::PreparePlaneTransfer { .. }
+			| Command::RelinquishPlaneTransfer { .. }
+			| Command::CommitPlaneTransfer { .. }
+			| Command::AbortPlaneTransfer { .. }
 			| Command::CompileAutodeleteRule { .. }
 			| Command::SetAutodeleteRuleInactiveDays { .. }
 			| Command::ApproveAutodeleteRule { .. }

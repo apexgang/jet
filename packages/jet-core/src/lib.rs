@@ -50,6 +50,11 @@ mod filesystem;
 pub use conversation::handoff::{HandoffProvenance, HandoffRequest};
 mod autodelete;
 mod pairing;
+mod plane_transfer;
+pub use plane_transfer::{
+	AuthorityFence, PlaneTransfer, PlaneTransferId, PreparedPlaneTransfer,
+	TransferPhase, TransferRole,
+};
 mod project;
 mod promotion;
 mod query;

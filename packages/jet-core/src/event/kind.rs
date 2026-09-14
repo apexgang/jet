@@ -69,6 +69,62 @@ pub enum EventKind {
 		/// The Conversation restored.
 		conversation_id: ConversationId,
 	},
+	/// The Conversation was frozen and bundled to move its Home Plane
+	/// (ADR-0070).
+	#[serde(rename = "conversation.transfer_prepared")]
+	ConversationTransferPrepared {
+		/// The Conversation being moved.
+		conversation_id: ConversationId,
+		/// The transfer.
+		transfer_id: crate::PlaneTransferId,
+		/// The Plane that will own it.
+		target_plane_id: crate::PlaneId,
+		/// The epoch this Plane will retire.
+		retired_epoch: u64,
+	},
+	/// A bundle was imported here as a Prepared transfer.
+	#[serde(rename = "conversation.transfer_imported")]
+	ConversationTransferImported {
+		/// The Conversation imported.
+		conversation_id: ConversationId,
+		/// The transfer.
+		transfer_id: crate::PlaneTransferId,
+		/// The Plane it came from.
+		source_plane_id: crate::PlaneId,
+		/// The epoch this copy is in.
+		epoch: u64,
+	},
+	/// This Plane retired its authority behind a fence; the content stays
+	/// as a Transfer tombstone until it expires.
+	#[serde(rename = "conversation.transfer_relinquished")]
+	ConversationTransferRelinquished {
+		/// The Conversation relinquished.
+		conversation_id: ConversationId,
+		/// The fence the target validates.
+		fence: crate::AuthorityFence,
+		/// When the tombstone expires.
+		tombstone_expires_at_unix_ms: i64,
+	},
+	/// This Plane became the Home Plane after validating the fence.
+	#[serde(rename = "conversation.transfer_committed")]
+	ConversationTransferCommitted {
+		/// The Conversation now owned here.
+		conversation_id: ConversationId,
+		/// The transfer.
+		transfer_id: crate::PlaneTransferId,
+		/// The Plane it came from.
+		source_plane_id: crate::PlaneId,
+		/// The epoch this Plane now holds.
+		epoch: u64,
+	},
+	/// A prepared transfer was abandoned before relinquishing.
+	#[serde(rename = "conversation.transfer_aborted")]
+	ConversationTransferAborted {
+		/// The Conversation that stays here.
+		conversation_id: ConversationId,
+		/// The transfer abandoned.
+		transfer_id: crate::PlaneTransferId,
+	},
 	/// Each elapsed occurrence retains its selection and admission outcome.
 	#[serde(rename = "schedule.fired")]
 	ScheduleFired {

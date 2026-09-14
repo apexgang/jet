@@ -518,6 +518,65 @@ pub(super) async fn execute_new(
 			crate::retention::restore(tx, actor, conversation_id, now_unix_ms)
 				.await
 		}
+		// Intercepted before the pipeline, like a Recovery export; the
+		// bundle it returns is never receipted.
+		Command::PreparePlaneTransfer { .. } => Err(CoreError::internal(
+			"transfer.prepare_misrouted",
+			"a Plane transfer prepare reached the receipt pipeline",
+		)),
+		Command::ImportPlaneTransfer { .. } => {
+			let Prepared::TransferImport(prepared) = prepared else {
+				return Err(CoreError::internal(
+					"transfer.unprepared",
+					"a Plane transfer import reached its transaction without \
+					 its decoded bundle",
+				));
+			};
+			crate::plane_transfer::import::record(
+				tx,
+				actor,
+				prepared,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::RelinquishPlaneTransfer {
+			transfer_id,
+			bundle_sha256,
+		} => {
+			crate::plane_transfer::settle::relinquish(
+				tx,
+				actor,
+				transfer_id,
+				&bundle_sha256,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::CommitPlaneTransfer {
+			transfer_id,
+			bundle_sha256,
+			fence,
+		} => {
+			crate::plane_transfer::settle::commit(
+				tx,
+				actor,
+				transfer_id,
+				&bundle_sha256,
+				&fence,
+				now_unix_ms,
+			)
+			.await
+		}
+		Command::AbortPlaneTransfer { transfer_id } => {
+			crate::plane_transfer::settle::abort(
+				tx,
+				actor,
+				transfer_id,
+				now_unix_ms,
+			)
+			.await
+		}
 		Command::CompileAutodeleteRule { rule_id, prompt } => {
 			crate::autodelete::compile(
 				tx,

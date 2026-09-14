@@ -17,6 +17,23 @@ impl ReadTransaction {
 		.await?)
 	}
 
+	/// Every Artifact one Run references, by hash.
+	/// Returns a store error when the read fails.
+	pub async fn run_artifacts(
+		&mut self,
+		run_id: Uuid,
+	) -> Result<Vec<(String, i64)>, StoreError> {
+		let run_id = run_id.to_string();
+		let rows = sqlx::query!(
+			"SELECT sha256, size FROM artifact_references WHERE run_id = ?1
+			 ORDER BY sha256",
+			run_id
+		)
+		.fetch_all(self.connection())
+		.await?;
+		Ok(rows.into_iter().map(|row| (row.sha256, row.size)).collect())
+	}
+
 	/// Tests a collection candidate against every durable reference.
 	/// Returns a store error when the read fails.
 	pub async fn artifact_referenced(

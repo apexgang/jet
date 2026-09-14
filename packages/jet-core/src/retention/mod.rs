@@ -24,7 +24,7 @@
 
 mod command;
 mod preview;
-mod protection;
+pub(crate) mod protection;
 mod sweep;
 mod workspace_state;
 

@@ -149,7 +149,9 @@ Security-degraded until an owner begins a new audit epoch, whose first
 record says so. That degradation survives restarts; it is the record of
 the rollback the audit itself keeps (ADR-0105). Every restoration also
 reapplies the Deletion ledger below, so an identity deleted after the
-snapshot was taken does not come back with it.
+snapshot was taken does not come back with it, and the Authority fences
+of a [Plane transfer](plane-transfer.md), so a Conversation authority
+retired after the snapshot does not resume with it.
 
 ## Deletion ledger
 

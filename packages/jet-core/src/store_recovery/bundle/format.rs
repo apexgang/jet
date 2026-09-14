@@ -5,10 +5,29 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
-pub(super) const MAX_BYTES: usize = 256 * 1024 * 1024;
+pub(crate) const MAX_BYTES: usize = 256 * 1024 * 1024;
 const MAX_MANIFEST: usize = 1024 * 1024;
-const MAGIC: &[u8] = b"JET-RECOVERY\0\x01";
-pub(super) type Components = BTreeMap<String, Vec<u8>>;
+pub(crate) type Components = BTreeMap<String, Vec<u8>>;
+
+/// One kind of bounded container: what its stream starts with, so one
+/// kind is never read as another, and which component names it carries
+/// beside Artifacts.
+pub(crate) struct Container {
+	magic: &'static [u8],
+	accepts: fn(&str) -> bool,
+}
+
+/// The portable Recovery bundle (ADR-0074).
+const RECOVERY: Container = Container {
+	magic: b"JET-RECOVERY\0\x01",
+	accepts: |name| matches!(name, "state.sqlite3" | "crafts.json"),
+};
+
+/// The Plane transfer bundle (ADR-0070).
+pub(crate) const TRANSFER: Container = Container {
+	magic: b"JET-TRANSFER\0\x01",
+	accepts: |name| name == "transfer.json",
+};
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Manifest {
@@ -30,10 +49,10 @@ pub(super) struct CraftMetadata {
 	pub(super) version: String,
 	pub(super) harnesses: Vec<String>,
 }
-pub(super) fn hash(bytes: &[u8]) -> String {
+pub(crate) fn hash(bytes: &[u8]) -> String {
 	format!("{:x}", Sha256::digest(bytes))
 }
-pub(super) fn artifact_name(name: &str) -> Option<&str> {
+pub(crate) fn artifact_name(name: &str) -> Option<&str> {
 	name.strip_prefix("artifacts/").filter(|hash| {
 		hash.len() == 64
 			&& hash
@@ -42,6 +61,12 @@ pub(super) fn artifact_name(name: &str) -> Option<&str> {
 	})
 }
 pub(super) fn encode(parts: Components) -> Result<Vec<u8>, CoreError> {
+	encode_in(&RECOVERY, parts)
+}
+pub(crate) fn encode_in(
+	container: &Container,
+	parts: Components,
+) -> Result<Vec<u8>, CoreError> {
 	let manifest = Manifest {
 		version: 1,
 		event_payload_version: 1,
@@ -57,15 +82,16 @@ pub(super) fn encode(parts: Components) -> Result<Vec<u8>, CoreError> {
 	let manifest = serde_json::to_vec(&manifest).map_err(|_| invalid())?;
 	let size = parts
 		.values()
-		.try_fold(MAGIC.len() + 4 + 32 + manifest.len(), |size, bytes| {
-			size.checked_add(bytes.len())
-		})
+		.try_fold(
+			container.magic.len() + 4 + 32 + manifest.len(),
+			|size, bytes| size.checked_add(bytes.len()),
+		)
 		.ok_or_else(invalid)?;
 	if manifest.len() > MAX_MANIFEST || size > MAX_BYTES || parts.len() > 4096 {
 		return Err(invalid());
 	}
 	let mut bytes = Vec::with_capacity(size);
-	bytes.extend_from_slice(MAGIC);
+	bytes.extend_from_slice(container.magic);
 	bytes.extend_from_slice(&(manifest.len() as u32).to_be_bytes());
 	bytes.extend_from_slice(&Sha256::digest(&manifest));
 	bytes.extend_from_slice(&manifest);
@@ -75,12 +101,40 @@ pub(super) fn encode(parts: Components) -> Result<Vec<u8>, CoreError> {
 	Ok(bytes)
 }
 pub(super) fn decode(bytes: &[u8]) -> Result<Components, CoreError> {
-	// ASVS 5.2.1, 11.2.5: no paths or payloads are trusted until every size,
-	// manifest hash, component hash, and the complete stream have been checked.
-	if bytes.len() > MAX_BYTES || !bytes.starts_with(MAGIC) {
+	let parts = decode_in(&RECOVERY, bytes)?;
+	if !parts
+		.get("state.sqlite3")
+		.is_some_and(|state| state.starts_with(b"SQLite format 3\0"))
+	{
 		return Err(invalid());
 	}
-	let mut remaining = &bytes[MAGIC.len()..];
+	let crafts: Vec<CraftMetadata> =
+		serde_json::from_slice(parts.get("crafts.json").ok_or_else(invalid)?)
+			.map_err(|_| invalid())?;
+	if crafts.len() > 1024
+		|| crafts.iter().any(|c| {
+			c.craft.is_empty()
+				|| c.craft.len() > 128
+				|| c.version.len() > 128
+				|| c.harnesses.len() > 128
+				|| c.harnesses.iter().any(|h| h.len() > 128)
+		}) {
+		return Err(invalid());
+	}
+	Ok(parts)
+}
+/// Reads a container of `container`'s kind back into its components, with
+/// every size, hash, and name checked and nothing trailing.
+pub(crate) fn decode_in(
+	container: &Container,
+	bytes: &[u8],
+) -> Result<Components, CoreError> {
+	// ASVS 5.2.1, 11.2.5: no paths or payloads are trusted until every size,
+	// manifest hash, component hash, and the complete stream have been checked.
+	if bytes.len() > MAX_BYTES || !bytes.starts_with(container.magic) {
+		return Err(invalid());
+	}
+	let mut remaining = &bytes[container.magic.len()..];
 	let length = u32::from_be_bytes(
 		take(&mut remaining, 4)?.try_into().map_err(|_| invalid())?,
 	) as usize;
@@ -102,7 +156,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Components, CoreError> {
 	}
 	let mut parts = Components::new();
 	for component in manifest.components {
-		if !matches!(component.name.as_str(), "state.sqlite3" | "crafts.json")
+		if !(container.accepts)(&component.name)
 			&& artifact_name(&component.name).is_none()
 		{
 			return Err(invalid());
@@ -116,24 +170,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Components, CoreError> {
 			return Err(invalid());
 		}
 	}
-	if !remaining.is_empty()
-		|| !parts
-			.get("state.sqlite3")
-			.is_some_and(|state| state.starts_with(b"SQLite format 3\0"))
-	{
-		return Err(invalid());
-	}
-	let crafts: Vec<CraftMetadata> =
-		serde_json::from_slice(parts.get("crafts.json").ok_or_else(invalid)?)
-			.map_err(|_| invalid())?;
-	if crafts.len() > 1024
-		|| crafts.iter().any(|c| {
-			c.craft.is_empty()
-				|| c.craft.len() > 128
-				|| c.version.len() > 128
-				|| c.harnesses.len() > 128
-				|| c.harnesses.iter().any(|h| h.len() > 128)
-		}) {
+	if !remaining.is_empty() {
 		return Err(invalid());
 	}
 	Ok(parts)
@@ -146,7 +183,7 @@ fn take<'a>(
 	*bytes = rest;
 	Ok(value)
 }
-pub(super) fn artifacts(parts: &Components) -> Vec<ArtifactDescriptor> {
+pub(crate) fn artifacts(parts: &Components) -> Vec<ArtifactDescriptor> {
 	parts
 		.iter()
 		.filter_map(|(name, bytes)| {

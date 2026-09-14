@@ -77,6 +77,21 @@ pub(crate) fn decision_for(command: &Command) -> Option<AuditDecision> {
 		Command::RestoreConversation { .. } => {
 			Some(AuditDecision::ConversationRestored)
 		}
+		Command::PreparePlaneTransfer { .. } => {
+			Some(AuditDecision::PlaneTransferPrepared)
+		}
+		Command::ImportPlaneTransfer { .. } => {
+			Some(AuditDecision::PlaneTransferImported)
+		}
+		Command::RelinquishPlaneTransfer { .. } => {
+			Some(AuditDecision::PlaneTransferRelinquished)
+		}
+		Command::CommitPlaneTransfer { .. } => {
+			Some(AuditDecision::PlaneTransferCommitted)
+		}
+		Command::AbortPlaneTransfer { .. } => {
+			Some(AuditDecision::PlaneTransferAborted)
+		}
 		Command::CompileAutodeleteRule { .. } => {
 			Some(AuditDecision::AutodeleteRuleCompiled)
 		}
@@ -153,9 +168,16 @@ pub(super) fn refused_subject(command: &Command) -> AuditSubject {
 		}
 		Command::ForgetConversation { conversation_id }
 		| Command::DeleteConversationEverywhere { conversation_id }
-		| Command::RestoreConversation { conversation_id } => {
-			AuditSubject::Conversation(*conversation_id)
-		}
+		| Command::RestoreConversation { conversation_id }
+		| Command::PreparePlaneTransfer {
+			conversation_id, ..
+		} => AuditSubject::Conversation(*conversation_id),
+		// A refused import, relinquishment, commit, or abort names a
+		// Conversation only through a transfer that may not exist here.
+		Command::ImportPlaneTransfer { .. }
+		| Command::RelinquishPlaneTransfer { .. }
+		| Command::CommitPlaneTransfer { .. }
+		| Command::AbortPlaneTransfer { .. } => AuditSubject::Plane,
 		Command::RemoveProject { binding, .. } => {
 			AuditSubject::Project(binding.project_id)
 		}
