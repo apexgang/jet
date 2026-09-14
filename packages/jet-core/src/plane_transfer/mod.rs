@@ -379,7 +379,7 @@ mod tests {
 		conversation_id: ConversationId,
 		target: PlaneId,
 	) -> Result<PreparedPlaneTransfer, CoreError> {
-		match core
+		let CommandOutcome::PlaneTransferPrepared(prepared) = core
 			.execute(
 				&actor(),
 				request(Command::PreparePlaneTransfer {
@@ -388,17 +388,17 @@ mod tests {
 				}),
 			)
 			.await?
-		{
-			CommandOutcome::PlaneTransferPrepared(prepared) => Ok(prepared),
-			other => panic!("unexpected outcome {other:?}"),
-		}
+		else {
+			panic!("expected a PlaneTransferPrepared outcome");
+		};
+		Ok(prepared)
 	}
 
 	async fn import(
 		core: &Core,
 		bundle: Vec<u8>,
 	) -> Result<PlaneTransfer, CoreError> {
-		match core
+		let CommandOutcome::PlaneTransferImported(transfer) = core
 			.execute(
 				&actor(),
 				request(Command::ImportPlaneTransfer {
@@ -407,17 +407,17 @@ mod tests {
 				}),
 			)
 			.await?
-		{
-			CommandOutcome::PlaneTransferImported(transfer) => Ok(transfer),
-			other => panic!("unexpected outcome {other:?}"),
-		}
+		else {
+			panic!("expected a PlaneTransferImported outcome");
+		};
+		Ok(transfer)
 	}
 
 	async fn relinquish(
 		core: &Core,
 		transfer: &PlaneTransfer,
 	) -> Result<AuthorityFence, CoreError> {
-		match core
+		let CommandOutcome::PlaneTransferRelinquished(fence) = core
 			.execute(
 				&actor(),
 				request(Command::RelinquishPlaneTransfer {
@@ -426,10 +426,10 @@ mod tests {
 				}),
 			)
 			.await?
-		{
-			CommandOutcome::PlaneTransferRelinquished(fence) => Ok(fence),
-			other => panic!("unexpected outcome {other:?}"),
-		}
+		else {
+			panic!("expected a PlaneTransferRelinquished outcome");
+		};
+		Ok(fence)
 	}
 
 	async fn commit(
@@ -437,7 +437,7 @@ mod tests {
 		transfer: &PlaneTransfer,
 		fence: AuthorityFence,
 	) -> Result<PlaneTransfer, CoreError> {
-		match core
+		let CommandOutcome::PlaneTransferCommitted(transfer) = core
 			.execute(
 				&actor(),
 				request(Command::CommitPlaneTransfer {
@@ -447,10 +447,10 @@ mod tests {
 				}),
 			)
 			.await?
-		{
-			CommandOutcome::PlaneTransferCommitted(transfer) => Ok(transfer),
-			other => panic!("unexpected outcome {other:?}"),
-		}
+		else {
+			panic!("expected a PlaneTransferCommitted outcome");
+		};
+		Ok(transfer)
 	}
 
 	async fn authority(
