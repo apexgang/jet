@@ -9,9 +9,10 @@ pub(crate) mod pairing;
 pub(crate) mod session;
 pub(crate) mod terminal_stream;
 
-use crate::translate;
+use crate::{diagnostics::core_failure, translate};
 use jet_core::{
 	Actor, ClientId, CommandEnvelope, CommandId, CommandOutcome, Core,
+	CoreError,
 };
 use jet_protocol::{
 	CODEC_JSON_V1, CONNECTION_STREAM, ClientHello, CommandRequest,
@@ -20,6 +21,7 @@ use jet_protocol::{
 	QueryRequest, RequestId, ServerHello, ServerMessage, StreamId, WireError,
 	decode_control, encode_control,
 };
+use jet_runtime::{Diagnostic, DiagnosticComponent};
 use std::{sync::Arc, time::Duration};
 use tokio::{
 	io::AsyncReadExt,
@@ -140,6 +142,12 @@ impl Connection {
 			None
 		};
 		if let Some(error) = rejection {
+			Diagnostic::warn(
+				DiagnosticComponent::Connection,
+				"rejected client hello",
+			)
+			.code(&error.code)
+			.emit();
 			let _ = self.send(&ServerHello::Rejected { error }).await;
 			return None;
 		}
@@ -231,6 +239,12 @@ impl Connection {
 		{
 			Ok(actor) => Some(actor),
 			Err(error) => {
+				// ASVS 16.2.2: the failure and its client, never the proof.
+				core_failure(
+					DiagnosticComponent::Authentication,
+					"remote client authentication failed",
+					&error,
+				);
 				let error =
 					translate::error(error, hello.minor.min(PROTOCOL_MINOR));
 				let _ = self.send(&ServerHello::Rejected { error }).await;
@@ -379,22 +393,62 @@ pub(super) async fn execute(
 	if matches!(&outcome, Ok(CommandOutcome::CraftInstallationQueued { .. }))
 		&& let Err(error) = core.perform_craft_installations().await
 	{
-		eprintln!("jetd: cannot publish accepted Craft installation: {error}");
+		core_failure(
+			DiagnosticComponent::Craft,
+			"cannot publish accepted Craft installation",
+			&error,
+		);
 	}
 	if matches!(&outcome, Ok(CommandOutcome::CraftDisabled { .. }))
 		&& let Err(error) = core.reconcile_crafts().await
 	{
-		eprintln!("jetd: cannot apply Craft disable: {error}");
+		core_failure(
+			DiagnosticComponent::Craft,
+			"cannot apply Craft disable",
+			&error,
+		);
 	}
 	match outcome {
 		Ok(outcome) => ServerMessage::CommandResult {
 			id,
 			result: translate::command_outcome(outcome, minor),
 		},
-		Err(error) => ServerMessage::Error {
-			id: Some(id),
-			error: translate::error(error, minor),
-		},
+		Err(error) => {
+			record_refusal(&error);
+			ServerMessage::Error {
+				id: Some(id),
+				error: translate::error(error, minor),
+			}
+		}
+	}
+}
+
+/// A refused Command is a security signal and is always recorded; any
+/// other failure is detail for somebody chasing one problem (ADR-0068).
+fn record_refusal(error: &CoreError) {
+	use jet_core::ErrorCategory as Category;
+	match error.category {
+		Category::Unauthorized => core_failure(
+			DiagnosticComponent::Authentication,
+			"Command refused",
+			error,
+		),
+		Category::InvalidInput
+		| Category::Conflict
+		| Category::Unavailable
+		| Category::Incompatible
+		| Category::RateLimited
+		| Category::NotFound
+		| Category::OutcomeUnknown
+		| Category::Internal => {
+			Diagnostic::debug(
+				DiagnosticComponent::Connection,
+				"Command failed",
+			)
+			.code(&error.code)
+			.failure(error)
+			.emit();
+		}
 	}
 }
 

@@ -9,11 +9,12 @@
 
 mod connection;
 mod daemon;
+mod diagnostics;
 mod installation_identity;
 mod translate;
 
 use clap::{Parser, ValueEnum};
-use jet_runtime::{InstallationChannel, JetHome};
+use jet_runtime::{DebugLogging, InstallationChannel, JetHome};
 use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Parser)]
@@ -66,6 +67,9 @@ enum Subcommand {
 		/// Trusted Jet release Ed25519 public key file, exactly 32 raw bytes.
 		#[arg(long)]
 		release_verification_key: Option<PathBuf>,
+		/// Keep debug records in the Diagnostic log for this process.
+		#[arg(long)]
+		debug_log: bool,
 	},
 }
 
@@ -125,6 +129,7 @@ async fn main() -> ExitCode {
 			identity_signer,
 			identity_client_id,
 			release_verification_key,
+			debug_log,
 		} => {
 			let Some(home) =
 				home.map(JetHome::at).or_else(JetHome::for_current_user)
@@ -145,6 +150,11 @@ async fn main() -> ExitCode {
 					return ExitCode::from(1);
 				}
 			};
+			let debug = if debug_log {
+				DebugLogging::Enabled
+			} else {
+				DebugLogging::Disabled
+			};
 			daemon::run(
 				home,
 				channel.into(),
@@ -155,6 +165,7 @@ async fn main() -> ExitCode {
 						client_id,
 					},
 				),
+				debug,
 			)
 			.await
 		}

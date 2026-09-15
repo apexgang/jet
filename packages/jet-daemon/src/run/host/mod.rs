@@ -293,9 +293,12 @@ impl RunHost for CraftProcesses {
 				match crate::craft::revocation::load(&path, &key) {
 					Ok(digests) => digests,
 					Err(error) => {
-						eprintln!(
-							"jetd: ignored Craft revocation metadata: {error}"
-						);
+						jet_runtime::Diagnostic::warn(
+							jet_runtime::DiagnosticComponent::Craft,
+							"ignored Craft revocation metadata",
+						)
+						.failure(&error)
+						.emit();
 						vec![]
 					}
 				}
