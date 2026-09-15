@@ -1,7 +1,7 @@
 //! Translation between core domain types and versioned wire types
 //! (ADR-0049). This is the only place the two vocabularies meet; its
-//! Account binding, Capability, import, Pairing, Project, and Setting
-//! parts sit in the submodules beside it.
+//! Account binding, Capability, import, Pairing, Project, Setting, and
+//! Workspace parts sit in the submodules beside it.
 
 mod user_input;
 use user_input::{
@@ -19,8 +19,10 @@ mod conversation;
 use conversation::{
 	conversation, conversation_list, conversation_snapshot,
 	lifecycle_from_wire, plane_status, retention_from_wire, run,
-	working_tree_request,
 };
+
+mod workspace;
+use workspace::working_tree_request;
 
 mod outcome;
 pub(crate) use outcome::command_outcome;
