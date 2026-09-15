@@ -3,11 +3,17 @@
 //! `jet-runtime` owns the narrow operating-system integrations the daemon
 //! needs before any Plane state is touched: the Jet home layout (ADR-0014),
 //! the per-Plane lifetime lock (ADR-0003), and the owner-only local IPC
-//! listener (ADR-0087).
+//! listener (ADR-0087), and the bounded, redacted Diagnostic log every
+//! executable role writes (ADR-0061).
 
+mod diagnostics;
 mod home;
 mod ipc;
 mod power;
+pub use diagnostics::{
+	DebugLogging, Diagnostic, DiagnosticComponent, DiagnosticLog,
+	ExecutableRole,
+};
 pub use power::{PowerState, observe_power};
 
 pub use home::JetHome;

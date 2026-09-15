@@ -11,6 +11,7 @@ const LOCK_FILE: &str = "jetd.lock";
 const SOCKET_FILE: &str = "jetd.sock";
 const STORE_FILE: &str = "plane.sqlite3";
 const WORKSPACES_DIR: &str = "workspaces";
+const DIAGNOSTICS_DIR: &str = "diagnostics";
 
 /// The directory holding everything the Jet core owns for one user.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,5 +82,12 @@ impl JetHome {
 	#[must_use]
 	pub fn workspaces_dir(&self) -> PathBuf {
 		self.root.join(WORKSPACES_DIR)
+	}
+
+	/// Owner-only directory holding the bounded Diagnostic logs of every
+	/// executable role (ADR-0061).
+	#[must_use]
+	pub fn diagnostics_dir(&self) -> PathBuf {
+		self.root.join(DIAGNOSTICS_DIR)
 	}
 }

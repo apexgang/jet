@@ -1,9 +1,11 @@
 //! Daemon lifecycle: lock, store, listener, serve, drain, shut down.
 
+use crate::diagnostics::core_failure;
 use jet_core::{Core, WorkspaceHome};
 use jet_runtime::{
-	DaemonMetadata, InstallationChannel, IpcError, JetHome, LifetimeLock,
-	LocalListener, LockError,
+	DaemonMetadata, DebugLogging, Diagnostic, DiagnosticComponent,
+	DiagnosticLog, ExecutableRole, InstallationChannel, IpcError, JetHome,
+	LifetimeLock, LocalListener, LockError,
 };
 use jet_store::Store;
 use std::{process::ExitCode, sync::Arc, time::Duration};
@@ -29,6 +31,7 @@ pub(crate) async fn run(
 	channel: InstallationChannel,
 	release_key: Option<ed25519_dalek::VerifyingKey>,
 	identity: Option<crate::installation_identity::Identity>,
+	debug: DebugLogging,
 ) -> ExitCode {
 	if let Err(error) = home.prepare() {
 		eprintln!(
@@ -36,6 +39,18 @@ pub(crate) async fn run(
 			home.root().display()
 		);
 		return ExitCode::from(EXIT_FAILURE);
+	}
+	// A Plane is never refused on its diagnostics' account: without a log
+	// the daemon serves exactly as before and says so once (ADR-0061).
+	match DiagnosticLog::open(
+		&home.diagnostics_dir(),
+		ExecutableRole::Daemon,
+		debug,
+	) {
+		Ok(log) => log.install(),
+		Err(error) => {
+			eprintln!("jetd: serving without a Diagnostic log: {error}")
+		}
 	}
 	let metadata = DaemonMetadata {
 		pid: std::process::id(),
@@ -100,6 +115,10 @@ pub(crate) async fn run(
 			return ExitCode::from(EXIT_FAILURE);
 		}
 	};
+	Diagnostic::info(DiagnosticComponent::Process, "daemon started")
+		.identity("version", &metadata.version)
+		.count("pid", u64::from(metadata.pid))
+		.emit();
 	match core.recovery_mode() {
 		jet_core::RecoveryMode::Serving => reconcile_at_start(&core).await,
 		jet_core::RecoveryMode::ReadOnly(reason) => {
@@ -111,6 +130,12 @@ pub(crate) async fn run(
 				"jetd: the Plane store failed its checks ({reason:?}); serving \
 				 read-only Recovery mode until a snapshot is restored"
 			);
+			Diagnostic::error(
+				DiagnosticComponent::Recovery,
+				"store failed its checks; serving read-only Recovery mode",
+			)
+			.failure(&format!("{reason:?}"))
+			.emit();
 		}
 	}
 	let utility_core = Arc::clone(&core);
@@ -118,7 +143,11 @@ pub(crate) async fn run(
 		utility_core.wait_until_serving().await;
 		loop {
 			if let Err(error) = utility_core.perform_git_deliveries().await {
-				eprintln!("jetd: cannot settle Utility work: {error}");
+				core_failure(
+					DiagnosticComponent::Utility,
+					"cannot settle Utility work",
+					&error,
+				);
 				tokio::time::sleep(Duration::from_secs(5)).await;
 				continue;
 			}
@@ -132,7 +161,11 @@ pub(crate) async fn run(
 		loop {
 			work_core.wait_for_run_work().await;
 			if let Err(error) = work_core.perform_runs().await {
-				eprintln!("jetd: cannot dispatch queued Run work: {error}");
+				core_failure(
+					DiagnosticComponent::Run,
+					"cannot dispatch queued Run work",
+					&error,
+				);
 			}
 		}
 	});
@@ -145,61 +178,88 @@ pub(crate) async fn run(
 			let mut retry = false;
 			if let Err(error) = recovery_core.reconcile_crafts().await {
 				retry = true;
-				eprintln!("jetd: cannot reconcile Crafts: {error}");
+				core_failure(
+					DiagnosticComponent::Craft,
+					"cannot reconcile Crafts",
+					&error,
+				);
 			}
 
 			if let Err(error) =
 				recovery_core.perform_craft_installations().await
 			{
 				retry = true;
-				eprintln!(
-					"jetd: cannot reconcile Craft installations: {error}"
+				core_failure(
+					DiagnosticComponent::Craft,
+					"cannot reconcile Craft installations",
+					&error,
 				);
 			}
 			if let Err(error) = recovery_core.perform_extension_changes().await
 			{
 				retry = true;
-				eprintln!(
-					"jetd: cannot apply native extension changes: {error}"
+				core_failure(
+					DiagnosticComponent::Extension,
+					"cannot apply native extension changes",
+					&error,
 				);
 			}
 			if let Err(error) = recovery_core.perform_schedules().await {
 				retry = true;
-				eprintln!("jetd: cannot advance schedules: {error}");
+				core_failure(
+					DiagnosticComponent::Maintenance,
+					"cannot advance schedules",
+					&error,
+				);
 			}
 			if let Err(error) = recovery_core.perform_terminals().await {
 				retry = true;
-				eprintln!("jetd: cannot recover terminals: {error}");
+				core_failure(
+					DiagnosticComponent::Terminal,
+					"cannot recover terminals",
+					&error,
+				);
 			}
 			if let Err(error) = recovery_core.recover_runs().await {
 				retry = true;
-				eprintln!("jetd: cannot recover executions: {error}");
+				core_failure(
+					DiagnosticComponent::Run,
+					"cannot recover executions",
+					&error,
+				);
 			}
 			if let Err(error) = recovery_core.constrain_child_work().await {
 				retry = true;
-				eprintln!("jetd: cannot apply child Energy policy: {error}");
+				core_failure(
+					DiagnosticComponent::Run,
+					"cannot apply child Energy policy",
+					&error,
+				);
 			}
 			// Retention policies stage into Jet Trash and grace periods end
 			// on the same wakeups; the sweep is idle when nothing is due
 			// (ADR-0015).
 			match recovery_core.sweep_retention().await {
 				Ok(sweep) => {
-					for conversation_id in sweep.trashed {
-						eprintln!(
-							"jetd: forgot Conversation {}",
-							conversation_id.0
-						);
-					}
-					for conversation_id in sweep.deleted {
-						eprintln!(
-							"jetd: deleted Conversation {}",
-							conversation_id.0
-						);
+					// What was forgotten is the journal's history, not the
+					// log's; only the sweep's size is worth a line.
+					if !sweep.trashed.is_empty() || !sweep.deleted.is_empty() {
+						Diagnostic::info(
+							DiagnosticComponent::Maintenance,
+							"retention sweep",
+						)
+						.count("trashed", sweep.trashed.len() as u64)
+						.count("deleted", sweep.deleted.len() as u64)
+						.emit();
 					}
 				}
 				Err(error) => {
 					retry = true;
-					eprintln!("jetd: cannot sweep retention: {error}");
+					core_failure(
+						DiagnosticComponent::Maintenance,
+						"cannot sweep retention",
+						&error,
+					);
 				}
 			}
 			// Approved Autodelete rules stage their matches on the same
@@ -207,16 +267,22 @@ pub(crate) async fn run(
 			// (ADR-0015).
 			match recovery_core.sweep_autodelete().await {
 				Ok(sweep) => {
-					for matched in sweep.trashed {
-						eprintln!(
-							"jetd: Autodelete rule {} staged Conversation {}",
-							matched.rule_id.0, matched.conversation_id.0
-						);
+					if !sweep.trashed.is_empty() {
+						Diagnostic::info(
+							DiagnosticComponent::Maintenance,
+							"Autodelete sweep",
+						)
+						.count("trashed", sweep.trashed.len() as u64)
+						.emit();
 					}
 				}
 				Err(error) => {
 					retry = true;
-					eprintln!("jetd: cannot sweep Autodelete rules: {error}");
+					core_failure(
+						DiagnosticComponent::Maintenance,
+						"cannot sweep Autodelete rules",
+						&error,
+					);
 				}
 			}
 			// Every Command and Effect commit wakes this loop, so the first
@@ -224,12 +290,19 @@ pub(crate) async fn run(
 			// (ADR-0097). A failed copy is retried on the next wake.
 			match recovery_core.snapshot_if_due().await {
 				Ok(Some(snapshot)) => {
-					eprintln!("jetd: took Recovery snapshot {}", snapshot.name);
+					Diagnostic::info(
+						DiagnosticComponent::Recovery,
+						"took Recovery snapshot",
+					)
+					.identity("snapshot", &snapshot.name)
+					.emit();
 				}
 				Ok(None) => {}
 				Err(error) => {
-					eprintln!(
-						"jetd: cannot take the Recovery snapshot: {error}"
+					core_failure(
+						DiagnosticComponent::Recovery,
+						"cannot take the Recovery snapshot",
+						&error,
 					);
 				}
 			}
@@ -240,8 +313,10 @@ pub(crate) async fn run(
 			} else if let Err(error) =
 				recovery_core.wait_for_maintenance().await
 			{
-				eprintln!(
-					"jetd: cannot determine maintenance deadline: {error}"
+				core_failure(
+					DiagnosticComponent::Maintenance,
+					"cannot determine maintenance deadline",
+					&error,
 				);
 				tokio::time::sleep(Duration::from_secs(1)).await;
 			}
@@ -267,6 +342,7 @@ pub(crate) async fn run(
 		})
 	);
 	let exit = serve(listener, &core).await;
+	Diagnostic::info(DiagnosticComponent::Process, "daemon stopping").emit();
 	recovery.abort();
 	run_work.abort();
 	utility_work.abort();
@@ -281,43 +357,79 @@ pub(crate) async fn run(
 /// own failure and the next still runs.
 async fn reconcile_at_start(core: &Arc<Core>) {
 	if let Err(error) = core.reconcile_crafts().await {
-		eprintln!("jetd: cannot reconcile Crafts: {error}");
+		core_failure(
+			DiagnosticComponent::Craft,
+			"cannot reconcile Crafts",
+			&error,
+		);
 	}
 	// A direct edit that reached its atomic replacement before an interruption
 	// is reconciled from its durable intent before clients can retry it.
 	if let Err(error) = core.perform_user_edits().await {
-		eprintln!("jetd: cannot reconcile direct user edits: {error}");
+		core_failure(
+			DiagnosticComponent::Run,
+			"cannot reconcile direct user edits",
+			&error,
+		);
 	}
 	// A verified Artifact accepted before a restart is published before
 	// capabilities or new Commands can observe the installed Craft.
 	if let Err(error) = core.perform_craft_installations().await {
-		eprintln!("jetd: cannot reconcile Craft installations: {error}");
+		core_failure(
+			DiagnosticComponent::Craft,
+			"cannot reconcile Craft installations",
+			&error,
+		);
 	}
 	// A promotion a previous daemon did not finish is settled from what its
 	// destination holds before any client can ask for another (ADR-0064,
 	// ADR-0067).
 	if let Err(error) = core.perform_promotions().await {
-		eprintln!("jetd: cannot reconcile Workspace promotions: {error}");
+		core_failure(
+			DiagnosticComponent::Workspace,
+			"cannot reconcile Workspace promotions",
+			&error,
+		);
 	}
 	if let Err(error) = core.perform_terminals().await {
-		eprintln!("jetd: cannot recover terminals: {error}");
+		core_failure(
+			DiagnosticComponent::Terminal,
+			"cannot recover terminals",
+			&error,
+		);
 	}
 	// Coalesce offline firings before any pending input can start a Run.
 	if let Err(error) = core.perform_schedules().await {
-		eprintln!("jetd: cannot recover schedules: {error}");
+		core_failure(
+			DiagnosticComponent::Maintenance,
+			"cannot recover schedules",
+			&error,
+		);
 	}
 	// Settle durable Run admission before serving new Commands.
 	if let Err(error) = core.perform_runs().await {
-		eprintln!("jetd: cannot reconcile Run starts: {error}");
+		core_failure(
+			DiagnosticComponent::Run,
+			"cannot reconcile Run starts",
+			&error,
+		);
 	}
 	// An interrupted escalation is observed, never continued blindly: a
 	// signal already delivered may have ended work whose outcome is not yet
 	// visible (ADR-0083).
 	if let Err(error) = core.perform_run_controls().await {
-		eprintln!("jetd: cannot reconcile execution control: {error}");
+		core_failure(
+			DiagnosticComponent::Run,
+			"cannot reconcile execution control",
+			&error,
+		);
 	}
 	if let Err(error) = core.recover_runs().await {
-		eprintln!("jetd: cannot recover executions: {error}");
+		core_failure(
+			DiagnosticComponent::Run,
+			"cannot recover executions",
+			&error,
+		);
 	}
 }
 
@@ -364,10 +476,17 @@ async fn serve(listener: LocalListener, core: &Arc<Core>) -> ExitCode {
 				}
 				Err(IpcError::PeerRejected { .. }) => {
 					// ASVS 16.2.5: record the rejection without the peer's identity.
-					eprintln!("jetd: refused local connection from a different user");
+					Diagnostic::warn(
+						DiagnosticComponent::Connection,
+						"refused local connection from a different user",
+					)
+					.emit();
 				}
 				Err(error) => {
 					eprintln!("jetd: accept failed: {error}");
+					Diagnostic::error(DiagnosticComponent::Connection, "accept failed")
+						.failure(&error)
+						.emit();
 					break ExitCode::from(EXIT_FAILURE);
 				}
 			},

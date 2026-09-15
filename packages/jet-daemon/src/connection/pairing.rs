@@ -13,9 +13,17 @@ pub(crate) async fn enroll(
 ) -> RemotePairingResponse {
 	match apply(core, client_id, request).await {
 		Ok(response) => response,
-		Err(error) => RemotePairingResponse::Rejected {
-			error: crate::translate::error(error, minor),
-		},
+		Err(error) => {
+			// ASVS 16.2.2: the refusal and its client, never the secret.
+			crate::diagnostics::core_failure(
+				jet_runtime::DiagnosticComponent::Authentication,
+				"remote pairing refused",
+				&error,
+			);
+			RemotePairingResponse::Rejected {
+				error: crate::translate::error(error, minor),
+			}
+		}
 	}
 }
 

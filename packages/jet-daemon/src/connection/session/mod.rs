@@ -4,12 +4,14 @@ mod writer;
 use crate::connection::{
 	answer, draining_error, execute, malformed, wire_error,
 };
+use crate::diagnostics::core_failure;
 use jet_core::{Actor, Core};
 use jet_protocol::{
 	ClientMessage, ErrorCategory, Frame, FrameError, FrameReader, FrameWriter,
 	MULTIPLEXED_STREAMS_MINOR, ServerMessage, StreamControl, StreamId,
 	WireError, decode_control, encode_control, raw_command,
 };
+use jet_runtime::DiagnosticComponent;
 use std::sync::Arc;
 use tokio::{
 	net::unix::{OwnedReadHalf, OwnedWriteHalf},
@@ -357,19 +359,31 @@ async fn process_requests(
 			let effect_core = Arc::clone(&core);
 			tokio::spawn(async move {
 				if let Err(error) = effect_core.perform_terminals().await {
-					eprintln!("jetd: cannot settle terminals: {error}");
+					core_failure(
+						DiagnosticComponent::Terminal,
+						"cannot settle terminals",
+						&error,
+					);
 				}
 				if let Err(error) = effect_core.perform_runs().await {
-					eprintln!("jetd: cannot record Run start outcome: {error}");
+					core_failure(
+						DiagnosticComponent::Run,
+						"cannot record Run start outcome",
+						&error,
+					);
 				}
 				if let Err(error) = effect_core.perform_run_controls().await {
-					eprintln!(
-						"jetd: cannot carry out an execution control request: {error}"
+					core_failure(
+						DiagnosticComponent::Run,
+						"cannot carry out an execution control request",
+						&error,
 					);
 				}
 				if let Err(error) = effect_core.perform_promotions().await {
-					eprintln!(
-						"jetd: cannot record a Workspace promotion outcome: {error}"
+					core_failure(
+						DiagnosticComponent::Workspace,
+						"cannot record a Workspace promotion outcome",
+						&error,
 					);
 				}
 			});
