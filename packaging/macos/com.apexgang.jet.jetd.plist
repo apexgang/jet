@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- LaunchAgent for a GUI-managed jetd, registered by the macOS app through
+     SMAppService (ADR-0026). It starts whatever ~/.jet/core/current names,
+     so an update or rollback switches the link and restarts only jetd. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.apexgang.jet.jetd</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/sh</string>
+		<string>-c</string>
+		<string>exec "$HOME/.jet/core/current/jetd" serve --channel gui</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<!-- A drained jetd exits 0 and must come back as whatever `current`
+	     names now; unloading the agent is how it stops. -->
+	<key>KeepAlive</key>
+	<true/>
+	<!-- jetfueld helpers outlive the daemon; never end them with it. -->
+	<key>AbandonProcessGroup</key>
+	<true/>
+	<!-- jetd drains within ten seconds (ADR-0088). -->
+	<key>ExitTimeOut</key>
+	<integer>15</integer>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+</dict>
+</plist>

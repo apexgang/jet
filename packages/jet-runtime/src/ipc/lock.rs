@@ -50,6 +50,16 @@ pub enum LockError {
 	Io(#[from] std::io::Error),
 }
 
+/// What a non-acquiring look at the lifetime lock found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LockProbe {
+	/// No live process holds the Plane.
+	Free,
+	/// A live process holds the Plane, with the metadata it left when that
+	/// was readable and named a live process.
+	Held(Option<DaemonMetadata>),
+}
+
 /// An exclusive claim on one Plane, released when dropped or when the
 /// process exits.
 #[derive(Debug)]
@@ -96,6 +106,35 @@ impl LifetimeLock {
 	}
 }
 
+impl LifetimeLock {
+	/// Reports who holds the Plane under `home` without claiming it or
+	/// rewriting the owner's metadata. A free lock is taken and released
+	/// within the call, so the answer is a snapshot, not a reservation.
+	///
+	/// # Errors
+	///
+	/// Returns [`LockError::Io`] when the lock file cannot be opened.
+	pub fn probe(home: &JetHome) -> Result<LockProbe, LockError> {
+		let mut file = OpenOptions::new()
+			.read(true)
+			.write(true)
+			.create(true)
+			.truncate(false)
+			.open(home.lock_path())?;
+		match rustix::fs::flock(&file, FlockOperation::NonBlockingLockExclusive)
+		{
+			Ok(()) => {
+				let _ = rustix::fs::flock(&file, FlockOperation::Unlock);
+				Ok(LockProbe::Free)
+			}
+			Err(rustix::io::Errno::WOULDBLOCK) => {
+				Ok(LockProbe::Held(read_owner(&mut file)))
+			}
+			Err(errno) => Err(LockError::Io(errno.into())),
+		}
+	}
+}
+
 impl Drop for LifetimeLock {
 	fn drop(&mut self) {
 		// Closing the file releases the lock as well; unlocking explicitly
@@ -131,7 +170,9 @@ fn process_exists(pid: u32) -> bool {
 mod tests {
 	use pretty_assertions::assert_eq;
 
-	use super::{DaemonMetadata, InstallationChannel, LifetimeLock, LockError};
+	use super::{
+		DaemonMetadata, InstallationChannel, LifetimeLock, LockError, LockProbe,
+	};
 	use crate::JetHome;
 
 	/// The owner a refused acquisition reported.
@@ -190,5 +231,28 @@ mod tests {
 		let second = LifetimeLock::acquire(&home, &metadata(42));
 
 		assert!(second.is_ok(), "{second:?}");
+	}
+
+	#[test]
+	fn a_probe_reports_the_owner_without_taking_the_plane() {
+		let dir = tempfile::tempdir().unwrap();
+		let home = JetHome::at(dir.path().join(".jet"));
+		home.prepare().unwrap();
+		let owner = metadata(std::process::id());
+
+		let free = LifetimeLock::probe(&home).unwrap();
+		let held = LifetimeLock::acquire(&home, &owner).unwrap();
+		let while_held = LifetimeLock::probe(&home).unwrap();
+		drop(held);
+		let released = LifetimeLock::probe(&home).unwrap();
+
+		assert_eq!(
+			(free, while_held, released),
+			(
+				LockProbe::Free,
+				LockProbe::Held(Some(owner)),
+				LockProbe::Free
+			)
+		);
 	}
 }

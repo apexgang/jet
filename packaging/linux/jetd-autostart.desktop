@@ -1,0 +1,10 @@
+# XDG autostart fallback for desktops without systemd user services
+# (ADR-0026). Install under ~/.config/autostart/.
+[Desktop Entry]
+Type=Application
+Name=Jet daemon
+Comment=Starts the Jet daemon for this user's Plane
+Exec=sh -c 'exec "$HOME/.jet/core/current/jetd" serve --channel gui'
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

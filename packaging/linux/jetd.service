@@ -1,0 +1,23 @@
+# systemd user service for a GUI-managed jetd (ADR-0026). Install under
+# ~/.config/systemd/user/ and enable with `systemctl --user enable --now jetd`.
+# The unit starts whatever `~/.jet/core/current` names, so updates and
+# rollbacks switch the link and restart only this service.
+[Unit]
+Description=Jet daemon for this user's Plane
+Documentation=https://github.com/apexgang/jet
+
+[Service]
+Type=simple
+ExecStart=%h/.jet/core/current/jetd serve --channel gui
+# jetd drains within ten seconds (ADR-0088); give it a little longer.
+TimeoutStopSec=15
+# Signal jetd alone. jetfueld helpers keep Runs and terminals alive across
+# a daemon stop, update, or rollback and must not die with the cgroup.
+KillMode=process
+# A drained jetd exits 0; the service must come back with whatever
+# `current` names now. `systemctl --user stop` still stops it.
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -12,7 +12,11 @@
 //! [`Store::open`]: crate::Store::open
 
 use crate::StoreError;
-use sqlx::{SqlitePool, migrate::Migrator};
+use sqlx::{
+	Connection as _, SqliteConnection, SqlitePool, migrate::Migrator,
+	sqlite::SqliteConnectOptions,
+};
+use std::path::Path;
 
 /// The migration set embedded in this build.
 ///
@@ -25,6 +29,52 @@ fn migrator() -> Migrator {
 	let mut migrator = sqlx::migrate!("./migrations");
 	migrator.set_ignore_missing(true);
 	migrator
+}
+
+/// The newest migration version embedded in this build: the schema a
+/// store is at once this release has opened it (ADR-0073). A release
+/// payload records it so an installer can tell whether the release before
+/// this one can still open the store.
+#[must_use]
+pub fn embedded_schema_version() -> i64 {
+	migrator().iter().map(|m| m.version).max().unwrap_or(0)
+}
+
+/// The newest migration version the store file at `path` has applied,
+/// read without migrating, checking, or otherwise touching it. `None` when
+/// there is no file or no schema tracker yet.
+///
+/// # Errors
+///
+/// Returns [`StoreError`] when the file exists but cannot be read.
+pub async fn applied_schema_version(
+	path: &Path,
+) -> Result<Option<i64>, StoreError> {
+	if !path.exists() {
+		return Ok(None);
+	}
+	let mut connection = SqliteConnection::connect_with(
+		&SqliteConnectOptions::new().filename(path).read_only(true),
+	)
+	.await?;
+	// Both statements run before the schema the compile-time query cache
+	// describes is known to exist, so they use the runtime API.
+	let tracked: Option<String> = sqlx::query_scalar(
+		"SELECT name FROM sqlite_master
+		 WHERE type = 'table' AND name = '_sqlx_migrations'",
+	)
+	.fetch_optional(&mut connection)
+	.await?;
+	if tracked.is_none() {
+		return Ok(None);
+	}
+	let applied: Option<i64> = sqlx::query_scalar(
+		"SELECT MAX(version) FROM _sqlx_migrations WHERE success",
+	)
+	.fetch_one(&mut connection)
+	.await?;
+	connection.close().await?;
+	Ok(applied)
 }
 
 pub(crate) async fn apply(pool: &SqlitePool) -> Result<(), StoreError> {
@@ -81,7 +131,6 @@ pub(crate) async fn state(
 mod tests {
 	use super::*;
 	use pretty_assertions::assert_eq;
-	use sqlx::Connection as _;
 
 	/// A file with no tracker has no schema; a migrated store is current;
 	/// a tracker missing the newest version is behind, naming the version
@@ -124,6 +173,34 @@ mod tests {
 				SchemaState::Behind {
 					applied_version: previous
 				}
+			)
+		);
+	}
+
+	/// A missing file and an untracked file report no schema; a migrated
+	/// store reports the version this build embeds, and the read leaves the
+	/// store as it was.
+	#[tokio::test]
+	async fn the_applied_version_is_read_without_migrating() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("plane.sqlite3");
+		let missing = applied_schema_version(&path).await.unwrap();
+		let pool =
+			sqlx::SqlitePool::connect_with(crate::open::connect_options(&path))
+				.await
+				.unwrap();
+		let untracked = applied_schema_version(&path).await.unwrap();
+		apply(&pool).await.unwrap();
+		let migrated = applied_schema_version(&path).await.unwrap();
+		let still_current = state(&pool).await.unwrap();
+		pool.close().await;
+		assert_eq!(
+			(missing, untracked, migrated, still_current),
+			(
+				None,
+				None,
+				Some(embedded_schema_version()),
+				SchemaState::Current
 			)
 		);
 	}

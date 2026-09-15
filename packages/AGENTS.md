@@ -92,6 +92,10 @@ Unless the change is mechanical, the total number of changed lines should not ex
 
 If the change is larger, explore whether it can be split into reviewable stages and identify the smallest coherent stage to land first. Base the staging suggestion on the actual diff, dependencies, and affected call sites.
 
+## Release packaging
+
+Release payloads, the per-user version layout, and the release envelope are described in [Core distribution](../docs/core-distribution.md). `just release-envelope` checks the dependency seams and profiles without a release build; `just release-package --target <triple>` and `just release-check --target <label>` build and gate a payload. Sizes are accepted per label in `release-baseline.json` through `just release-accept`.
+
 ## Commands
 
 Always use [justfile](./justfile) for backend commands. Run recipes from `packages/`, or use `just --justfile packages/justfile <recipe>` from the repository root. Use `just --list` to discover recipes; add a missing operation to the justfile before using it.

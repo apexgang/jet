@@ -83,6 +83,7 @@ pub use conversation::trash::{TrashReasonRecord, TrashRecord};
 pub use journal::{
 	EVENT_COMPACTION_BATCH_LIMIT, ForkContextEvents, TRANSCRIPT_EVENT_LIMIT,
 };
+pub use migrations::{applied_schema_version, embedded_schema_version};
 pub use pairing::PairingGate;
 pub use pairing::offer::{
 	NewPairingClaim, NewPairingOffer, PairingInvalidation, PairingKeyAlgorithm,
