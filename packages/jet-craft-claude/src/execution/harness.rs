@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 /// The Claude Code releases this Craft is tested against (ADR-0104). A Harness
-/// outside this range still runs, and the matrix in `docs/claude-code-craft.md`
+/// outside this range still runs, and the matrix in `docs/conformance-matrix.md`
 /// records what was verified.
 pub(crate) const TESTED_VERSIONS: &str = "2.1";
 
@@ -113,4 +113,27 @@ pub(crate) fn interrupt_request(request: Uuid) -> String {
 			"request": {"subtype": "interrupt"},
 		})
 	)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use pretty_assertions::assert_eq;
+
+	/// The published matrix pins the minor line this Craft's warning enforces
+	/// (ADR-0104), so neither can move without the other.
+	#[test]
+	fn the_published_matrix_pins_this_release() {
+		let matrix = include_str!("../../../../docs/conformance-matrix.md");
+		let pinned = matrix
+			.lines()
+			.find(|line| line.starts_with("| Claude Code |"))
+			.and_then(|line| line.split('|').nth(2))
+			.map(str::trim);
+		assert_eq!(
+			pinned,
+			Some(format!("Claude Code {TESTED_VERSIONS}.x, by minor line"))
+				.as_deref()
+		);
+	}
 }

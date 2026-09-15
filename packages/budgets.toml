@@ -1,0 +1,30 @@
+# The accepted performance envelope of the Jet core (ADR-0022). `just
+# budget-test` measures a Plane seeded with 10,000 Conversations and one
+# million journal Events on a reference host and `scripts/budgets.py check`
+# fails when a measurement misses its limit here or regresses more than
+# `regression_percent` against the accepted baseline for the same operating
+# system and architecture in budget-baseline.json. `just budget-accept`
+# records a reviewed baseline.
+
+[budget]
+regression_percent = 15
+
+# One entry per measurement `jet-daemon/tests/budgets.rs` writes. `max`
+# limits are milliseconds and a regression is an increase; `min` limits are
+# rates and a regression is a decrease.
+[limits]
+daemon_ready_ms = { max = 150 }
+commit_64_events_p99_ms = { max = 10 }
+commit_256_kib_p99_ms = { max = 10 }
+sidebar_page_p95_ms = { max = 10 }
+blocks_500_p95_ms = { max = 15 }
+reconnect_10000_events_ms = { max = 100 }
+ingestion_events_per_second = { min = 10000 }
+
+# Measured and recorded in the baseline but never gated: the open is inside
+# the daemon's ready time, and the second start of the same Plane shows the
+# ready time without the day's first Recovery snapshot. They explain a
+# `daemon_ready_ms` regression; they do not fail the check themselves.
+[informational]
+store_open_ms = {}
+daemon_ready_again_ms = {}

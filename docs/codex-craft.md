@@ -28,28 +28,13 @@ checklist. Views are bounded to 4 KiB and never include tool arguments.
 
 ## v1 conformance matrix
 
-ADR-0104 pins this matrix to **Codex CLI 0.153.4**, using the non-experimental
-schema emitted by `codex app-server generate-json-schema`.
-
-| Capability | Delivery | How |
-| --- | --- | --- |
-| Start a Conversation | Native | `initialize`, `initialized`, then `thread/start` |
-| Exchange turns | Native | `turn/start` on the open app-server input |
-| Structured progress and plans | Native | Complete `item/*` and `turn/plan/updated` events |
-| Report usage | Native + normalized | Complete `thread/tokenUsage/updated` events; the last turn's counts and the reported rate-limit windows are also Usage records |
-| Interrupt turn | Native | `turn/interrupt`; the app-server remains alive |
-| Waiting for approval | Native | Codex server requests answered only through Jet |
-| Waiting for authentication or quota | Native | Structured Codex error information |
-| Presentation blocks | Jet-equivalent | Bounded inert views derived from native events |
-| Stop Run | Jet-equivalent | Signal escalation through `jetfueld` (ADR-0083) |
-| File change evidence | Jet-equivalent | Workspace Change checkpoints provide Git object evidence |
-| Unknown future native events | Generic fallback | Retained raw JSON with no guessed semantics |
-| Oversized native-event Artifacts | Unavailable | Immutable Artifact publication is owned by #47 |
-| Harness extension lifecycle | Unavailable | Skills, MCP servers, hooks, and plugins are owned by #37 |
-
-A Codex release other than 0.153.4 may still run, but the Craft writes a visible
-unverified-compatibility diagnostic. A schema change never silently expands
-the matrix.
+ADR-0104 pins this Craft to **Codex CLI 0.153.4**, using the non-experimental
+schema emitted by `codex app-server generate-json-schema`. The classification
+of every v1 capability for that release is published in
+[conformance-matrix.md](conformance-matrix.md); a unit test keeps that file
+and the pin in `harness.rs` together. A Codex release other than 0.153.4 may
+still run, but the Craft writes a visible unverified-compatibility
+diagnostic. A schema change never silently expands the matrix.
 
 ## Validation
 

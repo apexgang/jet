@@ -27,23 +27,12 @@ Interrupting a turn uses the Harness's own `interrupt` control request, which is
 
 ## v1 conformance matrix
 
-ADR-0104 pins v1 parity to explicitly tested releases. This Craft is tested against **Claude Code 2.1**. A release outside that range still runs, and reports a visible unverified-compatibility warning on its diagnostics.
-
-| Capability | Delivery | How |
-| --- | --- | --- |
-| Start a Conversation | Native | `--print` with the stream-json protocol on both sides |
-| Exchange turns | Native | User messages written to open standard input (Helper 1.3) |
-| Structured progress | Native | `assistant` content blocks retained whole |
-| Report usage | Native + normalized | `result` carries `usage`, `total_cost_usd`, and `modelUsage`; the counts and the `rate_limit_event` window are also reported as Usage records |
-| Resume a Conversation | Native | `--resume` with the pinned `--session-id` |
-| Interrupt turn | Native | `interrupt` control request; the Run stays active |
-| Waiting for quota | Native | `rate_limit_event` status |
-| Presentation blocks | Jet-equivalent | Views built from native content blocks |
-| Stop Run | Jet-equivalent | Signal escalation through the helper (ADR-0083) |
-| File change evidence | Jet-equivalent | The Harness reports no object identities; Workspace comparison covers checkpoints |
-| Approval requests | Native | The Harness's own permission tool, answered by Jet |
-| No-Visa remote tools | Jet-equivalent | Craft 1.6 exposes `mcp__jet__remote` only for an admitted No-Visa Run |
-| Harness extensions | Unavailable | General skills, MCP servers, and hooks are #37 |
+ADR-0104 pins v1 parity to explicitly tested releases. This Craft is tested
+against **Claude Code 2.1**. The classification of every v1 capability for
+that minor line is published in [conformance-matrix.md](conformance-matrix.md);
+a unit test keeps that file and the pin in `harness.rs` together. A release
+outside that range still runs, and reports a visible
+unverified-compatibility warning on its diagnostics.
 
 ## Approvals
 

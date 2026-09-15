@@ -82,5 +82,19 @@ Combined measured CPU was 0.0% at `ps` time-counter resolution; no CPU-time
 increase was recorded. Disk growth was zero, no unneeded daemon children
 remained, and the helper retired after native input closed. The unlaunched
 helper used 2,464 KiB and retired within its ten-second startup deadline.
-All eight preceding replay and lifecycle stress checks passed. Linux has not
-yet been measured; run the same recipe on the Linux reference host.
+All eight preceding replay and lifecycle stress checks passed.
+
+On 2026-09-15, Linux x86_64 (CachyOS, kernel 7.2.4), the development profile
+passed with ten thousand Conversations and a 300.093-second idle window:
+
+| Process | Peak RSS (KiB) | Limit (MiB) |
+| --- | ---: | ---: |
+| `jetd` | 18,948 | 35 |
+| `jet-craft-codex` | 4,328 | 15 |
+| `jet-craft-claude` | 4,348 | 15 |
+| `jetfueld`, after output churn | 4,164 | 8 |
+
+Combined measured CPU was 0.0%, disk growth was zero, no unneeded daemon
+children remained, and the helper retired after native input closed. The
+unlaunched helper used 3,708 KiB and retired within its deadline. All eight
+preceding replay and lifecycle stress checks passed.
