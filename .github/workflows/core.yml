@@ -41,6 +41,8 @@ jobs:
         run: just sqlx-migrations-check
       - name: Check the dependency seams and release profiles
         run: just release-envelope
+      - name: Install clippy for the pinned toolchain
+        run: rustup component add clippy
       - name: Lint
         run: just clippy -- -D warnings
       - name: Run the suite
