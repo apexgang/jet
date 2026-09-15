@@ -177,6 +177,50 @@ mod tests {
 		);
 	}
 
+	/// A store the previous release left at its schema opens through this
+	/// build, migrates forward, and is authoritative afterwards: the
+	/// expand-only forward step ADR-0073 relies on.
+	#[tokio::test]
+	async fn a_store_at_the_previous_schema_migrates_forward_on_open() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("plane.sqlite3");
+		let newest = embedded_schema_version();
+		let previous = Migrator {
+			migrations: std::borrow::Cow::Owned(
+				migrator()
+					.iter()
+					.filter(|migration| migration.version < newest)
+					.cloned()
+					.collect(),
+			),
+			..migrator()
+		};
+		let previous_version =
+			previous.iter().map(|m| m.version).max().unwrap();
+		let pool =
+			sqlx::SqlitePool::connect_with(crate::open::connect_options(&path))
+				.await
+				.unwrap();
+		previous.run(&pool).await.unwrap();
+		pool.close().await;
+		let before = applied_schema_version(&path).await.unwrap();
+
+		let store = crate::Store::open(&path).await.unwrap();
+		let integrity = store.integrity();
+		let plane_readable = store.plane().await.is_ok();
+		store.close().await;
+		let after = applied_schema_version(&path).await.unwrap();
+		assert_eq!(
+			(before, after, integrity, plane_readable),
+			(
+				Some(previous_version),
+				Some(newest),
+				crate::StoreIntegrity::Verified,
+				true
+			)
+		);
+	}
+
 	/// A missing file and an untracked file report no schema; a migrated
 	/// store reports the version this build embeds, and the read leaves the
 	/// store as it was.
