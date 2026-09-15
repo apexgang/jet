@@ -335,8 +335,7 @@ impl Inner {
 			return;
 		};
 		let record = Record {
-			time: chrono::DateTime::<chrono::Utc>::from(time)
-				.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+			time: rfc3339_millis(time),
 			level: diagnostic.level,
 			component: diagnostic.component,
 			message: diagnostic.message,
@@ -365,6 +364,43 @@ impl Inner {
 			self.ring = None;
 		}
 	}
+}
+
+/// `time` as RFC 3339 in UTC with millisecond precision, the form every
+/// diagnostic record carries. Written here so the helper and the Crafts
+/// link no calendar crate (ADR-0060); times before the Unix epoch are
+/// clamped to it.
+fn rfc3339_millis(time: std::time::SystemTime) -> String {
+	let since_epoch = time
+		.duration_since(std::time::UNIX_EPOCH)
+		.unwrap_or_default();
+	let seconds = since_epoch.as_secs();
+	let millis = since_epoch.subsec_millis();
+	let days = i64::try_from(seconds / 86_400).unwrap_or(i64::MAX);
+	let second_of_day = seconds % 86_400;
+	// Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+	let z = days + 719_468;
+	let era = z.div_euclid(146_097);
+	let day_of_era = z.rem_euclid(146_097);
+	let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524
+		- day_of_era / 146_096)
+		/ 365;
+	let day_of_year =
+		day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+	let month_index = (5 * day_of_year + 2) / 153;
+	let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+	let month = if month_index < 10 {
+		month_index + 3
+	} else {
+		month_index - 9
+	};
+	let year = year_of_era + era * 400 + i64::from(month <= 2);
+	format!(
+		"{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{millis:03}Z",
+		second_of_day / 3_600,
+		second_of_day % 3_600 / 60,
+		second_of_day % 60
+	)
 }
 
 #[cfg(test)]
@@ -513,6 +549,32 @@ mod tests {
 				DebugLogging::Disabled
 			)
 			.is_err()
+		);
+	}
+
+	/// The record's time is RFC 3339 in UTC with milliseconds, across a
+	/// leap day, a century boundary, and the epoch itself.
+	#[test]
+	fn diagnostic_times_are_rfc3339_utc_with_milliseconds() {
+		let at = |seconds: u64, millis: u32| {
+			rfc3339_millis(
+				std::time::UNIX_EPOCH
+					+ std::time::Duration::new(seconds, millis * 1_000_000),
+			)
+		};
+		assert_eq!(
+			[
+				at(0, 0),
+				at(951_782_400, 7),
+				at(4_102_444_799, 999),
+				at(1_789_487_045, 120)
+			],
+			[
+				"1970-01-01T00:00:00.000Z".to_owned(),
+				"2000-02-29T00:00:00.007Z".to_owned(),
+				"2099-12-31T23:59:59.999Z".to_owned(),
+				"2026-09-15T15:44:05.120Z".to_owned(),
+			]
 		);
 	}
 }

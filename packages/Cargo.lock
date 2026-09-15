@@ -1522,7 +1522,6 @@ dependencies = [
 name = "jet-runtime"
 version = "0.2.0"
 dependencies = [
- "chrono",
  "filedescriptor",
  "portable-pty",
  "pretty_assertions",
