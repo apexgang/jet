@@ -1,0 +1,47 @@
+# This workflow is managed by gh actions-lock.
+# The v1 release contract's test gate (issue #58): the ordinary suite, the
+# lints, the migration conventions, and the dependency envelope on both
+# supported core platforms (ADR-0032). Reference performance and idle
+# resource measurements run on the fixed reference hosts instead, through
+# `just budget-test` and `just resource-test`.
+name: Core tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: packages
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: extractions/setup-just@v4.0.0
+      # rust-toolchain.toml selects the pinned toolchain when cargo first runs.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: packages
+      - name: Check migration conventions
+        run: just sqlx-migrations-check
+      - name: Check the dependency seams and release profiles
+        run: just release-envelope
+      - name: Lint
+        run: just clippy -- -D warnings
+      - name: Run the suite
+        run: just test

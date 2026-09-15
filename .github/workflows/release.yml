@@ -1,3 +1,4 @@
+# This workflow is managed by gh actions-lock.
 # Coordinated macOS and Linux distributions of the Jet core executables
 # (issue #57): one payload per architecture label, gated by release.toml.
 # Signing and notarization are the GUI distributions' step and run after
@@ -32,12 +33,12 @@ jobs:
       run:
         working-directory: packages
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.4.0
       - name: Install the pinned toolchain and targets
         run: |
           rustup toolchain install
           for target in ${{ matrix.targets }}; do rustup target add "$target"; done
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v3.1.0
       - name: Build, split symbols, strip, and package
         run: |
           args=()
@@ -45,7 +46,7 @@ jobs:
           just release-package "${args[@]}"
       - name: Gate sizes, dependency seams, and profiles
         run: just release-check --target ${{ matrix.label }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4.6.2
         # A failed gate still uploads, so the payload that failed can be inspected.
         if: ${{ !cancelled() }}
         with:

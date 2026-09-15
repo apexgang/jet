@@ -96,6 +96,10 @@ If the change is larger, explore whether it can be split into reviewable stages 
 
 Release payloads, the per-user version layout, and the release envelope are described in [Core distribution](../docs/core-distribution.md). `just release-envelope` checks the dependency seams and profiles without a release build; `just release-package --target <triple>` and `just release-check --target <label>` build and gate a payload. Sizes are accepted per label in `release-baseline.json` through `just release-accept`.
 
+## Release contract
+
+The gates behind issue #58 are listed in [The core v1 release contract](../docs/release-contract.md). `just release-contract` runs the local ones; the `Core tests` workflow runs them on Linux and macOS. `just budget-test` measures the ADR-0022 store and startup budgets on a reference host, alone, and gates them through `budgets.toml` and `budget-baseline.json` with `just budget-check` and `just budget-accept --justification`, the way release sizes are accepted. The Harness classification lives in [conformance-matrix.md](../docs/conformance-matrix.md); change a Craft's tested version together with that file, or its pin test fails.
+
 ## Commands
 
 Always use [justfile](./justfile) for backend commands. Run recipes from `packages/`, or use `just --justfile packages/justfile <recipe>` from the repository root. Use `just --list` to discover recipes; add a missing operation to the justfile before using it.

@@ -126,6 +126,28 @@ contracts-test-swift:
 	swiftc -module-cache-path "$scratch/cache" ../apps/jet/jet/Protocol/JetModels.swift jet-protocol/contracts/tests/main.swift -o "$scratch/jet"
 	"$scratch/jet" jet-protocol/contracts/jet-v1.schema.json jet-protocol/contracts/jet-fixtures.json
 
+# The release contract's local gate (issue #58): the ordinary suite with
+# the migration, envelope, and contract checks that need no reference host.
+release-contract: sqlx-migrations-check release-envelope contracts-check
+	just clippy -- -D warnings
+	just test
+
+# Measure the ADR-0022 store, startup, reconnect, and ingestion budgets at
+# the reference scale, alone on a reference host, then gate the result.
+[unix]
+budget-test: && budget-check
+	just test -p jet-daemon --test budgets -- --include-ignored --nocapture
+
+# Gate this host's last budget measurements against budgets.toml and the
+# accepted baseline; a regression over the accepted percentage fails.
+budget-check:
+	python3 ../scripts/budgets.py check
+
+# Record this host's last budget measurements as accepted, with a --justification.
+[unix]
+budget-accept *args:
+	python3 ../scripts/budgets.py accept "$@"
+
 build:
 	cargo build
 

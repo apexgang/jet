@@ -1,0 +1,17 @@
+{
+  "linux-x86_64": {
+    "arch": "x86_64",
+    "justification": "Initial measurement at 0.2.0 on the Linux x86_64 development host",
+    "measurements": {
+      "blocks_500_p95_ms": 3.483,
+      "commit_256_kib_p99_ms": 3.217,
+      "commit_64_events_p99_ms": 2.369,
+      "daemon_ready_again_ms": 535.096,
+      "ingestion_events_per_second": 53816.231,
+      "reconnect_10000_events_ms": 75.876,
+      "sidebar_page_p95_ms": 2.365,
+      "store_open_ms": 364.136
+    },
+    "os": "linux"
+  }
+}
