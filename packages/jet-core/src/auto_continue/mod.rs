@@ -474,8 +474,9 @@ pub(crate) mod tests {
 		assert_eq!(execution.activity, Some(RunActivity::WaitingForQuota));
 	}
 
-	mod driver {
-		//! Driven Harness and clock for Auto-continue tests at Commands/Queries/Events.
+	pub(crate) mod driver {
+		//! Driven Harness and clock for tests that drive a Visa Run at
+		//! Commands/Queries/Events.
 		use super::*;
 		use crate::test_support::{
 			FixedProbe, ManualClock, equipped, start_core_with,
@@ -491,7 +492,7 @@ pub(crate) mod tests {
 		};
 		use tokio::sync::mpsc;
 
-		pub(super) struct Harness {
+		pub(crate) struct Harness {
 			pub core: Arc<Core>,
 			pub clock: Arc<ManualClock>,
 			pub id: ConversationId,
@@ -514,6 +515,7 @@ pub(crate) mod tests {
 					receiver: Arc::new(tokio::sync::Mutex::new(receiver)),
 					launches: Mutex::default(),
 					inputs: Arc::default(),
+					acknowledged: Arc::default(),
 				});
 				let core = Arc::new(
 					start_core_with(
@@ -721,10 +723,12 @@ pub(crate) mod tests {
 			}
 		}
 		#[derive(Debug)]
-		pub(super) struct Host {
+		pub(crate) struct Host {
 			receiver: Arc<tokio::sync::Mutex<mpsc::Receiver<RunObservation>>>,
 			pub launches: Mutex<Vec<LaunchPlan>>,
 			pub inputs: Arc<Mutex<Vec<(uuid::Uuid, String)>>>,
+			/// Every source offset the core told the Craft it may drop.
+			pub acknowledged: Arc<Mutex<Vec<u64>>>,
 		}
 		impl RunHost for Host {
 			fn native_provider(
@@ -779,6 +783,7 @@ pub(crate) mod tests {
 					Ok(Box::new(Connection {
 						receiver: self.receiver.clone(),
 						inputs: self.inputs.clone(),
+						acknowledged: self.acknowledged.clone(),
 						started: std::sync::atomic::AtomicBool::new(false),
 					}) as Box<dyn RunConnection>)
 				})
@@ -786,6 +791,7 @@ pub(crate) mod tests {
 		}
 		struct Connection {
 			inputs: Arc<Mutex<Vec<(uuid::Uuid, String)>>>,
+			acknowledged: Arc<Mutex<Vec<u64>>>,
 			receiver: Arc<tokio::sync::Mutex<mpsc::Receiver<RunObservation>>>,
 			started: std::sync::atomic::AtomicBool,
 		}
@@ -817,8 +823,9 @@ pub(crate) mod tests {
 			}
 			fn acknowledge(
 				&self,
-				_: u64,
+				offset: u64,
 			) -> RunFuture<'_, Result<(), CoreError>> {
+				self.acknowledged.lock().unwrap().push(offset);
 				Box::pin(async { Ok(()) })
 			}
 			fn finish(&self) -> RunFuture<'_, Result<(), CoreError>> {

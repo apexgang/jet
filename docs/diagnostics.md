@@ -77,7 +77,10 @@ flag applies to that process alone and is never remembered.
 
 Refused Commands and failed remote authentication or pairing are always
 recorded at `warn` with their stable code and nothing of the request. Any
-other Command failure, a Usage query included, is a `debug` record.
+other Command failure, a Usage query included, is a `debug` record. A
+Usage report a Craft sent that the Plane refused is a `warn` record from
+the core itself, naming the Run and the code of what was refused and
+nothing of the report; the Run it came from goes on (issue #120).
 
 ## What `jetd` records today
 

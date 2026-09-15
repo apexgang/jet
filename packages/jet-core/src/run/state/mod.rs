@@ -220,9 +220,20 @@ async fn record(
 
 		// A Usage record is durable Plane state of its own rather than
 		// execution state, so it is written beside the Run instead of
-		// changing its lifecycle (ADR-0023).
+		// changing its lifecycle (ADR-0023). A report the Plane cannot
+		// record is refused before anything is written, and the refusal
+		// costs the batch nothing but the report: the native event beside
+		// it is journalled, the offset is acknowledged, and the Run goes
+		// on. Only what the store itself refuses fails the batch.
 		Observation::Usage(report) => {
-			if let crate::UsageReport::ProviderQuota(usage) = &report {
+			let report = match crate::usage::record::admit(report) {
+				Ok(report) => report,
+				Err(refused) => {
+					crate::usage::record::refusal(run_id, &refused).emit();
+					return Ok(());
+				}
+			};
+			if let crate::UsageReport::ProviderQuota(usage) = report.report() {
 				state.quota.retain(|previous| {
 					previous.usage.window != usage.window
 						|| previous.usage.scope != usage.scope
@@ -344,4 +355,149 @@ fn invalid() -> CoreError {
 		"run.invalid_observation",
 		"the Craft observation conflicts with the Run lifecycle",
 	)
+}
+
+#[cfg(test)]
+mod tests {
+	//! A Usage report the Plane refuses is dropped from its source batch,
+	//! not the batch from its Run: the native event beside it is
+	//! journalled, the batch commits, and the Craft is told to drop the
+	//! source (ADR-0023).
+	use crate::auto_continue::tests::driver::Harness;
+	use crate::test_support::{actor, events};
+	use crate::{
+		AutoContinuePolicy, EventKind, ModelId, ObservedUsage, Query,
+		QueryResult, QuotaMeasure, QuotaReport, QuotaScope, QuotaUnit,
+		RunLifecycle, RunObservation, UsageEstimation, UsageFinality,
+		UsageMeasurement, UsageReport, UsageTokens,
+	};
+	use pretty_assertions::assert_eq;
+
+	/// The native event the Craft derived its report from, journalled
+	/// whatever happens to the normalized record.
+	const NATIVE: &str = r#"{"type":"usage","input_tokens":1}"#;
+
+	/// A count the wire carries and the store does not.
+	const OVER_STORE: u64 = i64::MAX as u64 + 1;
+
+	/// What is left of a Run after a batch carried a refused report.
+	#[derive(Debug, PartialEq, Eq)]
+	struct Aftermath {
+		lifecycle: RunLifecycle,
+		/// The native events the journal holds.
+		native: Vec<String>,
+		/// The Usage records the journal names.
+		usage: Vec<EventKind>,
+		/// The source offsets the Craft was told to drop.
+		acknowledged: Vec<u64>,
+	}
+
+	/// The Run went on: its batch is journalled, its offset acknowledged,
+	/// and no Usage record was made of the report.
+	fn survived() -> Aftermath {
+		Aftermath {
+			lifecycle: RunLifecycle::Active,
+			native: vec![NATIVE.into()],
+			usage: vec![],
+			acknowledged: vec![1, 2],
+		}
+	}
+
+	async fn report(dir: &tempfile::TempDir, report: UsageReport) -> Aftermath {
+		let mut h = Harness::start(dir.path(), AutoContinuePolicy::Off).await;
+		h.send(vec![
+			RunObservation::Output {
+				native_json: NATIVE.into(),
+				presentation_json: vec![],
+			},
+			RunObservation::Usage(report),
+		])
+		.await;
+		let QueryResult::RunExecution(execution) = h
+			.core
+			.query(&actor(), Query::RunExecution { run_id: h.run_id })
+			.await
+			.unwrap()
+		else {
+			panic!("Run")
+		};
+		let events = events(&h.core).await;
+		Aftermath {
+			lifecycle: execution.run.lifecycle,
+			native: events
+				.iter()
+				.filter_map(|event| match event {
+					EventKind::RunOutput { native_json, .. } => {
+						Some(native_json.clone())
+					}
+					_ => None,
+				})
+				.collect(),
+			usage: events
+				.into_iter()
+				.filter(|event| {
+					matches!(event, EventKind::UsageRecorded { .. })
+				})
+				.collect(),
+			acknowledged: h.host.acknowledged.lock().unwrap().clone(),
+		}
+	}
+
+	fn observed(turn: &str, tokens: UsageTokens) -> UsageReport {
+		UsageReport::Observed(ObservedUsage {
+			measurement: UsageMeasurement::Turn {
+				turn: turn.into(),
+				native_usage_id: None,
+			},
+			model: Some(ModelId("claude-opus-5".into())),
+			estimation: UsageEstimation::Measured,
+			finality: UsageFinality::Final,
+			tokens,
+		})
+	}
+
+	fn share(used: u64) -> UsageReport {
+		UsageReport::ProviderQuota(QuotaReport {
+			window: "five_hour".into(),
+			scope: QuotaScope::ProviderAccount,
+			measure: QuotaMeasure {
+				unit: QuotaUnit::Share,
+				used,
+				limit: None,
+			},
+			window_seconds: Some(18_000),
+			resets_in_seconds: Some(3_600),
+			estimation: UsageEstimation::Measured,
+			finality: UsageFinality::Interim,
+		})
+	}
+
+	#[tokio::test]
+	async fn an_amount_above_what_the_store_holds_leaves_its_run_running() {
+		let dir = tempfile::tempdir().unwrap();
+		let tokens = UsageTokens {
+			input: OVER_STORE,
+			..UsageTokens::default()
+		};
+		assert_eq!(report(&dir, observed("turn-1", tokens)).await, survived());
+	}
+
+	#[tokio::test]
+	async fn a_share_above_its_fixed_limit_leaves_its_run_running() {
+		let dir = tempfile::tempdir().unwrap();
+		assert_eq!(report(&dir, share(10_001)).await, survived());
+	}
+
+	#[tokio::test]
+	async fn metadata_that_is_not_bounded_leaves_its_run_running() {
+		let dir = tempfile::tempdir().unwrap();
+		let tokens = UsageTokens {
+			input: 1,
+			..UsageTokens::default()
+		};
+		assert_eq!(
+			report(&dir, observed(&"t".repeat(129), tokens)).await,
+			survived()
+		);
+	}
 }
