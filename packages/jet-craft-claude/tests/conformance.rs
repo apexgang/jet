@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use std::{
 	os::unix::fs::{OpenOptionsExt, PermissionsExt},
 	path::{Path, PathBuf},
+	sync::{Mutex, MutexGuard, PoisonError},
 	time::Duration,
 };
 use tokio::{
@@ -478,7 +479,10 @@ fn workspace() -> (PathBuf, Uuid, PathBuf) {
 		"#!/bin/sh\nJET_CLAUDE_ARGUMENTS=\"$*\"\nexport JET_CLAUDE_ARGUMENTS\nexec {} --ignored --exact --nocapture claude_double\n",
 		std::env::current_exe().unwrap().display()
 	);
-	std::fs::write(&harness, script).unwrap();
+	{
+		let _guard = process_images();
+		std::fs::write(&harness, script).unwrap();
+	}
 	std::fs::set_permissions(&harness, std::fs::Permissions::from_mode(0o700))
 		.unwrap();
 	(root, Uuid::new_v4(), harness)
@@ -505,14 +509,15 @@ async fn start_helper(
 		.unwrap();
 	std::io::Write::write_all(&mut file, &encode_control(&config).unwrap())
 		.unwrap();
-	let mut child = tokio::process::Command::new(
-		PathBuf::from(env!("CARGO_BIN_EXE_jet-craft-claude"))
-			.with_file_name("jetfueld"),
+	let mut child = spawn_serialized(
+		tokio::process::Command::new(
+			PathBuf::from(env!("CARGO_BIN_EXE_jet-craft-claude"))
+				.with_file_name("jetfueld"),
+		)
+		.args(["run", "--config"])
+		.arg(path)
+		.kill_on_drop(true),
 	)
-	.args(["run", "--config"])
-	.arg(path)
-	.kill_on_drop(true)
-	.spawn()
 	.unwrap();
 	tokio::time::timeout(Duration::from_secs(10), async {
 		while !root.join("h.sock").exists() {
@@ -540,6 +545,28 @@ enum ResumeMode {
 	Fresh,
 	Pinned,
 }
+/// Held while an executable is written and while any child is spawned.
+///
+/// Tests share this process, and a spawn forks it: until the child has
+/// exec'd, it holds every open descriptor, including a sibling test's copy
+/// of the Craft still being written. Starting that copy meanwhile fails
+/// with `Text file busy` on Linux. A spawn returns once its child has
+/// exec'd, so serializing writes and spawns closes the window.
+static PROCESS_IMAGES: Mutex<()> = Mutex::new(());
+
+fn process_images() -> MutexGuard<'static, ()> {
+	PROCESS_IMAGES
+		.lock()
+		.unwrap_or_else(PoisonError::into_inner)
+}
+
+fn spawn_serialized(
+	command: &mut tokio::process::Command,
+) -> std::io::Result<tokio::process::Child> {
+	let _guard = process_images();
+	command.spawn()
+}
+
 fn start_craft_with_resume(
 	root: &Path,
 	harness: &Path,
@@ -547,7 +574,11 @@ fn start_craft_with_resume(
 ) -> (PathBuf, tokio::process::Child) {
 	let installed = root.join("craft/jet-craft-claude");
 	std::fs::create_dir_all(installed.with_file_name(".jet")).unwrap();
-	std::fs::copy(env!("CARGO_BIN_EXE_jet-craft-claude"), &installed).unwrap();
+	{
+		let _guard = process_images();
+		std::fs::copy(env!("CARGO_BIN_EXE_jet-craft-claude"), &installed)
+			.unwrap();
+	}
 	let declaration = format!(
 		"id = \"claude-code\"\nharness = \"claude-code\"\nschema = {{ major = 1, minor = 0 }}\nbroker_permissions = []\nhost_access = [{{ kind = \"executable\", name = {:?} }}]\nfeatures = [{{ name = \"turns\", required = true }}, {{ name = \"actions\", required = true }}]\n\n[protocol]\nfamily = \"craft\"\nversions = [{{ major = 1, minor = 4 }}]\ncapabilities = [\"runs\", \"actions\"]\n",
 		harness.to_str().unwrap()
@@ -573,12 +604,13 @@ fn start_craft_with_resume(
 	)
 	.unwrap();
 	let socket = root.join("craft.sock");
-	let child = tokio::process::Command::new(&installed)
-		.arg("--socket")
-		.arg(&socket)
-		.kill_on_drop(true)
-		.spawn()
-		.unwrap();
+	let child = spawn_serialized(
+		tokio::process::Command::new(&installed)
+			.arg("--socket")
+			.arg(&socket)
+			.kill_on_drop(true),
+	)
+	.unwrap();
 	(socket, child)
 }
 
