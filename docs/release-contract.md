@@ -90,12 +90,15 @@ accept its label.
 - The Codex Craft leaves three capabilities the Harness exposes unused:
   native resume, Model selection, and a No-Visa tool bridge. ADR-0104 makes
   them release blockers, marked as Craft gaps in the matrix (#154).
-- Five `jet-core` Git delivery commit tests fail on Linux with git 2.55.0,
-  independent of the user's git configuration (#153). The `Core tests`
-  workflow shows whether the runners' git releases are affected.
+- Five `jet-core` Git delivery commit tests fail on Linux, on the
+  development host and on `ubuntu-latest` alike, independent of the user's
+  git configuration (#153).
+- Four `jet-daemon` targets fail on `macos-latest` in the first `Core
+  tests` run: the deletion ledger, reviews, store recovery, and utility
+  suites (#156). They pass on Linux.
 - The Claude Craft conformance suite can fail with `Text file busy` when
   the whole workspace suite runs at once, because its tests copy the Craft
-  executable to a shared path while a sibling test is starting it; run
-  alone, it passes.
+  executable to a shared path while a sibling test is starting it (#157);
+  run alone, it passes.
 - Reference performance has a Linux baseline only; the macOS label still
   has to be measured and accepted.
