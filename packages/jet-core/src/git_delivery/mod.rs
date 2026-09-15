@@ -122,19 +122,12 @@ pub(crate) mod tests {
 	use pretty_assertions::assert_eq;
 
 	async fn deliveries(core: &Core, id: ConversationId) -> Vec<GitDelivery> {
-		let QueryResult::GitDeliveries(value) = core
-			.query(
-				&actor(),
-				Query::GitDeliveries {
-					conversation_id: id,
-				},
-			)
+		// ASVS 14.2.4, 16.2.5: keep the test's printable result on the typed
+		// Git-delivery path, separate from credential-bearing query variants.
+		core.store
+			.read(async |tx| super::state::query(tx, id).await)
 			.await
 			.unwrap()
-		else {
-			panic!("deliveries")
-		};
-		value
 	}
 
 	#[tokio::test]
