@@ -49,7 +49,7 @@ A user-directed application of a Workspace's changes to a permanent Project chec
 _Avoid_: Workspace move, automatic merge, Project transfer
 
 **Workspace seed**:
-The Local-checkout changes a Workspace starts with, chosen as none, every eligible change, or named paths, captured as one immutable Git tree and applied over the base as the Workspace is created. A Workspace the seed cannot be applied to is not created.
+The Local-checkout changes a Workspace starts with, chosen as none, every eligible change, or named paths while the checkout is at the Workspace's base, captured as one immutable Git tree that is applied, staged, over the base as the Workspace is created and kept for as long as the Workspace lives. A Workspace the seed cannot be applied to is not created.
 _Avoid_: Stash, patch, Change checkpoint, snapshot
 
 **Local checkout**:

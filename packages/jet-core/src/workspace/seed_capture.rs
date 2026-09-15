@@ -21,12 +21,21 @@
 //! Applying reads the tree over the Workspace's own HEAD after checking
 //! that HEAD is the commit the changes were made against. The changes
 //! arrive staged, because a Git link change has no unstaged form.
+//!
+//! Nothing else references the tree once it is applied, and `git gc`
+//! prunes an unreachable object after `gc.pruneExpire`. The tree is
+//! therefore pinned under `refs/jet/seeds/<workspace_id>` for as long as
+//! the Workspace exists, the way Change checkpoints are pinned under
+//! `refs/jet/checkpoints`, so what the Workspace records stays readable.
+//! The ref names no commit and moves no branch; it goes with the
+//! Workspace.
 
 use crate::{
 	error::CoreError,
 	filesystem::relative_path::RelativePath,
 	project::repository::{Output, git},
 	workspace::{
+		WorkspaceId,
 		seed::SeedSelection,
 		tree_capture::{ScratchIndex, diff_trees},
 		worktree,
@@ -158,6 +167,68 @@ async fn apply_unbounded(
 		return Err(seed_failed(read.stderr));
 	}
 	Ok(())
+}
+
+/// The ref that keeps the seed tree of `workspace_id` reachable in its
+/// Project.
+fn seed_ref(workspace_id: WorkspaceId) -> String {
+	format!("refs/jet/seeds/{}", workspace_id.0)
+}
+
+/// Pins the tree of `captured` under the seed ref of `workspace_id` in the
+/// repository at `project_root`, so `git gc` keeps it for as long as the
+/// Workspace does.
+///
+/// # Errors
+///
+/// Returns an `unavailable` `workspace.seed_failed` when Git cannot write
+/// the ref or does not finish in time. The Workspace is then not one the
+/// caller keeps.
+pub(crate) async fn pin(
+	project_root: &Path,
+	workspace_id: WorkspaceId,
+	captured: &CapturedSeed,
+) -> Result<(), CoreError> {
+	let reference = seed_ref(workspace_id);
+	let written = tokio::time::timeout(
+		SEED_BUDGET,
+		git(
+			project_root,
+			&[
+				"-c",
+				"core.fsync=loose-object,reference",
+				"update-ref",
+				"--no-deref",
+				&reference,
+				&captured.tree,
+			],
+		),
+	)
+	.await
+	.map_err(|_| {
+		seed_failed("the seed could not be pinned in time".into())
+	})??;
+	if !written.status.success() {
+		return Err(seed_failed(written.stderr));
+	}
+	Ok(())
+}
+
+/// Deletes the seed ref of `workspace_id` from the repository at
+/// `project_root`, once the Workspace is gone. A ref that is already
+/// absent is nothing to delete, and a failure leaves a ref that pins one
+/// tree in a repository Jet is still registered with; the answer is not
+/// needed.
+pub(crate) async fn unpin(project_root: &Path, workspace_id: WorkspaceId) {
+	let reference = seed_ref(workspace_id);
+	let _ = tokio::time::timeout(
+		SEED_BUDGET,
+		git(
+			project_root,
+			&["update-ref", "--no-deref", "-d", &reference],
+		),
+	)
+	.await;
 }
 
 /// Stages each named path over an index read back to HEAD, so only what

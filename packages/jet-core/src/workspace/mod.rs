@@ -327,7 +327,11 @@ pub(crate) async fn with_scratch<T>(
 /// names, which no later Conversation can collide with: the root is the
 /// Conversation's own identity. A seed that cannot be applied fails the
 /// whole creation and removes the worktree, so no Workspace is left
-/// holding part of what was selected (ADR-0025).
+/// holding part of what was selected; one that is applied is pinned under
+/// the Project's `refs/jet/seeds/<workspace_id>` so `git gc` keeps its
+/// tree for as long as the Workspace exists (ADR-0025). A commit that
+/// fails after the pin leaves a ref no row names, keeping one tree the
+/// Workspace's own worktree would have kept too.
 ///
 /// The Project is read again here: what was prepared describes the
 /// repository, and whether the Project is still registered is the
@@ -421,14 +425,26 @@ pub(crate) async fn create(
 			.await?;
 	}
 	worktree::add_detached(&project_root, &root_text, &base.commit).await?;
-	let captured = match changes {
-		PreparedChanges::Seed(captured)
-		| PreparedChanges::Snapshot(captured) => Some(captured),
-		PreparedChanges::None => None,
+	let applied = match &changes {
+		PreparedChanges::None => Ok(()),
+		PreparedChanges::Snapshot(captured) => {
+			seed_capture::apply(&root, captured).await
+		}
+		PreparedChanges::Seed(captured) => {
+			match seed_capture::apply(&root, captured).await {
+				Ok(()) => {
+					seed_capture::pin(
+						&project_root,
+						workspace.workspace_id,
+						captured,
+					)
+					.await
+				}
+				Err(refusal) => Err(refusal),
+			}
+		}
 	};
-	if let Some(captured) = captured
-		&& let Err(refusal) = seed_capture::apply(&root, &captured).await
-	{
+	if let Err(refusal) = applied {
 		worktree::remove_forced(&project_root, &root_text).await;
 		return Err(refusal);
 	}

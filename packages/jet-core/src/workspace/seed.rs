@@ -128,13 +128,18 @@ mod tests {
 	use pretty_assertions::assert_eq;
 
 	use crate::test_support::{
-		actor, conversation_snapshot as snapshot, events, git, init_repository,
-		register_repository, request, start_core,
+		FixedProbe, ManualClock, actor, conversation_snapshot as snapshot,
+		equipped, events, git, init_repository, register_repository, request,
+		start_core, start_core_with,
 	};
 	use crate::{
 		BaseSelection, Command, CommandOutcome, Conversation, Core, CoreError,
 		ErrorCategory, EventKind, ProjectId, RelativePath, RetentionPolicy,
-		SeedSelection, WorkingTreeRequest, WorkspaceSeed,
+		RetentionSweep, SeedSelection, WorkingTreeRequest, WorkspaceSeed,
+	};
+	use std::{
+		sync::Arc,
+		time::{Duration, UNIX_EPOCH},
 	};
 
 	/// A Project whose Local checkout holds every kind of change a seed meets:
@@ -494,6 +499,76 @@ mod tests {
 				],
 				1,
 				0,
+			)
+		);
+	}
+
+	/// A seed tree is pinned under an internal ref of the Project for as long
+	/// as its Workspace exists, so `git gc` cannot prune what the Workspace
+	/// records; the ref goes when the Workspace is deleted for good
+	/// (ADR-0025).
+	#[tokio::test]
+	async fn a_seed_tree_stays_reachable_until_its_workspace_is_gone() {
+		let dir = tempfile::tempdir().unwrap();
+		let clock = ManualClock::at(
+			UNIX_EPOCH + Duration::from_millis(1_700_000_000_000),
+		);
+		let core = start_core_with(
+			&dir.path().join("plane.sqlite3"),
+			Arc::clone(&clock) as Arc<dyn crate::clock::Clock>,
+			FixedProbe::new(equipped()),
+		)
+		.await;
+		let project_id =
+			register_repository(&core, &dir.path().join("repo")).await;
+		let repository = dir.path().join("repo").canonicalize().unwrap();
+		std::fs::write(repository.join("new.txt"), "new\n").unwrap();
+
+		let id = crate::retention::fixtures::conversation(
+			&core,
+			RetentionPolicy::ForgetAfterFinalRun,
+			WorkingTreeRequest::Workspace {
+				project_id,
+				base: BaseSelection::Head,
+				seed: SeedSelection::AllEligible,
+			},
+		)
+		.await;
+		let workspace = snapshot(&core, id).await.workspace.unwrap();
+		let tree = workspace.seed.unwrap().tree;
+		let reference = format!("refs/jet/seeds/{}", workspace.workspace_id.0);
+		let pinned = git(&repository, &["rev-parse", "--verify", &reference]);
+		git(&repository, &["reflog", "expire", "--expire=now", "--all"]);
+		git(&repository, &["gc", "-q", "--prune=now"]);
+		let after_gc = git(&repository, &["cat-file", "-t", &tree]);
+
+		git(&workspace.root, &["reset", "-q", "--hard"]);
+		crate::retention::fixtures::finished_run(&core, id).await;
+		let staged = core.sweep_retention().await.unwrap();
+		clock.advance(Duration::from_secs(31 * 24 * 60 * 60));
+		let deleted = core.sweep_retention().await.unwrap();
+		let refs = git(&repository, &["for-each-ref", "refs/jet/seeds"]);
+
+		assert_eq!(
+			(
+				pinned.trim(),
+				after_gc.trim(),
+				staged,
+				deleted,
+				refs.as_str()
+			),
+			(
+				tree.as_str(),
+				"tree",
+				RetentionSweep {
+					trashed: vec![id],
+					deleted: vec![],
+				},
+				RetentionSweep {
+					trashed: vec![],
+					deleted: vec![id],
+				},
+				"",
 			)
 		);
 	}
