@@ -7,7 +7,7 @@ use super::{
 	protections,
 };
 use crate::{
-	ConversationId, Core, CoreError, RecoveryMode,
+	ConversationId, Core, CoreError, RecoveryMode, WorkspaceId,
 	audit::{self, AuditDecision, AuditSubject, Decision},
 	security::SecurityClass,
 };
@@ -183,6 +183,9 @@ impl Core {
 							.await?
 							.map(|project| PathBuf::from(project.root)),
 						root: PathBuf::from(workspace.root),
+						pinned_seed: workspace
+							.seed
+							.map(|_| WorkspaceId(workspace.workspace_id)),
 					}),
 					None => None,
 				};
@@ -249,22 +252,32 @@ impl Staging {
 	}
 }
 
-/// A Workspace directory the store no longer names, and the repository it
-/// was a worktree of, if that Project is still registered.
+/// A Workspace directory the store no longer names, the repository it
+/// was a worktree of, if that Project is still registered, and the
+/// Workspace whose seed tree that repository pins, if it was seeded.
 struct Worktree {
 	project_root: Option<PathBuf>,
 	root: PathBuf,
+	pinned_seed: Option<WorkspaceId>,
 }
 
 impl Worktree {
-	/// Removes the directory. The repository forgets the worktree when it
-	/// still exists; the directory goes either way, and a failure leaves a
-	/// directory nothing refers to.
+	/// Removes the directory. The repository forgets the worktree and the
+	/// seed ref when it still exists; the directory goes either way, and a
+	/// failure leaves a directory nothing refers to.
 	async fn remove(self) {
-		if let Some(project_root) = &self.project_root
-			&& let Some(path) = self.root.to_str()
-		{
-			crate::workspace::worktree::remove_forced(project_root, path).await;
+		if let Some(project_root) = &self.project_root {
+			if let Some(path) = self.root.to_str() {
+				crate::workspace::worktree::remove_forced(project_root, path)
+					.await;
+			}
+			if let Some(workspace_id) = self.pinned_seed {
+				crate::workspace::seed_capture::unpin(
+					project_root,
+					workspace_id,
+				)
+				.await;
+			}
 		}
 		let _ = tokio::fs::remove_dir_all(&self.root).await;
 	}
