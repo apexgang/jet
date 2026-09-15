@@ -166,6 +166,10 @@ pub(super) fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::USAGE_RECORDS_MINOR,
 			feature: "the Usage Query",
 		}),
+		QueryRequest::UsageHistory { .. } => Some(MinorRequirement {
+			minor: jet_protocol::USAGE_HISTORY_MINOR,
+			feature: "the Usage history Query",
+		}),
 		QueryRequest::AccountBindings { .. } => Some(MinorRequirement {
 			minor: jet_protocol::ACCOUNT_BINDINGS_MINOR,
 			feature: "the Account binding Query",

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM usage_aggregates\n\t\t\t  WHERE resolution = 'hour' AND bucket_start_unix_ms < ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "9ea7af2642a2552754de4fee0c3a831e643e5aa7b55450ba57a748dbdc634c9e"
+}

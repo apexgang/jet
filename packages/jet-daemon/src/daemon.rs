@@ -285,6 +285,31 @@ pub(crate) async fn run(
 					);
 				}
 			}
+			// Usage rows are recounted into their aggregates and swept past
+			// their retention tiers on the same wakeups (ADR-0045).
+			match recovery_core.sweep_usage_history().await {
+				Ok(sweep) => {
+					if !sweep.is_empty() {
+						Diagnostic::info(
+							DiagnosticComponent::Maintenance,
+							"Usage history sweep",
+						)
+						.count("recounted_hours", sweep.recounted_hours)
+						.count("observations", sweep.observations)
+						.count("snapshots", sweep.snapshots)
+						.count("hours", sweep.hours)
+						.emit();
+					}
+				}
+				Err(error) => {
+					retry = true;
+					core_failure(
+						DiagnosticComponent::Maintenance,
+						"cannot sweep Usage history",
+						&error,
+					);
+				}
+			}
 			// Every Command and Effect commit wakes this loop, so the first
 			// meaningful change of a day is copied soon after it lands
 			// (ADR-0097). A failed copy is retried on the next wake.

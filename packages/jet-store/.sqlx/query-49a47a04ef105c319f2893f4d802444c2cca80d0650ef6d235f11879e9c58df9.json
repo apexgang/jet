@@ -1,0 +1,35 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n\t\t\t\t(SELECT MIN(observed_at_unix_ms) FROM usage_observations)\n\t\t\t\t\tAS \"observation: i64\",\n\t\t\t\t(SELECT MIN(bucket_start_unix_ms) FROM usage_aggregates\n\t\t\t\t  WHERE resolution = 'hour') AS \"hour: i64\",\n\t\t\t\t(SELECT MIN(s.observed_at_unix_ms) FROM usage_quota_snapshots s\n\t\t\t\t  WHERE s.rowid <> (\n\t\t\t\t\tSELECT t.rowid FROM usage_quota_snapshots t\n\t\t\t\t\t WHERE t.binding_id = s.binding_id\n\t\t\t\t\t   AND t.window_id = s.window_id\n\t\t\t\t\t   AND t.model IS s.model\n\t\t\t\t\t ORDER BY t.observed_at_unix_ms DESC, t.rowid DESC\n\t\t\t\t\t LIMIT 1)) AS \"snapshot: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "observation: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "hour: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "snapshot: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "49a47a04ef105c319f2893f4d802444c2cca80d0650ef6d235f11879e9c58df9"
+}

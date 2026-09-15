@@ -7,9 +7,12 @@ use jet_core::{
 	AccountBindingId, ConversationId, ModelConsumption, ModelId,
 	ObservedConsumption, ObservedUsage, PlaneUsage, QuotaMeasure, QuotaReport,
 	QuotaScope, QuotaUnit, QuotaWindow, RunId, UsageEstimation, UsageFinality,
-	UsageFreshness, UsageMeasurement, UsageReport, UsageSelection, UsageTokens,
+	UsageFreshness, UsageHistory, UsageHistoryRange, UsageHistorySelection,
+	UsageMeasurement, UsagePoint, UsageReport, UsageResolution, UsageSelection,
+	UsageSeries, UsageTokens,
 };
 use jet_protocol as wire;
+use std::time::{Duration, UNIX_EPOCH};
 
 /// What one Usage Query covers.
 pub(super) fn selection(selection: wire::UsageSelection) -> UsageSelection {
@@ -24,6 +27,72 @@ pub(super) fn selection(selection: wire::UsageSelection) -> UsageSelection {
 		wire::UsageSelection::Run { run_id } => {
 			UsageSelection::Run(RunId(run_id))
 		}
+	}
+}
+
+/// What one Usage history Query covers.
+pub(super) fn history_selection(
+	selection: wire::UsageHistorySelection,
+) -> UsageHistorySelection {
+	match selection {
+		wire::UsageHistorySelection::Plane => UsageHistorySelection::Plane,
+		wire::UsageHistorySelection::Binding { binding_id } => {
+			UsageHistorySelection::Binding(AccountBindingId(binding_id))
+		}
+	}
+}
+
+/// The span one Usage history Query asks about. An instant before the
+/// epoch is the epoch: nothing was observed before it.
+pub(super) fn history_range(
+	range: wire::UsageHistoryRange,
+) -> UsageHistoryRange {
+	let instant = |unix_ms: i64| {
+		UNIX_EPOCH + Duration::from_millis(u64::try_from(unix_ms).unwrap_or(0))
+	};
+	UsageHistoryRange {
+		from: instant(range.from_unix_ms),
+		until: instant(range.until_unix_ms),
+	}
+}
+
+/// The bucket width one Usage history Query asks for.
+pub(super) fn history_resolution(
+	resolution: wire::UsageResolution,
+) -> UsageResolution {
+	match resolution {
+		wire::UsageResolution::Hour => UsageResolution::Hour,
+		wire::UsageResolution::Day => UsageResolution::Day,
+	}
+}
+
+/// One Plane's Usage history as a client reads it.
+pub(super) fn history(history: UsageHistory) -> wire::UsageHistory {
+	wire::UsageHistory {
+		cursor: history.cursor.0,
+		plane_id: history.plane_id.0,
+		resolution: match history.resolution {
+			UsageResolution::Hour => wire::UsageResolution::Hour,
+			UsageResolution::Day => wire::UsageResolution::Day,
+		},
+		series: history.series.into_iter().map(series).collect(),
+	}
+}
+
+fn series(series: UsageSeries) -> wire::UsageSeries {
+	wire::UsageSeries {
+		model: series.model.map(|ModelId(model)| model),
+		points: series.points.into_iter().map(point).collect(),
+	}
+}
+
+fn point(point: UsagePoint) -> wire::UsagePoint {
+	wire::UsagePoint {
+		start_unix_ms: unix_ms(point.start),
+		tokens: tokens(point.tokens),
+		measurements: point.measurements,
+		estimated: point.estimated,
+		interim: point.interim,
 	}
 }
 

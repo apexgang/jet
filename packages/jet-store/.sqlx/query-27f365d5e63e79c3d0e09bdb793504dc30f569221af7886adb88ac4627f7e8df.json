@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM usage_quota_snapshots\n\t\t\t  WHERE observed_at_unix_ms < ?1\n\t\t\t    AND rowid <> (\n\t\t\t\t  SELECT t.rowid FROM usage_quota_snapshots t\n\t\t\t\t   WHERE t.binding_id = usage_quota_snapshots.binding_id\n\t\t\t\t     AND t.window_id = usage_quota_snapshots.window_id\n\t\t\t\t     AND t.model IS usage_quota_snapshots.model\n\t\t\t\t   ORDER BY t.observed_at_unix_ms DESC, t.rowid DESC\n\t\t\t\t   LIMIT 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "27f365d5e63e79c3d0e09bdb793504dc30f569221af7886adb88ac4627f7e8df"
+}

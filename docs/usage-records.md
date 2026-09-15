@@ -159,6 +159,80 @@ bundled Crafts reading their Harness's own accounting. Generated schema
 and GUI model updates are mechanical.
 
 Time-series downsampling — the hourly and daily aggregates ADR-0045
-retains after 90 days — is not in this change. The records it aggregates
-are here, and the Query answers current totals; the tiers and their sweep
-land next.
+retains after 90 days — is issue #116, below.
+
+## History and retention
+
+Issue #116 keeps the records inside the retention tiers ADR-0045 sets and
+answers a time series from them (Jet protocol 1.43):
+
+| Tier | Holds | Kept for |
+| --- | --- | --- |
+| Raw | `usage_observations`; `usage_quota_snapshots` other than the freshest of each window | 90 days |
+| Hourly | `usage_aggregates` at `hour`, per Account binding and Model | 1 year, in whole UTC days |
+| Daily | `usage_aggregates` at `day`, per Account binding and Model | Indefinitely |
+
+History covers Jet-observed activity alone (ADR-0023). A Provider's quota
+windows are readings rather than a series: the freshest snapshot of every
+window is kept whatever its age, because it is what the `usage` Query
+reports as the current reading, stale or not.
+
+### Counting into an aggregate
+
+An aggregate is never added to in place. Every write to a raw row marks
+the hour of every row of its Run in `usage_dirty_hours`, and so does
+removing a Conversation. The maintenance sweep recounts those hours from
+the raw rows under the same rule the current totals use — one measurement
+once, a cumulative Run total instead of the turns it covers — and then
+re-sums the days those hours fall in from the hours. A measurement
+**replaced** after it was first counted is counted as replaced: a Run's
+cumulative total reported an hour after its turns leaves the turns' hour
+empty and counts the total in its own.
+
+Raw rows leave the store whole hours at a time, so a marked hour always
+still has every row it had, and the recount is right however late it runs
+— after Recovery mode, a degraded Security audit, or a daemon that was
+offline. This is the one thing downsampling gives up: a measurement whose
+raw row is already swept, which only a Run alive more than 90 days can
+report again, comes back as a new row and is counted in both hours.
+
+Removing a Conversation marks its hours too, so a Conversation forgotten
+within the raw tier leaves the history it was counted into, while one
+forgotten later stays in the aggregates it can no longer be recounted out
+of. History is account-level accounting, not Conversation history; what a
+forgotten Conversation consumed did happen, and only the raw rows carry
+its identity.
+
+### Sweeping
+
+The sweep runs on every maintenance wake, recounts first, and then removes
+what has left its tier, so nothing leaves a tier before the next one
+carries it. Removing raw rows past 90 days changes no hour, and removing
+hourly rows past a year changes no day. The `usage` Query answers current
+totals from raw rows, so a Conversation whose observations were swept
+answers zero there while its hours and days remain in the history. A wake
+is scheduled for when the oldest row of any tier leaves it, and the sweep
+is idle otherwise; it does not run in Recovery mode or while the Security
+audit cannot be vouched for (ADR-0105).
+
+### The `usage_history` Query
+
+`usage_history` takes a `plane` or `binding` selection — aggregates carry
+no Conversation or Run — a half-open `range` in Unix milliseconds, and a
+`resolution` of `hour` or `day`. It answers one series per Model, in time
+order, with empty buckets left out, from the tier that still holds the
+whole range: a range that starts before the hourly tier's floor is
+answered in days, and the answer's `resolution` says so. The bucket the
+range starts inside is part of the answer. A range that
+ends before it starts is refused as `usage.range_inverted`. The answer
+names the Plane it covers and is fenced by the journal cursor it was read
+at, like every other snapshot (ADR-0016, ADR-0092).
+
+### Review stages
+
+The change is three stages. The first is the store: the `usage_aggregates`
+and `usage_dirty_hours` tables, the marking every raw write and removal
+does, the rebuild, and the sweeps. The second is the core: the tiers, the
+maintenance sweep and its deadline, and the history Query. The third is
+the wire: the Jet 1.43 `usage_history` Query, its translation, and the
+client helper. Generated schema and GUI model updates are mechanical.

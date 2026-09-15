@@ -39,6 +39,7 @@ impl Client {
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::Usage(_)
+			| QueryResponse::UsageHistory(_)
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::AutoContinue(_)

@@ -211,6 +211,10 @@ pub use setting::{
 	SettingSnapshot, SettingSource, SettingValue,
 };
 pub use status::PlaneStatus;
+pub use usage::history::{
+	UsageHistory, UsageHistoryRange, UsageHistorySelection, UsageHistorySweep,
+	UsagePoint, UsageResolution, UsageSeries,
+};
 pub use usage::{
 	ModelConsumption, ModelId, ObservedConsumption, ObservedUsage, PlaneUsage,
 	QuotaMeasure, QuotaReport, QuotaScope, QuotaUnit, QuotaWindow,

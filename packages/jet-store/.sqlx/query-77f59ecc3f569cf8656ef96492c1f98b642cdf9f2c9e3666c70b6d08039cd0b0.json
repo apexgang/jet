@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM usage_dirty_hours",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "77f59ecc3f569cf8656ef96492c1f98b642cdf9f2c9e3666c70b6d08039cd0b0"
+}

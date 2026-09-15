@@ -139,6 +139,15 @@ pub(crate) fn query(
 		wire::QueryRequest::Usage { selection } => Query::Usage {
 			selection: usage::selection(*selection),
 		},
+		wire::QueryRequest::UsageHistory {
+			selection,
+			range,
+			resolution,
+		} => Query::UsageHistory {
+			selection: usage::history_selection(*selection),
+			range: usage::history_range(*range),
+			resolution: usage::history_resolution(*resolution),
+		},
 		wire::QueryRequest::AccountBindings { observation } => {
 			Query::AccountBindings {
 				observation: capability::observation(*observation),
@@ -319,6 +328,11 @@ pub(crate) fn query_result(
 		}
 		QueryResult::Usage(snapshot) => {
 			wire::QueryResponse::Usage(Box::new(usage::plane(*snapshot)))
+		}
+		QueryResult::UsageHistory(history) => {
+			wire::QueryResponse::UsageHistory(Box::new(usage::history(
+				*history,
+			)))
 		}
 		QueryResult::Settings(snapshot) => {
 			wire::QueryResponse::Settings(setting::snapshot(snapshot, minor))

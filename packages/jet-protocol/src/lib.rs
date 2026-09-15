@@ -146,9 +146,9 @@ pub use transport::handshake::{
 	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, RETENTION_MINOR,
 	SCHEDULES_MINOR, SEARCH_MINOR, SECURITY_AUDIT_MINOR,
 	SEEDED_WORKSPACES_MINOR, SETTINGS_AND_CAPABILITIES_MINOR,
-	STORE_RECOVERY_MINOR, ServerHello, TURN_QUEUE_MINOR, USAGE_RECORDS_MINOR,
-	USER_INPUT_MINOR, UTILITY_MINOR, VersionRange, WORKSPACE_PROMOTION_MINOR,
-	WORKSPACE_TERMINALS_MINOR, WORKSPACES_MINOR,
+	STORE_RECOVERY_MINOR, ServerHello, TURN_QUEUE_MINOR, USAGE_HISTORY_MINOR,
+	USAGE_RECORDS_MINOR, USER_INPUT_MINOR, UTILITY_MINOR, VersionRange,
+	WORKSPACE_PROMOTION_MINOR, WORKSPACE_TERMINALS_MINOR, WORKSPACES_MINOR,
 };
 mod usage;
 pub use conversation::import::{
@@ -209,7 +209,8 @@ pub use transport::stream_control::StreamControl;
 pub use usage::{
 	ModelConsumption, ObservedConsumption, PlaneUsage, QuotaMeasure,
 	QuotaScope, QuotaUnit, QuotaWindow, UsageEstimation, UsageFinality,
-	UsageFreshness, UsageSelection, UsageTokens,
+	UsageFreshness, UsageHistory, UsageHistoryRange, UsageHistorySelection,
+	UsagePoint, UsageResolution, UsageSelection, UsageSeries, UsageTokens,
 };
 
 mod utility;
