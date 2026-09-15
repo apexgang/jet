@@ -54,3 +54,25 @@ pub(crate) fn interrupt(request: u64, thread: &str, turn: &str) -> String {
 fn line(value: Value) -> String {
 	format!("{value}\n")
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use pretty_assertions::assert_eq;
+
+	/// The published matrix pins the release this Craft's warning enforces
+	/// (ADR-0104), so neither can move without the other.
+	#[test]
+	fn the_published_matrix_pins_this_release() {
+		let matrix = include_str!("../../../../docs/conformance-matrix.md");
+		let pinned = matrix
+			.lines()
+			.find(|line| line.starts_with("| Codex |"))
+			.and_then(|line| line.split('|').nth(2))
+			.map(str::trim);
+		assert_eq!(
+			pinned,
+			Some(format!("Codex CLI {TESTED_VERSION}, exact")).as_deref()
+		);
+	}
+}
