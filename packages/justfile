@@ -35,6 +35,12 @@ install:
 
 [unix]
 test *args: build-run-helper
+	just cargo-test "$@"
+
+# Cargo test defaults shared by every test recipe; `test` adds the run helper.
+[unix]
+[private]
+cargo-test *args:
 	RUST_MIN_STACK={{ rust_min_stack }} cargo test --no-fail-fast "$@"
 
 # Subprocess conformance uses the separately deployed helper and Crafts.
@@ -98,14 +104,23 @@ contracts-check:
 		diff -u "$root/$artifact" "$scratch/$artifact"
 	done
 
-# Validate the shared corpora in both GUI languages; Node 24+ and Swift required.
-contracts-test node_bin="node":
+# Validate the shared corpora in every implementation; cargo, Node 24+, and Swift required.
+contracts-test node_bin="node": contracts-test-rust (contracts-test-typescript node_bin) contracts-test-swift
+
+# The Rust decoder reads the corpora in jet-protocol's own tests, which need no run helper.
+contracts-test-rust:
+	just cargo-test -p jet-protocol
+
+# Node 24+ runs the TypeScript checks directly, without a bundler.
+contracts-test-typescript node_bin="node":
+	"$1" jet-protocol/contracts/tests/craft-fixtures.ts
+	"$1" jet-protocol/contracts/tests/jet-fixtures.ts
+
+contracts-test-swift:
 	#!/usr/bin/env bash
 	set -euo pipefail
 	scratch="$(mktemp -d)"
 	trap 'rm -rf "$scratch"' EXIT
-	"$1" jet-protocol/contracts/tests/craft-fixtures.ts
-	"$1" jet-protocol/contracts/tests/jet-fixtures.ts
 	swiftc -module-cache-path "$scratch/cache" jet-protocol/contracts/CraftModels.swift jet-protocol/contracts/tests/main.swift -o "$scratch/craft"
 	"$scratch/craft" jet-protocol/contracts/craft-v1.schema.json jet-protocol/contracts/craft-fixtures.json
 	swiftc -module-cache-path "$scratch/cache" ../apps/jet/jet/Protocol/JetModels.swift jet-protocol/contracts/tests/main.swift -o "$scratch/jet"

@@ -63,7 +63,8 @@ models generated from them.
 
 - Run `just contracts` in the same commit as any change to a wire DTO, and
   gate on `just contracts-check`. Nothing else notices a stale contract; the
-  committed schema and the app models are what clients build against.
+  committed schema and the app models are what clients build against. The
+  `Wire contracts` workflow runs the check and each `contracts-test-*` recipe.
 - A field using `serde(with)` must also name its schema stand-in
   (`crate::Decimal`, `crate::OptionalDecimal`, `crate::Hex<N>`), because
   schemars sees the Rust type rather than the wire form.

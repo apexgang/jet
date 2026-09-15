@@ -17,6 +17,13 @@ diffs them against the committed ones, so a wire change that skips
 regeneration fails instead of leaving the GUIs on a stale contract. Schema
 emission is an optional `schema` feature; product builds link no `schemars`.
 
+The `Wire contracts` GitHub Actions workflow runs `contracts-check` and each
+`contracts-test-*` recipe on every pull request and push to `main`, with the
+Swift runner on macOS, so a stale contract fails the pull request's checks. The repository requires
+every workflow to pin its actions through `.github/workflows/actions.lock`;
+run `gh actions-lock` (the `github/gh-actions-lock` extension) after editing
+a workflow, or the run fails at startup.
+
 The declarations are models, not permissive JSON decoders: validate the
 original frame against the schema, and populate `RawJSON` from original
 fragments before parsing numbers (ADR-0089, ADR-0049).
@@ -33,12 +40,14 @@ without one publishes the Rust type instead of the wire form.
 ## Shared corpora
 
 `craft-fixtures.json` and `jet-fixtures.json` pair a `$defs` name with a
-payload and the decision every implementation must reach. The Rust decoder
-checks them in `just test -p jet-protocol`; `just contracts-test` (Node 24+
-and Swift) checks the same payloads against the emitted schema. Between them
-they cover optional fields an older reader ignores, rejected unknown message
-kinds, duplicate discriminators a dictionary would discard, non-canonical
-decimal strings, and hexadecimal of the wrong width or case (ADR-0094).
+payload and the decision every implementation must reach. `just contracts-test`
+runs all three implementations: `contracts-test-rust` decodes them through
+the Rust decoder in `jet-protocol`'s own tests, and `contracts-test-typescript`
+(Node 24+) and `contracts-test-swift` check the same payloads against the
+emitted schema. Between them they cover optional fields an older reader
+ignores, rejected unknown message kinds, duplicate discriminators a
+dictionary would discard, non-canonical decimal strings, and hexadecimal of
+the wrong width or case (ADR-0094).
 
 ## Autodelete negotiation
 
