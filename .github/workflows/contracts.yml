@@ -1,0 +1,55 @@
+# This workflow is managed by gh actions-lock.
+# Gate the wire contracts jet-protocol emits (docs/wire-contracts.md).
+#
+# The committed schema and GUI models are what clients build against, and
+# nothing but this check notices when they drift from the Rust wire DTOs.
+# The shared corpora then run through all three implementations: the Rust
+# decoder, the TypeScript models the Tauri GUI compiles, and the Swift
+# models the Xcode GUI compiles. Swift runs on macOS, the GUI's own host.
+name: Wire contracts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: packages
+
+jobs:
+  contracts:
+    name: Schema drift, Rust and TypeScript corpora
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: extractions/setup-just@v4.0.0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      # rust-toolchain.toml selects the pinned toolchain when cargo first runs.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: packages
+      - name: Fail when a committed contract no longer matches the Rust wire DTOs
+        run: just contracts-check
+      - name: Decode the shared corpora with the Rust decoder
+        run: just contracts-test-rust
+      - name: Validate the shared corpora against the TypeScript models
+        run: just contracts-test-typescript
+
+  swift:
+    name: Swift corpora
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: extractions/setup-just@v4.0.0
+      - name: Validate the shared corpora against the Swift models
+        run: just contracts-test-swift
