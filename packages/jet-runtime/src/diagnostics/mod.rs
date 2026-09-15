@@ -367,9 +367,9 @@ impl Inner {
 }
 
 /// `time` as RFC 3339 in UTC with millisecond precision, the form every
-/// diagnostic record carries. Written here so the helper and the Crafts
-/// link no calendar crate (ADR-0060); times before the Unix epoch are
-/// clamped to it.
+/// diagnostic record carries. Written here because the release envelope in
+/// `release.toml` forbids `jetfueld` and the Crafts a calendar crate; times
+/// before the Unix epoch are clamped to it.
 fn rfc3339_millis(time: std::time::SystemTime) -> String {
 	let since_epoch = time
 		.duration_since(std::time::UNIX_EPOCH)

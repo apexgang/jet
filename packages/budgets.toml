@@ -21,9 +21,10 @@ blocks_500_p95_ms = { max = 15 }
 reconnect_10000_events_ms = { max = 100 }
 ingestion_events_per_second = { min = 10000 }
 
-# Measured but not budgeted on their own: the open is inside the daemon's
-# ready time, and the second start of the same Plane shows the ready time
-# without the day's first Recovery snapshot; both place a regression.
+# Measured and recorded in the baseline but never gated: the open is inside
+# the daemon's ready time, and the second start of the same Plane shows the
+# ready time without the day's first Recovery snapshot. They explain a
+# `daemon_ready_ms` regression; they do not fail the check themselves.
 [informational]
 store_open_ms = {}
 daemon_ready_again_ms = {}

@@ -170,18 +170,36 @@ fn mutated_contract_fixtures_never_panic_a_control_decoder() {
 	assert_eq!(decoded, fixtures.len() * 48);
 }
 
+/// Which frame envelope the reader expects: the legacy handshake one or
+/// the multiplexed one negotiated afterwards.
+#[derive(Debug, Clone, Copy)]
+enum Envelope {
+	Legacy,
+	Multiplexed,
+}
+
+impl Envelope {
+	fn other(self) -> Self {
+		match self {
+			Self::Legacy => Self::Multiplexed,
+			Self::Multiplexed => Self::Legacy,
+		}
+	}
+}
+
 /// Reads one frame from `bytes` through a closed in-memory transport, the
 /// way the `frames` fuzz target does.
 async fn read_frame(
 	bytes: &[u8],
-	multiplexed: bool,
+	envelope: Envelope,
 ) -> Result<Frame, FrameError> {
 	let (mut peer, transport) = duplex(bytes.len().max(16));
 	peer.write_all(bytes).await.unwrap();
 	peer.shutdown().await.unwrap();
 	let mut reader = FrameReader::new(transport);
-	if multiplexed {
-		reader.enable_multiplexing();
+	match envelope {
+		Envelope::Legacy => {}
+		Envelope::Multiplexed => reader.enable_multiplexing(),
 	}
 	reader.read().await
 }
@@ -216,7 +234,7 @@ async fn hostile_frame_headers_are_refused_before_allocation() {
 	];
 	for header in oversized {
 		assert!(matches!(
-			read_frame(&header, false).await,
+			read_frame(&header, Envelope::Legacy).await,
 			Err(FrameError::Oversized {
 				kind: FrameKind::Control,
 				..
@@ -224,29 +242,33 @@ async fn hostile_frame_headers_are_refused_before_allocation() {
 		));
 	}
 	assert!(matches!(
-		read_frame(&[0x7f, 0, 0, 0, 0], false).await,
+		read_frame(&[0x7f, 0, 0, 0, 0], Envelope::Legacy).await,
 		Err(FrameError::UnknownKind(0x7f))
 	));
 	assert!(matches!(
-		read_frame(&framed(FrameKind::Data, Some(0), b""), true).await,
+		read_frame(
+			&framed(FrameKind::Data, Some(0), b""),
+			Envelope::Multiplexed
+		)
+		.await,
 		Err(FrameError::InvalidStream {
 			kind: FrameKind::Data,
 			..
 		})
 	));
 	assert!(matches!(
-		read_frame(&[], false).await,
+		read_frame(&[], Envelope::Legacy).await,
 		Err(FrameError::Closed)
 	));
 	let truncated =
 		[vec![FrameKind::Control as u8, 0, 0, 0, 8], b"{}".to_vec()].concat();
 	assert!(matches!(
-		read_frame(&truncated, false).await,
+		read_frame(&truncated, Envelope::Legacy).await,
 		Err(FrameError::Io(_))
 	));
 	let short_header = [FrameKind::Control as u8, 0, 0];
 	assert!(matches!(
-		read_frame(&short_header, true).await,
+		read_frame(&short_header, Envelope::Multiplexed).await,
 		Err(FrameError::Io(_))
 	));
 }
@@ -264,9 +286,13 @@ async fn mutated_frames_never_panic_a_frame_reader() {
 	for original in &originals {
 		for _ in 0..256 {
 			let mutant = mutate(original, &originals, &mut rng);
-			let multiplexed = mutant.first().is_some_and(|byte| byte & 1 == 1);
-			let _ = read_frame(&mutant, multiplexed).await;
-			let _ = read_frame(&mutant, !multiplexed).await;
+			let envelope = if mutant.first().is_some_and(|byte| byte & 1 == 1) {
+				Envelope::Multiplexed
+			} else {
+				Envelope::Legacy
+			};
+			let _ = read_frame(&mutant, envelope).await;
+			let _ = read_frame(&mutant, envelope.other()).await;
 			read += 1;
 		}
 	}

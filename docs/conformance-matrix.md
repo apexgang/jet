@@ -30,10 +30,13 @@ release never silently widens a row below.
 - **Generic fallback**: the Harness emits something Jet cannot interpret
   precisely, so it is retained losslessly and rendered as an opaque
   Presentation block.
-- **Unavailable**: the Harness, at the pinned release and through the
-  bundled Craft, does not expose the capability. ADR-0104 makes every
-  feature-list item a release blocker wherever the Harness supports it, so
-  each Unavailable row names why it is not a blocker.
+- **Unavailable**: the Harness, at the pinned release, does not expose the
+  capability, so ADR-0104 does not make it a release blocker; each such
+  row names why.
+- **Craft gap**: the Harness exposes the capability but the bundled Craft
+  does not use it yet. ADR-0104 makes every feature-list item a release
+  blocker wherever the Harness supports it, so each such row names the
+  issue that closes it.
 
 ## Matrix
 
@@ -42,6 +45,7 @@ release never silently widens a row below.
 | Start a managed Conversation | Native | Native | `thread/start` over the app-server; `--print` with stream-json on both sides |
 | Exchange turns on a live Run | Native | Native | `turn/start`; user messages on open standard input (Helper 1.3) |
 | Structured progress | Native | Native | Complete `item/*` events; `assistant` content blocks retained whole |
+| Turn summary block | Native | Native | The completed `agentMessage` and reasoning `summary` items; the final assistant text and `result`, each rendered as a bounded Presentation view |
 | Plan status | Native | Generic fallback | `turn/plan/updated`; Claude Code has no plan event, so its plan tool calls render as ordinary content |
 | Usage per turn and rate-limit windows | Native, normalized | Native, normalized | `thread/tokenUsage/updated`; `result` and `rate_limit_event`. Both are also Usage records ([usage-records.md](usage-records.md)) |
 | Waiting for quota | Native | Native | Structured Codex error; `rate_limit_event` |
@@ -50,9 +54,9 @@ release never silently widens a row below.
 | Stop Run | Jet-equivalent | Jet-equivalent | Signal escalation through `jetfueld` (ADR-0083) |
 | Approval requests | Native | Native | Server requests answered only through Jet; the `--permission-prompt-tool` MCP tool Jet serves |
 | Automatic review | Jet-equivalent | Jet-equivalent | Neither release exposes a separate native reviewer that satisfies ADR-0012, so the Provider's low-effort reviewer answers and is recorded ([automatic-review.md](automatic-review.md)) |
-| Resume a native Conversation across Craft or daemon restart | Unavailable | Native | Claude Code resumes with `--resume` and the pinned session; the Codex Craft declares no `resume` feature, so a lost Run continues as a new Run with a new thread. Not a blocker: the Conversation and its Jet history continue |
+| Resume a native Conversation across Craft or daemon restart | Craft gap (#154) | Native | Claude Code resumes with `--resume` and the pinned `--session-id`; Codex exposes `thread/resume`, but the Craft declares no `resume` feature, so a lost Run continues as a new Run with a new thread |
 | Auto-continue after a rate limit | Jet-equivalent, live connection only | Jet-equivalent | The Codex Craft retries only on its matching live connection; the Claude Craft also opens a new Run through native resume with the observed Model ([auto-continue.md](auto-continue.md)) |
-| Model selection and Model-pinned resume | Unavailable | Native | Craft 1.10 explicit native Model selection is implemented by the Claude Craft only. Not a blocker: Codex Runs use the Harness's configured Model |
+| Model selection and Model-pinned resume | Craft gap (#154) | Native | Craft 1.10 explicit native Model selection is implemented by the Claude Craft only; Codex accepts a `model` the Craft does not pass, so Codex Runs use the Harness's configured Model |
 | Fork a Conversation from a checkpoint | Jet-equivalent | Jet-equivalent | Neither Craft declares `fork`; the new Run starts a native Conversation with the provenance-marked history prefix ([conversation-forks.md](conversation-forks.md)) |
 | Handoff to another Harness | Jet-equivalent | Jet-equivalent | Jet composes the Handoff summary; no Harness exports one ([handoffs.md](handoffs.md)) |
 | Import an external native Conversation | Jet-equivalent | Jet-equivalent | Identities are discovered and recorded as metadata; a managed Resume makes a Conversation in a registered Project and starts a new Run |
@@ -64,7 +68,7 @@ release never silently widens a row below.
 | Skills, MCP servers, and hooks | Native | Native | Native configuration files edited in their own formats ([harness-extensions.md](harness-extensions.md)) |
 | Plugins and marketplaces | Native | Native | Codex plugin RPCs on the app-server; Claude marketplaces and plugin refresh |
 | Visa Runs on a destination Plane | Native | Native | Both Provider mappings are supported ([visa-runs.md](visa-runs.md)) |
-| No-Visa remote tools | Unavailable | Jet-equivalent | Claude Code reaches `mcp__jet__remote` through its native MCP bridge; Codex has no comparable tool bridge in the bundled Craft ([no-visa-execution.md](no-visa-execution.md)). Not a blocker: a Codex Conversation runs in Visa mode |
+| No-Visa remote tools | Craft gap (#154) | Jet-equivalent | Claude Code reaches `mcp__jet__remote` through its native MCP bridge; Codex loads MCP servers but the bundled Craft serves no tool bridge, so a Codex Conversation runs in Visa mode ([no-visa-execution.md](no-visa-execution.md)) |
 | Utility work: names, commit and pull-request text | Jet-equivalent | Jet-equivalent | Both declare `utility`; the Home Plane's Utility binding selects the Model ([utility-work.md](utility-work.md)) |
 | Completion notifications | Native | Native | Native completion events reach the GUI's platform notifications |
 | Oversized native output | Jet-equivalent | Jet-equivalent | Immutable Artifact publication and binary transfer ([artifacts.md](artifacts.md)) |
@@ -74,8 +78,8 @@ release never silently widens a row below.
 - Change a pin only together with a run of that Craft's conformance suite
   (`just test -p jet-craft-codex`, `just test -p jet-craft-claude`) and the
   affected rows.
-- A row moves from Unavailable only when the Craft implements it; a new
-  Harness release never moves a row by itself.
+- A row moves from Unavailable or a Craft gap only when the Craft
+  implements it; a new Harness release never moves a row by itself.
 - The per-Craft documents, [codex-craft.md](codex-craft.md) and
   [claude-code-craft.md](claude-code-craft.md), describe the native
   protocols and defer to this file for classification.

@@ -11,9 +11,12 @@ supported core platforms, Linux and macOS (ADR-0032).
 ## Test gates
 
 `just release-contract` runs everything below that needs no reference
-host, and the `Core tests` workflow runs the same on `ubuntu-latest` and
-`macos-latest` for every pull request and push to `main`. The `Wire
-contracts` workflow adds the TypeScript and Swift corpora.
+host and no GUI toolchain: the ordinary suite, clippy, the migration
+conventions, the dependency envelope, and the contract drift check. The
+`Core tests` workflow runs the same on `ubuntu-latest` and `macos-latest`
+for every pull request and push to `main`, and the `Wire contracts`
+workflow runs the TypeScript and Swift corpora. The reference measurements
+below run on the fixed reference hosts by hand, never on shared runners.
 
 | Category | Gate |
 | --- | --- |
@@ -39,7 +42,7 @@ one the matrix publishes.
 
 | Budget | Gate | Baseline |
 | --- | --- | --- |
-| Store, startup, reconnect, ingestion (ADR-0022) | `just budget-test` on a reference host, alone: `jet-daemon/tests/budgets.rs` seeds 10,000 Conversations and one million journal Events and writes `target/budgets/<os>-<arch>.json`; `just budget-check` fails a measurement over its limit in `budgets.toml` or more than 15% worse than the accepted one | `budget-baseline.json`, per operating system and architecture, through `just budget-accept --justification` |
+| Store, startup, reconnect, ingestion (ADR-0022) | `just budget-test` on a reference host, alone: `jet-daemon/tests/budgets.rs` seeds 10,000 Conversations and one million journal Events and writes `target/budgets/<os>-<arch>.json`; `just budget-check` fails a measurement over its limit in `budgets.toml` or more than 15% worse than the accepted one. Reconnect paging is measured at the store seam, in the store's bounded pages, without protocol framing | `budget-baseline.json`, per operating system and architecture, through `just budget-accept --justification` |
 | Binary size (ADR-0054) | `just release-check --target <label>` after `just release-package`; the `Release core executables` workflow on every `v*` tag | `release-baseline.json`, drift over 5% fails |
 | Idle resources (ADR-0055) | `just resource-test` on a reference host, alone: 35 MiB daemon RSS, 15 MiB per idle Craft, 8 MiB per helper, 0.2% combined CPU over five minutes, zero idle storage growth | Recorded in [resource-budgets.md](resource-budgets.md) |
 | Disk pressure (ADR-0079) | `jet-core` unit tests in `disk_pressure.rs`, `artifact/mod.rs`, and `checkpoint/mod.rs`: pressure rejects new Runs without poisoning retries or reads, the disposable budget reserves and releases uploads, and the current diff stays readable when pressure prevents Artifact ingestion | Behavioral, no measurement |
@@ -84,6 +87,9 @@ accept its label.
 - `jetd` measures 17.08 MiB stripped on Linux x86_64 against its 12 MiB
   budget, so `just release-check` fails ([core-distribution.md](core-distribution.md)).
 - `daemon_ready_ms` misses its 150 ms budget as recorded above (#152).
+- The Codex Craft leaves three capabilities the Harness exposes unused:
+  native resume, Model selection, and a No-Visa tool bridge. ADR-0104 makes
+  them release blockers, marked as Craft gaps in the matrix (#154).
 - Five `jet-core` Git delivery commit tests fail on Linux with git 2.55.0,
   independent of the user's git configuration (#153). The `Core tests`
   workflow shows whether the runners' git releases are affected.

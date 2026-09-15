@@ -188,14 +188,35 @@ where
 	samples
 }
 
-pub async fn commit_events(store: &Store, count: usize, payload_bytes: usize) {
+/// The shape of one representative commit ADR-0022 budgets: how many
+/// Events it carries and how large each payload is.
+#[derive(Debug, Clone, Copy)]
+pub struct Commit {
+	pub events: usize,
+	pub payload_bytes: usize,
+}
+
+impl Commit {
+	/// Sixty-four small Events, the batched ingestion shape.
+	pub const SMALL_BATCH: Self = Self {
+		events: 64,
+		payload_bytes: 0,
+	};
+	/// 256 KiB across eight Events, under the 64 KiB payload bound.
+	pub const LARGE: Self = Self {
+		events: 8,
+		payload_bytes: 32 * 1024,
+	};
+}
+
+pub async fn commit_events(store: &Store, commit: Commit) {
 	store
 		.write(async |tx| {
-			for _ in 0..count {
+			for _ in 0..commit.events {
 				tx.append_event(event(
 					None,
 					"run.progress",
-					payload(payload_bytes),
+					payload(commit.payload_bytes),
 				))
 				.await?;
 			}
@@ -209,17 +230,11 @@ fn payload(bytes: usize) -> String {
 	format!("{{\"blob\":\"{}\"}}", "x".repeat(bytes.saturating_sub(11)))
 }
 
-/// p99 of committing `count` Events of `payload_bytes` each, `samples`
-/// times.
-pub async fn commit_p99(
-	store: &Store,
-	samples: usize,
-	count: usize,
-	payload_bytes: usize,
-) -> f64 {
+/// p99 of one `commit` shape, `samples` times.
+pub async fn commit_p99(store: &Store, samples: usize, commit: Commit) -> f64 {
 	percentile(
 		timed_samples(samples, async || {
-			commit_events(store, count, payload_bytes).await;
+			commit_events(store, commit).await;
 		})
 		.await,
 		99,
@@ -296,8 +311,15 @@ pub async fn ingestion_rate(store: &Store, events: usize) -> f64 {
 	let started = Instant::now();
 	let mut remaining = events;
 	while remaining > 0 {
-		let batch = remaining.min(64);
-		commit_events(store, batch, 0).await;
+		let batch = remaining.min(Commit::SMALL_BATCH.events);
+		commit_events(
+			store,
+			Commit {
+				events: batch,
+				..Commit::SMALL_BATCH
+			},
+		)
+		.await;
 		remaining -= batch;
 	}
 	events as f64 / started.elapsed().as_secs_f64()

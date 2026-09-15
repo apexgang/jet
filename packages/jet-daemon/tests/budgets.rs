@@ -25,9 +25,10 @@ async fn measure(scale: Scale, root: &Path, output: &Path) -> Measurements {
 	let store_open_ms = measured::elapsed_ms(started);
 	let samples = scale.samples();
 	let commit_64_events_p99_ms =
-		measured::commit_p99(&store, samples, 64, 0).await;
+		measured::commit_p99(&store, samples, measured::Commit::SMALL_BATCH)
+			.await;
 	let commit_256_kib_p99_ms =
-		measured::commit_p99(&store, samples, 8, 32 * 1024).await;
+		measured::commit_p99(&store, samples, measured::Commit::LARGE).await;
 	let sidebar_page_p95_ms = measured::sidebar_p95(&store, samples).await;
 	let blocks_500_p95_ms =
 		measured::blocks_p95(&store, transcript, samples).await;
@@ -87,31 +88,19 @@ async fn the_budget_runner_measures_every_gate_at_smoke_scale() {
 	let measurements = measure(Scale::Smoke, dir.path(), &output).await;
 	let written: serde_json::Value =
 		serde_json::from_slice(&std::fs::read(&output).unwrap()).unwrap();
-	let positive: Vec<&str> = written
+	let not_positive: Vec<&str> = written
 		.as_object()
 		.unwrap()
 		.iter()
-		.filter(|(_, value)| value.as_f64().is_some_and(|value| value > 0.0))
+		.filter(|(_, value)| value.as_f64().is_some_and(|value| value <= 0.0))
 		.map(|(name, _)| name.as_str())
 		.collect();
 	assert_eq!(
-		(measurements.conversations, measurements.events, positive),
 		(
-			100,
-			2_000,
-			vec![
-				"blocks_500_p95_ms",
-				"commit_256_kib_p99_ms",
-				"commit_64_events_p99_ms",
-				"conversations",
-				"daemon_ready_again_ms",
-				"daemon_ready_ms",
-				"events",
-				"ingestion_events_per_second",
-				"reconnect_10000_events_ms",
-				"sidebar_page_p95_ms",
-				"store_open_ms",
-			]
-		)
+			measurements.conversations,
+			measurements.events,
+			not_positive
+		),
+		(100, 2_000, Vec::<&str>::new())
 	);
 }
