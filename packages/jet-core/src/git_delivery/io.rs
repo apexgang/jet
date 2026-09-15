@@ -3,6 +3,7 @@ use crate::{
 	CoreError, GitOperation,
 	git_delivery::state::{Document, refused},
 };
+use jet_runtime::{Diagnostic, DiagnosticComponent};
 use std::{
 	path::{Path, PathBuf},
 	process::Stdio,
@@ -12,6 +13,10 @@ use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	process::Command,
 };
+
+/// How much of a failed command's diagnostic stream is read before the
+/// Diagnostic log's own scrub and bound apply. The rest is drained unread.
+const STDERR_LIMIT: usize = 4096;
 
 pub(crate) struct RepositoryState {
 	pub head: String,
@@ -58,10 +63,40 @@ pub(crate) async fn run(
 	input: &[u8],
 	limit: usize,
 ) -> Result<String, CoreError> {
+	capture(command, input, limit).await.map_err(|failure| {
+		let Failure { error, diagnostic } = *failure;
+		if let Some(diagnostic) = diagnostic {
+			diagnostic.emit();
+		}
+		error
+	})
+}
+/// What a command left behind when it did not answer: the refusal its
+/// caller gets, and, when the command itself failed, the record `run`
+/// leaves in the Diagnostic log (ADR-0061).
+#[derive(Debug, PartialEq, Eq)]
+struct Failure {
+	error: CoreError,
+	diagnostic: Option<Diagnostic>,
+}
+impl From<CoreError> for Box<Failure> {
+	fn from(error: CoreError) -> Self {
+		Box::new(Failure {
+			error,
+			diagnostic: None,
+		})
+	}
+}
+async fn capture(
+	command: &mut Command,
+	input: &[u8],
+	limit: usize,
+) -> Result<String, Box<Failure>> {
+	let invocation = invocation(command);
 	command
 		.stdin(Stdio::piped())
 		.stdout(Stdio::piped())
-		.stderr(Stdio::null())
+		.stderr(Stdio::piped())
 		.kill_on_drop(true);
 	tokio::time::timeout(Duration::from_secs(30), async {
 		let mut child = command
@@ -73,6 +108,10 @@ pub(crate) async fn run(
 			.ok_or_else(|| refused("git.tool_unavailable"))?;
 		let stdout = child
 			.stdout
+			.take()
+			.ok_or_else(|| refused("git.tool_unavailable"))?;
+		let stderr = child
+			.stderr
 			.take()
 			.ok_or_else(|| refused("git.tool_unavailable"))?;
 		let write = async {
@@ -88,10 +127,11 @@ pub(crate) async fn run(
 				.await?;
 			Ok::<_, std::io::Error>(bytes)
 		};
-		let (_, bytes) = tokio::try_join!(write, read)
-			.map_err(|_| refused("git.io_failed"))?;
+		let (_, bytes, printed) =
+			tokio::try_join!(write, read, drain_bounded(stderr))
+				.map_err(|_| refused("git.io_failed"))?;
 		if bytes.len() > limit {
-			return Err(refused("git.output_limit"));
+			return Err(refused("git.output_limit").into());
 		}
 		if !child
 			.wait()
@@ -99,14 +139,91 @@ pub(crate) async fn run(
 			.map_err(|_| refused("git.io_failed"))?
 			.success()
 		{
-			return Err(refused("git.command_failed"));
+			return Err(Box::new(Failure {
+				error: refused("git.command_failed"),
+				diagnostic: Some(command_failed(&invocation, &printed)),
+			}));
 		}
 		String::from_utf8(bytes)
 			.map(|text| text.trim_end().to_owned())
-			.map_err(|_| refused("git.output_invalid"))
+			.map_err(|_| refused("git.output_invalid").into())
 	})
 	.await
 	.map_err(|_| refused("git.timeout"))?
+}
+/// The program and subcommand a command line runs, such as `git push`,
+/// past the `-C` and `-c` options the Git wrapper puts in front of it.
+fn invocation(command: &Command) -> String {
+	let command = command.as_std();
+	let program = Path::new(command.get_program())
+		.file_name()
+		.unwrap_or_default()
+		.to_string_lossy();
+	let mut args = command.get_args();
+	while let Some(arg) = args.next() {
+		if arg == "-C" || arg == "-c" {
+			args.next();
+			continue;
+		}
+		return format!("{program} {}", arg.to_string_lossy());
+	}
+	program.into_owned()
+}
+/// Reads a pipe to its end so the child never blocks on it, keeping at
+/// least the first [`STDERR_LIMIT`] bytes and not much more.
+async fn drain_bounded(
+	mut pipe: impl tokio::io::AsyncRead + Unpin,
+) -> std::io::Result<Vec<u8>> {
+	let mut kept = Vec::new();
+	let mut buffer = [0u8; 4096];
+	loop {
+		let read = pipe.read(&mut buffer).await?;
+		if read == 0 {
+			return Ok(kept);
+		}
+		if kept.len() < STDERR_LIMIT {
+			kept.extend_from_slice(&buffer[..read]);
+		}
+	}
+}
+/// The Diagnostic record of a failed command: the invocation, the stable
+/// code, and what the command printed. Git single-quotes the values a
+/// user supplied, such as paths, revisions and identities, so those spans
+/// are elided before the log's own scrub and bound apply (ADR-0061).
+fn command_failed(invocation: &str, stderr: &[u8]) -> Diagnostic {
+	let printed = elide_quoted(&String::from_utf8_lossy(stderr));
+	Diagnostic::warn(
+		DiagnosticComponent::Utility,
+		"Git delivery command failed",
+	)
+	.code("git.command_failed")
+	.failure(&format!("{invocation}: {printed}"))
+}
+/// Replaces every single-quoted span with `'…'`. A quote inside a quoted
+/// value is what Git spells `'\''`, and stays inside the span.
+fn elide_quoted(text: &str) -> String {
+	let mut out = String::with_capacity(text.len());
+	let mut rest = text;
+	while let Some(open) = rest.find('\'') {
+		out.push_str(&rest[..open]);
+		out.push_str("'…");
+		rest = &rest[open + 1..];
+		loop {
+			// An unterminated quote runs to the end; keep nothing of it.
+			let Some(close) = rest.find('\'') else {
+				return out;
+			};
+			rest = &rest[close + 1..];
+			if let Some(after) = rest.strip_prefix("\\''") {
+				rest = after;
+				continue;
+			}
+			out.push('\'');
+			break;
+		}
+	}
+	out.push_str(rest);
+	out
 }
 pub(crate) async fn git(
 	root: &Path,
@@ -383,4 +500,77 @@ pub(crate) async fn pushed(doc: &Document) -> Result<bool, CoreError> {
 			.split_whitespace()
 			.next() == Some(doc.head.as_str()),
 	)
+}
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::test_support::init_repository;
+	use pretty_assertions::assert_eq;
+
+	fn failed(printed: &str) -> Box<Failure> {
+		Box::new(Failure {
+			error: refused("git.command_failed"),
+			diagnostic: Some(
+				Diagnostic::warn(
+					DiagnosticComponent::Utility,
+					"Git delivery command failed",
+				)
+				.code("git.command_failed")
+				.failure(&printed),
+			),
+		})
+	}
+
+	#[tokio::test]
+	async fn a_failed_command_leaves_its_invocation_and_message() {
+		let dir = tempfile::tempdir().unwrap();
+		let root = init_repository(dir.path());
+		assert_eq!(
+			capture(
+				crate::project::repository::command(&root).args([
+					"rev-parse",
+					"--verify",
+					"nope"
+				]),
+				&[],
+				65536,
+			)
+			.await
+			.expect_err("no such revision"),
+			failed("git rev-parse: fatal: Needed a single revision")
+		);
+	}
+
+	#[tokio::test]
+	async fn the_record_elides_what_git_quotes() {
+		let dir = tempfile::tempdir().unwrap();
+		let root = init_repository(dir.path());
+		assert_eq!(
+			capture(
+				crate::project::repository::command(&root).args([
+					"checkout",
+					"--",
+					"secret-path.txt"
+				]),
+				&[],
+				65536,
+			)
+			.await
+			.expect_err("no such path"),
+			failed(
+				"git checkout: error: pathspec '…' did not match any file(s) \
+				 known to git"
+			)
+		);
+	}
+
+	#[test]
+	fn a_quote_inside_a_quoted_value_stays_inside() {
+		assert_eq!(
+			elide_quoted(
+				"error: pathspec 'my'\\''secret.txt' did not match; see 'help"
+			),
+			"error: pathspec '…' did not match; see '…"
+		);
+	}
 }

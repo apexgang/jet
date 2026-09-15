@@ -429,10 +429,14 @@ pub(crate) fn git(dir: &Path, args: &[&str]) -> String {
 
 /// Creates an ordinary repository at `dir` with one commit and returns its
 /// canonical path, which on macOS differs from the temporary path a test
-/// was handed.
+/// was handed. The repository carries its own identity: the core commits
+/// with the identity Git resolves for the repository, and a host with no
+/// global `user.email`, such as CI, has none to offer.
 pub(crate) fn init_repository(dir: &Path) -> std::path::PathBuf {
 	std::fs::create_dir_all(dir).unwrap();
 	git(dir, &["init", "-q"]);
+	git(dir, &["config", "user.name", "Jet"]);
+	git(dir, &["config", "user.email", "jet@example.invalid"]);
 	std::fs::write(dir.join("README.md"), "# Jet\n").unwrap();
 	git(dir, &["add", "-A"]);
 	git(dir, &["commit", "-q", "-m", "Initial"]);
@@ -480,13 +484,6 @@ pub(crate) async fn diverged(dir: &Path) -> Diverged {
 	std::fs::write(repository.join("k.txt"), "keep\n").unwrap();
 	git(&repository, &["add", "-A"]);
 	git(&repository, &["commit", "-q", "-m", "Base"]);
-	// The core's Git commits a branch promotion as whoever the Project's
-	// configuration names; the host's own identity is not assumed.
-	git(&repository, &["config", "user.name", "Jet"]);
-	git(
-		&repository,
-		&["config", "user.email", "jet@example.invalid"],
-	);
 	let base = git(&repository, &["rev-parse", "HEAD"]).trim().to_owned();
 	std::fs::write(repository.join("notes.txt"), "draft\n").unwrap();
 
