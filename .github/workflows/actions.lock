@@ -11,6 +11,7 @@ workflows:
     '.github/workflows/core.yml':
         - 'actions/checkout@v7.0.1'
         - 'extractions/setup-just@v4.0.0'
+        - 'swatinem/rust-cache@v2.9.2'
     '.github/workflows/release.yml':
         - 'actions/checkout@v4.4.0'
         - 'actions/upload-artifact@v4.6.2'
