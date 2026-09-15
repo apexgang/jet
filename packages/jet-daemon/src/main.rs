@@ -5,11 +5,13 @@
 //! protocol over an owner-only local socket.
 //!
 //! Exit codes: `0` after a clean shutdown, `2` when another live `jetd`
-//! already owns the Plane, `1` for any other failure.
+//! already owns the Plane, `1` for any other failure. `jetd core` manages
+//! the GUI-managed installation's versions and documents its own codes.
 
 mod connection;
 mod daemon;
 mod diagnostics;
+mod installation;
 mod installation_identity;
 mod translate;
 
@@ -49,6 +51,11 @@ enum Subcommand {
 		/// Jet home directory; defaults to `~/.jet`.
 		#[arg(long)]
 		home: Option<PathBuf>,
+	},
+	/// Stage, activate, roll back, and drain GUI-managed core versions.
+	Core {
+		#[command(subcommand)]
+		command: installation::CoreCommand,
 	},
 	/// Serve the Plane in the foreground until SIGTERM or SIGINT.
 	Serve {
@@ -106,10 +113,9 @@ async fn main() -> ExitCode {
 			}
 		},
 		Subcommand::RemoteWorker => remote::tool::worker().await,
+		Subcommand::Core { command } => installation::run(command).await,
 		Subcommand::Connect { home, .. } => {
-			let Some(home) =
-				home.map(JetHome::at).or_else(JetHome::for_current_user)
-			else {
+			let Some(home) = jet_home(home) else {
 				return ExitCode::from(1);
 			};
 			let code = match remote::stdio::connect(&home).await {
@@ -131,10 +137,7 @@ async fn main() -> ExitCode {
 			release_verification_key,
 			debug_log,
 		} => {
-			let Some(home) =
-				home.map(JetHome::at).or_else(JetHome::for_current_user)
-			else {
-				eprintln!("jetd: no --home given and HOME is not set");
+			let Some(home) = jet_home(home) else {
 				return ExitCode::from(1);
 			};
 			let release_key = match release_verification_key
@@ -170,6 +173,16 @@ async fn main() -> ExitCode {
 			.await
 		}
 	}
+}
+
+/// The Jet home named by `--home`, or the current user's, reporting the
+/// one case where neither exists.
+fn jet_home(home: Option<PathBuf>) -> Option<JetHome> {
+	let home = home.map(JetHome::at).or_else(JetHome::for_current_user);
+	if home.is_none() {
+		eprintln!("jetd: no --home given and HOME is not set");
+	}
+	home
 }
 
 mod craft;

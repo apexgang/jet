@@ -1,0 +1,54 @@
+# Coordinated macOS and Linux distributions of the Jet core executables
+# (issue #57): one payload per architecture label, gated by release.toml.
+# Signing and notarization are the GUI distributions' step and run after
+# these payloads are produced.
+name: Release core executables
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            targets: x86_64-unknown-linux-gnu
+            label: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            targets: aarch64-unknown-linux-gnu
+            label: aarch64-unknown-linux-gnu
+          - runner: macos-15
+            targets: aarch64-apple-darwin x86_64-apple-darwin
+            label: universal-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: packages
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain and targets
+        run: |
+          rustup toolchain install
+          for target in ${{ matrix.targets }}; do rustup target add "$target"; done
+      - uses: extractions/setup-just@v3
+      - name: Build, split symbols, strip, and package
+        run: |
+          args=()
+          for target in ${{ matrix.targets }}; do args+=(--target "$target"); done
+          just release-package "${args[@]}"
+      - name: Gate sizes, dependency seams, and profiles
+        run: just release-check --target ${{ matrix.label }}
+      - uses: actions/upload-artifact@v4
+        # A failed gate still uploads, so the payload that failed can be inspected.
+        if: ${{ !cancelled() }}
+        with:
+          name: jet-core-${{ matrix.label }}
+          path: packages/target/dist/*.tar.gz
+          if-no-files-found: error

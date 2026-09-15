@@ -1,0 +1,90 @@
+# The accepted release envelope of the Jet core executables. `just
+# release-check` fails when a stripped executable exceeds its per-architecture
+# budget (ADR-0054), when a role links a crate outside its seam (ADR-0057,
+# ADR-0060), or when a release profile drifts from ADR-0059. Measured sizes
+# are accepted per target in release-baseline.json; an increase above
+# `increase_percent` over the accepted size fails until `just release-accept`
+# records a reviewed justification.
+
+[budget]
+payload_mib = 30
+increase_percent = 5
+
+# What each profile must say in Cargo.toml (ADR-0059).
+[profiles.release]
+opt-level = "s"
+lto = "thin"
+panic = "abort"
+codegen-units = 1
+
+[profiles.release-small]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+
+# Only jetd links SQLite; nothing else in the workspace may reach it.
+[sqlite]
+crate = "libsqlite3-sys"
+dependents = ["jet-daemon", "jet-core", "jet-store"]
+
+[executables.jetd]
+package = "jet-daemon"
+profile = "release"
+limit_mib = 12
+workspace = ["jet-client", "jet-core", "jet-protocol", "jet-runtime", "jet-store"]
+forbidden = ["jet-craft-sdk"]
+
+[executables.jetfueld]
+package = "jet-fueld"
+profile = "release-small"
+limit_mib = 3
+workspace = ["jet-protocol", "jet-runtime"]
+forbidden = [
+	"age",
+	"chrono",
+	"chrono-tz",
+	"ed25519-dalek",
+	"libsqlite3-sys",
+	"reqwest",
+	"rustls",
+	"sqlx",
+	"toml",
+	"toml_edit",
+	"trash",
+]
+
+[executables.jet-craft-claude]
+package = "jet-craft-claude"
+profile = "release-small"
+limit_mib = 6
+workspace = ["jet-craft-sdk", "jet-protocol"]
+forbidden = [
+	"age",
+	"chrono",
+	"chrono-tz",
+	"ed25519-dalek",
+	"libsqlite3-sys",
+	"portable-pty",
+	"reqwest",
+	"rustls",
+	"sqlx",
+	"trash",
+]
+
+[executables.jet-craft-codex]
+package = "jet-craft-codex"
+profile = "release-small"
+limit_mib = 6
+workspace = ["jet-craft-sdk", "jet-protocol"]
+forbidden = [
+	"age",
+	"chrono",
+	"chrono-tz",
+	"ed25519-dalek",
+	"libsqlite3-sys",
+	"portable-pty",
+	"reqwest",
+	"rustls",
+	"sqlx",
+	"trash",
+]

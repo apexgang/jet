@@ -1,0 +1,17 @@
+{
+  "x86_64-unknown-linux-gnu": {
+    "executables": {
+      "jet-craft-claude": {
+        "x86_64": 1792936
+      },
+      "jet-craft-codex": {
+        "x86_64": 1712008
+      },
+      "jetfueld": {
+        "x86_64": 1073840
+      }
+    },
+    "justification": "Initial measurement at 0.2.0",
+    "version": "0.2.0"
+  }
+}

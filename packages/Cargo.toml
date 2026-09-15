@@ -83,9 +83,19 @@ lto = true
 codegen-units = 1
 panic = "abort"
 
+# Release profiles by role (ADR-0059). `jetd` balances speed and size with
+# thin LTO; `jetfueld` and the bundled Crafts take the size-first profile.
+# Both keep line tables and leave symbols in place so `just release-package`
+# can split them into separate crash-symbol artifacts before stripping.
 [profile.release]
-opt-level = "z"
-strip = "symbols"
-lto = true
+opt-level = "s"
+lto = "thin"
 codegen-units = 1
 panic = "abort"
+debug = "line-tables-only"
+strip = "none"
+
+[profile.release-small]
+inherits = "release"
+opt-level = "z"
+lto = "fat"

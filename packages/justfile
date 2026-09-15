@@ -132,6 +132,28 @@ build:
 build-release:
 	cargo build --release
 
+# Build both role profiles for the given --target(s), split crash symbols,
+# strip, write the payload manifest, and archive payload and symbols
+# (ADR-0026, ADR-0059). Two Apple targets merge into one universal payload.
+[unix]
+release-package *args:
+	python3 ../scripts/release.py package "$@"
+
+# Gate a packaged --target against the release envelope in release.toml:
+# per-architecture size budgets, dependency seams, profiles, and symbols.
+[unix]
+release-check *args:
+	python3 ../scripts/release.py check "$@"
+
+# Record a packaged --target's sizes as accepted, with a --justification.
+[unix]
+release-accept *args:
+	python3 ../scripts/release.py accept "$@"
+
+# Check only the dependency seams and profiles; needs no release build.
+release-envelope:
+	python3 ../scripts/release.py envelope
+
 clean:
 	cargo clean
 

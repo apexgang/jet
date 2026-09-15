@@ -18,7 +18,7 @@ pub use power::{PowerState, observe_power};
 
 pub use home::JetHome;
 pub use ipc::lock::{
-	DaemonMetadata, InstallationChannel, LifetimeLock, LockError,
+	DaemonMetadata, InstallationChannel, LifetimeLock, LockError, LockProbe,
 };
 pub use ipc::{IpcError, LocalListener};
 pub use process::execution::{
