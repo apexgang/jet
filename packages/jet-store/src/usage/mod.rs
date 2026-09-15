@@ -3,8 +3,10 @@
 //!
 //! What a Harness reported it used is identified so that repeating a
 //! measurement replaces its row instead of adding to it. The
-//! Provider-reported quota windows beside it live in `usage_quota`.
+//! Provider-reported quota windows beside it live in `quota`, and the
+//! hourly and daily aggregates the rows are downsampled into in `history`.
 
+pub(crate) mod history;
 pub(crate) mod quota;
 
 use crate::{
@@ -241,7 +243,9 @@ impl WriteTransaction {
 	/// Store one Jet-observed measurement, replacing the row a repeated
 	/// measurement already wrote rather than adding to it. Reports whether
 	/// the row changed: an older repeat of a measurement already stored
-	/// leaves it alone.
+	/// leaves it alone. Every hour of the Run's rows is marked for the
+	/// next aggregate rebuild, since a Run-scoped row changes what its
+	/// turns count for.
 	///
 	/// # Errors
 	///
@@ -266,6 +270,11 @@ impl WriteTransaction {
 		let output = stored_count("output_tokens", observation.tokens.output)?;
 		let reasoning =
 			stored_count("reasoning_tokens", observation.tokens.reasoning)?;
+		self.mark_run_usage_hours_dirty(
+			&run_id,
+			observation.observed_at_unix_ms,
+		)
+		.await?;
 		let changed = sqlx::query!(
 			"INSERT INTO usage_observations
 				(observation_id, conversation_id, run_id, measurement,

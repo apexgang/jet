@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM usage_aggregates",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "5cc0e20cb9b2b38df3d39d3605fd29e95998fe7fa22fcea79abab4bae55444ce"
+}

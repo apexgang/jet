@@ -12,6 +12,7 @@ use std::time::Duration;
 use jet_protocol::{
 	BaseSelection, PlaneUsage, QuotaScope, QuotaUnit, RetentionPolicy,
 	SeedSelection, UsageEstimation, UsageFinality, UsageFreshness,
+	UsageHistory, UsageHistoryRange, UsageHistorySelection, UsageResolution,
 	UsageSelection, VisaRunRequest, WorkingTreeRequest,
 };
 use pretty_assertions::assert_eq;
@@ -42,6 +43,32 @@ async fn recorded(client: &jet_client::Client) -> PlaneUsage {
 		tokio::time::sleep(Duration::from_millis(50)).await;
 	}
 	panic!("the Plane never recorded the Harness's Usage report")
+}
+
+/// Reads the last day of the Plane's Usage history until the maintenance
+/// sweep has counted the Harness's report into its hour.
+async fn aggregated(
+	client: &jet_client::Client,
+	observed_at_unix_ms: i64,
+) -> UsageHistory {
+	for _ in 0..300 {
+		let history = client
+			.usage_history(
+				UsageHistorySelection::Plane,
+				UsageHistoryRange {
+					from_unix_ms: observed_at_unix_ms - 86_400_000,
+					until_unix_ms: observed_at_unix_ms + 86_400_000,
+				},
+				UsageResolution::Hour,
+			)
+			.await
+			.unwrap();
+		if !history.series.is_empty() {
+			return *history;
+		}
+		tokio::time::sleep(Duration::from_millis(50)).await;
+	}
+	panic!("the Plane never aggregated the Harness's Usage report")
 }
 
 /// What a Harness reports about its own consumption and about its
@@ -194,6 +221,44 @@ async fn a_harness_report_becomes_a_queryable_usage_record() {
 			),
 			(usage.consumption.clone(), vec![], usage.consumption.clone())
 		);
+		// The maintenance loop counts the same measurement into its hour,
+		// and the history Query answers it at the resolution it asked for
+		// (ADR-0045).
+		let history = aggregated(
+			&client,
+			usage
+				.consumption
+				.last_observed_at_unix_ms
+				.expect("observed"),
+		)
+		.await;
+		let point = history
+			.series
+			.first()
+			.and_then(|series| series.points.first())
+			.expect("one point");
+		assert_eq!(
+			(
+				history.plane_id,
+				history.resolution,
+				history.series.len(),
+				history.series[0].model.clone(),
+				history.series[0].points.len(),
+				point.tokens,
+				point.measurements,
+				point.start_unix_ms % 3_600_000,
+			),
+			(
+				usage.plane_id,
+				UsageResolution::Hour,
+				1,
+				Some("fake-model".into()),
+				1,
+				usage.consumption.tokens,
+				1,
+				0,
+			)
+		);
 	})
 	.await
 	.expect("the Plane records and answers within the bound");
@@ -229,6 +294,48 @@ async fn a_client_below_the_usage_minor_is_refused() {
 				format!(
 					"the Usage Query needs protocol minor {}",
 					jet_protocol::USAGE_RECORDS_MINOR
+				)
+				.as_str()
+			)
+		)
+	);
+}
+
+/// A client that negotiated a minor without Usage history is answered with
+/// a stable refusal rather than a series it cannot read (ADR-0019).
+#[tokio::test]
+async fn a_client_below_the_usage_history_minor_is_refused() {
+	let dir = tempfile::tempdir().unwrap();
+	let home = dir.path().join(".jet");
+	let client_id = Uuid::new_v4();
+	let daemon = start_jetd_with_credential_store(&home).await;
+	let mut older = support::hello(client_id);
+	older.minor = jet_protocol::USAGE_HISTORY_MINOR - 1;
+	let (mut connection, _) = support::handshake_raw(&daemon, &older).await;
+	connection
+		.send(&json!({
+			"kind":"query",
+			"id":1,
+			"query":{
+				"type":"usage_history",
+				"selection":{"scope":"plane"},
+				"range":{"from_unix_ms":0,"until_unix_ms":1},
+				"resolution":"day"
+			}
+		}))
+		.await;
+	let refused: Value = connection.receive().await;
+	assert_eq!(
+		(
+			refused["error"]["code"].as_str(),
+			refused["error"]["message"].as_str()
+		),
+		(
+			Some("protocol.unsupported_minor"),
+			Some(
+				format!(
+					"the Usage history Query needs protocol minor {}",
+					jet_protocol::USAGE_HISTORY_MINOR
 				)
 				.as_str()
 			)

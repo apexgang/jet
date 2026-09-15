@@ -417,6 +417,34 @@ impl WriteTransaction {
 		Ok(())
 	}
 
+	/// Delete every snapshot observed before `cutoff_unix_ms` that is not
+	/// the freshest of its window. The freshest stays whatever its age: it
+	/// is what the current reading is, stale or not (ADR-0045).
+	///
+	/// # Errors
+	///
+	/// Returns a store error when the delete fails.
+	pub async fn sweep_usage_quota_snapshots_before(
+		&mut self,
+		cutoff_unix_ms: i64,
+	) -> Result<u64, StoreError> {
+		Ok(sqlx::query!(
+			"DELETE FROM usage_quota_snapshots
+			  WHERE observed_at_unix_ms < ?1
+			    AND rowid <> (
+				  SELECT t.rowid FROM usage_quota_snapshots t
+				   WHERE t.binding_id = usage_quota_snapshots.binding_id
+				     AND t.window_id = usage_quota_snapshots.window_id
+				     AND t.model IS usage_quota_snapshots.model
+				   ORDER BY t.observed_at_unix_ms DESC, t.rowid DESC
+				   LIMIT 1)",
+			cutoff_unix_ms
+		)
+		.execute(self.connection())
+		.await?
+		.rows_affected())
+	}
+
 	/// Record whether one binding's Provider answered. An older observation
 	/// never overwrites a newer one.
 	///
@@ -553,6 +581,38 @@ mod tests {
 			.await
 			.unwrap();
 		assert_eq!(windows, vec![haiku, opus]);
+	}
+
+	/// Sweeping snapshots past the raw tier keeps the freshest of every
+	/// window whatever its age: it is what the current reading is (ADR-0045).
+	#[tokio::test]
+	async fn a_sweep_keeps_the_freshest_snapshot_of_every_window() {
+		let dir = tempfile::tempdir().unwrap();
+		let store = open(&dir).await;
+		let binding_id = Uuid::now_v7();
+		let newest =
+			snapshot(binding_id, "five_hour", 4_200, NOW_UNIX_MS + 60_000);
+		let weekly = snapshot(binding_id, "weekly", 1_000, NOW_UNIX_MS);
+		let (swept, windows) = store
+			.write(async |tx| {
+				tx.record_usage_quota_snapshot(&snapshot(
+					binding_id,
+					"five_hour",
+					1_500,
+					NOW_UNIX_MS,
+				))
+				.await?;
+				tx.record_usage_quota_snapshot(&newest).await?;
+				tx.record_usage_quota_snapshot(&weekly).await?;
+				let swept = tx
+					.sweep_usage_quota_snapshots_before(NOW_UNIX_MS + 1)
+					.await?;
+				let windows = tx.usage_quota_windows(Some(binding_id)).await?;
+				Ok::<_, crate::StoreError>((swept, windows))
+			})
+			.await
+			.unwrap();
+		assert_eq!((swept, windows), (1, vec![newest, weekly]));
 	}
 
 	/// Deduplication reads the newest snapshot of one window alone.

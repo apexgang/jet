@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM usage_observations WHERE observed_at_unix_ms < ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "52bd6d12147e5deccc07dfeb9ab5c26d465e0da5c840d73ced98fbea24bd2945"
+}

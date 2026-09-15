@@ -13,6 +13,7 @@
 //! the GUI's claim to make, and it can only make it about the Planes it is
 //! actually connected to (ADR-0016).
 
+pub(crate) mod history;
 pub(crate) mod query;
 pub(crate) mod record;
 
@@ -359,7 +360,9 @@ pub(crate) mod tests {
 	/// without one looks like to a Usage report.
 	const UNBOUND: Option<AccountBindingId> = None;
 
-	async fn start(dir: &tempfile::TempDir) -> (Core, Arc<ManualClock>) {
+	pub(crate) async fn start(
+		dir: &tempfile::TempDir,
+	) -> (Core, Arc<ManualClock>) {
 		let clock = ManualClock::at(UNIX_EPOCH + NOW);
 		let core = start_core_with(
 			&dir.path().join("plane.sqlite3"),
@@ -372,7 +375,7 @@ pub(crate) mod tests {
 
 	/// One Conversation with one Run, which is everything a Usage record needs
 	/// to name what it belongs to.
-	async fn run(core: &Core) -> Run {
+	pub(crate) async fn run(core: &Core) -> Run {
 		let conversation_id = Uuid::now_v7();
 		let run_id = Uuid::now_v7();
 		let now = core.now_unix_ms();
@@ -400,7 +403,7 @@ pub(crate) mod tests {
 
 	/// One Account binding, which is what a Provider-reported window belongs
 	/// to.
-	async fn bind(core: &Core) -> AccountBindingId {
+	pub(crate) async fn bind(core: &Core) -> AccountBindingId {
 		let CommandOutcome::AccountBound(binding) = core
 			.execute(
 				&actor(),
@@ -419,7 +422,7 @@ pub(crate) mod tests {
 		binding.binding_id
 	}
 
-	async fn record(
+	pub(crate) async fn record(
 		core: &Core,
 		run: &Run,
 		binding: Option<AccountBindingId>,
@@ -463,7 +466,7 @@ pub(crate) mod tests {
 			.collect()
 	}
 
-	fn observed(turn: &str, tokens: UsageTokens) -> UsageReport {
+	pub(crate) fn observed(turn: &str, tokens: UsageTokens) -> UsageReport {
 		UsageReport::Observed(ObservedUsage {
 			measurement: UsageMeasurement::Turn {
 				turn: turn.into(),
@@ -476,7 +479,7 @@ pub(crate) mod tests {
 		})
 	}
 
-	fn window(used: u64) -> UsageReport {
+	pub(crate) fn window(used: u64) -> UsageReport {
 		UsageReport::ProviderQuota(reported("five_hour", used, 3_600))
 	}
 
@@ -509,7 +512,7 @@ pub(crate) mod tests {
 		}
 	}
 
-	fn tokens(input: u64, output: u64) -> UsageTokens {
+	pub(crate) fn tokens(input: u64, output: u64) -> UsageTokens {
 		UsageTokens {
 			input,
 			cached_input: 0,

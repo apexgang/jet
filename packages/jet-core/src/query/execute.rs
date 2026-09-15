@@ -231,6 +231,16 @@ impl Core {
 			Query::Usage { selection } => {
 				crate::usage::query::usage(self, selection).await
 			}
+			Query::UsageHistory {
+				selection,
+				range,
+				resolution,
+			} => {
+				crate::usage::history::history(
+					self, selection, range, resolution,
+				)
+				.await
+			}
 			Query::Settings { scope, selection } => {
 				settings(self, scope, selection).await
 			}

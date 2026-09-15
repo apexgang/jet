@@ -13,7 +13,11 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 42;
+pub const PROTOCOL_MINOR: u32 = 43;
+
+/// Usage history: the downsampled time series of Jet-observed consumption
+/// and the `usage_history` Query that answers it.
+pub const USAGE_HISTORY_MINOR: u32 = 43;
 
 /// Plane transfer: preparing, importing, relinquishing, and committing a
 /// Conversation's Home Plane, and the Transfer tombstone Trash reason.

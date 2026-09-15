@@ -2,6 +2,14 @@
 use crate::{Core, CoreError};
 use std::time::Duration;
 
+/// How long to wait for `due_unix_ms`, at least one second: a deadline
+/// already passed, or a full queue or bounded catch-up, retries then.
+fn delay_until(due_unix_ms: i64, now_unix_ms: i64) -> Duration {
+	Duration::from_millis(
+		due_unix_ms.saturating_sub(now_unix_ms).max(1000) as u64
+	)
+}
+
 impl Core {
 	/// Wait without polling an idle Plane. Commands wake this before its earliest
 	/// deadline; active executions retain bounded recovery and power revalidation.
@@ -16,17 +24,14 @@ impl Core {
 				let active = !tx.active_execution_ids("").await?.is_empty()
 					|| !tx.live_terminals("").await?.is_empty();
 				let pending = !tx.pending_turn_queues("").await?.is_empty();
-				let schedule = tx.next_schedule_deadline().await?.map(|due| {
-					// A full queue or bounded catch-up waits one second before retrying.
-					Duration::from_millis(
-						due.saturating_sub(self.now_unix_ms()).max(1000) as u64,
-					)
-				});
-				let trash = tx.next_trash_expiry().await?.map(|due| {
-					Duration::from_millis(
-						due.saturating_sub(self.now_unix_ms()).max(1000) as u64,
-					)
-				});
+				let schedule = tx
+					.next_schedule_deadline()
+					.await?
+					.map(|due| delay_until(due, self.now_unix_ms()));
+				let trash = tx
+					.next_trash_expiry()
+					.await?
+					.map(|due| delay_until(due, self.now_unix_ms()));
 				// An approved Autodelete rule's next match is due when the
 				// first Conversation not yet idle long enough becomes so.
 				// Conversations already past the cutoff are the sweep's:
@@ -35,12 +40,12 @@ impl Core {
 				let autodelete =
 					crate::autodelete::next_deadline(tx, self.now_unix_ms())
 						.await?
-						.map(|due| {
-							Duration::from_millis(
-								due.saturating_sub(self.now_unix_ms()).max(1000)
-									as u64,
-							)
-						});
+						.map(|due| delay_until(due, self.now_unix_ms()));
+				// Usage rows leave their retention tier on their own clock
+				// (ADR-0045).
+				let usage = crate::usage::history::next_deadline(tx)
+					.await?
+					.map(|due| delay_until(due, self.now_unix_ms()));
 				let recovery = if active {
 					Some(Duration::from_secs(1))
 				} else if pending {
@@ -54,6 +59,7 @@ impl Core {
 						.chain(recovery)
 						.chain(trash)
 						.chain(autodelete)
+						.chain(usage)
 						.min(),
 				)
 			})

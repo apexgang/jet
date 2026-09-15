@@ -225,3 +225,85 @@ pub struct PlaneUsage {
 	/// Deduplicated Jet-observed consumption for the selection.
 	pub consumption: ObservedConsumption,
 }
+
+/// What a Usage history Query covers (Jet 1.43). Aggregates are kept per
+/// Account binding and Model, so a Conversation or Run has no series.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "scope", rename_all = "snake_case")]
+pub enum UsageHistorySelection {
+	/// Every Account binding on the Plane.
+	Plane,
+	/// One Plane-local Account binding.
+	Binding {
+		/// The binding.
+		binding_id: Uuid,
+	},
+}
+
+/// The width of the buckets a Usage history is answered in (ADR-0045).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum UsageResolution {
+	/// One hour per point, held for one year.
+	Hour,
+	/// One UTC day per point, held after that.
+	Day,
+}
+
+/// The half-open span of time one Usage history Query asks about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UsageHistoryRange {
+	/// The first instant covered.
+	pub from_unix_ms: i64,
+	/// The first instant not covered.
+	pub until_unix_ms: i64,
+}
+
+/// One bucket of deduplicated consumption.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UsagePoint {
+	/// When the bucket starts.
+	pub start_unix_ms: i64,
+	/// The counts.
+	pub tokens: UsageTokens,
+	/// How many deduplicated measurements contributed.
+	pub measurements: u64,
+	/// How many of them Jet estimated rather than measured.
+	pub estimated: u64,
+	/// How many of them could still change when they were counted.
+	pub interim: u64,
+}
+
+/// The series of one Model, in time order, with empty buckets left out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UsageSeries {
+	/// The Model, absent where the Harness named none.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub model: Option<String>,
+	/// The buckets that hold anything.
+	pub points: Vec<UsagePoint>,
+}
+
+/// What one Plane holds of Usage history for the selected scope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UsageHistory {
+	/// Newest Event sequence visible when the history was read, carried
+	/// as a decimal string (ADR-0089).
+	#[serde(with = "crate::transport::decimal")]
+	#[cfg_attr(feature = "schema", schemars(with = "crate::Decimal"))]
+	pub cursor: u64,
+	/// The Plane every point was observed on. A series covers this Plane
+	/// alone (ADR-0016).
+	pub plane_id: Uuid,
+	/// The resolution the history was answered at: the requested one,
+	/// unless the range reaches past the tier that holds it.
+	pub resolution: UsageResolution,
+	/// One series per Model.
+	pub series: Vec<UsageSeries>,
+}

@@ -169,6 +169,17 @@ pub enum Query {
 		/// What the answer covers.
 		selection: crate::UsageSelection,
 	},
+	/// The Jet-observed consumption this Plane holds as a time series,
+	/// answered from the retention tier that still holds the whole range
+	/// (ADR-0045).
+	UsageHistory {
+		/// What the answer covers.
+		selection: crate::UsageHistorySelection,
+		/// The span of time asked about.
+		range: crate::UsageHistoryRange,
+		/// The bucket width asked for.
+		resolution: crate::UsageResolution,
+	},
 	/// Settings resolved for one scope (ADR-0085).
 	Settings {
 		/// The scope to resolve for; its own values win over the Plane's.
@@ -305,6 +316,9 @@ pub enum QueryResult {
 	/// What one Plane knows about Usage for the selected scope. Boxed: it
 	/// carries the Plane's quota windows beside its per-Model totals.
 	Usage(Box<crate::PlaneUsage>),
+	/// One Plane's Usage history for the selected scope, at the resolution
+	/// it could be answered at. Boxed: it carries one series per Model.
+	UsageHistory(Box<crate::UsageHistory>),
 	/// Settings resolved for one scope.
 	Settings(SettingSnapshot),
 	/// One page of journal Events in sequence order.

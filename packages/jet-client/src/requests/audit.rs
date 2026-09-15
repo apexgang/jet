@@ -113,6 +113,7 @@ impl Client {
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
 			| QueryResponse::Usage(_)
+			| QueryResponse::UsageHistory(_)
 			| QueryResponse::Pairing(_)
 			| QueryResponse::Projects(_)
 			| QueryResponse::ProjectPreview(_)

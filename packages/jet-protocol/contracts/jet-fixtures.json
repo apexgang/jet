@@ -415,6 +415,21 @@
     "payload": "{\"kind\":\"query_result\",\"id\":1,\"result\":{\"type\":\"usage\",\"cursor\":12,\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"quota_windows\":[],\"consumption\":{\"tokens\":{\"input\":0,\"cached_input\":0,\"output\":0,\"reasoning\":0},\"measurements\":0,\"estimated\":0,\"interim\":0,\"models\":[]}}}"
   },
   {
+    "schema": "ClientMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":1,\"query\":{\"type\":\"usage_history\",\"selection\":{\"scope\":\"binding\",\"binding_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\"},\"range\":{\"from_unix_ms\":1788800000000,\"until_unix_ms\":1788886400000},\"resolution\":\"hour\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":1,\"result\":{\"type\":\"usage_history\",\"cursor\":\"12\",\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"resolution\":\"day\",\"series\":[{\"model\":\"claude-opus-5\",\"points\":[{\"start_unix_ms\":1788825600000,\"tokens\":{\"input\":1200,\"cached_input\":800,\"output\":340,\"reasoning\":0},\"measurements\":2,\"estimated\":1,\"interim\":0}]},{\"points\":[]}]}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"query_result\",\"id\":1,\"result\":{\"type\":\"usage_history\",\"cursor\":\"12\",\"plane_id\":\"018f3a2b-7c4d-7e21-9f80-2a1b3c4d5e6f\",\"resolution\":\"minute\",\"series\":[]}}"
+  },
+  {
     "schema": "ArtifactControl",
     "valid": true,
     "payload": "{\"type\":\"artifact_upload\",\"run_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"artifact\":{\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\"size\":\"3\"}}"

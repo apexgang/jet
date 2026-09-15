@@ -1100,6 +1100,7 @@ public enum QueryRequest {
     case `capabilities`(QueryRequestCapabilities)
     case `account_bindings`(QueryRequestAccountBindings)
     case `usage`(QueryRequestUsage)
+    case `usage_history`(QueryRequestUsageHistory)
     case `settings`(QueryRequestSettings)
     case `events`(QueryRequestEvents)
     case `pairing`(QueryRequestPairing)
@@ -1138,6 +1139,7 @@ public enum QueryResponse {
     case `capabilities`(QueryResponseCapabilities)
     case `account_bindings`(QueryResponseAccountBindings)
     case `usage`(QueryResponseUsage)
+    case `usage_history`(QueryResponseUsageHistory)
     case `settings`(QueryResponseSettings)
     case `events`(QueryResponseEvents)
     case `pairing`(QueryResponsePairing)
@@ -1633,11 +1635,46 @@ public enum UsageFreshness {
     case `unreachable`(UsageFreshnessUnreachable)
 }
 
+public struct UsageHistory {
+    public let `cursor`: String
+    public let `plane_id`: String
+    public let `resolution`: UsageResolution
+    public let `series`: [UsageSeries]
+}
+
+public struct UsageHistoryRange {
+    public let `from_unix_ms`: Int64
+    public let `until_unix_ms`: Int64
+}
+
+public enum UsageHistorySelection {
+    case `plane`(UsageHistorySelectionPlane)
+    case `binding`(UsageHistorySelectionBinding)
+}
+
+public struct UsagePoint {
+    public let `estimated`: UInt64
+    public let `interim`: UInt64
+    public let `measurements`: UInt64
+    public let `start_unix_ms`: Int64
+    public let `tokens`: UsageTokens
+}
+
+public enum UsageResolution: String {
+    case `hour` = "hour"
+    case `day` = "day"
+}
+
 public enum UsageSelection {
     case `plane`(UsageSelectionPlane)
     case `binding`(UsageSelectionBinding)
     case `conversation`(UsageSelectionConversation)
     case `run`(UsageSelectionRun)
+}
+
+public struct UsageSeries {
+    public let `model`: String?
+    public let `points`: [UsagePoint]
 }
 
 public struct UsageTokens {
@@ -2884,6 +2921,12 @@ public struct QueryRequestUsage {
     public let `selection`: UsageSelection
 }
 
+public struct QueryRequestUsageHistory {
+    public let `range`: UsageHistoryRange
+    public let `resolution`: UsageResolution
+    public let `selection`: UsageHistorySelection
+}
+
 public struct QueryRequestSettings {
     public let `scope`: SettingScope
     public let `selection`: SettingSelection
@@ -3110,6 +3153,13 @@ public struct QueryResponseUsage {
     public let `cursor`: String
     public let `plane_id`: String
     public let `quota_windows`: [QuotaWindow]
+}
+
+public struct QueryResponseUsageHistory {
+    public let `cursor`: String
+    public let `plane_id`: String
+    public let `resolution`: UsageResolution
+    public let `series`: [UsageSeries]
 }
 
 public struct QueryResponseSettings {
@@ -3461,6 +3511,14 @@ public struct UsageFreshnessStale {
 
 public struct UsageFreshnessUnreachable {
     public let `reason`: String
+}
+
+public struct UsageHistorySelectionPlane {
+
+}
+
+public struct UsageHistorySelectionBinding {
+    public let `binding_id`: String
 }
 
 public struct UsageSelectionPlane {

@@ -1,0 +1,87 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT bucket_start_unix_ms, model,\n\t\t\t\tCAST(SUM(input_tokens) AS INTEGER) AS \"input!: i64\",\n\t\t\t\tCAST(SUM(cached_input_tokens) AS INTEGER) AS \"cached!: i64\",\n\t\t\t\tCAST(SUM(output_tokens) AS INTEGER) AS \"output!: i64\",\n\t\t\t\tCAST(SUM(reasoning_tokens) AS INTEGER) AS \"reasoning!: i64\",\n\t\t\t\tCAST(SUM(measurements) AS INTEGER) AS \"measurements!: i64\",\n\t\t\t\tCAST(SUM(estimated) AS INTEGER) AS \"estimated!: i64\",\n\t\t\t\tCAST(SUM(interim) AS INTEGER) AS \"interim!: i64\"\n\t\t\t FROM usage_aggregates\n\t\t\t WHERE resolution = ?1\n\t\t\t   AND (?2 IS NULL OR binding_id = ?2)\n\t\t\t   AND bucket_start_unix_ms >= ?3\n\t\t\t   AND bucket_start_unix_ms < ?4\n\t\t\t GROUP BY model, bucket_start_unix_ms\n\t\t\t ORDER BY model, bucket_start_unix_ms",
+  "describe": {
+    "columns": [
+      {
+        "name": "bucket_start_unix_ms",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "usage_aggregates",
+            "name": "bucket_start_unix_ms"
+          }
+        }
+      },
+      {
+        "name": "model",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_aggregates",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "name": "input!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "cached!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "output!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "reasoning!: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "measurements!: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "estimated!: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "interim!: i64",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8ac3dd19e63563b17f736a8b92ae91bbe9e4d8a9bf06416b2d981ce83463f42d"
+}

@@ -69,6 +69,9 @@ the Setting, and are refused an audit page that names the actor. See
 
 ## Usage negotiation
 
+Jet 1.43 adds the `usage_history` Query and its Plane-local series. Older
+peers cannot admit it. See [Usage records](usage-records.md).
+
 Jet 1.32 adds `authorize_approval_retry` and `approval_retry_authorized`.
 The Command identifies the Run and a denied review, with no replacement
 action. Older peers cannot admit it. See [Automatic review](automatic-review.md).

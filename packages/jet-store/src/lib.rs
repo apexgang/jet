@@ -111,6 +111,9 @@ pub use search::{
 };
 pub use snapshot::{RecoverySnapshot, SnapshotReason};
 pub use transaction::{ReadTransaction, WriteTransaction};
+pub use usage::history::{
+	UsageHistoryPointRecord, UsageOldestRecord, UsageResolutionRecord,
+};
 pub use usage::quota::{
 	ProviderReachRecord, QuotaScopeRecord, QuotaUnitRecord,
 	UsageProviderReachRecord, UsageQuotaHeartbeatRecord,

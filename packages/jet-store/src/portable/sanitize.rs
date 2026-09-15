@@ -119,6 +119,12 @@ pub(super) async fn sanitize(
 	sqlx::query!("DELETE FROM turn_queues")
 		.execute(&mut *connection)
 		.await?;
+	sqlx::query!("DELETE FROM usage_aggregates")
+		.execute(&mut *connection)
+		.await?;
+	sqlx::query!("DELETE FROM usage_dirty_hours")
+		.execute(&mut *connection)
+		.await?;
 	sqlx::query!("DELETE FROM usage_observations")
 		.execute(&mut *connection)
 		.await?;
@@ -223,6 +229,8 @@ const TABLES: &[&str] = &[
 	"settings",
 	"sqlite_sequence",
 	"turn_queues",
+	"usage_aggregates",
+	"usage_dirty_hours",
 	"usage_observations",
 	"usage_provider_reach",
 	"usage_quota_snapshots",

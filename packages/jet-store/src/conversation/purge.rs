@@ -147,6 +147,11 @@ pub(crate) async fn purge_rows(
 	.execute(&mut *connection)
 	.await?
 	.rows_affected();
+	// The hours the removed measurements were counted into are recounted
+	// at the next rebuild; what has already been downsampled past the raw
+	// tier stands.
+	crate::usage::history::mark_conversation_usage_hours_dirty(connection, id)
+		.await?;
 	changed += sqlx::query!(
 		"DELETE FROM usage_observations WHERE conversation_id = ?1",
 		id

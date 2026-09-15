@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO usage_dirty_hours (hour_start_unix_ms)\n\t\t SELECT (observed_at_unix_ms / ?2) * ?2 FROM usage_observations\n\t\t  WHERE conversation_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "c62e7bc3d98fb3694e13aab93a8a8b42ce438a174ee7389a89be7fb2af338685"
+}
