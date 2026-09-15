@@ -120,15 +120,33 @@ Every reported name is bounded metadata, not a payload: window names,
 Model names, turn identities, and native usage identities are at most 128
 characters and hold no control characters, and an unreachable reason is at
 most 256. A report that is not that is refused rather than truncated
-(ASVS 1.5.2, 2.2.1, 5.3.1). A Craft asserts no time, no Account binding,
-and no Plane: the host stamps all three.
+(ASVS 1.5.2, 2.2.1, 5.3.1). So is an amount above what the store holds,
+which the wire's `uint64` permits and SQLite's `INTEGER` does not, and a
+share above its fixed limit of 10,000. A Craft asserts no time, no Account
+binding, and no Plane: the host stamps all three.
 
-A number the Craft protocol permits is never a refusal. A window's stated
-length is a duration or nothing, so a Provider reporting zero seconds — or
-a length no clock could mean — has stated none, and the record says so
-rather than rejecting the report. A Usage report arrives inside its Run's
-own source batch, and refusing a value a conformant Craft is entitled to
-send would fail that batch and take the Run down with it.
+A window's stated length is a duration or nothing, so a Provider reporting
+zero seconds — or a length no clock could mean — has stated none, and the
+record says so rather than rejecting the report.
+
+## What a refusal costs
+
+A Usage report arrives inside its Run's own source batch, and a batch that
+fails drops the Craft connection, records the Run as disconnected, and
+never acknowledges the source, so a replay delivers the same report again.
+A refused report is therefore refused on its own (issue #120). The report
+is checked before anything is written; one the Plane cannot record is left
+out of the batch, the native event beside it is journalled, the batch
+commits, the source offset is acknowledged, and the Run goes on. The
+refusal is written to the Diagnostic log as a `warn` record naming the Run
+and the stable code (`usage.turn_unsupported`, `usage.amount_unsupported`,
+`usage.share_unsupported`, and the rest) with nothing of the report
+(ADR-0061).
+
+Only a refusal of the reported content is survivable. A report already
+admitted is the only kind that reaches the store, so a store integrity
+error or a failed write there is the Plane's own failure and still fails
+the batch, as any other write failure does.
 
 ## Review stages
 

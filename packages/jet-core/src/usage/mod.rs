@@ -430,6 +430,7 @@ pub(crate) mod tests {
 			authorized_by: ClientId(Uuid::nil()),
 		};
 		let now = core.now_unix_ms();
+		let report = crate::usage::record::admit(report).unwrap();
 		core.store
 			.write(async |tx| {
 				crate::usage::record::record(
@@ -815,36 +816,6 @@ pub(crate) mod tests {
 				}
 			]
 		);
-	}
-
-	/// Bounded metadata is what a record carries; a Craft cannot make one out
-	/// of a payload.
-	#[tokio::test]
-	async fn a_report_that_is_not_bounded_metadata_is_refused() {
-		let dir = tempfile::tempdir().unwrap();
-		let (core, _clock) = start(&dir).await;
-		let run = run(&core).await;
-		let actor = EventActor::Harness {
-			run_id: run.run_id,
-			authorized_by: ClientId(Uuid::nil()),
-		};
-		let now = core.now_unix_ms();
-		let refused = core
-			.store
-			.write(async |tx| {
-				crate::usage::record::record(
-					tx,
-					&actor,
-					&run,
-					UNBOUND,
-					observed(&"t".repeat(129), tokens(1, 1)),
-					now,
-				)
-				.await
-			})
-			.await
-			.expect_err("bounded metadata");
-		assert_eq!(refused.code, "usage.turn_unsupported");
 	}
 
 	/// A Plane answers for itself. Its snapshot names the Plane it came from
