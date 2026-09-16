@@ -1,6 +1,6 @@
 //! The ADR-0022 store, startup, reconnect, and ingestion measurements.
 //! `just budget-test` runs them alone on a reference host at the
-//! reference scale and gates the result through `scripts/budgets.py`;
+//! reference scale and gates the result through `.github/scripts/budgets.py`;
 //! the ordinary suite runs the same code at a smoke scale so the runner
 //! cannot rot between reference runs.
 #[path = "support/budgets.rs"]

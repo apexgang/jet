@@ -25,19 +25,41 @@ defaults:
     working-directory: packages
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      contracts: ${{ steps.changes.outputs.contracts }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Select checks
+        id: changes
+        working-directory: .
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 .github/scripts/changes.py
+
   contracts:
     name: Schema drift, Rust and TypeScript corpora
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: extractions/setup-just@v4.0.0
+      - name: Set up Rust
+        working-directory: .
+        run: bash .github/scripts/setup-rust.sh test
+      - uses: swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: packages
+          shared-key: contracts
+          key: ${{ hashFiles('packages/**/*.rs', 'packages/**/*.sql', 'packages/**/.sqlx/*.json', 'packages/**/contracts/**', 'docs/conformance-matrix.md') }}
+          cache-workspace-crates: true
+          cache-on-failure: true
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: 24
-      # rust-toolchain.toml selects the pinned toolchain when cargo first runs.
-      - uses: Swatinem/rust-cache@v2.9.2
-        with:
-          workspaces: packages
       - name: Fail when a committed contract no longer matches the Rust wire DTOs
         run: just contracts-check
       - name: Decode the shared corpora with the Rust decoder
@@ -47,7 +69,10 @@ jobs:
 
   swift:
     name: Swift corpora
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
     runs-on: macos-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: extractions/setup-just@v4.0.0

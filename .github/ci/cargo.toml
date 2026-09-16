@@ -1,0 +1,12 @@
+# Appended to packages/.cargo/config.toml only on CI test runners.
+# Keep the local size-first profile and both distribution profiles intact.
+[profile.dev]
+opt-level = 0
+lto = "off"
+codegen-units = 256
+incremental = false
+
+# Cryptographic tests need optimized dependencies to finish promptly. These
+# artifacts change infrequently and are reused from the dependency cache.
+[profile.dev.package."*"]
+opt-level = 1

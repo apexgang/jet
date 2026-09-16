@@ -23,20 +23,45 @@ defaults:
     working-directory: packages
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.changes.outputs.core }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Select checks
+        id: changes
+        working-directory: .
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 .github/scripts/changes.py
+      - name: Test automation
+        working-directory: .
+        run: python3 -m unittest discover -s .github/tests -v
+
   test:
     name: ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: extractions/setup-just@v4.0.0
-      # rust-toolchain.toml selects the pinned toolchain when cargo first runs.
-      - uses: Swatinem/rust-cache@v2.9.2
+      - name: Set up Rust
+        working-directory: .
+        run: bash .github/scripts/setup-rust.sh test
+      - uses: swatinem/rust-cache@v2.9.2
         with:
           workspaces: packages
+          shared-key: core
+          key: ${{ hashFiles('packages/**/*.rs', 'packages/**/*.sql', 'packages/**/.sqlx/*.json', 'packages/**/contracts/**', 'docs/conformance-matrix.md') }}
+          cache-workspace-crates: true
+          cache-on-failure: true
       - name: Check migration conventions
         run: just sqlx-migrations-check
       - name: Check the dependency seams and release profiles
@@ -46,4 +71,4 @@ jobs:
       - name: Lint
         run: just clippy -- -D warnings
       - name: Run the suite
-        run: just test
+        run: just test --locked

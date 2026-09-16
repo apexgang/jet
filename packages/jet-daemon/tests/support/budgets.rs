@@ -1,6 +1,6 @@
 //! Measurement support for the ADR-0022 performance gates: seeding a Plane
 //! at the reference scale, timing one operation many times, and writing
-//! the measurements `scripts/budgets.py` gates against the accepted
+//! the measurements `.github/scripts/budgets.py` gates against the accepted
 //! baseline.
 use jet_store::{
 	ActorRecord, ConversationOriginRecord, ConversationPageStart, EventClass,
@@ -64,7 +64,7 @@ pub struct Measurements {
 	pub ingestion_events_per_second: f64,
 }
 
-/// Where a run's measurements go for `scripts/budgets.py`: one file per
+/// Where a run's measurements go for `.github/scripts/budgets.py`: one file per
 /// operating system and architecture under the workspace target directory.
 pub fn output_path() -> PathBuf {
 	Path::new(env!("CARGO_MANIFEST_DIR"))

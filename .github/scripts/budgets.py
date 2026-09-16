@@ -13,7 +13,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-PACKAGES = Path(__file__).resolve().parent.parent / "packages"
+PACKAGES = Path(__file__).resolve().parents[2] / "packages"
 CONFIG = tomllib.loads((PACKAGES / "budgets.toml").read_text())
 BASELINE = PACKAGES / "budget-baseline.json"
 

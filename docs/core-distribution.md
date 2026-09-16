@@ -36,16 +36,22 @@ stripped.
 freshly built `jetd core describe`, and archives payload and symbols.
 Two Apple targets given together are merged with `lipo` into one
 universal payload. `.github/workflows/release.yml` runs it for the three
-labels on every `v*` tag and uploads the archives. Code signing and
+labels on every version tag matching the workspace, gates all three payloads,
+and publishes their archives and checksums together as a GitHub release. Code signing and
 notarization belong to the GUI distributions and run after these
-payloads exist; a Homebrew formula would install the same payload into
-Homebrew's prefix and run `jetd serve --channel homebrew` under `brew
-services`.
+payloads exist. Stable releases update `apexgang/homebrew-tap` using an
+Ape Bonker installation token scoped to that repository. Prereleases leave
+the stable formula unchanged. See [CI and releases](../.github/README.md)
+for credentials and retry instructions.
+
+`brew install apexgang/tap/jet` installs the compiled payload without Rust.
+`brew services start apexgang/tap/jet` runs `jetd serve --channel homebrew`.
+The service definitions preserve helpers across daemon restarts.
 
 ## The release envelope
 
-`packages/release.toml` is the accepted envelope and
-`packages/release-baseline.json` the accepted measurements per label.
+`.github/packaging/release.toml` is the accepted envelope and
+`.github/packaging/release-baseline.json` the accepted measurements per label.
 `just release-check --target <label>` fails when any of these hold:
 
 - A stripped executable exceeds its per-architecture budget of 12 MiB
@@ -97,8 +103,8 @@ A GUI-managed installation keeps immutable versions under the Jet home
 ```
 
 The service definition starts `~/.jet/core/current/jetd serve --channel
-gui`; `packaging/linux/jetd.service`, `packaging/linux/jetd-autostart.desktop`,
-and `packaging/macos/com.apexgang.jet.jetd.plist` are the systemd user
+gui`; `.github/packaging/linux/jetd.service`, `.github/packaging/linux/jetd-autostart.desktop`,
+and `.github/packaging/macos/com.apexgang.jet.jetd.plist` are the systemd user
 unit, the XDG autostart fallback, and the LaunchAgent the macOS app
 registers through `SMAppService`. Both service definitions signal `jetd`
 alone and never its process group, because `jetfueld` helpers must

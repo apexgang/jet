@@ -33,9 +33,10 @@ import tempfile
 import tomllib
 from pathlib import Path
 
-PACKAGES = Path(__file__).resolve().parent.parent / "packages"
-CONFIG = tomllib.loads((PACKAGES / "release.toml").read_text())
-BASELINE_PATH = PACKAGES / "release-baseline.json"
+PACKAGES = Path(__file__).resolve().parents[2] / "packages"
+PACKAGING = Path(__file__).resolve().parents[1] / "packaging"
+CONFIG = tomllib.loads((PACKAGING / "release.toml").read_text())
+BASELINE_PATH = PACKAGING / "release-baseline.json"
 MIB = 1024 * 1024
 UNIVERSAL = "universal-apple-darwin"
 ELF_MAGIC = b"\x7fELF"
@@ -96,7 +97,7 @@ def build(targets):
         for name, spec in CONFIG["executables"].items():
             by_profile.setdefault(spec["profile"], []).append(spec["package"])
         for profile, packages in by_profile.items():
-            command = ["cargo", "build", "--profile", profile, "--target", target]
+            command = ["cargo", "build", "--locked", "--profile", profile, "--target", target]
             for package in packages:
                 command += ["-p", package]
             run(command)
