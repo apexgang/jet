@@ -34,7 +34,6 @@ cache restore time and the test suite itself still contribute to elapsed time.
    executables; `brew services start apexgang/tap/jet` starts the daemon.
 
 The Actions secret `APE_BONKER_PRIVATE_KEY` holds Ape Bonker's private key.
-The existing organization secret `RELEASE_APP_CLIENT_KEY` is a fallback.
 `RELEASE_APP_CLIENT_ID` identifies the installed app; the workflow defaults to
 the verified Ape Bonker client ID. `actions/create-github-app-token` restricts
 the short-lived token to `contents:write` on `homebrew-tap` and revokes it at job

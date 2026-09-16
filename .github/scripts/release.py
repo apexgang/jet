@@ -113,6 +113,10 @@ def split_symbols(merged, stripped, symbols, name):
     else:
         run(["dsymutil", str(merged), "-o", str(symbols / f"{name}.dSYM")])
         run(["strip", "-o", str(stripped), str(merged)])
+        # Stripping invalidates Mach-O signatures. Homebrew installs this
+        # payload directly, so sign every slice before hashing the manifest.
+        run(["codesign", "--force", "--sign", "-", str(stripped)])
+        run(["codesign", "--verify", "--strict", "--all-architectures", str(stripped)])
     os.chmod(stripped, 0o755)
 
 
@@ -199,9 +203,16 @@ def arch_of(path, kind):
 
 
 def is_stripped(path):
-    result = run(["nm", "--defined-only", str(path)], check=False,
-                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    return result.stdout.strip() == ""
+    command = ["nm", "--defined-only", "--format=posix"]
+    macho = executable_kind(path) != "elf"
+    if macho:
+        command += ["-arch", "all"]
+    result = run([*command, str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # Mach-O retains its executable header even after strip. Universal nm
+    # output also has an architecture heading before each slice's symbols.
+    symbols = {line.split()[0] for line in result.stdout.splitlines()
+               if line.strip() and not line.endswith(":")}
+    return not (symbols - ({"__mh_execute_header"} if macho else set()))
 
 
 def has_symbols(symbols, name):

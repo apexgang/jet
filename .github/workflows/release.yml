@@ -9,9 +9,9 @@ on:
 permissions:
   contents: read
 
-# Serialize publication and tap updates, including retries. Never cancel a release.
+# Serialize retries of one tag without cancelling another version's build.
 concurrency:
-  group: core-release
+  group: core-release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - name: Require a version tag matching the workspace
         env:
-          APP_KEY: ${{ secrets.APE_BONKER_PRIVATE_KEY || secrets.RELEASE_APP_CLIENT_KEY }}
+          APP_KEY: ${{ secrets.APE_BONKER_PRIVATE_KEY }}
         run: |
           test "$GITHUB_REF_TYPE" = tag
           python3 .github/scripts/release_assets.py --tag "$GITHUB_REF_NAME"
@@ -114,7 +114,7 @@ jobs:
         id: app
         with:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID || 'Iv23liPckhcRTwkS6Yxe' }}
-          private-key: ${{ secrets.APE_BONKER_PRIVATE_KEY || secrets.RELEASE_APP_CLIENT_KEY }}
+          private-key: ${{ secrets.APE_BONKER_PRIVATE_KEY }}
           owner: apexgang
           repositories: homebrew-tap
           permission-contents: write

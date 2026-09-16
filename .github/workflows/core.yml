@@ -51,6 +51,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.1
+      - name: Test native macOS packaging
+        if: runner.os == 'macOS'
+        working-directory: .
+        run: python3 -m unittest discover -s .github/tests -p test_packaging.py -v
       - uses: extractions/setup-just@v4.0.0
       - name: Set up Rust
         working-directory: .
