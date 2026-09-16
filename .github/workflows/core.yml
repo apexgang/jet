@@ -59,15 +59,17 @@ jobs:
       - name: Set up Rust
         working-directory: .
         run: bash .github/scripts/setup-rust.sh test
-      - uses: swatinem/rust-cache@v2.9.2
+      - uses: actions/cache/restore@v6.1.0
         id: cache
         with:
-          workspaces: packages
-          shared-key: core
-          key: source-times-v1-${{ hashFiles('packages/**', 'docs/conformance-matrix.md') }}
-          cache-workspace-crates: true
-          cache-on-failure: true
-          cache-directories: .github/.cache
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/target
+            !packages/target/dist
+            .github/.cache
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-core-${{ hashFiles('packages/rust-toolchain.toml', 'packages/.cargo/config.toml', '.github/ci/cargo.toml') }}-${{ hashFiles('packages/**', 'docs/conformance-matrix.md') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-core-${{ hashFiles('packages/rust-toolchain.toml', 'packages/.cargo/config.toml', '.github/ci/cargo.toml') }}-
       - name: Restore unchanged source timestamps
         working-directory: .
         run: python3 .github/scripts/cache_sources.py restore
@@ -92,3 +94,13 @@ jobs:
         if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
         working-directory: .
         run: python3 .github/scripts/cache_sources.py save
+      - uses: actions/cache/save@v6.1.0
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' }}
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/target
+            !packages/target/dist
+            .github/.cache
+          key: ${{ steps.cache.outputs.cache-primary-key }}

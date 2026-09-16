@@ -20,6 +20,8 @@ A source timestamp is restored only if its SHA-256 matches the cached input;
 changed inputs stay fresh so Cargo rebuilds them. This avoids rebuilding
 unchanged workspace crates after every checkout.
 `just ci-test` uses nextest to schedule tests across binaries concurrently;
+the bulk PTY and multi-daemon origin scenarios reserve the runner to avoid
+contention-induced deadlines. Test assertions and timeouts remain unchanged.
 Cargo doctests run in a separate step even when a test fails. The local
 `just test` command still uses Cargo's built-in runner.
 

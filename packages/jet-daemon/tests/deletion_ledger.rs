@@ -21,7 +21,10 @@ async fn wait_for_daily_snapshot(home: &Path) -> String {
 		if let Ok(entries) = std::fs::read_dir(home.join("snapshots")) {
 			let mut names: Vec<String> = entries
 				.map(|entry| entry.unwrap().file_name().into_string().unwrap())
-				.filter(|name| name.ends_with("-daily.sqlite3"))
+				.filter(|name| {
+					name.starts_with("plane-")
+						&& name.ends_with("-daily.sqlite3")
+				})
 				.collect();
 			if let Some(name) = names.pop() {
 				return name;

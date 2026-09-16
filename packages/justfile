@@ -40,7 +40,7 @@ test *args: build-run-helper
 # CI runs test binaries concurrently; the workflow runs Cargo doctests separately.
 [unix]
 ci-test *args: build-run-helper
-	RUST_MIN_STACK={{ rust_min_stack }} cargo nextest run --no-fail-fast "$@"
+	RUST_MIN_STACK={{ rust_min_stack }} cargo nextest run --config-file ../.github/ci/nextest.toml --no-fail-fast "$@"
 
 # Cargo test defaults shared by every test recipe; `test` adds the run helper.
 [unix]

@@ -12,6 +12,18 @@ if [[ "$tag" != "$latest" ]]; then
   exit 0
 fi
 mkdir -p Formula
+if [[ -f Formula/jet.rb ]]; then
+  update=$(ruby -e '
+    require "rubygems"
+    current = File.read(ARGV[1]).match(/^\s*version "([0-9]+\.[0-9]+\.[0-9]+)"$/)
+    abort "Cannot read the current Jet formula version" unless current
+    puts Gem::Version.new(ARGV[0].delete_prefix("v")) >= Gem::Version.new(current[1])
+  ' "$tag" Formula/jet.rb)
+  if [[ "$update" != true ]]; then
+    echo "Skipped $tag: the tap already contains a newer version"
+    exit 0
+  fi
+fi
 cp "$RUNNER_TEMP/jet-formula/jet.rb" Formula/jet.rb
 ruby -c Formula/jet.rb
 if [[ -z $(git status --porcelain -- Formula/jet.rb) ]]; then

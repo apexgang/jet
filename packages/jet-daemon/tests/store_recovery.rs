@@ -40,24 +40,6 @@ fn damage(home: &Path) {
 	file.sync_all().unwrap();
 }
 
-/// The first change of the day earns a snapshot as soon as the daemon
-/// wakes for maintenance, so it is there within moments of the Command.
-async fn wait_for_daily_snapshot(home: &Path) -> String {
-	for _ in 0..500 {
-		if let Ok(entries) = std::fs::read_dir(home.join("snapshots")) {
-			let mut names: Vec<String> = entries
-				.map(|entry| entry.unwrap().file_name().into_string().unwrap())
-				.filter(|name| name.ends_with("-daily.sqlite3"))
-				.collect();
-			if let Some(name) = names.pop() {
-				return name;
-			}
-		}
-		tokio::time::sleep(Duration::from_millis(20)).await;
-	}
-	panic!("no daily snapshot was taken");
-}
-
 #[tokio::test]
 async fn a_damaged_store_is_served_read_only_until_a_snapshot_is_restored() {
 	tokio::time::timeout(Duration::from_secs(60), async {
@@ -72,7 +54,21 @@ async fn a_damaged_store_is_served_read_only_until_a_snapshot_is_restored() {
 			.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
 			.await
 			.unwrap();
-		let snapshot = wait_for_daily_snapshot(&home).await;
+		// Startup work can earn the daily snapshot before this Conversation.
+		// Restart with no snapshots so startup takes a completed maintenance
+		// snapshot containing the state this test intends to restore.
+		drop(client);
+		let mut daemon = daemon;
+		daemon.child.kill().await.unwrap();
+		if home.join("snapshots").exists() {
+			std::fs::remove_dir_all(home.join("snapshots")).unwrap();
+		}
+		let daemon = start_jetd(&home).await;
+		let client = support::connect(&daemon, client_id).await;
+		let snapshot =
+			client.status().await.unwrap().recovery.unwrap().snapshots[0]
+				.name
+				.clone();
 		// Anything after the snapshot is what a restoration gives up.
 		client
 			.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
@@ -97,7 +93,7 @@ async fn a_damaged_store_is_served_read_only_until_a_snapshot_is_restored() {
 				snapshots: vec![RecoverySnapshot {
 					name: snapshot.clone(),
 					taken_at_unix_ms: taken.taken_at_unix_ms,
-					reason: SnapshotReason::Daily,
+					reason: SnapshotReason::Maintenance,
 					bytes: taken.bytes,
 				}],
 				deletion_ledger: Some(DeletionLedgerStatus::Verified {
@@ -145,7 +141,7 @@ async fn a_damaged_store_is_served_read_only_until_a_snapshot_is_restored() {
 					}),
 				}),
 				Some(SecurityState::Trusted),
-				2
+				3
 			)
 		);
 		let conversations = client.conversations().await.unwrap();
@@ -184,7 +180,7 @@ async fn a_damaged_store_is_served_read_only_until_a_snapshot_is_restored() {
 			.unwrap();
 		assert_eq!(
 			(status.daemon_starts, status.security),
-			(3, Some(SecurityState::Trusted))
+			(4, Some(SecurityState::Trusted))
 		);
 	})
 	.await
