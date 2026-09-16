@@ -51,12 +51,17 @@ jobs:
         working-directory: .
         run: bash .github/scripts/setup-rust.sh test
       - uses: swatinem/rust-cache@v2.9.2
+        id: cache
         with:
           workspaces: packages
           shared-key: contracts
-          key: ${{ hashFiles('packages/**/*.rs', 'packages/**/*.sql', 'packages/**/.sqlx/*.json', 'packages/**/contracts/**', 'docs/conformance-matrix.md') }}
+          key: source-times-v1-${{ hashFiles('packages/**', 'docs/conformance-matrix.md') }}
           cache-workspace-crates: true
           cache-on-failure: true
+          cache-directories: .github/.cache
+      - name: Restore unchanged source timestamps
+        working-directory: .
+        run: python3 .github/scripts/cache_sources.py restore
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: 24
@@ -66,6 +71,11 @@ jobs:
         run: just contracts-test-rust
       - name: Validate the shared corpora against the TypeScript models
         run: just contracts-test-typescript
+
+      - name: Save source timestamps
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
+        working-directory: .
+        run: python3 .github/scripts/cache_sources.py save
 
   swift:
     name: Swift corpora

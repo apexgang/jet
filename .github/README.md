@@ -16,6 +16,9 @@ code compiles without optimization or LTO, with 256 codegen units. Dependencies
 use optimization level 1 so cryptographic tests stay practical. Local build
 settings and optimized release profiles are unchanged. Caches include workspace
 crates, use separate keys for each build graph, and save even when tests fail.
+A source timestamp is restored only if its SHA-256 matches the cached input;
+changed inputs stay fresh so Cargo rebuilds them. This avoids rebuilding
+unchanged workspace crates after every checkout.
 `just ci-test` uses nextest to schedule tests across binaries concurrently;
 Cargo doctests run in a separate step even when a test fails. The local
 `just test` command still uses Cargo's built-in runner.

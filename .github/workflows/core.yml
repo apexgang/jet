@@ -60,12 +60,17 @@ jobs:
         working-directory: .
         run: bash .github/scripts/setup-rust.sh test
       - uses: swatinem/rust-cache@v2.9.2
+        id: cache
         with:
           workspaces: packages
           shared-key: core
-          key: ${{ hashFiles('packages/**/*.rs', 'packages/**/*.sql', 'packages/**/.sqlx/*.json', 'packages/**/contracts/**', 'docs/conformance-matrix.md') }}
+          key: source-times-v1-${{ hashFiles('packages/**', 'docs/conformance-matrix.md') }}
           cache-workspace-crates: true
           cache-on-failure: true
+          cache-directories: .github/.cache
+      - name: Restore unchanged source timestamps
+        working-directory: .
+        run: python3 .github/scripts/cache_sources.py restore
       - name: Check migration conventions
         run: just sqlx-migrations-check
       - name: Check the dependency seams and release profiles
@@ -83,3 +88,7 @@ jobs:
       - name: Run doctests
         if: ${{ !cancelled() && steps.suite.outcome != 'skipped' }}
         run: just test-doc --locked
+      - name: Save source timestamps
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
+        working-directory: .
+        run: python3 .github/scripts/cache_sources.py save

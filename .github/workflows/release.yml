@@ -60,12 +60,17 @@ jobs:
         working-directory: .
         run: bash .github/scripts/setup-rust.sh release
       - uses: swatinem/rust-cache@v2.9.2
+        id: cache
         with:
           workspaces: packages
           shared-key: release-${{ matrix.label }}
-          key: ${{ hashFiles('packages/**/*.rs', 'packages/**/*.sql', 'packages/**/.sqlx/*.json', 'packages/**/contracts/**', 'docs/conformance-matrix.md') }}
+          key: source-times-v1-${{ hashFiles('packages/**', 'docs/conformance-matrix.md') }}
           cache-workspace-crates: true
           cache-on-failure: true
+          cache-directories: .github/.cache
+      - name: Restore unchanged source timestamps
+        working-directory: .
+        run: python3 .github/scripts/cache_sources.py restore
       - name: Install targets
         run: |
           for target in $TARGETS; do rustup target add "$target"; done
@@ -76,6 +81,10 @@ jobs:
           just release-package "${args[@]}"
       - name: Gate sizes, dependency seams, and profiles
         run: just release-check --target "$LABEL"
+      - name: Save source timestamps
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
+        working-directory: .
+        run: python3 .github/scripts/cache_sources.py save
       - uses: actions/upload-artifact@v7.0.1
         if: ${{ !cancelled() }}
         with:
