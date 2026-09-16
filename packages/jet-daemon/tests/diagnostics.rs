@@ -79,9 +79,16 @@ async fn the_daemon_records_its_life_and_refusals_without_content() {
 		"process".to_owned(),
 		"daemon stopping".to_owned(),
 	);
-	assert!(summary.contains(&started), "{summary:?}");
-	assert!(summary.contains(&rejected), "{summary:?}");
-	assert_eq!(summary.last(), Some(&stopping), "{summary:?}");
+	// Maintenance can finish logging while shutdown cancels its task.
+	// Compare the lifecycle and refusal sequence independently of that work.
+	let lifecycle: Vec<_> = summary
+		.iter()
+		.filter(|record| {
+			**record == started || **record == rejected || **record == stopping
+		})
+		.cloned()
+		.collect();
+	assert_eq!(lifecycle, vec![started, rejected, stopping], "{summary:?}");
 	let refusal = records
 		.iter()
 		.find(|record| record["message"] == "rejected client hello")
