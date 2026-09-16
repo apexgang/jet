@@ -12,6 +12,7 @@ workflows:
         - 'actions/checkout@v7.0.1'
         - 'extractions/setup-just@v4.0.0'
         - 'swatinem/rust-cache@v2.9.2'
+        - 'taiki-e/install-action@v2.87.13'
     '.github/workflows/release.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/create-github-app-token@v3.2.0'
@@ -62,3 +63,8 @@ dependencies:
         commit: 'sha1-6323deb102c322ba6fcbdcafc7e3dddab59af2b6'
         owner_id: 580492
         repo_id: 298565987
+    'taiki-e/install-action@v2.87.13':
+        ref: 'v2.87.13'
+        commit: 'sha1-26e9283f268b880168bdbd2c545dfcd60ec2c6ab'
+        owner_id: 43724913
+        repo_id: 442947557

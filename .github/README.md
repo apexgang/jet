@@ -16,6 +16,9 @@ code compiles without optimization or LTO, with 256 codegen units. Dependencies
 use optimization level 1 so cryptographic tests stay practical. Local build
 settings and optimized release profiles are unchanged. Caches include workspace
 crates, use separate keys for each build graph, and save even when tests fail.
+`just ci-test` uses nextest to schedule tests across binaries concurrently;
+Cargo doctests run in a separate step even when a test fails. The local
+`just test` command still uses Cargo's built-in runner.
 
 The baseline is [run 35009475464](https://github.com/apexgang/jet/actions/runs/35009475464):
 Linux test compilation took 9m 54s and macOS took 21m 01s. The whole macOS job

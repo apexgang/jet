@@ -74,5 +74,12 @@ jobs:
         run: rustup component add clippy
       - name: Lint
         run: just clippy -- -D warnings
+      - uses: taiki-e/install-action@v2.87.13
+        with:
+          tool: cargo-nextest@0.9.144
       - name: Run the suite
-        run: just test --locked
+        id: suite
+        run: just ci-test --locked
+      - name: Run doctests
+        if: ${{ !cancelled() && steps.suite.outcome != 'skipped' }}
+        run: just test-doc --locked
