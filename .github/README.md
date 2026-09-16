@@ -17,13 +17,13 @@ use optimization level 1 so cryptographic tests stay practical. Local build
 settings and optimized release profiles are unchanged. Caches include workspace
 crates, use separate keys for each build graph, and save even when tests fail.
 A source timestamp is restored only if its SHA-256 matches the cached input;
-changed inputs stay fresh so Cargo rebuilds them. This avoids rebuilding
+changed inputs receive current timestamps so Cargo rebuilds them. This avoids rebuilding
 unchanged workspace crates after every checkout.
 Directory timestamps also account for added and removed tracked inputs, so
 the store's migration watcher remains correct while reusing unchanged builds.
 `just ci-test` uses nextest to schedule tests across binaries concurrently;
 the bulk PTY and multi-daemon origin scenarios reserve the runner to avoid
-contention-induced deadlines. Test assertions and timeouts remain unchanged.
+contention-induced timeouts. These scenarios retain their original deadlines.
 Cargo doctests run in a separate step even when a test fails. The local
 `just test` command still uses Cargo's built-in runner.
 

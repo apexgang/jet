@@ -35,6 +35,8 @@ async fn interrupting_a_turn_cancels_it_natively_and_keeps_the_run_working() {
 		));
 		let run_id = start_run(&mut wire, id).await;
 		wait_file(&root.join("current-turn"), "initial").await;
+		run_assertions::wait_for(&mut wire, &run_id.to_string(), "active")
+			.await;
 
 		// The next input waits behind the turn that is about to be cancelled.
 		wire.send(&submit(id, "Work after the interruption")).await;
@@ -104,6 +106,8 @@ async fn stopping_a_run_escalates_to_kill_and_keeps_what_it_produced() {
 		let mut wire = connect_raw(&daemon, owner).await;
 		let run_id = start_run(&mut wire, id).await;
 		wait_file(&root.join("deaf-ready"), "").await;
+		run_assertions::wait_for(&mut wire, &run_id.to_string(), "active")
+			.await;
 
 		wire.send(&control(run_id, "stop_run")).await;
 		let accepted: Value = wire.receive().await;
