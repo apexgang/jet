@@ -43,15 +43,16 @@ async fn measure(scale: Scale, root: &Path, output: &Path) -> Measurements {
 	store.close().await;
 
 	let started = Instant::now();
-	let daemon = support::start_jetd(&home).await;
+	let mut daemon = support::start_jetd(&home).await;
 	let daemon_ready_ms = measured::elapsed_ms(started);
-	drop(daemon);
+	// kill_on_drop requests termination but does not wait for the Plane lock.
+	daemon.child.kill().await.unwrap();
 	// The first start of a day copies a Recovery snapshot (ADR-0097); the
 	// second start on the same Plane shows the ready time without it.
 	let started = Instant::now();
-	let daemon = support::start_jetd(&home).await;
+	let mut daemon = support::start_jetd(&home).await;
 	let daemon_ready_again_ms = measured::elapsed_ms(started);
-	drop(daemon);
+	daemon.child.kill().await.unwrap();
 
 	let measurements = Measurements {
 		os: std::env::consts::OS,
