@@ -1,0 +1,6 @@
+# These scenarios drive multiple daemons or nine MiB through a real PTY.
+# Reserve the runner while they execute so their deadlines measure the
+# scenario itself, rather than contention from unrelated integration tests.
+[[profile.default.overrides]]
+filter = 'package(jet-daemon) & (test(=rolling_output_reports_an_exact_gap_and_obeys_receiver_credit) | test(=run_tests::origin_run_keeps_native_processes_local_and_brokers_only_selected_destinations))'
+threads-required = "num-test-threads"

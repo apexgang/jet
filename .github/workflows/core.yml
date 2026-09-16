@@ -23,20 +23,56 @@ defaults:
     working-directory: packages
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.changes.outputs.core }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Select checks
+        id: changes
+        working-directory: .
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 .github/scripts/changes.py
+      - name: Test automation
+        working-directory: .
+        run: python3 -m unittest discover -s .github/tests -v
+
   test:
     name: ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.1
+      - name: Test native macOS packaging
+        if: runner.os == 'macOS'
+        working-directory: .
+        run: python3 -m unittest discover -s .github/tests -p test_packaging.py -v
       - uses: extractions/setup-just@v4.0.0
-      # rust-toolchain.toml selects the pinned toolchain when cargo first runs.
-      - uses: Swatinem/rust-cache@v2.9.2
+      - name: Set up Rust
+        working-directory: .
+        run: bash .github/scripts/setup-rust.sh test
+      - uses: actions/cache/restore@v6.1.0
+        id: cache
         with:
-          workspaces: packages
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/target
+            !packages/target/dist
+            .github/.cache
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-core-${{ hashFiles('packages/rust-toolchain.toml', 'packages/.cargo/config.toml', '.github/ci/cargo.toml') }}-${{ hashFiles('packages/**', 'docs/conformance-matrix.md') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-core-${{ hashFiles('packages/rust-toolchain.toml', 'packages/.cargo/config.toml', '.github/ci/cargo.toml') }}-
+      - name: Restore unchanged source timestamps
+        working-directory: .
+        run: python3 .github/scripts/cache_sources.py restore
       - name: Check migration conventions
         run: just sqlx-migrations-check
       - name: Check the dependency seams and release profiles
@@ -45,5 +81,26 @@ jobs:
         run: rustup component add clippy
       - name: Lint
         run: just clippy -- -D warnings
+      - uses: taiki-e/install-action@v2.87.13
+        with:
+          tool: cargo-nextest@0.9.144
       - name: Run the suite
-        run: just test
+        id: suite
+        run: just ci-test --locked
+      - name: Run doctests
+        if: ${{ !cancelled() && steps.suite.outcome != 'skipped' }}
+        run: just test-doc --locked
+      - name: Save source timestamps
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
+        working-directory: .
+        run: python3 .github/scripts/cache_sources.py save
+      - uses: actions/cache/save@v6.1.0
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' }}
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/target
+            !packages/target/dist
+            .github/.cache
+          key: ${{ steps.cache.outputs.cache-primary-key }}

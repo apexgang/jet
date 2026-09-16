@@ -1,6 +1,6 @@
 # The accepted performance envelope of the Jet core (ADR-0022). `just
 # budget-test` measures a Plane seeded with 10,000 Conversations and one
-# million journal Events on a reference host and `scripts/budgets.py check`
+# million journal Events on a reference host and `.github/scripts/budgets.py check`
 # fails when a measurement misses its limit here or regresses more than
 # `regression_percent` against the accepted baseline for the same operating
 # system and architecture in budget-baseline.json. `just budget-accept`

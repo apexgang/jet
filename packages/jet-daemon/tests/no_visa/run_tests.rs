@@ -47,6 +47,7 @@ pub(super) async fn workspace(
 #[tokio::test]
 async fn origin_run_keeps_native_processes_local_and_brokers_only_selected_destinations()
  {
+	let phase = std::cell::Cell::new("fixture setup");
 	tokio::time::timeout(std::time::Duration::from_secs(25), async {
         let temp = tempfile::tempdir_in("/tmp").unwrap();
         let origin_home = temp.path().join("origin");
@@ -62,20 +63,25 @@ async fn origin_run_keeps_native_processes_local_and_brokers_only_selected_desti
         let client_id = Uuid::new_v4();
         let signer = bin.join("signer");
         executable(&signer, &format!("#!/bin/sh\nset -eu\nexport JET_TEST_SIGNATURE=$(mktemp)\ntrap 'rm -f \"$JET_TEST_SIGNATURE\"' EXIT\n{} --ignored --exact fake_platform_signer >/dev/null\ncat \"$JET_TEST_SIGNATURE\"\n", quote(std::env::current_exe().unwrap().to_str().unwrap())));
-        executable(&bin.join("ssh"), &format!("#!/bin/sh\nfor arg; do [ \"$arg\" != unavailable-destination ] || exit 1; done\nexec {} connect --stdio --home {}\n", quote(env!("CARGO_BIN_EXE_jetd")), quote(destination_home.to_str().unwrap())));
+        executable(&bin.join("ssh"), &format!("#!/bin/sh\nif [ \"$1\" = -V ]; then printf \"OpenSSH_fixture\\n\"; exit 0; fi\nfor arg; do [ \"$arg\" != unavailable-destination ] || exit 1; done\nexec {} connect --stdio --home {}\n", quote(env!("CARGO_BIN_EXE_jetd")), quote(destination_home.to_str().unwrap())));
+        phase.set("destination startup");
         let destination = support::start_jetd(&destination_home).await;
         let owner = support::connect(&destination, Uuid::new_v4()).await;
+        phase.set("destination workspace and pairing");
         let (_, target) = workspace(&owner, &temp.path().join("destination-repo")).await;
         let paired = support::connect(&destination, client_id).await;
         support::pairing::pair(&owner, &paired, client_id, &ed25519_dalek::SigningKey::from_bytes(&[38; 32])).await;
+        phase.set("origin startup");
         let origin = support::start_jetd_process(support::jetd(&origin_home)
             .args(["--identity-signer", signer.to_str().unwrap(), "--identity-client-id", &client_id.to_string()])
             .env("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()))
             .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/jet-test-bus")).await;
         let client = support::connect(&origin, client_id).await;
+        phase.set("origin workspace and binding");
         let (conversation, source) = workspace(&client, &temp.path().join("origin-repo")).await;
         let binding = client.bind_account(Uuid::now_v7(), "openai", "Origin", None, jet_protocol::CredentialSource::HarnessNative).await.unwrap();
         let mut raw = support::connect_raw(&origin, client_id).await;
+        phase.set("run admission");
         raw.send(&json!({"kind":"command","id":1,"command_id":Uuid::now_v7(),"command":{"type":"start_no_visa_run",
             "conversation_id":conversation.conversation_id,"origin_plane_id":client.status().await.unwrap().plane_id,"account_binding_id":binding.binding_id,
             "craft":"fake","prompt":"Make a change","destinations":[{"plane_id":owner.status().await.unwrap().plane_id,"workspace_id":target.workspace_id,"ssh_endpoint":"paired-destination"},{"plane_id":Uuid::new_v4(),"workspace_id":Uuid::new_v4(),"ssh_endpoint":"unavailable-destination"}]
@@ -84,9 +90,11 @@ async fn origin_run_keeps_native_processes_local_and_brokers_only_selected_desti
         assert_eq!(admitted["result"]["type"], "run_created", "{admitted}");
         let run_id:Uuid = serde_json::from_value(admitted["result"]["run_id"].clone()).unwrap();
         let source = Path::new(&source.root);
+        phase.set("remote tool results");
         let waiting = std::time::Instant::now();
         while !source.join("remote-results").exists() {
             if waiting.elapsed() > std::time::Duration::from_secs(18) {
+                phase.set("stalled run inspection");
                 raw.send(&json!({"kind":"query","id":5,"query":{"type":"run_execution","run_id":run_id}})).await;
                 let snapshot:Value = raw.receive().await;
                 panic!("origin broker stalled: {snapshot}");
@@ -101,6 +109,7 @@ async fn origin_run_keeps_native_processes_local_and_brokers_only_selected_desti
         assert!(!source.join("from-origin.txt").exists());
         assert!(source.join("result.txt").exists(), "the native Harness ran on the origin");
         assert!(!Path::new(&target.root).join("result.txt").exists());
+        phase.set("final run and conversation snapshots");
         raw.send(&json!({"kind":"query","id":2,"query":{"type":"run_execution","run_id":run_id}})).await;
         let reply:Value = raw.receive().await;
         let execution:jet_protocol::RunExecution = serde_json::from_value(reply["result"].clone()).unwrap();
@@ -108,5 +117,5 @@ async fn origin_run_keeps_native_processes_local_and_brokers_only_selected_desti
         assert_eq!(execution.no_visa.unwrap().native_unavailable, vec!["remote_checkpoints", "tool_discovery", "extensions", "sandbox_internals", "persistent_terminals"]);
         assert_eq!(client.conversation(conversation.conversation_id).await.unwrap().conversation.conversation_id, conversation.conversation_id);
         std::fs::write(source.join("continue"), "go").unwrap();
-    }).await.unwrap();
+    }).await.unwrap_or_else(|error| panic!("{error} during {}", phase.get()));
 }

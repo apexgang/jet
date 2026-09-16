@@ -2,11 +2,11 @@
 
 ### Issue tracker
 
-Issues are tracked in this repository’s GitHub Issues. See `docs/agents/issue-tracker.md`.
+Issues are tracked in this repository’s GitHub Issues. See `.github/docs/issue-tracker.md`.
 
 ### Triage labels
 
-Use the five default canonical triage labels. See `docs/agents/triage-labels.md`.
+Use the five default canonical triage labels. See `.github/docs/triage-labels.md`.
 
 ### Domain docs
 

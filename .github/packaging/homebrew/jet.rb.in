@@ -1,0 +1,67 @@
+class Jet < Formula
+  desc "Run and manage coding agent conversations across machines"
+  homepage "https://github.com/apexgang/jet"
+  version "@VERSION@"
+  license "Apache-2.0"
+
+  on_macos do
+    url "@URL@/jet-core-@VERSION@-universal-apple-darwin.tar.gz"
+    sha256 "@MACOS_SHA256@"
+  end
+
+  on_linux do
+    on_arm do
+      url "@URL@/jet-core-@VERSION@-aarch64-unknown-linux-gnu.tar.gz"
+      sha256 "@LINUX_ARM_SHA256@"
+    end
+    on_intel do
+      url "@URL@/jet-core-@VERSION@-x86_64-unknown-linux-gnu.tar.gz"
+      sha256 "@LINUX_INTEL_SHA256@"
+    end
+  end
+
+  def install
+    service_path = "#{HOMEBREW_PREFIX}/bin:#{HOMEBREW_PREFIX}/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
+    libexec.install "jetd", "jetfueld", "jet-craft-claude", "jet-craft-codex", "manifest.json"
+    bin.install_symlink libexec/"jetd", libexec/"jetfueld", libexec/"jet-craft-claude", libexec/"jet-craft-codex"
+    # Helpers must survive brew services stop/restart, just as they survive a
+    # GUI-managed daemon restart. Homebrew's generated units kill the group.
+    (prefix/"com.apexgang.jet.homebrew.plist").write <<~PLIST
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0"><dict>
+        <key>Label</key><string>com.apexgang.jet.homebrew</string>
+        <key>ProgramArguments</key><array>
+          <string>#{opt_bin}/jetd</string><string>serve</string>
+          <string>--channel</string><string>homebrew</string>
+        </array>
+        <key>EnvironmentVariables</key><dict><key>PATH</key><string>#{service_path}</string></dict>
+        <key>RunAtLoad</key><true/>
+        <key>KeepAlive</key><true/>
+        <key>AbandonProcessGroup</key><true/>
+        <key>ExitTimeOut</key><integer>15</integer>
+      </dict></plist>
+    PLIST
+    (prefix/"jet-homebrew.service").write <<~SERVICE
+      [Unit]
+      Description=Jet daemon
+      [Service]
+      ExecStart=#{opt_bin}/jetd serve --channel homebrew
+      Environment="PATH=#{service_path}"
+      KillMode=process
+      TimeoutStopSec=15
+      Restart=always
+      RestartSec=2
+      [Install]
+      WantedBy=default.target
+    SERVICE
+  end
+
+  service do
+    name macos: "com.apexgang.jet.homebrew", linux: "jet-homebrew"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/jetd core describe")
+  end
+end

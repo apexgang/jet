@@ -7,7 +7,7 @@ use jet_protocol::{
 	Frame, FrameReader, FrameWriter, PREFACE, decode_control, encode_control,
 };
 use pretty_assertions::assert_eq;
-use std::process::Stdio;
+use std::{process::Stdio, time::Duration};
 use support::{Daemon, hello, start_jetd};
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -58,6 +58,23 @@ async fn the_rust_remote_client_reads_the_same_plane_as_the_local_client() {
 	let owner = support::connect(&daemon, Uuid::new_v4()).await;
 	let local = support::connect(&daemon, identity.0).await;
 	support::pairing::pair(&owner, &local, identity.0, &identity.1).await;
+	// Pairing wakes the daily snapshot worker. Wait for its published result
+	// before comparing two sequential reads of the entire status object.
+	tokio::time::timeout(Duration::from_secs(10), async {
+		while local
+			.status()
+			.await
+			.unwrap()
+			.recovery
+			.unwrap()
+			.snapshots
+			.is_empty()
+		{
+			tokio::time::sleep(Duration::from_millis(10)).await;
+		}
+	})
+	.await
+	.unwrap();
 	let mut child = Command::new(env!("CARGO_BIN_EXE_jetd"))
 		.args(["connect", "--stdio", "--home"])
 		.arg(&home)

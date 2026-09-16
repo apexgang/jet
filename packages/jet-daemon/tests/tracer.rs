@@ -43,7 +43,22 @@ async fn status_is_answered_before_and_after_a_daemon_crash_and_restart() {
 		.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)
 		.await
 		.unwrap();
-	let before = client.status().await.unwrap();
+	// Startup maintenance can publish the daily snapshot before or after
+	// the conversation is created. Wait for it before crashing the daemon,
+	// then require the same snapshot metadata to survive the restart.
+	let before =
+		tokio::time::timeout(std::time::Duration::from_secs(10), async {
+			loop {
+				let status = client.status().await.unwrap();
+				if !status.recovery.as_ref().unwrap().snapshots.is_empty() {
+					break status;
+				}
+				tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+			}
+		})
+		.await
+		.unwrap();
+	let snapshots = before.recovery.as_ref().unwrap().snapshots.clone();
 	first.child.kill().await.unwrap();
 
 	let second = start_jetd(&home).await;
@@ -62,7 +77,7 @@ async fn status_is_answered_before_and_after_a_daemon_crash_and_restart() {
 				recovery: Some(RecoveryStatus {
 					state: RecoveryState::Serving,
 					reason: None,
-					snapshots: vec![],
+					snapshots: snapshots.clone(),
 					deletion_ledger: Some(DeletionLedgerStatus::Verified {
 						deletions: 0,
 					}),
@@ -78,7 +93,7 @@ async fn status_is_answered_before_and_after_a_daemon_crash_and_restart() {
 				recovery: Some(RecoveryStatus {
 					state: RecoveryState::Serving,
 					reason: None,
-					snapshots: after.recovery.clone().unwrap().snapshots,
+					snapshots,
 					deletion_ledger: Some(DeletionLedgerStatus::Verified {
 						deletions: 0,
 					}),

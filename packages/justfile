@@ -37,6 +37,11 @@ install:
 test *args: build-run-helper
 	just cargo-test "$@"
 
+# CI runs test binaries concurrently; the workflow runs Cargo doctests separately.
+[unix]
+ci-test *args: build-run-helper
+	RUST_MIN_STACK={{ rust_min_stack }} cargo nextest run --config-file ../.github/ci/nextest.toml --no-fail-fast "$@"
+
 # Cargo test defaults shared by every test recipe; `test` adds the run helper.
 [unix]
 [private]
@@ -89,8 +94,8 @@ emit-contracts root:
 	cargo run -q -p jet-protocol --features schema --example jet-schema > "$contracts/jet-v1.schema.json"
 	cargo run -q -p jet-protocol --features schema --example remote-tool-schema > "$contracts/remote-tool.schema.json"
 	# Craft models serve the contract test; only clients need the Jet models.
-	python3 ../scripts/wire-models.py "$contracts/craft-v1.schema.json" "$contracts/CraftModels.ts" "$contracts/CraftModels.swift"
-	python3 ../scripts/wire-models.py "$contracts/jet-v1.schema.json" "$typescript/JetModels.ts" "$swift/JetModels.swift"
+	python3 ../.github/scripts/wire-models.py "$contracts/craft-v1.schema.json" "$contracts/CraftModels.ts" "$contracts/CraftModels.swift"
+	python3 ../.github/scripts/wire-models.py "$contracts/jet-v1.schema.json" "$typescript/JetModels.ts" "$swift/JetModels.swift"
 
 # Fail when a committed contract no longer matches the Rust wire DTOs.
 contracts-check:
@@ -141,12 +146,12 @@ budget-test: && budget-check
 # Gate this host's last budget measurements against budgets.toml and the
 # accepted baseline; a regression over the accepted percentage fails.
 budget-check:
-	python3 ../scripts/budgets.py check
+	python3 ../.github/scripts/budgets.py check
 
 # Record this host's last budget measurements as accepted, with a --justification.
 [unix]
 budget-accept *args:
-	python3 ../scripts/budgets.py accept "$@"
+	python3 ../.github/scripts/budgets.py accept "$@"
 
 build:
 	cargo build
@@ -159,22 +164,22 @@ build-release:
 # (ADR-0026, ADR-0059). Two Apple targets merge into one universal payload.
 [unix]
 release-package *args:
-	python3 ../scripts/release.py package "$@"
+	python3 ../.github/scripts/release.py package "$@"
 
 # Gate a packaged --target against the release envelope in release.toml:
 # per-architecture size budgets, dependency seams, profiles, and symbols.
 [unix]
 release-check *args:
-	python3 ../scripts/release.py check "$@"
+	python3 ../.github/scripts/release.py check "$@"
 
 # Record a packaged --target's sizes as accepted, with a --justification.
 [unix]
 release-accept *args:
-	python3 ../scripts/release.py accept "$@"
+	python3 ../.github/scripts/release.py accept "$@"
 
 # Check only the dependency seams and profiles; needs no release build.
 release-envelope:
-	python3 ../scripts/release.py envelope
+	python3 ../.github/scripts/release.py envelope
 
 clean:
 	cargo clean
@@ -234,4 +239,4 @@ sqlx-check: sqlx-migrations-check
 # Release packaging still enforces the per-architecture budgets in ADR-0054.
 recovery-crypto-budget:
 	cargo build -p jet-core --example recovery-crypto-baseline --example recovery-crypto-budget
-	python3 ../scripts/recovery-crypto-budget.py target/debug/examples
+	python3 ../.github/scripts/recovery-crypto-budget.py target/debug/examples

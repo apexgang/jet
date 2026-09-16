@@ -14,8 +14,11 @@ supported core platforms, Linux and macOS (ADR-0032).
 host and no GUI toolchain: the ordinary suite, clippy, the migration
 conventions, the dependency envelope, and the contract drift check. The
 `Core tests` workflow runs the same on `ubuntu-latest` and `macos-latest`
-for every pull request and push to `main`, and the `Wire contracts`
-workflow runs the TypeScript and Swift corpora. The reference measurements
+when core inputs change in a pull request or push to `main`. The `Wire
+contracts` workflow checks schema drift and the Rust, TypeScript and Swift
+corpora when their inputs change. CI uses the fast development-profile
+overrides in `.github/ci/cargo.toml`; release profiles remain optimized by role.
+The reference measurements
 below run on the fixed reference hosts by hand, never on shared runners.
 
 | Category | Gate |

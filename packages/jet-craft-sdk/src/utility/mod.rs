@@ -85,10 +85,10 @@ pub(crate) async fn write(
 	value: &impl serde::Serialize,
 ) -> Result<(), CraftError> {
 	let bytes = serde_json::to_vec(value).map_err(|_| invalid())?;
-	tokio::io::stdout()
-		.write_all(&bytes)
-		.await
-		.map_err(|_| invalid())
+	let mut stdout = tokio::io::stdout();
+	stdout.write_all(&bytes).await.map_err(|_| invalid())?;
+	// One-shot Crafts exit immediately; finish the blocking stdout write first.
+	stdout.flush().await.map_err(|_| invalid())
 }
 pub(crate) fn invalid() -> CraftError {
 	CraftError::Incompatible
