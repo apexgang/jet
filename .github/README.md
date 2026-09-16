@@ -19,6 +19,8 @@ crates, use separate keys for each build graph, and save even when tests fail.
 A source timestamp is restored only if its SHA-256 matches the cached input;
 changed inputs stay fresh so Cargo rebuilds them. This avoids rebuilding
 unchanged workspace crates after every checkout.
+Directory timestamps also account for added and removed tracked inputs, so
+the store's migration watcher remains correct while reusing unchanged builds.
 `just ci-test` uses nextest to schedule tests across binaries concurrently;
 the bulk PTY and multi-daemon origin scenarios reserve the runner to avoid
 contention-induced deadlines. Test assertions and timeouts remain unchanged.
