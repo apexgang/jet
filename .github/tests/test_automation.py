@@ -17,7 +17,8 @@ import release_assets
 class ChangeSelection(unittest.TestCase):
     def test_unrelated_changes_skip_builds(self):
         self.assertEqual(changes.classify(['docs/usage.md', 'apps/jet/jet/Views/Home.swift',
-                                          '.github/README.md', '.github/docs/issue-tracker.md']),
+                                          '.github/workflows/README.md',
+                                          '.github/docs/issue-tracker.md']),
                          {'core': False, 'contracts': False})
 
     def test_core_does_not_rebuild_contracts(self):

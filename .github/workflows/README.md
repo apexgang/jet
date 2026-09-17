@@ -1,7 +1,9 @@
 # CI and releases
 
-GitHub workflows, their scripts, packaging, and issue-tracker instructions live
-here. `packages/justfile` remains the entry point for local backend commands.
+This directory contains Jet's GitHub workflows. Their supporting scripts,
+packaging files, tests, and issue-tracker instructions live elsewhere under
+`.github/`. `packages/justfile` remains the entry point for local backend
+commands.
 
 ## CI
 
@@ -59,7 +61,7 @@ the formula after a newer stable release is published.
 
 Failed size gates retain build artifacts for seven days but prevent publication.
 The historical `jetd` size overage is documented in
-[Core distribution](../docs/core-distribution.md); this workflow does not relax
+[Core distribution](../../docs/core-distribution.md); this workflow does not relax
 that budget. GUI signing and notarization remain separate distribution steps.
 
 ## Validation

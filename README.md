@@ -1,27 +1,61 @@
 # Jet
 
-Jet is a multi-platform app for running and managing AI coding Harness
-conversations across local and remote computers.
+Jet runs AI coding Conversations across local and remote computers from one
+desktop app. It gives Codex and Claude Code the same project, run, terminal,
+approval, and history model without hiding the native Harness underneath.
 
-Jet keeps each Conversation's authoritative state on one Home Plane. GUI clients
-connect to the Plane's `jetd` daemon, while Jet Crafts adapt Codex and Claude Code
-to the same versioned protocol. Work can run on the Home Plane or on a paired
-destination Plane.
+Each Conversation has one authoritative Home Plane. A Plane is a computer
+running `jetd`. Jet can run a Harness on that Plane, run it natively on a paired
+remote Plane, or keep the Harness local while it works through controlled remote
+tools.
 
-Jet is under active development. The core targets macOS and Linux. The repository
-also contains a native Apple client and a cross-platform Tauri client.
+> [!WARNING]
+> Jet is under active development. The core targets macOS and Linux. The native
+> Apple and Tauri clients are still being built, and the v1 release contract has
+> open gates.
 
-## Repository layout
+## What Jet manages
 
-- [`packages`](packages/) contains the Rust workspace, including `jetd`,
-  `jetfueld`, the protocol, the store, the client library, and bundled Crafts.
-- [`apps/jet`](apps/jet/) contains the SwiftUI client.
-- [`apps/jet-tauri`](apps/jet-tauri/) contains the Tauri and Svelte client.
-- [`docs`](docs/) contains the design, protocol, operations, and recovery
-  documentation.
+- Durable Conversations with queued turns, schedules, approvals, and retained
+  history.
+- Isolated Git Workspaces so concurrent Conversations do not overwrite one
+  another.
+- Local and paired remote Planes, with explicit authority and recovery rules.
+- Codex and Claude Code through versioned Jet Crafts instead of GUI-specific
+  integrations.
+- Run recovery through `jetfueld`, which keeps an execution alive while `jetd`
+  restarts or upgrades.
 
-The [domain glossary](CONTEXT.md) defines terms such as Conversation, Plane,
-Workspace, Run, Harness, and Craft.
+## Architecture
+
+```text
+SwiftUI client             Tauri client
+       \                       /
+        +---- Jet protocol ---+
+                   |
+                 jetd
+          authoritative state
+             /            \
+        jetfueld       Jet Crafts
+     run continuity    /         \
+                  Codex CLI   Claude Code
+```
+
+Every GUI uses the same versioned protocol. `jetd` owns the state for its Plane,
+Jet Crafts translate Harness-native events and commands, and `jetfueld` keeps
+active work alive if the daemon is temporarily unavailable.
+
+The [domain glossary](CONTEXT.md) defines Conversation, Plane, Workspace, Run,
+Harness, Craft, and the other terms used throughout the repository.
+
+## Repository
+
+| Path | Contents |
+| --- | --- |
+| [`packages/`](packages/) | Rust workspace for `jetd`, `jetfueld`, protocols, storage, clients, and bundled Crafts |
+| [`apps/jet/`](apps/jet/) | Native SwiftUI client for Apple platforms |
+| [`apps/jet-tauri/`](apps/jet-tauri/) | Cross-platform Tauri and Svelte client |
+| [`docs/`](docs/) | Behavior, operations, recovery, protocol, and architecture records |
 
 ## Install the core
 
@@ -32,12 +66,13 @@ brew install apexgang/tap/jet
 brew services start apexgang/tap/jet
 ```
 
-See [core distribution](docs/core-distribution.md) for release contents,
-platforms, version management, and rollback behavior.
+The GUI clients have a separate distribution lifecycle. See
+[core distribution](docs/core-distribution.md) for the packaged executables,
+supported targets, upgrades, and rollback behavior.
 
 ## Build from source
 
-Development requires Git, [Rustup](https://rustup.rs/), and
+Install Git, [Rustup](https://rustup.rs/), and
 [`just`](https://just.systems/). The repository pins its Rust toolchain.
 
 ```sh
@@ -48,15 +83,23 @@ just build
 just test
 ```
 
-Run `just --list` in `packages/` to see the supported development commands. The
-wire-contract checks also require Node.js 24 or newer and Swift.
+Run `just --list` from `packages/` to see the supported development commands.
+Wire-contract checks also require Node.js 24 or newer and Swift.
 
-## Contributing and security
+## Project documentation
+
+- [Core v1 release contract](docs/release-contract.md)
+- [Harness conformance matrix](docs/conformance-matrix.md)
+- [Remote connections](docs/remote-connections.md)
+- [Visa execution](docs/visa-runs.md) and
+  [No-Visa execution](docs/no-visa-execution.md)
+- [Recovery](docs/recovery.md)
 
 Read the [contribution guide](.github/CONTRIBUTING.md) before opening a pull
-request. Report vulnerabilities through the process in the
-[security policy](.github/SECURITY.md). Everyone participating in the project
-must follow the [code of conduct](.github/CODE_OF_CONDUCT.md).
+request. Report vulnerabilities through the
+[security policy](.github/SECURITY.md), not a public issue. Everyone
+participating in the project must follow the
+[code of conduct](.github/CODE_OF_CONDUCT.md).
 
 ## License
 

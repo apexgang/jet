@@ -41,7 +41,7 @@ and publishes their archives and checksums together as a GitHub release. Code si
 notarization belong to the GUI distributions and run after these
 payloads exist. Stable releases update `apexgang/homebrew-tap` using an
 Ape Bonker installation token scoped to that repository. Prereleases leave
-the stable formula unchanged. See [CI and releases](../.github/README.md)
+the stable formula unchanged. See [CI and releases](../.github/workflows/README.md)
 for credentials and retry instructions.
 
 `brew install apexgang/tap/jet` installs the compiled payload without Rust.

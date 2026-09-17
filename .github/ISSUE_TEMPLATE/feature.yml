@@ -1,0 +1,54 @@
+name: Feature request
+description: Propose a change to Jet
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues before proposing a change. Explain the problem first so the design can be evaluated in context.
+
+  - type: checkboxes
+    id: existing-issue
+    attributes:
+      label: Existing issue
+      options:
+        - label: I searched the open and closed issues and did not find an existing proposal.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who is affected, and what can they not do today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-behavior
+    attributes:
+      label: Proposed behavior
+      description: Describe the user-visible behavior you want Jet to provide.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe workarounds or other designs you considered, if any.
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add examples, mockups, links, or technical constraints that clarify the proposal.
+
+  - type: checkboxes
+    id: code-of-conduct
+    attributes:
+      label: Code of conduct
+      options:
+        - label: I agree to follow this project's Code of Conduct.
+          required: true

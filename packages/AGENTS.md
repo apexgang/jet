@@ -94,7 +94,7 @@ If the change is larger, explore whether it can be split into reviewable stages 
 
 ## Release packaging
 
-Release payloads, the per-user version layout, and the release envelope are described in [Core distribution](../docs/core-distribution.md). `just release-envelope` checks the dependency seams and profiles without a release build; `just release-package --target <triple>` and `just release-check --target <label>` build and gate a payload. Sizes are accepted per label in `.github/packaging/release-baseline.json` through `just release-accept`. GitHub automation, packaging, and their scripts live under `.github/`; see [CI and releases](../.github/README.md).
+Release payloads, the per-user version layout, and the release envelope are described in [Core distribution](../docs/core-distribution.md). `just release-envelope` checks the dependency seams and profiles without a release build; `just release-package --target <triple>` and `just release-check --target <label>` build and gate a payload. Sizes are accepted per label in `.github/packaging/release-baseline.json` through `just release-accept`. GitHub automation, packaging, and their scripts live under `.github/`; see [CI and releases](../.github/workflows/README.md).
 
 ## Release contract
 
