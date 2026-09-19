@@ -566,10 +566,11 @@ pub(crate) mod tests {
 	async fn collection_removes_crash_orphans_only_after_grace_and_never_follows_links()
 	 {
 		use crate::test_support::{
-			FixedProbe, ManualClock, equipped, start_core_with,
+			FixedProbe, ManualClock, equipped, set_modified, start_core_with,
 		};
 		let home = tempfile::tempdir().unwrap();
-		let clock = ManualClock::at(std::time::SystemTime::now());
+		let created_at = std::time::SystemTime::now();
+		let clock = ManualClock::at(created_at);
 		let core = start_core_with(
 			&home.path().join("plane.sqlite3"),
 			clock.clone(),
@@ -578,12 +579,13 @@ pub(crate) mod tests {
 		.await;
 		assert_eq!(core.collect_artifacts(&actor()).await.unwrap(), 0);
 		let directory = home.path().join("artifacts/payloads");
-		std::fs::write(directory.join(ABC), b"abc").unwrap();
-		std::fs::write(
-			directory.join(format!(".pending-{}", uuid::Uuid::new_v4())),
-			b"interrupted",
-		)
-		.unwrap();
+		let orphan = directory.join(ABC);
+		std::fs::write(&orphan, b"abc").unwrap();
+		set_modified(&orphan, created_at);
+		let pending =
+			directory.join(format!(".pending-{}", uuid::Uuid::new_v4()));
+		std::fs::write(&pending, b"interrupted").unwrap();
+		set_modified(&pending, created_at);
 		let protected = home.path().join("protected");
 		std::fs::write(&protected, b"keep").unwrap();
 		std::os::unix::fs::symlink(&protected, directory.join("0".repeat(64)))

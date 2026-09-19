@@ -67,6 +67,13 @@ pub(crate) async fn start_core(path: &Path) -> Core {
 		.await
 }
 
+pub(crate) fn set_modified(path: &Path, modified: SystemTime) {
+	std::fs::File::open(path)
+		.unwrap()
+		.set_times(std::fs::FileTimes::new().set_modified(modified))
+		.unwrap();
+}
+
 /// The same core with an injected clock or Plane observation.
 pub(crate) async fn start_core_with(
 	path: &Path,
