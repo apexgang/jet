@@ -4,7 +4,7 @@ import subprocess
 
 
 def classify(paths):
-    automation = any(p.startswith('.github/') and p != '.github/README.md'
+    automation = any(p.startswith('.github/') and p != '.github/workflows/README.md'
                      and not p.startswith('.github/docs/') for p in paths)
     shared = automation or any(p in {
         'packages/Cargo.toml', 'packages/Cargo.lock', 'packages/justfile',

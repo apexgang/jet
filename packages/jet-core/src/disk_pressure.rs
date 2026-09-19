@@ -296,14 +296,15 @@ pub(crate) mod tests {
 	async fn pressure_preserves_published_artifacts_and_collects_only_expired_disposable_data()
 	 {
 		use crate::test_support::{
-			FixedProbe, ManualClock, equipped, start_core_with,
+			FixedProbe, ManualClock, equipped, set_modified, start_core_with,
 		};
 		use crate::{
 			ArtifactDescriptor, SettingKey, SettingScope, SettingValue,
 		};
 		let home = tempfile::tempdir().unwrap();
 		let path = home.path().join("plane.sqlite3");
-		let clock = ManualClock::at(std::time::SystemTime::now());
+		let created_at = std::time::SystemTime::now();
+		let clock = ManualClock::at(created_at);
 		let core =
 			start_core_with(&path, clock.clone(), FixedProbe::new(equipped()))
 				.await;
@@ -344,18 +345,19 @@ pub(crate) mod tests {
 		.unwrap();
 		let cache = home.path().join("cache");
 		std::fs::create_dir(&cache).unwrap();
-		std::fs::write(cache.join("0".repeat(64)), b"cache").unwrap();
+		let cached = cache.join("0".repeat(64));
+		std::fs::write(&cached, b"cache").unwrap();
+		set_modified(&cached, created_at);
 		std::fs::write(cache.join("unrecognized"), b"keep").unwrap();
 		let protected = home.path().join("workspaces");
 		std::fs::create_dir_all(&protected).unwrap();
 		std::fs::write(protected.join("dirty"), b"keep").unwrap();
 		std::os::unix::fs::symlink(&protected, cache.join("1".repeat(64)))
 			.unwrap();
-		std::fs::write(
-			home.path().join("artifacts/payloads").join("2".repeat(64)),
-			b"orphan",
-		)
-		.unwrap();
+		let orphan =
+			home.path().join("artifacts/payloads").join("2".repeat(64));
+		std::fs::write(&orphan, b"orphan").unwrap();
+		set_modified(&orphan, created_at);
 		assert_eq!(core.collect_artifacts(&actor()).await.unwrap(), 0);
 		core.close().await;
 		let core =

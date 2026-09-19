@@ -1,0 +1,98 @@
+name: Bug report
+description: Report a reproducible problem in Jet
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues before filing a new one. Report security vulnerabilities through the private link in the issue chooser.
+
+  - type: checkboxes
+    id: existing-issue
+    attributes:
+      label: Existing issue
+      options:
+        - label: I searched the open and closed issues and did not find a duplicate.
+          required: true
+
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: What happened?
+      description: Describe the observable behavior and its impact.
+      placeholder: Tell us what Jet did and what you could not do as a result.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Give the smallest reliable sequence that triggers the problem.
+      placeholder: |
+        1. Start Jet with ...
+        2. Open ...
+        3. Run ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: What should Jet have done instead?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options:
+        - Jet core or daemon
+        - Codex Craft
+        - Claude Code Craft
+        - Native Apple client
+        - Tauri client
+        - Remote connection or pairing
+        - Installation or upgrade
+        - Other or unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include every version or platform detail needed to reproduce the problem.
+      value: |
+        - Jet version or commit:
+        - Operating system and version:
+        - Harness and version, if relevant:
+        - Installation method:
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste relevant redacted logs. This field formats them as shell output.
+      render: shell
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add screenshots, links, or other details that help explain the problem.
+
+  - type: checkboxes
+    id: code-of-conduct
+    attributes:
+      label: Code of conduct
+      options:
+        - label: I agree to follow this project's Code of Conduct.
+          required: true
