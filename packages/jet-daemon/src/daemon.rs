@@ -161,8 +161,10 @@ pub(crate) async fn run(
 	);
 	let utility_core = Arc::clone(&core);
 	let utility_work = tokio::spawn(async move {
-		utility_core.wait_until_serving().await;
 		loop {
+			// Serving now, or again once a snapshot is restored over a
+			// store the idle check found damaged (ADR-0077).
+			utility_core.wait_until_serving().await;
 			if let Err(error) = utility_core.perform_git_deliveries().await {
 				core_failure(
 					DiagnosticComponent::Utility,
@@ -178,8 +180,8 @@ pub(crate) async fn run(
 	let recovery_core = Arc::clone(&core);
 	let work_core = Arc::clone(&core);
 	let run_work = tokio::spawn(async move {
-		work_core.wait_until_serving().await;
 		loop {
+			work_core.wait_until_serving().await;
 			work_core.wait_for_run_work().await;
 			if let Err(error) = work_core.perform_runs().await {
 				core_failure(
@@ -206,6 +208,14 @@ pub(crate) async fn run(
 			);
 		}
 		loop {
+			// The idle check below can put a serving Plane into Recovery
+			// mode; what follows then waits for the restoration, like a
+			// Plane that opened its store damaged (ADR-0077).
+			if recovery_core.recovery_mode() != jet_core::RecoveryMode::Serving
+			{
+				recovery_core.wait_until_serving().await;
+				reconcile_at_start(&recovery_core).await;
+			}
 			let mut retry = false;
 			if let Err(error) = recovery_core.reconcile_crafts().await {
 				retry = true;
@@ -358,6 +368,41 @@ pub(crate) async fn run(
 					core_failure(
 						DiagnosticComponent::Recovery,
 						"cannot take the Recovery snapshot",
+						&error,
+					);
+				}
+			}
+			// The deep check of the live store runs on these same wakeups,
+			// never on a timer of its own, and only while no Command,
+			// Effect, or execution is active (ADR-0077, ADR-0055). Damage
+			// puts the Plane in read-only Recovery mode, which the top of
+			// this loop waits out at once, so the restoration is followed
+			// by the reconciliation a start gets.
+			match recovery_core.check_store_if_idle().await {
+				Ok(jet_core::DeepCheckOutcome::Damaged) => {
+					Diagnostic::error(
+						DiagnosticComponent::Recovery,
+						"store failed its deep check; serving read-only Recovery mode",
+					)
+					.emit();
+					continue;
+				}
+				Ok(jet_core::DeepCheckOutcome::Passed) => {
+					Diagnostic::info(
+						DiagnosticComponent::Recovery,
+						"deep check of the store passed",
+					)
+					.emit();
+				}
+				Ok(
+					jet_core::DeepCheckOutcome::NotDue
+					| jet_core::DeepCheckOutcome::Busy
+					| jet_core::DeepCheckOutcome::Abandoned,
+				) => {}
+				Err(error) => {
+					core_failure(
+						DiagnosticComponent::Recovery,
+						"cannot run the deep check of the store",
 						&error,
 					);
 				}

@@ -26,6 +26,8 @@ mod checkpoint;
 mod command;
 mod conversation;
 pub use craft::lifecycle::CraftDisableMode;
+mod deep_check;
+pub use deep_check::DeepCheck;
 mod deletion;
 pub use deletion::{DeletedIdentityKind, DeletionLedger, DeletionRecord};
 mod effect;
@@ -183,6 +185,8 @@ pub struct Store {
 	database: PathBuf,
 	/// When the next routine Recovery snapshot is due (ADR-0097).
 	snapshots: snapshot::Tracker,
+	/// Whether a deep check of the live store is owed (ADR-0077).
+	deep_checks: deep_check::Tracker,
 }
 
 /// One connection to the database and what opening it established.
@@ -238,11 +242,12 @@ impl Store {
 			opened: std::sync::RwLock::new(opened),
 			database: path.to_owned(),
 			snapshots,
+			deep_checks: deep_check::Tracker::at_open(),
 		})
 	}
 
 	/// Whether this store passed the checks that make it authoritative, as
-	/// established when it was opened or last restored.
+	/// established when it was opened, last restored, or last deep-checked.
 	#[must_use]
 	pub fn integrity(&self) -> StoreIntegrity {
 		self.opened().integrity.clone()
@@ -445,6 +450,7 @@ impl Store {
 	///
 	/// Returns a [`StoreError`] when the increment cannot be committed.
 	pub async fn record_daemon_start(&self) -> Result<PlaneRecord, StoreError> {
+		self.require_writable()?;
 		plane::record_daemon_start(&self.pool()).await
 	}
 

@@ -132,6 +132,7 @@ impl Core {
 			capabilities: tokio::sync::RwLock::new(capabilities),
 			security: tokio::sync::RwLock::new(security),
 			recovery: tokio::sync::watch::channel(recovery).0,
+			commands_in_flight: std::sync::atomic::AtomicUsize::new(0),
 			started_at,
 			effect_reconciliation: tokio::sync::Mutex::new(()),
 			craft_artifact_publication: tokio::sync::Mutex::new(()),

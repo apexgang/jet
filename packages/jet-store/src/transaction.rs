@@ -122,6 +122,7 @@ impl Store {
 		&self,
 		work: impl AsyncFnOnce(&mut WriteTransaction) -> Result<T, E>,
 	) -> Result<T, E> {
+		self.require_writable().map_err(E::from)?;
 		// A write takes its lock up front. A deferred transaction that reads
 		// before it writes cannot upgrade, and SQLite refuses it outright
 		// rather than waiting on the busy handler.
@@ -241,6 +242,7 @@ impl Store {
 						.fences_applied = Some(applied);
 				}
 				self.snapshots.mark_dirty();
+				self.deep_checks.mark_dirty();
 				Ok(value)
 			}
 			Err(error) => {
