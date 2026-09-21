@@ -225,6 +225,11 @@ impl Core {
 					}
 				}))
 			}
+			Query::VerifyCredentialStore => {
+				Ok(QueryResult::CredentialStoreVerification(
+					self.verify_credential_store().await,
+				))
+			}
 			Query::AccountBindings { observation } => {
 				account_bindings(self, observation).await
 			}

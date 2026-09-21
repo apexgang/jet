@@ -512,6 +512,26 @@
   {
     "schema": "ClientMessage",
     "valid": true,
+    "payload": "{\"kind\":\"query\",\"id\":8,\"query\":{\"type\":\"verify_credential_store\"}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":8,\"result\":{\"type\":\"credential_store_verification\",\"verification\":{\"outcome\":\"verified\",\"kind\":\"apple_keychain\"}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": true,
+    "payload": "{\"kind\":\"query_result\",\"id\":8,\"result\":{\"type\":\"credential_store_verification\",\"verification\":{\"outcome\":\"failed\",\"kind\":\"secret_service\",\"step\":\"read\"}}}"
+  },
+  {
+    "schema": "ServerMessage",
+    "valid": false,
+    "payload": "{\"kind\":\"query_result\",\"id\":8,\"result\":{\"type\":\"credential_store_verification\",\"verification\":{\"outcome\":\"failed\",\"kind\":\"secret_service\",\"step\":\"prompt\"}}}"
+  },
+  {
+    "schema": "ClientMessage",
+    "valid": true,
     "payload": "{\"kind\":\"command\",\"id\":1,\"command_id\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"command\":{\"type\":\"set_auto_continue\",\"target\":{\"account_binding\":\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"},\"policy\":{\"mode\":\"retry\",\"delay_ms\":60000,\"max_delay_ms\":600000,\"max_retries\":3,\"message\":\"Continue\"}}}"
   },
   {

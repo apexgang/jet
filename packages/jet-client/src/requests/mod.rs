@@ -37,8 +37,8 @@ pub(crate) mod visa;
 
 use crate::connection::{Client, ClientError};
 use jet_protocol::{
-	CapabilityObservation, CapabilitySnapshot, EventPage, PlaneStatus,
-	QueryRequest, QueryResponse,
+	CapabilityObservation, CapabilitySnapshot, CredentialStoreVerification,
+	EventPage, PlaneStatus, QueryRequest, QueryResponse,
 };
 
 impl Client {
@@ -81,6 +81,7 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
+			| QueryResponse::CredentialStoreVerification { .. }
 			| QueryResponse::Usage(_)
 			| QueryResponse::UsageHistory(_)
 			| QueryResponse::SecurityAudit(_)
@@ -133,6 +134,7 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
+			| QueryResponse::CredentialStoreVerification { .. }
 			| QueryResponse::Usage(_)
 			| QueryResponse::UsageHistory(_)
 			| QueryResponse::SecurityAudit(_)
@@ -192,6 +194,67 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Settings(_)
 			| QueryResponse::AccountBindings(_)
+			| QueryResponse::CredentialStoreVerification { .. }
+			| QueryResponse::Usage(_)
+			| QueryResponse::UsageHistory(_)
+			| QueryResponse::SecurityAudit(_)
+			| QueryResponse::Pairing(_)
+			| QueryResponse::Projects(_)
+			| QueryResponse::ProjectPreview(_)
+			| QueryResponse::ProjectRemovalPreview(_)
+			| QueryResponse::ProjectEntry(_)
+			| QueryResponse::PromotionPreview(_)
+			| QueryResponse::ChangeArtifact(_)
+			| QueryResponse::ChangeDiff(_)
+			| QueryResponse::RunExecution(_)
+			| QueryResponse::Search(_)
+			| QueryResponse::ExternalConversations(_)) => Err(unexpected(&other)),
+		}
+	}
+}
+
+impl Client {
+	/// Proves that the Plane's credential store holds a Credential: the
+	/// Plane creates, reads back, and deletes one probe item and reports
+	/// how far it got. ADR-0076 requires this before durable Pairing is
+	/// enabled, and the probe never prompts: a store that would need the
+	/// user is reported as locked, and the GUI starts the operating
+	/// system's own unlock flow.
+	///
+	/// # Errors
+	///
+	/// Returns [`ClientError::Remote`] when the daemon reports a stable
+	/// error, or the transport failure otherwise.
+	pub async fn verify_credential_store(
+		&self,
+	) -> Result<CredentialStoreVerification, ClientError> {
+		self.require_minor(jet_protocol::CREDENTIAL_STORE_VERIFICATION_MINOR)?;
+		match self.query(QueryRequest::VerifyCredentialStore).await? {
+			QueryResponse::CredentialStoreVerification { verification } => {
+				Ok(verification)
+			}
+			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::ExtensionCatalog(_)
+			| QueryResponse::ExtensionChange(_)
+			| QueryResponse::RemoteToolReview(_)
+			| QueryResponse::Utility(_)
+			| QueryResponse::CraftInstallationPreview(_)
+			| QueryResponse::AutoContinue(_)
+			| QueryResponse::ScheduledTasks(_)
+			| QueryResponse::ConversationTrash(_)
+			| QueryResponse::RetentionPreview(_)
+			| QueryResponse::AutodeleteRules(_)
+			| QueryResponse::EditableFile(_)
+			| QueryResponse::WorkspaceTerminals { .. }
+			| QueryResponse::TurnQueue(_)
+			| QueryResponse::OrphanedExecutions(_)
+			| QueryResponse::Status(_)
+			| QueryResponse::Conversations(_)
+			| QueryResponse::Conversation(_)
+			| QueryResponse::Events(_)
+			| QueryResponse::Settings(_)
+			| QueryResponse::AccountBindings(_)
+			| QueryResponse::Capabilities(_)
 			| QueryResponse::Usage(_)
 			| QueryResponse::UsageHistory(_)
 			| QueryResponse::SecurityAudit(_)

@@ -3,7 +3,10 @@
 use super::{
 	ArtifactLimits, CapabilitySnapshot, Core, CoreError, GitHubHost,
 	SecurityState, WorkspaceHome, audit,
-	capability::{CapabilityProbe, probe::SystemCapabilityProbe},
+	capability::{
+		CapabilityProbe, CredentialStoreVerification,
+		probe::SystemCapabilityProbe,
+	},
 	checkpoint,
 	clock::{Clock, SystemClock},
 	conversation::{
@@ -213,6 +216,15 @@ impl Core {
 			CapabilitySnapshot::from_observation(observed, self.clock.now());
 		*self.capabilities.write().await = snapshot.clone();
 		snapshot
+	}
+
+	/// Proves the platform credential store round-trips a Credential
+	/// (ADR-0076). The probe writes into the store, so this runs only when
+	/// a caller asks; the latest snapshot is left as it was.
+	pub(crate) async fn verify_credential_store(
+		&self,
+	) -> CredentialStoreVerification {
+		self.probe.verify_credential_store().await
 	}
 
 	/// The core clock's current time as the store records it. Every stamp

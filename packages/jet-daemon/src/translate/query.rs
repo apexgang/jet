@@ -136,6 +136,9 @@ pub(crate) fn query(
 				observation: capability::observation(*observation),
 			}
 		}
+		wire::QueryRequest::VerifyCredentialStore => {
+			Query::VerifyCredentialStore
+		}
 		wire::QueryRequest::Usage { selection } => Query::Usage {
 			selection: usage::selection(*selection),
 		},
@@ -322,6 +325,11 @@ pub(crate) fn query_result(
 			wire::QueryResponse::Capabilities(capability::snapshot(
 				snapshot, minor,
 			))
+		}
+		QueryResult::CredentialStoreVerification(verification) => {
+			wire::QueryResponse::CredentialStoreVerification {
+				verification: capability::verification(verification),
+			}
 		}
 		QueryResult::AccountBindings(bindings) => {
 			wire::QueryResponse::AccountBindings(account::list(bindings))

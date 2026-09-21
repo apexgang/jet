@@ -28,8 +28,21 @@ tokio.workspace = true
 toml.workspace = true
 uuid.workspace = true
 
+# The platform credential store is spoken to through its own API: the
+# freedesktop Secret Service over D-Bus, the macOS Keychain through the
+# Security framework (ADR-0076).
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+zbus.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework.workspace = true
+
 [dev-dependencies]
 pretty_assertions.workspace = true
+
+# Tests serve a Secret Service of their own over a private socket.
+[target.'cfg(not(target_os = "macos"))'.dev-dependencies]
+zbus = { workspace = true, features = ["p2p"] }
 
 [lints]
 workspace = true

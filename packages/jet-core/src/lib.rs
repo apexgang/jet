@@ -148,9 +148,10 @@ pub use audit::{
 	AuditSequence, AuditTarget,
 };
 pub use capability::{
-	CapabilityObservation, CapabilitySnapshot, CraftId, CredentialStoreKind,
-	CredentialStoreStatus, DegradedCondition, ExternalTool, ExternalToolStatus,
-	HarnessId, InstalledCraft, Platform, ToolAvailability,
+	CapabilityObservation, CapabilitySnapshot, CraftId, CredentialProbeStep,
+	CredentialStoreKind, CredentialStoreStatus, CredentialStoreVerification,
+	DegradedCondition, ExternalTool, ExternalToolStatus, HarnessId,
+	InstalledCraft, Platform, ToolAvailability,
 };
 pub use command::{Command, CommandEnvelope, CommandId, CommandOutcome};
 pub use conversation::import::{

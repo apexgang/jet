@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// The newest minor of [`PROTOCOL_VERSION`] this crate speaks. Minors are
 /// additive: a peer negotiated to a lower minor never sees fields it does
 /// not know (ADR-0019).
-pub const PROTOCOL_MINOR: u32 = 43;
+pub const PROTOCOL_MINOR: u32 = 44;
 
 /// Usage history: the downsampled time series of Jet-observed consumption
 /// and the `usage_history` Query that answers it.
@@ -221,3 +221,7 @@ pub enum ServerHello {
 
 /// Independent non-destructive Git delivery Commands and policy.
 pub const GIT_DELIVERY_MINOR: u32 = 35;
+
+/// The credential store verification Query: one probe item created, read
+/// back, and deleted before durable Pairing is enabled (ADR-0076).
+pub const CREDENTIAL_STORE_VERIFICATION_MINOR: u32 = 44;
