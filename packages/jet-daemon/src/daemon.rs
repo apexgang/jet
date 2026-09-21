@@ -10,7 +10,7 @@ use jet_runtime::{
 use jet_store::Store;
 use std::{process::ExitCode, sync::Arc, time::Duration};
 use tokio::{
-	signal::unix::{SignalKind, signal},
+	signal::unix::{Signal, SignalKind, signal},
 	sync::{Semaphore, watch},
 	task::JoinSet,
 	time::timeout,
@@ -149,6 +149,14 @@ pub(crate) async fn run(
 	let recovery_mode = match core.recovery_mode() {
 		jet_core::RecoveryMode::Serving => "serving",
 		jet_core::RecoveryMode::ReadOnly(_) => "read_only",
+	};
+	// Listened for before the ready line, so a stop that follows it at
+	// once is the clean one a launcher expects rather than the default
+	// action (ADR-0088).
+	let Some(stop) = StopSignals::listen() else {
+		close_store(&core).await;
+		drop(lock);
+		return ExitCode::from(EXIT_FAILURE);
 	};
 	println!(
 		"{}",
@@ -423,7 +431,7 @@ pub(crate) async fn run(
 			}
 		}
 	});
-	let exit = serve(listener, &core).await;
+	let exit = serve(listener, &core, stop).await;
 	Diagnostic::info(DiagnosticComponent::Process, "daemon stopping").emit();
 	recovery.abort();
 	run_work.abort();
@@ -527,19 +535,41 @@ async fn close_store(core: &Core) {
 	}
 }
 
+/// The signals that stop the daemon.
+struct StopSignals {
+	terminate: Signal,
+	interrupt: Signal,
+}
+
+impl StopSignals {
+	/// Starts listening for both, and says so on stderr when it cannot.
+	fn listen() -> Option<Self> {
+		let terminate = signal(SignalKind::terminate())
+			.inspect_err(|_| eprintln!("jetd: cannot listen for SIGTERM"))
+			.ok()?;
+		let interrupt = signal(SignalKind::interrupt())
+			.inspect_err(|_| eprintln!("jetd: cannot listen for SIGINT"))
+			.ok()?;
+		Some(Self {
+			terminate,
+			interrupt,
+		})
+	}
+}
+
 /// Accepts connections until a stop signal or a listener failure, then
 /// drains: the socket closes, every connection finishes the request it is
 /// on and is told to reconnect later, and the daemon exits within
 /// [`DRAIN_TIMEOUT`] either way (ADR-0088).
-async fn serve(listener: LocalListener, core: &Arc<Core>) -> ExitCode {
-	let Ok(mut terminate) = signal(SignalKind::terminate()) else {
-		eprintln!("jetd: cannot listen for SIGTERM");
-		return ExitCode::from(EXIT_FAILURE);
-	};
-	let Ok(mut interrupt) = signal(SignalKind::interrupt()) else {
-		eprintln!("jetd: cannot listen for SIGINT");
-		return ExitCode::from(EXIT_FAILURE);
-	};
+async fn serve(
+	listener: LocalListener,
+	core: &Arc<Core>,
+	stop: StopSignals,
+) -> ExitCode {
+	let StopSignals {
+		mut terminate,
+		mut interrupt,
+	} = stop;
 	let (drain, draining) = watch::channel(false);
 	let mut connections = JoinSet::new();
 	let capacity = Arc::new(Semaphore::new(128));
