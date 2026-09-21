@@ -73,6 +73,30 @@ snapshot moves authoritative state backwards, and the head left in place
 is what makes that visible to the audit, which an owner then carries on
 from by beginning a new epoch (ADR-0105).
 
+## The deep check while idle
+
+The store owes a deep check after every open and after every committed
+change, at most once a day. It runs on the maintenance wakeups `jetd`
+already has, which every Command and Effect commit and every Run's end
+trigger, so it never wakes an idle Plane on a timer of its own
+(ADR-0055), and only while the Plane is idle: no Command being
+executed, no Effect pending or in flight, and no execution or terminal
+alive. A Plane that is never idle is never checked this way; the daily
+snapshot still is.
+
+The check is SQLite's `PRAGMA integrity_check`, run over the schema and
+then one table at a time on a connection of its own, so the store's one
+connection is never held through a Command. Every table and index is
+checked in full; only SQLite's accounting of free pages, which holds no
+data, is left to the check a snapshot gets. Between tables it looks for
+new work: a Command in flight, or any write that committed since it
+began, abandons the check, which is then owed again. Damage puts the
+Plane in read-only Recovery mode exactly as a failed open does, with
+`integrity_check_failed`, and the store is preserved as found: nothing
+writes to it, the workers wait for a restoration, and the way out is the
+same `restore_recovery_snapshot`. An idle Plane's diagnostic log says
+when a check passed or failed.
+
 ## Read-only Recovery mode
 
 An open after an unclean shutdown runs SQLite's `PRAGMA quick_check`
@@ -82,8 +106,8 @@ connection closes; a store its last holder closed is served without the
 check, which reads every page and would spend the ready-time budget of
 ADR-0022 on its own at scale. Damage met on the way to serving the store
 counts as the check failing either way. The deeper `integrity_check` runs
-on every snapshot as it is taken; scheduling it over the live store while
-idle is left to #137. A store that fails a check, or whose migration
+on every snapshot as it is taken, and over the live store while the
+Plane is idle (below). A store that fails a check, or whose migration
 fails, still opens, and `jetd` still serves it: the ready line carries
 `"recovery": "read_only"` and the status Query reports
 

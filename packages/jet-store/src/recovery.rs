@@ -11,7 +11,7 @@
 //! the same checks as any other open.
 
 use crate::{
-	Opened, StoreError,
+	Opened, Store, StoreError,
 	snapshot::{self, Tracker, unavailable},
 };
 use serde::{Deserialize, Serialize};
@@ -80,7 +80,8 @@ pub struct IntegrityFailure {
 /// Which check a store failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntegrityFailureReason {
-	/// `PRAGMA quick_check` reported damage.
+	/// `PRAGMA quick_check` at open, or the deep check while idle,
+	/// reported damage.
 	IntegrityCheck,
 	/// A schema migration failed, leaving the store at its previous
 	/// version (ADR-0073).
@@ -97,6 +98,24 @@ pub struct RestoredStore {
 	/// check, `plane.sqlite3.unmigrated-<stamp>` after a failed migration,
 	/// which left it intact at its previous version.
 	pub replaced: String,
+}
+
+impl Store {
+	/// Refuses a write while the store is in read-only Recovery mode: the
+	/// damaged database is preserved exactly as found until a verified
+	/// snapshot is restored over it (ADR-0077). The refusal is
+	/// unavailability, like the one a Command meets at the door, because
+	/// the same write succeeds after the restoration.
+	pub(crate) fn require_writable(&self) -> Result<(), StoreError> {
+		match self.integrity() {
+			StoreIntegrity::Verified => Ok(()),
+			StoreIntegrity::Failed(_) => Err(StoreError::Unavailable(
+				"the store is in read-only Recovery mode; nothing is written \
+				 until a verified Recovery snapshot is restored"
+					.into(),
+			)),
+		}
+	}
 }
 
 /// Runs SQLite's lightweight check over the database behind `pool` and
@@ -238,7 +257,7 @@ fn rename_aside(from: &Path, to: &Path) -> Result<(), StoreError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
 	use super::*;
 	use crate::{SnapshotReason, Store};
 	use pretty_assertions::assert_eq;
@@ -323,14 +342,14 @@ mod tests {
 	/// Overwrites the page in the middle of a closed database, which the
 	/// Event journal fills once [`fill_journal`] has run: a page nothing
 	/// reads on the way to serving the store.
-	fn damage_journal_page(path: &Path) {
+	pub(crate) fn damage_journal_page(path: &Path) {
 		let length = fs::metadata(path).unwrap().len();
 		damage_at(path, length / 2 / 4096 * 4096);
 	}
 
 	/// Appends Events until the journal is most of the file, so the page
 	/// in its middle is the journal's wherever the schema's pages fall.
-	async fn fill_journal(store: &Store) {
+	pub(crate) async fn fill_journal(store: &Store) {
 		store
 			.write(async |tx| {
 				for _ in 0..256 {

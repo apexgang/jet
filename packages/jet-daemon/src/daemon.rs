@@ -10,7 +10,7 @@ use jet_runtime::{
 use jet_store::Store;
 use std::{process::ExitCode, sync::Arc, time::Duration};
 use tokio::{
-	signal::unix::{SignalKind, signal},
+	signal::unix::{Signal, SignalKind, signal},
 	sync::{Semaphore, watch},
 	task::JoinSet,
 	time::timeout,
@@ -150,6 +150,14 @@ pub(crate) async fn run(
 		jet_core::RecoveryMode::Serving => "serving",
 		jet_core::RecoveryMode::ReadOnly(_) => "read_only",
 	};
+	// Listened for before the ready line, so a stop that follows it at
+	// once is the clean one a launcher expects rather than the default
+	// action (ADR-0088).
+	let Some(stop) = StopSignals::listen() else {
+		close_store(&core).await;
+		drop(lock);
+		return ExitCode::from(EXIT_FAILURE);
+	};
 	println!(
 		"{}",
 		serde_json::json!({
@@ -161,8 +169,10 @@ pub(crate) async fn run(
 	);
 	let utility_core = Arc::clone(&core);
 	let utility_work = tokio::spawn(async move {
-		utility_core.wait_until_serving().await;
 		loop {
+			// Serving now, or again once a snapshot is restored over a
+			// store the idle check found damaged (ADR-0077).
+			utility_core.wait_until_serving().await;
 			if let Err(error) = utility_core.perform_git_deliveries().await {
 				core_failure(
 					DiagnosticComponent::Utility,
@@ -178,8 +188,8 @@ pub(crate) async fn run(
 	let recovery_core = Arc::clone(&core);
 	let work_core = Arc::clone(&core);
 	let run_work = tokio::spawn(async move {
-		work_core.wait_until_serving().await;
 		loop {
+			work_core.wait_until_serving().await;
 			work_core.wait_for_run_work().await;
 			if let Err(error) = work_core.perform_runs().await {
 				core_failure(
@@ -206,6 +216,14 @@ pub(crate) async fn run(
 			);
 		}
 		loop {
+			// The idle check below can put a serving Plane into Recovery
+			// mode; what follows then waits for the restoration, like a
+			// Plane that opened its store damaged (ADR-0077).
+			if recovery_core.recovery_mode() != jet_core::RecoveryMode::Serving
+			{
+				recovery_core.wait_until_serving().await;
+				reconcile_at_start(&recovery_core).await;
+			}
 			let mut retry = false;
 			if let Err(error) = recovery_core.reconcile_crafts().await {
 				retry = true;
@@ -362,6 +380,41 @@ pub(crate) async fn run(
 					);
 				}
 			}
+			// The deep check of the live store runs on these same wakeups,
+			// never on a timer of its own, and only while no Command,
+			// Effect, or execution is active (ADR-0077, ADR-0055). Damage
+			// puts the Plane in read-only Recovery mode, which the top of
+			// this loop waits out at once, so the restoration is followed
+			// by the reconciliation a start gets.
+			match recovery_core.check_store_if_idle().await {
+				Ok(jet_core::DeepCheckOutcome::Damaged) => {
+					Diagnostic::error(
+						DiagnosticComponent::Recovery,
+						"store failed its deep check; serving read-only Recovery mode",
+					)
+					.emit();
+					continue;
+				}
+				Ok(jet_core::DeepCheckOutcome::Passed) => {
+					Diagnostic::info(
+						DiagnosticComponent::Recovery,
+						"deep check of the store passed",
+					)
+					.emit();
+				}
+				Ok(
+					jet_core::DeepCheckOutcome::NotDue
+					| jet_core::DeepCheckOutcome::Busy
+					| jet_core::DeepCheckOutcome::Abandoned,
+				) => {}
+				Err(error) => {
+					core_failure(
+						DiagnosticComponent::Recovery,
+						"cannot run the deep check of the store",
+						&error,
+					);
+				}
+			}
 			// Sweep once on startup, including durable extension/install work that
 			// has no active Run or schedule to supply the first wakeup.
 			if retry {
@@ -378,7 +431,7 @@ pub(crate) async fn run(
 			}
 		}
 	});
-	let exit = serve(listener, &core).await;
+	let exit = serve(listener, &core, stop).await;
 	Diagnostic::info(DiagnosticComponent::Process, "daemon stopping").emit();
 	recovery.abort();
 	run_work.abort();
@@ -482,19 +535,41 @@ async fn close_store(core: &Core) {
 	}
 }
 
+/// The signals that stop the daemon.
+struct StopSignals {
+	terminate: Signal,
+	interrupt: Signal,
+}
+
+impl StopSignals {
+	/// Starts listening for both, and says so on stderr when it cannot.
+	fn listen() -> Option<Self> {
+		let terminate = signal(SignalKind::terminate())
+			.inspect_err(|_| eprintln!("jetd: cannot listen for SIGTERM"))
+			.ok()?;
+		let interrupt = signal(SignalKind::interrupt())
+			.inspect_err(|_| eprintln!("jetd: cannot listen for SIGINT"))
+			.ok()?;
+		Some(Self {
+			terminate,
+			interrupt,
+		})
+	}
+}
+
 /// Accepts connections until a stop signal or a listener failure, then
 /// drains: the socket closes, every connection finishes the request it is
 /// on and is told to reconnect later, and the daemon exits within
 /// [`DRAIN_TIMEOUT`] either way (ADR-0088).
-async fn serve(listener: LocalListener, core: &Arc<Core>) -> ExitCode {
-	let Ok(mut terminate) = signal(SignalKind::terminate()) else {
-		eprintln!("jetd: cannot listen for SIGTERM");
-		return ExitCode::from(EXIT_FAILURE);
-	};
-	let Ok(mut interrupt) = signal(SignalKind::interrupt()) else {
-		eprintln!("jetd: cannot listen for SIGINT");
-		return ExitCode::from(EXIT_FAILURE);
-	};
+async fn serve(
+	listener: LocalListener,
+	core: &Arc<Core>,
+	stop: StopSignals,
+) -> ExitCode {
+	let StopSignals {
+		mut terminate,
+		mut interrupt,
+	} = stop;
 	let (drain, draining) = watch::channel(false);
 	let mut connections = JoinSet::new();
 	let capacity = Arc::new(Semaphore::new(128));

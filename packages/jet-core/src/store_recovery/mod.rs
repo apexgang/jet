@@ -20,6 +20,8 @@ pub use bundle::{
 	RECOVERY_PLAINTEXT_WARNING, RecoveredBundle, RecoveredConversation,
 	RecoveryKey, RecoveryProtection,
 };
+mod deep_check;
+pub use deep_check::DeepCheckOutcome;
 mod purge;
 mod restore;
 pub(crate) use restore::{not_read_only, read_only};

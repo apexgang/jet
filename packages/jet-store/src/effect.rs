@@ -54,6 +54,24 @@ impl ReadTransaction {
 	}
 }
 
+impl ReadTransaction {
+	/// Whether any Effect, of any kind, is still pending or in flight: the
+	/// Plane is not idle while one is (ADR-0077).
+	///
+	/// # Errors
+	///
+	/// Returns a [`StoreError`] when the outbox cannot be read.
+	pub async fn has_unresolved_effects(&mut self) -> Result<bool, StoreError> {
+		Ok(sqlx::query_scalar!(
+			r#"SELECT EXISTS(
+				SELECT 1 FROM effects WHERE state IN ('pending', 'in_flight')
+			) AS "unresolved!: bool""#
+		)
+		.fetch_one(self.connection())
+		.await?)
+	}
+}
+
 impl WriteTransaction {
 	/// Adds an Effect to the transaction that records its initiating change.
 	///

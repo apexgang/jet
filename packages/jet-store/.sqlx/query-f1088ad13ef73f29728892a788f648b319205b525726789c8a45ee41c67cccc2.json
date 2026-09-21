@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS(\n\t\t\t\tSELECT 1 FROM effects WHERE state IN ('pending', 'in_flight')\n\t\t\t) AS \"unresolved!: bool\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "unresolved!: bool",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f1088ad13ef73f29728892a788f648b319205b525726789c8a45ee41c67cccc2"
+}
