@@ -12,7 +12,7 @@ use jet_client::Client;
 use jet_protocol::{
 	CODEC_JSON_V1, ClientHello, Frame, FrameReader, FrameWriter,
 	MAX_CONTROL_FRAME, MAX_DATA_FRAME, PREFACE, PROTOCOL_MINOR, ServerHello,
-	StreamId, VersionRange, decode_control, encode_control,
+	SnapshotReason, StreamId, VersionRange, decode_control, encode_control,
 };
 use pretty_assertions::assert_eq;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -90,6 +90,36 @@ pub async fn start_jetd_process(command: &mut Command) -> Daemon {
 		socket: PathBuf::from(ready["socket"].as_str().unwrap()),
 		ready,
 	}
+}
+
+/// Waits for a Recovery snapshot taken for `reason` and returns its name.
+/// The daemon takes the day's copy once it serves, so it lands moments
+/// after the ready line or the first change of the day (ADR-0097,
+/// ADR-0022).
+pub async fn wait_for_snapshot(home: &Path, reason: SnapshotReason) -> String {
+	// The reason is a segment of the snapshot's file name.
+	let segment = match reason {
+		SnapshotReason::Daily => "-daily.",
+		SnapshotReason::Maintenance => "-maintenance.",
+		SnapshotReason::Migration => "-migration-",
+	};
+	for _ in 0..500 {
+		if let Ok(entries) = std::fs::read_dir(home.join("snapshots")) {
+			let mut names: Vec<String> = entries
+				.map(|entry| entry.unwrap().file_name().into_string().unwrap())
+				.filter(|name| {
+					name.starts_with("plane-")
+						&& name.ends_with(".sqlite3")
+						&& name.contains(segment)
+				})
+				.collect();
+			if let Some(name) = names.pop() {
+				return name;
+			}
+		}
+		tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+	}
+	panic!("no {reason:?} snapshot was taken");
 }
 
 pub async fn connect(daemon: &Daemon, client_id: Uuid) -> Client {

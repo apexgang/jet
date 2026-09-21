@@ -56,9 +56,12 @@ def check(measured, accepted):
         base = accepted.get(name)
         if base is None:
             continue
-        if "max" in limit and value > base * (1 + percent / 100):
+        # A measurement may name a tolerance in its own unit: the drift a
+        # short measurement shows from scheduling alone, never a regression.
+        tolerance = limit.get("tolerance", 0)
+        if "max" in limit and value > max(base * (1 + percent / 100), base + tolerance):
             failures.append(f"{name}: {value:.3f} regressed over {percent}% from the accepted {base:.3f}")
-        if "min" in limit and value < base * (1 - percent / 100):
+        if "min" in limit and value < min(base * (1 - percent / 100), base - tolerance):
             failures.append(f"{name}: {value:.3f} regressed over {percent}% from the accepted {base:.3f}")
     return failures
 

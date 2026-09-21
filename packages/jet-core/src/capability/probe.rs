@@ -27,12 +27,26 @@ impl CapabilityProbe for SystemCapabilityProbe {
 		&self,
 	) -> Pin<Box<dyn Future<Output = ObservedCapabilities> + Send + '_>> {
 		Box::pin(async move {
+			// Every tool is asked at once; the snapshot still lists them in
+			// the order of `ExternalTool::ALL`. The ready line waits for
+			// this, and four version commands in a row cost it more than
+			// one (ADR-0022).
+			let detections: Vec<_> = ExternalTool::ALL
+				.into_iter()
+				.map(|tool| tokio::spawn(detect(tool)))
+				.collect();
 			let mut external_tools =
 				Vec::with_capacity(ExternalTool::ALL.len());
-			for tool in ExternalTool::ALL {
+			for (tool, detection) in
+				ExternalTool::ALL.into_iter().zip(detections)
+			{
 				external_tools.push(ExternalToolStatus {
 					tool,
-					availability: detect(tool).await,
+					// A detection that panicked observed nothing, which
+					// is what a missing tool reports too.
+					availability: detection
+						.await
+						.unwrap_or(ToolAvailability::Missing),
 				});
 			}
 			ObservedCapabilities {

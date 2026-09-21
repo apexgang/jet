@@ -42,16 +42,20 @@ async fn measure(scale: Scale, root: &Path, output: &Path) -> Measurements {
 		measured::ingestion_rate(&store, scale.events().min(100_000)).await;
 	store.close().await;
 
+	// The store was closed cleanly, so this is the ready time ADR-0022
+	// budgets; the day's first Recovery snapshot follows the ready line
+	// (ADR-0097).
 	let started = Instant::now();
 	let mut daemon = support::start_jetd(&home).await;
 	let daemon_ready_ms = measured::elapsed_ms(started);
 	// kill_on_drop requests termination but does not wait for the Plane lock.
 	daemon.child.kill().await.unwrap();
-	// The first start of a day copies a Recovery snapshot (ADR-0097); the
-	// second start on the same Plane shows the ready time without it.
+	// Killed, the daemon left its write-ahead log behind, so the second
+	// start also runs the integrity check an unclean shutdown earns
+	// (ADR-0077).
 	let started = Instant::now();
 	let mut daemon = support::start_jetd(&home).await;
-	let daemon_ready_again_ms = measured::elapsed_ms(started);
+	let daemon_ready_unclean_ms = measured::elapsed_ms(started);
 	daemon.child.kill().await.unwrap();
 
 	let measurements = Measurements {
@@ -61,7 +65,7 @@ async fn measure(scale: Scale, root: &Path, output: &Path) -> Measurements {
 		events: scale.events(),
 		store_open_ms,
 		daemon_ready_ms,
-		daemon_ready_again_ms,
+		daemon_ready_unclean_ms,
 		commit_64_events_p99_ms,
 		commit_256_kib_p99_ms,
 		sidebar_page_p95_ms,

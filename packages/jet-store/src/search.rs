@@ -989,4 +989,38 @@ mod tests {
 
 		assert_eq!((floor, sequences), (first + 1, vec![first, third]));
 	}
+
+	/// Catching the index up reads through the semantic Events' own index
+	/// rather than walking the operational Events behind the last of them,
+	/// which on a long Run's journal is most of the file (ADR-0022).
+	#[tokio::test]
+	async fn semantic_events_are_read_through_their_own_index() {
+		let dir = tempfile::tempdir().unwrap();
+		let store = open(&dir).await;
+		let plan: Vec<String> = store
+			.read(async |tx| {
+				// The statement `semantic_events_after` runs, as the planner
+				// sees it; EXPLAIN has no describable shape for the macros.
+				let rows: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+					"EXPLAIN QUERY PLAN SELECT sequence FROM events
+					 WHERE sequence > ?1 AND class = 'semantic'
+					 ORDER BY sequence LIMIT ?2",
+				)
+				.bind(0_i64)
+				.bind(10_i64)
+				.fetch_all(tx.connection())
+				.await?;
+				Ok::<_, StoreError>(rows.into_iter().map(|row| row.3).collect())
+			})
+			.await
+			.unwrap();
+
+		assert_eq!(
+			plan,
+			vec![
+				"SEARCH events USING COVERING INDEX events_semantic_by_sequence (sequence>?)"
+					.to_owned()
+			]
+		);
+	}
 }

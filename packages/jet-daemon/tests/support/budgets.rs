@@ -55,7 +55,7 @@ pub struct Measurements {
 	pub events: usize,
 	pub store_open_ms: f64,
 	pub daemon_ready_ms: f64,
-	pub daemon_ready_again_ms: f64,
+	pub daemon_ready_unclean_ms: f64,
 	pub commit_64_events_p99_ms: f64,
 	pub commit_256_kib_p99_ms: f64,
 	pub sidebar_page_p95_ms: f64,

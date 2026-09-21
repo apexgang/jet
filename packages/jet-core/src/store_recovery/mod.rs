@@ -203,7 +203,8 @@ mod tests {
 	}
 
 	/// A restarted core's start-time maintenance is preceded by a snapshot
-	/// of the state it is about to sweep (ADR-0097).
+	/// of the state it is about to sweep (ADR-0097). The start itself takes
+	/// none, so the copy never holds the ready line up (ADR-0022).
 	#[tokio::test]
 	async fn maintenance_at_start_is_preceded_by_a_snapshot() {
 		let dir = tempfile::tempdir().unwrap();
@@ -225,13 +226,26 @@ mod tests {
 			FixedProbe::new(equipped()),
 		)
 		.await;
+		let at_start = restarted.recovery_snapshots().unwrap();
+		restarted.perform_start_maintenance().await.unwrap();
+		// Owed once: the same day's maintenance takes no second copy.
+		restarted.perform_start_maintenance().await.unwrap();
 		let snapshots = restarted.recovery_snapshots().unwrap();
 		assert_eq!(
-			snapshots
-				.iter()
-				.map(|snapshot| (snapshot.reason, snapshot.taken_at_unix_ms))
-				.collect::<Vec<_>>(),
-			vec![(SnapshotReason::Maintenance, 1_700_086_400_000)]
+			(
+				at_start,
+				snapshots
+					.iter()
+					.map(|snapshot| (
+						snapshot.reason,
+						snapshot.taken_at_unix_ms
+					))
+					.collect::<Vec<_>>()
+			),
+			(
+				vec![],
+				vec![(SnapshotReason::Maintenance, 1_700_086_400_000)]
+			)
 		);
 	}
 }

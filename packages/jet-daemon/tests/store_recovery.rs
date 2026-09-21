@@ -18,7 +18,7 @@ use std::{
 	path::Path,
 	time::Duration,
 };
-use support::{Daemon, start_jetd};
+use support::{Daemon, start_jetd, wait_for_snapshot};
 use uuid::Uuid;
 
 fn send_sigterm(daemon: &Daemon) {
@@ -55,8 +55,9 @@ async fn a_damaged_store_is_served_read_only_until_a_snapshot_is_restored() {
 			.await
 			.unwrap();
 		// Startup work can earn the daily snapshot before this Conversation.
-		// Restart with no snapshots so startup takes a completed maintenance
-		// snapshot containing the state this test intends to restore.
+		// Restart with no snapshots so the restart's maintenance takes a
+		// snapshot containing the state this test intends to restore. It is
+		// taken behind the ready line (ADR-0022), so it is waited for.
 		drop(client);
 		let mut daemon = daemon;
 		daemon.child.kill().await.unwrap();
@@ -64,11 +65,22 @@ async fn a_damaged_store_is_served_read_only_until_a_snapshot_is_restored() {
 			std::fs::remove_dir_all(home.join("snapshots")).unwrap();
 		}
 		let daemon = start_jetd(&home).await;
-		let client = support::connect(&daemon, client_id).await;
 		let snapshot =
-			client.status().await.unwrap().recovery.unwrap().snapshots[0]
-				.name
-				.clone();
+			wait_for_snapshot(&home, SnapshotReason::Maintenance).await;
+		let client = support::connect(&daemon, client_id).await;
+		assert_eq!(
+			client
+				.status()
+				.await
+				.unwrap()
+				.recovery
+				.unwrap()
+				.snapshots
+				.iter()
+				.map(|snapshot| snapshot.name.clone())
+				.collect::<Vec<_>>(),
+			vec![snapshot.clone()]
+		);
 		// Anything after the snapshot is what a restoration gives up.
 		client
 			.create_conversation(Uuid::now_v7(), RetentionPolicy::Retain)

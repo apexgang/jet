@@ -37,9 +37,11 @@ it only removes content-addressed payloads and pending uploads under
   reported on stderr and retried on the next wake; the change it
   followed is already durable.
 - **Before destructive maintenance.** The Security-audit retention sweep
-  and unreferenced Craft Artifact collection run when the core starts on
-  a trusted audit. When no snapshot belongs to that day yet, one is
-  taken first, whether or not the store is known to have changed.
+  and unreferenced Craft Artifact collection run once the daemon serves
+  on a trusted audit, behind the ready line rather than before it, because
+  the copy costs what the store weighs and readiness has a budget
+  (ADR-0022). When no snapshot belongs to that day yet, one is taken
+  first, whether or not the store is known to have changed.
 
 Routine and maintenance snapshots share the one-per-day bound, so a
 sweep on a day that already has its snapshot runs without a fresh one;
@@ -73,13 +75,17 @@ from by beginning a new epoch (ADR-0105).
 
 ## Read-only Recovery mode
 
-Every open of the store runs SQLite's `PRAGMA quick_check` before any
-migration. Damage met on the way to the check counts as the check
-failing. The deeper `integrity_check` runs on every snapshot as it is
-taken; scheduling it over the live store while idle is left to a
-follow-up. A store that fails it, or whose migration fails, still opens,
-and `jetd` still serves it: the ready line carries `"recovery":
-"read_only"` and the status Query reports
+An open after an unclean shutdown runs SQLite's `PRAGMA quick_check`
+before any migration. The mark of an unclean shutdown is the write-ahead
+log SQLite leaves beside the database, which it removes when the last
+connection closes; a store its last holder closed is served without the
+check, which reads every page and would spend the ready-time budget of
+ADR-0022 on its own at scale. Damage met on the way to serving the store
+counts as the check failing either way. The deeper `integrity_check` runs
+on every snapshot as it is taken; scheduling it over the live store while
+idle is left to #137. A store that fails a check, or whose migration
+fails, still opens, and `jetd` still serves it: the ready line carries
+`"recovery": "read_only"` and the status Query reports
 
 ```json
 "recovery": {
@@ -271,7 +277,8 @@ deletion_ledger` drives a real daemon through a deletion and a purge.
 `just test -p jet-store snapshot` covers naming, verification,
 publication, the once-per-day rule, and retention tiers;
 `just test -p jet-store recovery` covers a damaged store opening
-read-only, a failed migration, and restoration.
+read-only, the check being owed to an unclean shutdown alone, a failed
+migration, and restoration.
 `just test -p jet-core store_recovery` covers the daily and maintenance
 moments, refusal, restoration, and the audit through the core.
 `just test -p jet-daemon --test store_recovery`, run from `packages/`,
