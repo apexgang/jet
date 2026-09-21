@@ -9,8 +9,8 @@ use crate::{
 	WorkspaceHome, WorkspaceId,
 	capability::{
 		CapabilityProbe, CredentialStoreKind, CredentialStoreStatus,
-		ExternalTool, ExternalToolStatus, InstalledCraft, ObservedCapabilities,
-		Platform, ToolAvailability,
+		CredentialStoreVerification, ExternalTool, ExternalToolStatus,
+		InstalledCraft, ObservedCapabilities, Platform, ToolAvailability,
 	},
 	clock::{Clock, SystemClock},
 	conversation::discovery::ConversationDiscovery,
@@ -257,15 +257,32 @@ impl Clock for ManualClock {
 /// A Capability probe whose answer a test changes between observations, the
 /// way a Plane changes when a tool is uninstalled while `jetd` runs.
 #[derive(Debug)]
-pub(crate) struct FixedProbe(Mutex<ObservedCapabilities>);
+pub(crate) struct FixedProbe {
+	observed: Mutex<ObservedCapabilities>,
+	verification: Mutex<CredentialStoreVerification>,
+}
 
 impl FixedProbe {
+	/// A Plane observed as `observed`, whose credential store round-trips
+	/// a probe item until a test says otherwise.
 	pub(crate) fn new(observed: ObservedCapabilities) -> Arc<Self> {
-		Arc::new(Self(Mutex::new(observed)))
+		Arc::new(Self {
+			observed: Mutex::new(observed),
+			verification: Mutex::new(CredentialStoreVerification::Verified {
+				kind: CredentialStoreKind::SecretService,
+			}),
+		})
 	}
 
 	pub(crate) fn answer_with(&self, observed: ObservedCapabilities) {
-		*self.0.lock().unwrap() = observed;
+		*self.observed.lock().unwrap() = observed;
+	}
+
+	pub(crate) fn verify_with(
+		&self,
+		verification: CredentialStoreVerification,
+	) {
+		*self.verification.lock().unwrap() = verification;
 	}
 }
 
@@ -273,8 +290,16 @@ impl CapabilityProbe for FixedProbe {
 	fn observe(
 		&self,
 	) -> Pin<Box<dyn Future<Output = ObservedCapabilities> + Send + '_>> {
-		let observed = self.0.lock().unwrap().clone();
+		let observed = self.observed.lock().unwrap().clone();
 		Box::pin(async move { observed })
+	}
+
+	fn verify_credential_store(
+		&self,
+	) -> Pin<Box<dyn Future<Output = CredentialStoreVerification> + Send + '_>>
+	{
+		let verification = *self.verification.lock().unwrap();
+		Box::pin(async move { verification })
 	}
 }
 

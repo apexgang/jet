@@ -160,6 +160,10 @@ _Avoid_: Credential, token, environment value
 The backend one Account binding resolves its Credential through: the platform credential store, an explicitly configured external helper, native Harness authentication from the launch environment, or the memory of one daemon start. Each names the limitation it carries, and none of them is a plaintext fallback.
 _Avoid_: Credential store, credential helper, secret backend
 
+**Credential store verification**:
+One create/read/delete round trip through the platform credential store, run only when a client asks and never prompting, that proves the store holds a Credential before durable Pairing depends on it. It leaves no item behind and does not change the Capability snapshot.
+_Avoid_: Keyring test, capability observation, credential store observation
+
 **Model**:
 An inference model made available through a provider account.
 _Avoid_: Provider, harness, agent

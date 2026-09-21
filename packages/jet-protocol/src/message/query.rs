@@ -4,7 +4,9 @@ use super::{EventPage, PlaneStatus};
 use crate::{
 	account::AccountBindingList,
 	audit::SecurityAudit,
-	capability::{CapabilityObservation, CapabilitySnapshot},
+	capability::{
+		CapabilityObservation, CapabilitySnapshot, CredentialStoreVerification,
+	},
 	conversation::{
 		ConversationList, ConversationSnapshot, PageCursor,
 		import::ExternalConversationList,
@@ -156,6 +158,9 @@ pub enum QueryRequest {
 		/// Whether to report the last observation or take a new one.
 		observation: CapabilityObservation,
 	},
+	/// Prove that the platform credential store holds a Credential, by
+	/// creating, reading back, and deleting a probe item (Jet 1.44).
+	VerifyCredentialStore,
 	/// Every Account binding on the Plane, with the state of the Credential
 	/// each one resolves.
 	AccountBindings {
@@ -316,6 +321,11 @@ pub enum QueryResponse {
 	Conversation(Box<ConversationSnapshot>),
 	/// What the Plane can do.
 	Capabilities(CapabilitySnapshot),
+	/// Whether the platform credential store round-tripped a Credential.
+	CredentialStoreVerification {
+		/// How far the round trip got.
+		verification: CredentialStoreVerification,
+	},
 	/// Every Account binding on the Plane.
 	AccountBindings(AccountBindingList),
 	/// What one Plane knows about Usage for the selected scope. Boxed: it

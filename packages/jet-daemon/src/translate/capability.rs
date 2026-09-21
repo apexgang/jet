@@ -2,9 +2,10 @@
 
 use super::unix_ms;
 use jet_core::{
-	CapabilityObservation, CapabilitySnapshot, CraftId, CredentialStoreKind,
-	CredentialStoreStatus, DegradedCondition, ExternalTool, ExternalToolStatus,
-	HarnessId, InstalledCraft, Platform, ToolAvailability,
+	CapabilityObservation, CapabilitySnapshot, CraftId, CredentialProbeStep,
+	CredentialStoreKind, CredentialStoreStatus, CredentialStoreVerification,
+	DegradedCondition, ExternalTool, ExternalToolStatus, HarnessId,
+	InstalledCraft, Platform, ToolAvailability,
 };
 use jet_protocol as wire;
 
@@ -133,6 +134,44 @@ fn credential_store(
 		CredentialStoreStatus::Unavailable { kind } => {
 			wire::CredentialStoreStatus::Unavailable {
 				kind: credential_store_kind(kind),
+			}
+		}
+	}
+}
+
+pub(super) fn verification(
+	verification: CredentialStoreVerification,
+) -> wire::CredentialStoreVerification {
+	match verification {
+		CredentialStoreVerification::Verified { kind } => {
+			wire::CredentialStoreVerification::Verified {
+				kind: credential_store_kind(kind),
+			}
+		}
+		CredentialStoreVerification::Locked { kind } => {
+			wire::CredentialStoreVerification::Locked {
+				kind: credential_store_kind(kind),
+			}
+		}
+		CredentialStoreVerification::Unavailable { kind } => {
+			wire::CredentialStoreVerification::Unavailable {
+				kind: credential_store_kind(kind),
+			}
+		}
+		CredentialStoreVerification::Failed { kind, step } => {
+			wire::CredentialStoreVerification::Failed {
+				kind: credential_store_kind(kind),
+				step: match step {
+					CredentialProbeStep::Create => {
+						wire::CredentialProbeStep::Create
+					}
+					CredentialProbeStep::Read => {
+						wire::CredentialProbeStep::Read
+					}
+					CredentialProbeStep::Delete => {
+						wire::CredentialProbeStep::Delete
+					}
+				},
 			}
 		}
 	}

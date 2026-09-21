@@ -162,6 +162,10 @@ pub(super) fn query_minor(query: &QueryRequest) -> Option<MinorRequirement> {
 			minor: jet_protocol::SETTINGS_AND_CAPABILITIES_MINOR,
 			feature: "the Capability Query",
 		}),
+		QueryRequest::VerifyCredentialStore => Some(MinorRequirement {
+			minor: jet_protocol::CREDENTIAL_STORE_VERIFICATION_MINOR,
+			feature: "the credential store verification Query",
+		}),
 		QueryRequest::Usage { .. } => Some(MinorRequirement {
 			minor: jet_protocol::USAGE_RECORDS_MINOR,
 			feature: "the Usage Query",

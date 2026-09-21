@@ -7,7 +7,9 @@ use crate::{
 	ProjectId,
 	account::AccountBindingList,
 	audit::{AuditPage, AuditSequence},
-	capability::{CapabilityObservation, CapabilitySnapshot},
+	capability::{
+		CapabilityObservation, CapabilitySnapshot, CredentialStoreVerification,
+	},
 	conversation::{
 		ConversationId, ConversationList, ConversationSnapshot, PageCursor,
 		import::ExternalConversationList,
@@ -155,6 +157,9 @@ pub enum Query {
 		/// Whether to report the last observation or take a new one.
 		observation: CapabilityObservation,
 	},
+	/// Prove that the platform credential store holds a Credential, by
+	/// creating, reading back, and deleting a probe item (ADR-0076).
+	VerifyCredentialStore,
 	/// Every Account binding on the Plane, with the state of the Credential
 	/// each one resolves (ADR-0016, ADR-0076).
 	AccountBindings {
@@ -311,6 +316,8 @@ pub enum QueryResult {
 	Conversation(Box<ConversationSnapshot>),
 	/// What the Plane can do.
 	Capabilities(CapabilitySnapshot),
+	/// Whether the platform credential store round-tripped a Credential.
+	CredentialStoreVerification(CredentialStoreVerification),
 	/// Every Account binding on the Plane.
 	AccountBindings(AccountBindingList),
 	/// What one Plane knows about Usage for the selected scope. Boxed: it

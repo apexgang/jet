@@ -4,6 +4,8 @@
 #![allow(dead_code)]
 
 pub mod pairing;
+#[cfg(not(target_os = "macos"))]
+pub mod secret_service;
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -54,13 +56,19 @@ pub async fn start_jetd_without_external_tools(home: &Path) -> Daemon {
 
 /// Starts `jetd` on a Plane whose credential store answers, so a test that
 /// binds an account through the platform store runs the same way wherever
-/// it runs. macOS resolves through the Keychain; on Linux the probe reads
-/// the advertised session bus address a Secret Service would answer on.
+/// it runs. On Linux the Plane is given a session bus of the test's own,
+/// with an open Secret Service on it; macOS resolves through the Keychain.
+#[cfg(not(target_os = "macos"))]
 pub async fn start_jetd_with_credential_store(home: &Path) -> Daemon {
-	start_jetd_process(
-		jetd(home).env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/jet-test-bus"),
-	)
-	.await
+	let address = secret_service::serve(&home.with_file_name("bus")).await;
+	start_jetd_process(jetd(home).env("DBUS_SESSION_BUS_ADDRESS", address))
+		.await
+}
+
+/// See the Linux form; the Keychain is part of the operating system.
+#[cfg(target_os = "macos")]
+pub async fn start_jetd_with_credential_store(home: &Path) -> Daemon {
+	start_jetd(home).await
 }
 
 /// Spawns one `jetd` and waits for the line that says it can serve.

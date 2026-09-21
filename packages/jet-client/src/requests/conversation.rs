@@ -41,6 +41,7 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
+			| QueryResponse::CredentialStoreVerification { .. }
 			| QueryResponse::Usage(_)
 			| QueryResponse::UsageHistory(_)
 			| QueryResponse::SecurityAudit(_)
@@ -96,6 +97,7 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
+			| QueryResponse::CredentialStoreVerification { .. }
 			| QueryResponse::Usage(_)
 			| QueryResponse::UsageHistory(_)
 			| QueryResponse::SecurityAudit(_)
@@ -151,6 +153,7 @@ impl Client {
 			| QueryResponse::Settings(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
+			| QueryResponse::CredentialStoreVerification { .. }
 			| QueryResponse::Usage(_)
 			| QueryResponse::UsageHistory(_)
 			| QueryResponse::SecurityAudit(_)

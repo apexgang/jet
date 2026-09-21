@@ -5,9 +5,9 @@
 //! reports what it found.
 
 use crate::capability::{
-	CapabilityProbe, CredentialStoreKind, CredentialStoreStatus, ExternalTool,
-	ExternalToolStatus, MAX_VERSION_CHARS, ObservedCapabilities, Platform,
-	ToolAvailability,
+	CapabilityProbe, CredentialStoreStatus, CredentialStoreVerification,
+	ExternalTool, ExternalToolStatus, MAX_VERSION_CHARS, ObservedCapabilities,
+	Platform, ToolAvailability, credential_store,
 };
 use std::{future::Future, pin::Pin};
 use tokio::process::Command;
@@ -35,6 +35,10 @@ impl CapabilityProbe for SystemCapabilityProbe {
 				.into_iter()
 				.map(|tool| tokio::spawn(detect(tool)))
 				.collect();
+			// The credential store is asked at the same time, for the same
+			// reason; a store that does not answer is unavailable, so a
+			// probe that panicked reports what a silent one does.
+			let credential_store = tokio::spawn(credential_store::observe());
 			let mut external_tools =
 				Vec::with_capacity(ExternalTool::ALL.len());
 			for (tool, detection) in
@@ -56,12 +60,23 @@ impl CapabilityProbe for SystemCapabilityProbe {
 					architecture: std::env::consts::ARCH,
 				},
 				external_tools,
-				credential_store: credential_store(),
+				credential_store: credential_store.await.unwrap_or(
+					CredentialStoreStatus::Unavailable {
+						kind: credential_store::KIND,
+					},
+				),
 				// Craft discovery and installation arrive with the Craft
 				// issues; until then the Plane honestly reports none.
 				crafts: Vec::new(),
 			}
 		})
+	}
+
+	fn verify_credential_store(
+		&self,
+	) -> Pin<Box<dyn Future<Output = CredentialStoreVerification> + Send + '_>>
+	{
+		Box::pin(credential_store::verify())
 	}
 }
 
@@ -107,38 +122,6 @@ fn first_line(output: &[u8]) -> Option<String> {
 	let text = String::from_utf8_lossy(output);
 	let line = text.lines().map(str::trim).find(|line| !line.is_empty())?;
 	Some(line.chars().take(MAX_VERSION_CHARS).collect())
-}
-
-/// Which credential store this platform resolves through, and whether it
-/// can be reached. Jet never falls back to plaintext, so an unreachable
-/// store is reported rather than replaced (ADR-0076).
-///
-/// This looks for the backend rather than into it. Telling a locked
-/// backend from an open one means speaking the Secret Service D-Bus
-/// interface on Linux and the Keychain API on macOS, which this Plane does
-/// not yet do; until it does, a backend it can find is reported as
-/// available, and a Plane reports [`CredentialStoreStatus::Locked`] only
-/// through a probe that can see the difference.
-fn credential_store() -> CredentialStoreStatus {
-	if cfg!(target_os = "macos") {
-		// The Keychain is part of the operating system.
-		return CredentialStoreStatus::Available {
-			kind: CredentialStoreKind::AppleKeychain,
-		};
-	}
-	let kind = CredentialStoreKind::SecretService;
-	// The Secret Service answers on the session bus. Its advertised address
-	// or the socket the session manager left behind is the evidence that
-	// one exists; a `jetd` started without a session has neither.
-	let session_bus = std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some()
-		|| std::env::var_os("XDG_RUNTIME_DIR").is_some_and(|runtime| {
-			std::path::Path::new(&runtime).join("bus").exists()
-		});
-	if session_bus {
-		CredentialStoreStatus::Available { kind }
-	} else {
-		CredentialStoreStatus::Unavailable { kind }
-	}
 }
 
 #[cfg(test)]
