@@ -205,8 +205,11 @@ struct Opened {
 impl Store {
 	/// Opens or creates the store at `path` and applies pending migrations.
 	///
-	/// Every open runs SQLite's lightweight integrity check first. A store
-	/// that fails it, or whose migration fails, still opens, but reads only:
+	/// An open after an unclean shutdown, which the write-ahead log SQLite
+	/// leaves behind marks, runs SQLite's lightweight integrity check first;
+	/// a store its last holder closed is served without it, so the ready
+	/// line keeps its budget at any size (ADR-0022). A store that fails the
+	/// check, or whose migration fails, still opens, but reads only:
 	/// [`Store::integrity`] says so, and the damaged database is kept as
 	/// found until a verified snapshot is restored over it (ADR-0077).
 	///
@@ -225,7 +228,12 @@ impl Store {
 	/// verification.
 	pub async fn open(path: &Path) -> Result<Self, StoreError> {
 		let snapshots = snapshot::Tracker::at_open(path)?;
-		let opened = open::connect(path, &snapshots).await?;
+		let opened = open::connect(
+			path,
+			&snapshots,
+			open::PageCheck::AfterUncleanShutdown,
+		)
+		.await?;
 		Ok(Self {
 			opened: std::sync::RwLock::new(opened),
 			database: path.to_owned(),
@@ -243,7 +251,8 @@ impl Store {
 	/// Restores the verified Recovery snapshot called `name` over the
 	/// damaged database, keeping the damaged files beside it under a name
 	/// that carries `now_unix_ms`, and reopens the result through the same
-	/// checks as any open (ADR-0077). The Security audit head stays where
+	/// checks as any open, the page check included, because the copy's
+	/// verification lies in the past (ADR-0077). The Security audit head stays where
 	/// it is, so the audit sees that state moved backwards (ADR-0105), and
 	/// the Deletion ledger is reapplied to the restored copy, so a deletion
 	/// made after the snapshot stays made (ADR-0102).

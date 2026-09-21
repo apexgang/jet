@@ -700,6 +700,9 @@ pub(crate) mod tests {
 			FixedProbe::new(equipped()),
 		)
 		.await;
+		// The sweep is the maintenance a start owes, settled once the
+		// daemon serves (ADR-0022).
+		restarted.perform_start_maintenance().await.unwrap();
 
 		let page = audit(&restarted, AuditSequence(0)).await;
 		assert_eq!(

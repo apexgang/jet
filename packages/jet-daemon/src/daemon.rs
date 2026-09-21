@@ -138,6 +138,27 @@ pub(crate) async fn run(
 			.emit();
 		}
 	}
+	// ADR-0086: the Plane reports what it can do at startup, on the one
+	// line a launcher reads, and on demand afterwards. The line precedes
+	// the workers, so the maintenance a start owes never holds it up
+	// (ADR-0022).
+	let capabilities = crate::translate::capabilities(
+		core.capabilities().await,
+		jet_protocol::PROTOCOL_MINOR,
+	);
+	let recovery_mode = match core.recovery_mode() {
+		jet_core::RecoveryMode::Serving => "serving",
+		jet_core::RecoveryMode::ReadOnly(_) => "read_only",
+	};
+	println!(
+		"{}",
+		serde_json::json!({
+			"status": "ready",
+			"socket": listener.socket_path().display().to_string(),
+			"capabilities": capabilities,
+			"recovery": recovery_mode,
+		})
+	);
 	let utility_core = Arc::clone(&core);
 	let utility_work = tokio::spawn(async move {
 		utility_core.wait_until_serving().await;
@@ -173,6 +194,16 @@ pub(crate) async fn run(
 		if recovery_core.recovery_mode() != jet_core::RecoveryMode::Serving {
 			recovery_core.wait_until_serving().await;
 			reconcile_at_start(&recovery_core).await;
+		}
+		// The day's first Recovery snapshot, then the sweeps it precedes,
+		// run once the Plane serves: the copy costs what the store weighs
+		// (ADR-0097, ADR-0022). What fails here is owed again next start.
+		if let Err(error) = recovery_core.perform_start_maintenance().await {
+			core_failure(
+				DiagnosticComponent::Maintenance,
+				"cannot settle the maintenance a start owes",
+				&error,
+			);
 		}
 		loop {
 			let mut retry = false;
@@ -347,25 +378,6 @@ pub(crate) async fn run(
 			}
 		}
 	});
-	// ADR-0086: the Plane reports what it can do at startup, on the one
-	// line a launcher reads, and on demand afterwards.
-	let capabilities = crate::translate::capabilities(
-		core.capabilities().await,
-		jet_protocol::PROTOCOL_MINOR,
-	);
-	let recovery_mode = match core.recovery_mode() {
-		jet_core::RecoveryMode::Serving => "serving",
-		jet_core::RecoveryMode::ReadOnly(_) => "read_only",
-	};
-	println!(
-		"{}",
-		serde_json::json!({
-			"status": "ready",
-			"socket": listener.socket_path().display().to_string(),
-			"capabilities": capabilities,
-			"recovery": recovery_mode,
-		})
-	);
 	let exit = serve(listener, &core).await;
 	Diagnostic::info(DiagnosticComponent::Process, "daemon stopping").emit();
 	recovery.abort();

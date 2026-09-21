@@ -96,23 +96,6 @@ impl Core {
 			.parent()
 			.expect("Workspace home has a parent")
 			.join("crafts");
-		if serving && security == SecurityState::Trusted {
-			// What the sweep and the collection are about to remove is
-			// copied first, at most once a day (ADR-0097).
-			store
-				.snapshot_if_due(
-					jet_store::SnapshotReason::Maintenance,
-					unix_ms(started_at),
-				)
-				.await?;
-			audit::sweep_retention(&store, unix_ms(started_at)).await?;
-			craft::artifact_collection::collect_unreferenced(
-				&store,
-				craft_home.clone(),
-				started_at,
-			)
-			.await?;
-		}
 		let mut observed = probe.observe().await;
 		observed
 			.crafts
@@ -163,6 +146,44 @@ impl Core {
 			core.index_search().await?;
 		}
 		Ok(core)
+	}
+
+	/// Settles the maintenance a start owes, once the Plane is serving:
+	/// the day's Recovery snapshot when the store predates this start and
+	/// the day has none, then the Security audit's retention sweep and the
+	/// collection of unreferenced Craft Artifacts, which the snapshot
+	/// precedes because they remove things (ADR-0097). Nothing runs while
+	/// the store is in read-only Recovery mode or the audit is not trusted
+	/// (ADR-0077, ADR-0105).
+	///
+	/// The copy costs what the store weighs, so `jetd` calls this after its
+	/// ready line rather than before it (ADR-0022).
+	///
+	/// # Errors
+	///
+	/// Returns a store category [`CoreError`] when the snapshot cannot be
+	/// taken or verified, or a sweep cannot be committed. The maintenance
+	/// is owed again on the next start.
+	pub async fn perform_start_maintenance(&self) -> Result<(), CoreError> {
+		if self.recovery_mode() != store_recovery::RecoveryMode::Serving
+			|| self.security().await != SecurityState::Trusted
+		{
+			return Ok(());
+		}
+		let now = self.clock.now();
+		self.store
+			.snapshot_if_due(
+				jet_store::SnapshotReason::Maintenance,
+				unix_ms(now),
+			)
+			.await?;
+		audit::sweep_retention(&self.store, unix_ms(now)).await?;
+		craft::artifact_collection::collect_unreferenced(
+			&self.store,
+			self.run_home().join("crafts"),
+			now,
+		)
+		.await
 	}
 
 	/// What the Plane could do when it was last observed. `jetd` reports
@@ -238,6 +259,9 @@ mod tests {
 			panic!("expected a status snapshot");
 		};
 
+		// A start takes no snapshot of its own: the restart's maintenance,
+		// and the copy that precedes it, wait for the Plane to serve
+		// (ADR-0097, ADR-0022).
 		assert_eq!(
 			(&before, &after),
 			(
@@ -261,24 +285,13 @@ mod tests {
 					started_at: after.started_at,
 					core_version: CORE_VERSION,
 					security: SecurityState::Trusted,
-					// The restart's maintenance was preceded by a snapshot
-					// of the store the first core left behind (ADR-0097).
 					recovery: RecoveryStatus {
 						mode: RecoveryMode::Serving,
-						snapshots: after.recovery.snapshots.clone(),
+						snapshots: vec![],
 						deletions: DeletionLedger::Verified(vec![]),
 					},
 				}
 			)
-		);
-		assert_eq!(
-			after
-				.recovery
-				.snapshots
-				.iter()
-				.map(|snapshot| snapshot.reason)
-				.collect::<Vec<_>>(),
-			vec![crate::SnapshotReason::Maintenance]
 		);
 		assert!(after.started_at >= before.started_at);
 	}
