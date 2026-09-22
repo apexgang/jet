@@ -2,10 +2,57 @@
 
 use super::unexpected;
 use crate::connection::{Client, ClientError};
-use jet_protocol::{CommandRequest, CommandResponse, Run, RunLifecycle};
+use jet_protocol::{
+	CommandRequest, CommandResponse, QueryRequest, QueryResponse, Run,
+	RunControl, RunExecution, RunLifecycle,
+};
 use uuid::Uuid;
 
 impl Client {
+	/// Reads the authoritative execution state and Event fence for one Run.
+	///
+	/// # Errors
+	/// Returns a stable feature, not-found, or transport error.
+	pub async fn run_execution(
+		&self,
+		run_id: Uuid,
+	) -> Result<RunExecution, ClientError> {
+		self.require_minor(jet_protocol::MANAGED_RUNS_MINOR)?;
+		match self.query(QueryRequest::RunExecution { run_id }).await? {
+			QueryResponse::RunExecution(execution) => Ok(execution),
+			other => Err(unexpected(&other)),
+		}
+	}
+
+	/// Durably requests either interruption of the active Turn or termination
+	/// of the whole Run. Acceptance is not the execution outcome.
+	///
+	/// A retry must reuse `command_id`, `run_id`, and `control`.
+	///
+	/// # Errors
+	/// Returns a stable lifecycle, feature, or transport error.
+	pub async fn control_run(
+		&self,
+		command_id: Uuid,
+		run_id: Uuid,
+		control: RunControl,
+	) -> Result<Run, ClientError> {
+		self.require_minor(jet_protocol::EXECUTION_CONTROL_MINOR)?;
+		let request = match control {
+			RunControl::InterruptTurn => {
+				CommandRequest::InterruptTurn { run_id }
+			}
+			RunControl::StopRun => CommandRequest::StopRun { run_id },
+		};
+		match self.execute_command(command_id, request).await? {
+			CommandResponse::RunControlAccepted {
+				run,
+				control: accepted,
+			} if accepted == control => Ok(run),
+			other => Err(unexpected(&other)),
+		}
+	}
+
 	/// Starts one managed Run and admits its initial user Turn under the
 	/// Command identity `command_id`. A retry must reuse the same identity,
 	/// Conversation, Craft, and prompt.

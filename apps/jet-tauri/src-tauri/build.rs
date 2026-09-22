@@ -10,6 +10,11 @@ fn main() {
             "preview_project_removal",
             "remove_project",
             "bind_harness_account",
+            "load_run_supervision",
+            "withdraw_turn",
+            "interrupt_turn",
+            "stop_run",
+            "authorize_approval_retry",
         ]),
     ))
     .expect("failed to build the Tauri command manifest");

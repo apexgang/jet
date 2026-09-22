@@ -30,6 +30,11 @@ pub fn run() {
             jet::create_conversation,
             jet::start_run,
             jet::submit_turn,
+            jet::load_run_supervision,
+            jet::withdraw_turn,
+            jet::interrupt_turn,
+            jet::stop_run,
+            jet::authorize_approval_retry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Jet desktop application");

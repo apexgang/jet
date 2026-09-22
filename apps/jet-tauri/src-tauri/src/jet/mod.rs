@@ -3,6 +3,7 @@ mod client;
 mod conversations;
 mod errors;
 mod identity;
+mod run_control;
 mod setup;
 
 use std::{io, path::Path, time::Duration};
@@ -21,6 +22,7 @@ pub(crate) struct JetBridge {
     client: PlaneClient,
     setup: setup::SetupState,
     conversations: conversations::ConversationState,
+    run_control: run_control::RunControlState,
 }
 
 impl JetBridge {
@@ -43,6 +45,7 @@ impl JetBridge {
             ),
             setup: setup::SetupState::default(),
             conversations: conversations::ConversationState::new(app_data_directory),
+            run_control: run_control::RunControlState::default(),
         })
     }
 }
@@ -154,4 +157,47 @@ pub(crate) async fn submit_turn(
     prompt: String,
 ) -> Result<conversations::TurnResultView, PublicError> {
     conversations::submit_turn(bridge, conversation_id, prompt).await
+}
+
+#[tauri::command]
+pub(crate) async fn load_run_supervision(
+    bridge: State<'_, JetBridge>,
+    conversation_id: String,
+    run_id: Option<String>,
+) -> Result<run_control::RunSupervisionView, PublicError> {
+    run_control::load_run_supervision(bridge, conversation_id, run_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn withdraw_turn(
+    bridge: State<'_, JetBridge>,
+    conversation_id: String,
+    turn_id: String,
+) -> Result<run_control::TurnView, PublicError> {
+    run_control::withdraw_turn(bridge, conversation_id, turn_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn interrupt_turn(
+    bridge: State<'_, JetBridge>,
+    run_id: String,
+) -> Result<run_control::CommandAcceptedView, PublicError> {
+    run_control::interrupt_turn(bridge, run_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn stop_run(
+    bridge: State<'_, JetBridge>,
+    run_id: String,
+) -> Result<run_control::CommandAcceptedView, PublicError> {
+    run_control::stop_run(bridge, run_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn authorize_approval_retry(
+    bridge: State<'_, JetBridge>,
+    run_id: String,
+    review_id: String,
+) -> Result<run_control::ApprovalRetryView, PublicError> {
+    run_control::authorize_approval_retry(bridge, run_id, review_id).await
 }

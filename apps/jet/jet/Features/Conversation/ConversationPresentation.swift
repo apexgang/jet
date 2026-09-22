@@ -31,16 +31,34 @@ extension JetEvent {
             let state = (payload["to"] as? String)?
                 .replacingOccurrences(of: "_", with: " ") ?? "updated"
             return [activityEntry("Run \(state).")]
-        case "change.checkpoint_recorded":
+        case "run.control_requested":
+            switch payload["control"] as? String {
+            case JetRunControl.interruptTurn.rawValue:
+                return [activityEntry("Interrupt requested. Waiting for the active Turn to end.")]
+            case JetRunControl.stopRun.rawValue:
+                return [activityEntry("Stop requested. Waiting for the Run to end.")]
+            default:
+                return [activityEntry("Run control requested.")]
+            }
+        case "run.terminated":
+            return [terminationEntry(payload)]
+        case "approval.requested", "approval.reviewed":
+            guard let approval = approvalPresentation(payload) else { return [] }
+            let runKey = approval.runID?.uuidString.lowercased() ?? "run"
             return [
                 JetTimelineEntry(
-                    id: "\(sequence)-checkpoint",
-                    kind: .result,
-                    text: "Jet recorded the completed turn and its changes.",
+                    id: "approval-\(runKey)-\(approval.requestID)",
+                    kind: .approval,
+                    text: approvalSummary(approval),
                     sequence: sequence,
-                    rawCount: 0
+                    rawCount: 0,
+                    approval: approval
                 ),
             ]
+        case "approval.retry_authorized":
+            return [resultEntry("One exact approval retry was authorized.")]
+        case "change.checkpoint_recorded":
+            return [resultEntry("Jet recorded the completed turn and its changes.")]
         default:
             return []
         }
@@ -111,6 +129,133 @@ extension JetEvent {
             sequence: sequence,
             rawCount: 0
         )
+    }
+
+    private func resultEntry(_ text: String) -> JetTimelineEntry {
+        JetTimelineEntry(
+            id: "\(sequence)-result",
+            kind: .result,
+            text: text,
+            sequence: sequence,
+            rawCount: 0
+        )
+    }
+
+    private func terminationEntry(_ payload: [String: Any]) -> JetTimelineEntry {
+        let value = payload["termination"] as? [String: Any] ?? payload
+        let termination = (value["control"] as? String)
+            .flatMap(JetRunControl.init(rawValue:))
+            .flatMap { control in
+                (value["stage"] as? String)
+                    .flatMap(JetTerminationStage.init(rawValue:))
+                    .map { JetRunTermination(control: control, stage: $0) }
+            }
+        return resultEntry(termination?.summary ?? "The Run control request finished.")
+    }
+
+    private func approvalPresentation(
+        _ payload: [String: Any]
+    ) -> JetApprovalPresentation? {
+        let request: [String: Any]
+        let reviewID: UUID?
+        let state: JetApprovalState
+        let canAuthorizeRetry: Bool
+        let rationale: String?
+        let consequence: String
+
+        if kind == "approval.requested" {
+            guard let value = payload["request"] as? [String: Any] else { return nil }
+            request = value
+            reviewID = nil
+            state = .requested
+            canAuthorizeRetry = false
+            rationale = nil
+            consequence = "The Run stays paused until this request is decided. Manual approval decisions are not available through the current client protocol."
+        } else {
+            guard let review = payload["review"] as? [String: Any],
+                  let value = review["request"] as? [String: Any],
+                  let outcome = review["outcome"] as? [String: Any],
+                  let status = outcome["status"] as? String
+            else {
+                return nil
+            }
+            request = value
+            reviewID = (review["review_id"] as? String).flatMap(UUID.init(uuidString:))
+            let decision = outcome["decision"] as? String
+            switch (status, decision) {
+            case ("decided", "allow"):
+                state = .allowed
+                consequence = "The reviewer allowed this exact action once."
+            case ("denied", _), ("decided", "deny"):
+                state = .denied
+                consequence = "The action remains blocked. You may authorize one review retry of the unchanged request."
+            case ("unavailable", _):
+                state = .unavailable
+                consequence = "Automatic review could not decide. The Run remains paused for a person."
+            default:
+                return nil
+            }
+            canAuthorizeRetry = state == .denied && reviewID != nil
+            let verdict = outcome["verdict"] as? [String: Any]
+            rationale = (verdict?["rationale"] as? String ?? outcome["reason"] as? String)
+                .map { bounded($0, maximumBytes: 1_024) }
+        }
+
+        guard let requestID = request["request_id"] as? String,
+              !requestID.isEmpty,
+              requestID.utf8.count <= 128,
+              !requestID.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              let tool = request["tool"] as? String,
+              !tool.isEmpty,
+              tool.utf8.count <= 128,
+              !tool.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              let action = request["action"] as? String,
+              action.utf8.count <= 4_096
+        else {
+            return nil
+        }
+        return JetApprovalPresentation(
+            requestID: requestID,
+            reviewID: reviewID,
+            runID: runID,
+            tool: tool,
+            action: action,
+            target: actionTarget(action),
+            scope: "This action once",
+            consequence: consequence,
+            rationale: rationale,
+            state: state,
+            canAuthorizeRetry: canAuthorizeRetry
+        )
+    }
+
+    private func approvalSummary(_ approval: JetApprovalPresentation) -> String {
+        switch approval.state {
+        case .allowed: "\(approval.tool) was allowed once."
+        case .denied: "\(approval.tool) was denied."
+        case .unavailable: "\(approval.tool) still needs a decision."
+        case .requested: "\(approval.tool) needs approval."
+        }
+    }
+
+    private func actionTarget(_ action: String) -> String {
+        guard let data = action.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return "Current Run"
+        }
+        for key in [
+            "file_path", "filePath", "path", "directory", "cwd",
+            "working_directory", "workingDirectory",
+        ] {
+            if let value = object[key] as? String {
+                let flattened = value.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+                return flattened.isEmpty
+                    ? "Current Run"
+                    : bounded(flattened, maximumBytes: 512)
+            }
+        }
+        return "Current Run"
     }
 
     private func bounded(_ value: String, maximumBytes: Int) -> String {

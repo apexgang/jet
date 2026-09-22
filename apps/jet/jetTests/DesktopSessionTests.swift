@@ -183,9 +183,75 @@ struct DesktopSessionTests {
         #expect(session.timeline.isEmpty)
     }
 
+    @Test
+    func approvalProjectionKeepsTheActionInertAndRetryBoundToTheReview() throws {
+        let runID = UUID()
+        let reviewID = UUID()
+        let requested = event(
+            sequence: 10,
+            conversationID: UUID(),
+            runID: runID,
+            kind: "approval.requested",
+            payload: #"{"request":{"request_id":"req-1","tool":"shell","action":"{\"cwd\":\"/tmp/project\",\"command\":\"make test\"}"}}"#
+        )
+        let reviewed = event(
+            sequence: 11,
+            conversationID: requested.conversationID!,
+            runID: runID,
+            kind: "approval.reviewed",
+            payload: #"{"review":{"review_id":"\#(reviewID.uuidString)","request":{"request_id":"req-1","tool":"shell","action":"{\"cwd\":\"/tmp/project\",\"command\":\"make test\"}"},"outcome":{"status":"denied","reason":"Outside the current policy."}}}"#
+        )
+
+        let first = try #require(requested.timelineProjections().first)
+        let second = try #require(reviewed.timelineProjections().first)
+        #expect(first.id == second.id)
+        #expect(first.approval?.target == "/tmp/project")
+        #expect(second.approval?.reviewID == reviewID)
+        #expect(second.approval?.canAuthorizeRetry == true)
+        #expect(second.approval?.action.contains("make test") == true)
+    }
+
+    @Test
+    func interruptAndStopKeepDistinctLifecycleFeedback() {
+        #expect(
+            JetRunTermination(control: .interruptTurn, stage: .nativeCancellation)
+                .summary.contains("next Turn")
+        )
+        #expect(
+            JetRunTermination(control: .stopRun, stage: .kill)
+                .summary.contains("Run stopped")
+        )
+    }
+
+    @Test
+    func composerHonorsQueueAndUtf8Limits() {
+        let session = DesktopSession()
+        session.draft = String(repeating: "a", count: JetTurnQueue.maximumPromptBytes + 1)
+        #expect(!session.canSubmitDraft)
+
+        session.draft = "next"
+        session.turnQueue = JetTurnQueue(
+            cursor: 1,
+            turns: (1 ... JetTurnQueue.maximumEntries).map { position in
+                JetTurnQueueEntry(
+                    id: UUID(),
+                    sequence: UInt64(position),
+                    position: position,
+                    source: .user,
+                    state: .queued,
+                    runID: nil,
+                    withdrawable: false
+                )
+            }
+        )
+        #expect(session.queueIsFull)
+        #expect(!session.canSubmitDraft)
+    }
+
     private func event(
         sequence: UInt64,
         conversationID: UUID,
+        runID: UUID? = nil,
         kind: String,
         payload: String
     ) -> JetEvent {
@@ -196,7 +262,7 @@ struct DesktopSessionTests {
             origin: nil,
             recordedAtUnixMilliseconds: 1,
             conversationID: conversationID,
-            runID: nil,
+            runID: runID,
             kind: kind,
             payloadVersion: 1,
             payload: JetRawJSON(source: payload)

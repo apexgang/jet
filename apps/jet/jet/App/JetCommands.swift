@@ -27,10 +27,14 @@ struct JetCommands: Commands {
                 .keyboardShortcut(.return, modifiers: [.command])
                 .disabled(!session.canSubmitDraft)
             Divider()
-            Button("Interrupt Turn") {}
-                .disabled(true)
-            Button("Stop Run") {}
-                .disabled(true)
+            Button("Interrupt Turn…") {
+                session.requestRunControl(.interruptTurn)
+            }
+                .disabled(!session.canInterruptTurn || session.supervisionOperation != nil)
+            Button("Stop Run…") {
+                session.requestRunControl(.stopRun)
+            }
+                .disabled(!session.canStopRun || session.supervisionOperation != nil)
             Divider()
             Button("Rename") {}
                 .disabled(true)

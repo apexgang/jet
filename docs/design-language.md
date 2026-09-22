@@ -124,9 +124,13 @@ When the user sends, Jet validates the required context. If one item is missing,
 
 Stream meaningful progress into the timeline. Group repetitive tool and protocol activity behind a concise summary with an activity count and latest state.
 
-Approvals appear inline where the action was proposed. Each approval must state the action, target, scope, consequence, and whether it can be remembered. Reject and cancel remain easy to reach.
+Approvals appear inline where the action was proposed. Each approval must state the action, target, scope, consequence, and whether it can be remembered. Lead with the action name and state, present target and consequence as labeled facts, and keep the exact requested action selectable and monospaced. Reject and cancel remain easy to reach.
 
-Interrupt Turn stops the active response while preserving the Run. Stop Run ends the Run. Queue actions show their target and queue position and use the protocol's withdrawal semantics.
+If the negotiated protocol cannot record a generic Harness approval decision, show that limitation in the approval card and expose only real recovery or cancellation commands. Never make a local button look like it approved or rejected remote work.
+
+Interrupt Turn stops the active response while preserving the Run. Stop Run ends the Run. Keep them as separate labeled controls, confirm either action with consequence-specific copy, and reserve destructive styling for Stop Run. Queue actions show their target and queue position and use the protocol's withdrawal semantics.
+
+Expose protocol limits where users act: show UTF-8 byte usage beside the composer, queue occupancy in Run details, and a plain-language queue-full message that points to withdrawing a queued Turn or waiting.
 
 ### Completion and delivery
 

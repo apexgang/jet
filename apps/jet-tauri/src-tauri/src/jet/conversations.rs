@@ -110,6 +110,8 @@ pub(crate) struct ConversationDetailView {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RunView {
     id: String,
+    conversation_id: String,
+    revision: String,
     lifecycle: &'static str,
     title: String,
     created_at_unix_ms: String,
@@ -358,9 +360,11 @@ fn row_view(conversation: &Conversation) -> ConversationRowView {
     }
 }
 
-fn run_view(run: &Run) -> RunView {
+pub(crate) fn run_view(run: &Run) -> RunView {
     RunView {
         id: run.run_id.to_string(),
+        conversation_id: run.conversation_id.to_string(),
+        revision: run.revision.to_string(),
         lifecycle: lifecycle_name(run.lifecycle),
         title: run
             .name

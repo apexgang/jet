@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-withdraw-turn"
+description = "Enables the withdraw_turn command without any pre-configured scope."
+commands.allow = ["withdraw_turn"]
+
+[[permission]]
+identifier = "deny-withdraw-turn"
+description = "Denies the withdraw_turn command without any pre-configured scope."
+commands.deny = ["withdraw_turn"]

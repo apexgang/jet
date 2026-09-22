@@ -299,6 +299,78 @@ actor JetClient {
         return try decodeAdmittedTurn(data, requestID: requestID)
     }
 
+    func turnQueue(conversationID: UUID) async throws -> JetTurnQueue {
+        let (data, requestID) = try await sendQuery([
+            "type": "turn_queue",
+            "conversation_id": conversationID.uuidString.lowercased(),
+        ])
+        return try decodeTurnQueue(data, requestID: requestID)
+    }
+
+    func withdrawTurn(
+        conversationID: UUID,
+        turnID: UUID,
+        commandID: UUID
+    ) async throws -> JetTurnSummary {
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "withdraw_turn",
+                "conversation_id": conversationID.uuidString.lowercased(),
+                "turn_id": turnID.uuidString.lowercased(),
+            ],
+            commandID: commandID
+        )
+        return try decodeWithdrawnTurn(data, requestID: requestID)
+    }
+
+    func runExecution(runID: UUID) async throws -> JetRunExecution {
+        let (data, requestID) = try await sendQuery([
+            "type": "run_execution",
+            "run_id": runID.uuidString.lowercased(),
+        ])
+        return try decodeRunExecution(data, requestID: requestID)
+    }
+
+    func controlRun(
+        runID: UUID,
+        control: JetRunControl,
+        commandID: UUID
+    ) async throws -> JetRunControlAccepted {
+        let (data, requestID) = try await sendCommand(
+            ["type": control.rawValue, "run_id": runID.uuidString.lowercased()],
+            commandID: commandID
+        )
+        return try decodeRunControlAccepted(
+            data,
+            requestID: requestID,
+            expectedControl: control
+        )
+    }
+
+    func authorizeApprovalRetry(
+        runID: UUID,
+        reviewID: UUID,
+        commandID: UUID
+    ) async throws {
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "authorize_approval_retry",
+                "run_id": runID.uuidString.lowercased(),
+                "review_id": reviewID.uuidString.lowercased(),
+            ],
+            commandID: commandID
+        )
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "approval_retry_authorized"
+        )
+        guard uuid(result["review_id"]) == reviewID else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+    }
+
     func previewProject(path: String) async throws -> JetProjectPreview {
         guard !path.isEmpty,
               path.utf8.count <= 4_096,
@@ -1183,11 +1255,150 @@ actor JetClient {
               let id = uuid(turn["turn_id"]),
               let sequenceText = turn["sequence"] as? String,
               let sequence = UInt64(sequenceText),
-              let state = turn["state"] as? String
+              let stateText = turn["state"] as? String,
+              let state = JetTurnState(rawValue: stateText)
         else {
             throw JetClientFailure.presentation(.invalidResponse)
         }
         return JetTurnSummary(id: id, sequence: sequence, state: state)
+    }
+
+    private func decodeWithdrawnTurn(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetTurnSummary {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "turn_withdrawn"
+        )
+        guard let turn = result["turn"] as? [String: Any] else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let decoded = try decodeTurn(turn, position: 0)
+        return JetTurnSummary(id: decoded.id, sequence: decoded.sequence, state: decoded.state)
+    }
+
+    private func decodeTurnQueue(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetTurnQueue {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "turn_queue"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let turns = result["turns"] as? [[String: Any]],
+              turns.count <= JetTurnQueue.maximumEntries
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetTurnQueue(
+            cursor: cursor,
+            turns: try turns.enumerated().map { index, turn in
+                try decodeTurn(turn, position: index + 1)
+            }
+        )
+    }
+
+    private func decodeTurn(
+        _ value: [String: Any],
+        position: Int
+    ) throws -> JetTurnQueueEntry {
+        guard let id = uuid(value["turn_id"]),
+              let sequenceText = value["sequence"] as? String,
+              let sequence = UInt64(sequenceText),
+              let clientID = uuid(value["client_id"]),
+              let sourceText = value["source"] as? String,
+              let source = JetTurnSource(rawValue: sourceText),
+              let stateText = value["state"] as? String,
+              let state = JetTurnState(rawValue: stateText)
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetTurnQueueEntry(
+            id: id,
+            sequence: sequence,
+            position: position,
+            source: source,
+            state: state,
+            runID: try optionalUUID(value["run_id"]),
+            withdrawable: clientID == configuration.clientID
+                && source == .user
+                && state == .queued
+        )
+    }
+
+    private func decodeRunExecution(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetRunExecution {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "run_execution"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let run = result["run"] as? [String: Any]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let activity: JetRunActivity?
+        if let text = result["activity"] as? String {
+            guard let parsed = JetRunActivity(rawValue: text) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            activity = parsed
+        } else {
+            activity = nil
+        }
+        let termination: JetRunTermination?
+        if let value = result["termination"] as? [String: Any] {
+            guard let controlText = value["control"] as? String,
+                  let control = JetRunControl(rawValue: controlText),
+                  let stageText = value["stage"] as? String,
+                  let stage = JetTerminationStage(rawValue: stageText)
+            else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            termination = JetRunTermination(control: control, stage: stage)
+        } else {
+            termination = nil
+        }
+        return JetRunExecution(
+            cursor: cursor,
+            run: try decodeRun(run),
+            activity: activity,
+            needsAttention: result["needs_attention"] as? Bool ?? false,
+            termination: termination
+        )
+    }
+
+    private func decodeRunControlAccepted(
+        _ data: Data,
+        requestID: UInt64,
+        expectedControl: JetRunControl
+    ) throws -> JetRunControlAccepted {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "run_control_accepted"
+        )
+        guard let run = result["run"] as? [String: Any],
+              let controlText = result["control"] as? String,
+              let control = JetRunControl(rawValue: controlText),
+              control == expectedControl
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetRunControlAccepted(run: try decodeRun(run), control: control)
     }
 
     private func decodeConversationSummary(
@@ -1225,6 +1436,9 @@ actor JetClient {
 
     private func decodeRun(_ value: [String: Any]) throws -> JetRunSummary {
         guard let id = uuid(value["run_id"]),
+              let conversationID = uuid(value["conversation_id"]),
+              let revisionText = value["revision"] as? String,
+              let revision = UInt64(revisionText),
               let lifecycleText = value["lifecycle"] as? String,
               let lifecycle = JetRunLifecycle(rawValue: lifecycleText),
               let createdAt = signed64(value["created_at_unix_ms"])
@@ -1248,6 +1462,8 @@ actor JetClient {
         }
         return JetRunSummary(
             id: id,
+            conversationID: conversationID,
+            revision: revision,
             lifecycle: lifecycle,
             title: title,
             createdAtUnixMilliseconds: createdAt,

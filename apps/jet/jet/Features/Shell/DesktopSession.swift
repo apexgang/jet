@@ -45,6 +45,11 @@ final class DesktopSession {
         let commandID: UUID
     }
 
+    private struct RunControlKey: Hashable {
+        let runID: UUID
+        let control: JetRunControl
+    }
+
     enum ContentState {
         case loading
         case ready(DesktopFixtureScenario)
@@ -87,7 +92,11 @@ final class DesktopSession {
     var conversationSnapshot: JetConversationSnapshot?
     var conversationFreshness: JetConversationFreshness = .loading
     var conversationOperation: String?
+    var supervisionOperation: String?
     var timeline: [JetTimelineEntry] = []
+    var turnQueue: JetTurnQueue?
+    var runExecution: JetRunExecution?
+    var runControlConfirmation: JetRunControl?
     var searchText = ""
     var searchResult: JetSearchResult?
     var searchIsLoading = false
@@ -105,6 +114,9 @@ final class DesktopSession {
     private var createCommandID = UUID()
     private var pendingStart: PendingStart?
     private var pendingTurn: PendingTurn?
+    private var withdrawalCommandIDs: [UUID: UUID] = [:]
+    private var runControlCommandIDs: [RunControlKey: UUID] = [:]
+    private var approvalRetryCommandIDs: [UUID: UUID] = [:]
     private var eventObservationTask: Task<Void, Never>?
     private var conversationRequest = 0
     private var searchRequest = 0
@@ -122,6 +134,20 @@ final class DesktopSession {
 
     var canSubmitDraft: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && draftBytes <= JetTurnQueue.maximumPromptBytes
+            && !queueIsFull
+    }
+
+    var draftBytes: Int { draft.utf8.count }
+    var queueIsFull: Bool {
+        (turnQueue?.turns.count ?? 0) >= JetTurnQueue.maximumEntries
+    }
+
+    var attentionCount: Int {
+        let approvals = timeline.filter {
+            $0.approval?.state == .requested || $0.approval?.state == .unavailable
+        }.count
+        return approvals + (runExecution?.needsAttention == true ? 1 : 0)
     }
 
     var setupSnapshot: JetSetupSnapshot? {
@@ -167,11 +193,20 @@ final class DesktopSession {
     }
 
     var selectedRun: JetRunSummary? {
-        conversationSnapshot?.runs.last
+        runExecution?.run ?? conversationSnapshot?.runs.last
     }
 
     var hasLiveRun: Bool {
         selectedRun?.lifecycle.isLive == true
+    }
+
+    var canInterruptTurn: Bool {
+        guard let run = selectedRun, run.lifecycle == .active else { return false }
+        return turnQueue?.turns.contains { $0.runID == run.id && $0.state == .active } == true
+    }
+
+    var canStopRun: Bool {
+        selectedRun?.lifecycle == .active
     }
 
     var planeConnectionLabel: String {
@@ -291,10 +326,13 @@ final class DesktopSession {
                restoredSnapshot.conversation.id == selectedConversationID
             {
                 conversationSnapshot = restoredSnapshot
+                await loadRunSupervision()
             } else if selectedConversationID != nil {
                 await loadSelectedConversation()
             } else {
                 conversationSnapshot = nil
+                turnQueue = nil
+                runExecution = nil
             }
             if eventObservationTask == nil {
                 observeEvents(after: page.cursor)
@@ -352,6 +390,8 @@ final class DesktopSession {
         if selectedConversationID != conversationID {
             timeline = []
             conversationSnapshot = nil
+            turnQueue = nil
+            runExecution = nil
         }
         selectedConversationID = conversationID
         sidebarSelection = .conversation
@@ -373,12 +413,153 @@ final class DesktopSession {
             conversationSnapshot = snapshot
             mergeConversation(snapshot.conversation)
             conversationFreshness = .live
+            await loadRunSupervision()
         } catch {
             guard self.selectedConversationID == selectedConversationID else { return }
             conversationFreshness = conversationSnapshot == nil ? .failed : .cached
             actionNotice = presentationError(error).message
         }
         conversationOperation = nil
+    }
+
+    func loadRunSupervision() async {
+        guard usesLivePlane, let conversationID = selectedConversationID else {
+            turnQueue = nil
+            runExecution = nil
+            return
+        }
+        supervisionOperation = "refresh"
+        defer { supervisionOperation = nil }
+        do {
+            let client = try await activeClient()
+            async let queue = client.turnQueue(conversationID: conversationID)
+            if let runID = conversationSnapshot?.runs.last?.id {
+                async let execution = client.runExecution(runID: runID)
+                let (nextQueue, nextExecution) = try await (queue, execution)
+                guard selectedConversationID == conversationID else { return }
+                guard nextExecution.run.conversationID == conversationID else {
+                    throw JetClientFailure.presentation(.invalidResponse)
+                }
+                turnQueue = nextQueue
+                runExecution = nextExecution
+            } else {
+                let nextQueue = try await queue
+                guard selectedConversationID == conversationID else { return }
+                turnQueue = nextQueue
+                runExecution = nil
+            }
+        } catch {
+            guard selectedConversationID == conversationID else { return }
+            actionNotice = presentationError(error).message
+        }
+    }
+
+    func withdrawTurn(_ turn: JetTurnQueueEntry) async {
+        guard supervisionOperation == nil,
+              turn.withdrawable,
+              turn.state == .queued,
+              let conversationID = selectedConversationID
+        else {
+            return
+        }
+        supervisionOperation = "withdraw"
+        let commandID = withdrawalCommandIDs[turn.id] ?? UUID()
+        withdrawalCommandIDs[turn.id] = commandID
+        do {
+            _ = try await activeClient().withdrawTurn(
+                conversationID: conversationID,
+                turnID: turn.id,
+                commandID: commandID
+            )
+            withdrawalCommandIDs.removeValue(forKey: turn.id)
+            actionNotice = "The queued Turn was withdrawn."
+            await loadRunSupervision()
+        } catch {
+            actionNotice = presentationError(error).message
+        }
+        supervisionOperation = nil
+    }
+
+    func requestRunControl(_ control: JetRunControl) {
+        guard (control == .interruptTurn ? canInterruptTurn : canStopRun) else { return }
+        runControlConfirmation = control
+        selectedWorkPanel = .run
+        isWorkPanelPresented = true
+    }
+
+    func cancelRunControl() {
+        runControlConfirmation = nil
+    }
+
+    func confirmRunControl() async {
+        guard supervisionOperation == nil,
+              let control = runControlConfirmation,
+              let runID = selectedRun?.id
+        else {
+            return
+        }
+        supervisionOperation = control.rawValue
+        let key = RunControlKey(runID: runID, control: control)
+        let commandID = runControlCommandIDs[key] ?? UUID()
+        runControlCommandIDs[key] = commandID
+        do {
+            _ = try await activeClient().controlRun(
+                runID: runID,
+                control: control,
+                commandID: commandID
+            )
+            runControlCommandIDs.removeValue(forKey: key)
+            runControlConfirmation = nil
+            actionNotice = control == .interruptTurn
+                ? "Interrupt requested. Waiting for the active Turn to end."
+                : "Stop requested. Waiting for the Run to end."
+            await loadRunSupervision()
+        } catch {
+            actionNotice = presentationError(error).message
+        }
+        supervisionOperation = nil
+    }
+
+    func authorizeApprovalRetry(_ approval: JetApprovalPresentation) async {
+        guard supervisionOperation == nil,
+              approval.canAuthorizeRetry,
+              let runID = approval.runID,
+              let reviewID = approval.reviewID
+        else {
+            return
+        }
+        supervisionOperation = "approval-retry"
+        let commandID = approvalRetryCommandIDs[reviewID] ?? UUID()
+        approvalRetryCommandIDs[reviewID] = commandID
+        do {
+            try await activeClient().authorizeApprovalRetry(
+                runID: runID,
+                reviewID: reviewID,
+                commandID: commandID
+            )
+            approvalRetryCommandIDs.removeValue(forKey: reviewID)
+            actionNotice = "One exact review retry was authorized."
+            if let index = timeline.firstIndex(where: { $0.approval?.reviewID == reviewID }),
+               let existing = timeline[index].approval
+            {
+                timeline[index].approval = JetApprovalPresentation(
+                    requestID: existing.requestID,
+                    reviewID: existing.reviewID,
+                    runID: existing.runID,
+                    tool: existing.tool,
+                    action: existing.action,
+                    target: existing.target,
+                    scope: existing.scope,
+                    consequence: existing.consequence,
+                    rationale: existing.rationale,
+                    state: existing.state,
+                    canAuthorizeRetry: false
+                )
+            }
+        } catch {
+            actionNotice = presentationError(error).message
+        }
+        supervisionOperation = nil
     }
 
     func requestAddProject() {
@@ -526,6 +707,8 @@ final class DesktopSession {
         sidebarSelection = .newTask
         selectedConversationID = nil
         conversationSnapshot = nil
+        turnQueue = nil
+        runExecution = nil
         timeline = []
         isWorkPanelPresented = false
         actionNotice = nil
@@ -544,6 +727,8 @@ final class DesktopSession {
         case .newTask:
             selectedConversationID = nil
             conversationSnapshot = nil
+            turnQueue = nil
+            runExecution = nil
             timeline = []
             isWorkPanelPresented = false
             composerFocusRequest += 1
@@ -551,8 +736,11 @@ final class DesktopSession {
             isWorkPanelPresented = false
         case .needsAttention:
             if usesLivePlane {
-                actionNotice = "The attention inbox arrives with Run controls in Wave 2.1."
-                isWorkPanelPresented = false
+                actionNotice = attentionCount == 0
+                    ? "No current Run needs attention."
+                    : "Showing the selected Run items that need attention."
+                selectedWorkPanel = .run
+                isWorkPanelPresented = true
             } else {
                 showScenario(.approval, fallback: .recovery)
                 isWorkPanelPresented = true
@@ -757,6 +945,11 @@ final class DesktopSession {
                 || event.kind == "turn.changed"
             {
                 await loadSelectedConversation()
+            } else if event.kind.hasPrefix("approval.")
+                || event.kind == "run.control_requested"
+                || event.kind == "run.terminated"
+            {
+                await loadRunSupervision()
             }
         }
         if ["conversation.created", "conversation.name_changed", "conversation.trashed"]
@@ -767,7 +960,11 @@ final class DesktopSession {
     }
 
     private func mergeTimeline(_ entry: JetTimelineEntry) {
-        if entry.kind == .user,
+        if entry.kind == .approval,
+           let index = timeline.firstIndex(where: { $0.id == entry.id })
+        {
+            timeline[index] = entry
+        } else if entry.kind == .user,
            let index = timeline.firstIndex(where: { $0.id == entry.id })
         {
             timeline[index].text += entry.text

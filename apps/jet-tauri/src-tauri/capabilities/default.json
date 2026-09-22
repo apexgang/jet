@@ -18,6 +18,11 @@
     "allow-create-conversation",
     "allow-start-run",
     "allow-submit-turn",
+    "allow-load-run-supervision",
+    "allow-withdraw-turn",
+    "allow-interrupt-turn",
+    "allow-stop-run",
+    "allow-authorize-approval-retry",
     "dialog:allow-open"
   ]
 }

@@ -72,6 +72,33 @@ struct DesktopShellView: View {
         .onChange(of: session.selectedConversationID) { _, value in
             storedConversationID = value?.uuidString.lowercased() ?? ""
         }
+        .confirmationDialog(
+            session.runControlConfirmation == .interruptTurn
+                ? "Interrupt this Turn?"
+                : "Stop this Run?",
+            isPresented: Binding(
+                get: { session.runControlConfirmation != nil },
+                set: { if !$0 { session.cancelRunControl() } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if session.runControlConfirmation == .interruptTurn {
+                Button("Interrupt Turn") {
+                    Task { await session.confirmRunControl() }
+                }
+            } else if session.runControlConfirmation == .stopRun {
+                Button("Stop Run", role: .destructive) {
+                    Task { await session.confirmRunControl() }
+                }
+            }
+            Button("Cancel", role: .cancel, action: session.cancelRunControl)
+        } message: {
+            Text(
+                session.runControlConfirmation == .interruptTurn
+                    ? "Jet will end the active Turn. The Run can accept the next queued Turn when native cancellation succeeds."
+                    : "Jet will end the whole Run and its native processes. Recorded output and Workspace changes remain available."
+            )
+        }
     }
 }
 
@@ -121,8 +148,20 @@ private struct SidebarView: View {
                 }
                 .buttonStyle(.plain)
 
-                Label("Needs attention", systemImage: "bell")
-                    .tag(SidebarDestination.needsAttention)
+                HStack {
+                    Label("Needs attention", systemImage: "bell")
+                    Spacer()
+                    if session.attentionCount > 0 {
+                        Text(session.attentionCount, format: .number)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.orange.opacity(0.12), in: Capsule())
+                            .accessibilityLabel("\(session.attentionCount) items")
+                    }
+                }
+                .tag(SidebarDestination.needsAttention)
             }
 
             Section("Projects") {
@@ -357,7 +396,16 @@ private struct LiveStatusLabel: View {
 
     private var label: String {
         if session.conversationFreshness == .cached { return "Offline cache" }
+        if !session.planeIsConnected { return "Reconnecting" }
         if session.conversationOperation != nil { return "Loading" }
+        switch session.runExecution?.activity {
+        case .waitingForApproval: return "Approval needed"
+        case .waitingForUser: return "Waiting for you"
+        case .waitingForAuth: return "Sign-in needed"
+        case .waitingForQuota: return "Usage limited"
+        case .reconnecting: return "Reconnecting"
+        case .working, nil: break
+        }
         switch session.selectedRun?.lifecycle {
         case .starting: return "Starting"
         case .active: return "Working"
@@ -371,7 +419,11 @@ private struct LiveStatusLabel: View {
     }
 
     private var symbol: String {
-        switch session.selectedRun?.lifecycle {
+        if !session.planeIsConnected { return "arrow.clockwise" }
+        if session.runExecution?.needsAttention == true {
+            return "exclamationmark.circle"
+        }
+        return switch session.selectedRun?.lifecycle {
         case .starting, .active, .stopping: "bolt.horizontal.circle"
         case .completed: "checkmark.circle"
         case .failed, .canceled, .lost: "exclamationmark.circle"
@@ -381,6 +433,8 @@ private struct LiveStatusLabel: View {
 
     private var color: Color {
         if session.conversationFreshness == .cached { return .orange }
+        if !session.planeIsConnected { return .orange }
+        if session.runExecution?.needsAttention == true { return .orange }
         return switch session.selectedRun?.lifecycle {
         case .starting, .active, .stopping:
             Color(red: 41 / 255, green: 182 / 255, blue: 246 / 255)
@@ -432,7 +486,7 @@ private struct LiveTimelineView: View {
                     .frame(maxWidth: .infinity, minHeight: 260)
                 } else {
                     ForEach(session.timeline) { entry in
-                        LiveTimelineEntryView(entry: entry)
+                        LiveTimelineEntryView(entry: entry, session: session)
                     }
                 }
             }
@@ -447,6 +501,7 @@ private struct LiveTimelineView: View {
 
 private struct LiveTimelineEntryView: View {
     let entry: JetTimelineEntry
+    let session: DesktopSession
 
     var body: some View {
         switch entry.kind {
@@ -464,6 +519,10 @@ private struct LiveTimelineEntryView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Activity: \(entry.text)")
+        case .approval:
+            if let approval = entry.approval {
+                ApprovalCardView(approval: approval, session: session)
+            }
         case .result:
             Label(entry.text, systemImage: "checkmark.circle")
                 .font(.subheadline)
@@ -473,6 +532,98 @@ private struct LiveTimelineEntryView: View {
                 .textSelection(.enabled)
                 .font(.body)
                 .lineSpacing(3)
+        }
+    }
+}
+
+private struct ApprovalCardView: View {
+    let approval: JetApprovalPresentation
+    @Bindable var session: DesktopSession
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(approval.tool)
+                        .font(.headline)
+                    Text(stateLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                }
+                Spacer(minLength: 12)
+                Text(approval.scope)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+                GridRow {
+                    Text("Target").foregroundStyle(.secondary)
+                    Text(approval.target).textSelection(.enabled)
+                }
+                GridRow {
+                    Text("Consequence").foregroundStyle(.secondary)
+                    Text(approval.consequence)
+                }
+            }
+            .font(.caption)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Requested action")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(approval.action)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(9)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 7))
+            }
+
+            if let rationale = approval.rationale {
+                Text(rationale)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                if approval.canAuthorizeRetry {
+                    Button("Authorize one retry") {
+                        Task { await session.authorizeApprovalRetry(approval) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(session.supervisionOperation != nil)
+                } else if approval.state == .requested || approval.state == .unavailable {
+                    Text("Approve and Reject need the planned approval-decision protocol command.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Button("Interrupt Turn…") {
+                    session.requestRunControl(.interruptTurn)
+                }
+                .disabled(!session.canInterruptTurn || session.supervisionOperation != nil)
+                Button("Stop Run…", role: .destructive) {
+                    session.requestRunControl(.stopRun)
+                }
+                .disabled(!session.canStopRun || session.supervisionOperation != nil)
+            }
+        }
+        .padding(16)
+        .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(.orange.opacity(0.35), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var stateLabel: String {
+        switch approval.state {
+        case .requested: "Approval needed"
+        case .allowed: "Action allowed"
+        case .denied: "Action denied"
+        case .unavailable: "Decision needed"
         }
     }
 }
@@ -489,6 +640,16 @@ private struct LiveComposerView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: 760, alignment: .leading)
                     .accessibilityLabel(actionNotice)
+            }
+
+            if session.queueIsFull {
+                Label(
+                    "The Turn queue is full. Withdraw a queued Turn or wait for one to finish.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .frame(maxWidth: 760, alignment: .leading)
             }
 
             HStack(alignment: .bottom, spacing: 10) {
@@ -525,6 +686,12 @@ private struct LiveComposerView: View {
                 ContextValue(label: "Agent", value: session.selectedHarnessName)
                 ContextValue(label: "Runs on", value: "This Mac")
                 Spacer(minLength: 0)
+                Text("\(session.draftBytes.formatted()) / \(JetTurnQueue.maximumPromptBytes.formatted()) bytes")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(
+                        session.draftBytes > JetTurnQueue.maximumPromptBytes ? .red : .secondary
+                    )
+                    .accessibilityLabel("Message size")
             }
             .frame(maxWidth: 760)
         }
@@ -872,19 +1039,67 @@ private struct WorkPanelEmptyState: View {
 }
 
 private struct RunSummaryView: View {
-    let session: DesktopSession
+    @Bindable var session: DesktopSession
 
     var body: some View {
         List {
             Section("Current Run") {
                 LabeledContent("Lifecycle", value: lifecycleLabel)
-                LabeledContent("Activity", value: session.hasLiveRun ? "Streaming" : "Idle")
+                LabeledContent("Activity", value: activityLabel)
                 LabeledContent("Runs on", value: "This Mac")
+                if let run = session.selectedRun {
+                    LabeledContent("Revision", value: run.revision.formatted())
+                }
+                if let termination = session.runExecution?.termination {
+                    Text(termination.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Interrupt Turn…") {
+                        session.requestRunControl(.interruptTurn)
+                    }
+                    .disabled(!session.canInterruptTurn || session.supervisionOperation != nil)
+
+                    Button("Stop Run…", role: .destructive) {
+                        session.requestRunControl(.stopRun)
+                    }
+                    .disabled(!session.canStopRun || session.supervisionOperation != nil)
+                }
             }
 
-            Section("Queue") {
-                Text("Queue controls arrive in Wave 2.1. Submitted Turns still follow Plane order.")
-                    .foregroundStyle(.secondary)
+            Section("Turn queue") {
+                if session.supervisionOperation == "refresh", session.turnQueue == nil {
+                    ProgressView("Loading the authoritative queue")
+                } else if let turns = session.turnQueue?.turns, !turns.isEmpty {
+                    ForEach(turns) { turn in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(turn.state == .active ? "Current Turn" : "Position \(turn.position)")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("\(turn.source.rawValue.replacingOccurrences(of: "_", with: " ")) · \(turn.targetLabel)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("Turn \(turn.sequence) · \(turn.state.rawValue.replacingOccurrences(of: "_", with: " "))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Spacer(minLength: 8)
+                            if turn.withdrawable {
+                                Button("Withdraw") {
+                                    Task { await session.withdrawTurn(turn) }
+                                }
+                                .disabled(session.supervisionOperation != nil)
+                            }
+                        }
+                    }
+                } else {
+                    Text("No active or queued Turns.")
+                        .foregroundStyle(.secondary)
+                }
+                Text("Up to \(JetTurnQueue.maximumEntries) unsettled Turns; each prompt can contain \(JetTurnQueue.maximumPromptBytes.formatted()) UTF-8 bytes.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
         .listStyle(.inset)
@@ -895,6 +1110,13 @@ private struct RunSummaryView: View {
             return session.selectedRun?.lifecycle.rawValue.capitalized ?? "Not started"
         }
         return session.scenario?.run?.lifecycle.rawValue.capitalized ?? "Not started"
+    }
+
+    private var activityLabel: String {
+        session.runExecution?.activity?.rawValue
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
+            ?? (session.hasLiveRun ? "Starting" : "Idle")
     }
 }
 

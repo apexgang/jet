@@ -31,9 +31,24 @@ export type PlaneUpdate =
   | { type: "failed"; error: PublicError };
 
 export type TimelineItem = {
-  kind: "user" | "agent" | "activity" | "result";
+  kind: "user" | "agent" | "activity" | "approval" | "result";
   text: string;
   itemId: string | null;
+  approval: ApprovalPresentation | null;
+};
+
+export type ApprovalPresentation = {
+  requestId: string;
+  reviewId: string | null;
+  runId: string | null;
+  tool: string;
+  action: string;
+  target: string;
+  scope: string;
+  consequence: string;
+  rationale: string | null;
+  state: "requested" | "allowed" | "denied" | "unavailable";
+  canAuthorizeRetry: boolean;
 };
 
 export type SetupSnapshot = {
@@ -128,6 +143,8 @@ export type ConversationPage = {
 
 export type RunSummary = {
   id: string;
+  conversationId: string;
+  revision: string;
   lifecycle: "created" | "starting" | "active" | "stopping" | "completed" | "failed" | "canceled" | "lost";
   title: string;
   createdAtUnixMs: string;
@@ -162,6 +179,61 @@ export type TurnResult = {
   sequence: string;
   state: string;
   prompt: string;
+};
+
+export type TurnQueueItem = {
+  id: string;
+  sequence: string;
+  position: number;
+  source: "user" | "schedule" | "auto_continue";
+  state:
+    | "queued"
+    | "active"
+    | "completed"
+    | "superseded"
+    | "canceled"
+    | "withdrawn"
+    | "failed"
+    | "outcome_unknown";
+  runId: string | null;
+  target: "Current Run" | "Next Run";
+  withdrawable: boolean;
+};
+
+export type RunSupervision = {
+  cursor: string;
+  maximumEntries: number;
+  maximumPromptBytes: number;
+  turns: TurnQueueItem[];
+  execution: {
+    cursor: string;
+    run: RunSummary;
+    activity:
+      | "working"
+      | "waiting_for_user"
+      | "waiting_for_approval"
+      | "waiting_for_auth"
+      | "waiting_for_quota"
+      | "reconnecting"
+      | null;
+    needsAttention: boolean;
+    termination: {
+      control: "interrupt_turn" | "stop_run";
+      stage: "native_cancellation" | "interrupt" | "terminate" | "kill" | "unobserved";
+      summary: string;
+    } | null;
+  } | null;
+};
+
+export type RunControlAccepted = {
+  run: RunSummary;
+  control: "interrupt_turn" | "stop_run";
+  message: string;
+};
+
+export type ApprovalRetryAccepted = {
+  reviewId: string;
+  message: string;
 };
 
 /** The only direct Tauri IPC adapter used by presentation code. */
@@ -228,4 +300,30 @@ export function startRun(
 
 export function submitTurn(conversationId: string, prompt: string): Promise<TurnResult> {
   return invoke<TurnResult>("submit_turn", { conversationId, prompt });
+}
+
+export function loadRunSupervision(
+  conversationId: string,
+  runId: string | null,
+): Promise<RunSupervision> {
+  return invoke<RunSupervision>("load_run_supervision", { conversationId, runId });
+}
+
+export function withdrawTurn(conversationId: string, turnId: string): Promise<TurnQueueItem> {
+  return invoke<TurnQueueItem>("withdraw_turn", { conversationId, turnId });
+}
+
+export function interruptTurn(runId: string): Promise<RunControlAccepted> {
+  return invoke<RunControlAccepted>("interrupt_turn", { runId });
+}
+
+export function stopRun(runId: string): Promise<RunControlAccepted> {
+  return invoke<RunControlAccepted>("stop_run", { runId });
+}
+
+export function authorizeApprovalRetry(
+  runId: string,
+  reviewId: string,
+): Promise<ApprovalRetryAccepted> {
+  return invoke<ApprovalRetryAccepted>("authorize_approval_retry", { runId, reviewId });
 }

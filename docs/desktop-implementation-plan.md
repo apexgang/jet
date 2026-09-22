@@ -1,6 +1,6 @@
 # Jet desktop implementation plan
 
-Status: Wave 0 foundation and Wave 1 completed on 2026-09-22. Wave 2.1 is next.
+Status: Wave 0, Wave 1, and the protocol-supported portion of Wave 2.1 were completed on 2026-09-22. Wave 2.2 is next; generic Harness approval decisions remain a backend dependency.
 
 This plan turns `docs/design-language.md` into a staged desktop product for macOS and Linux. It is repository-specific and preserves the boundaries in `apps/jet/AGENTS.md`, `apps/jet-tauri/AGENTS.md`, and the Jet protocol ADRs.
 
@@ -168,6 +168,8 @@ Estimated effort: 3 to 5 engineer-weeks after Wave 0.
 Goal: users can safely supervise real work and inspect its result.
 
 ### 2.1 Turns, approvals, and run control
+
+Implemented on 2026-09-22 in both desktop clients. The clients render the bounded authoritative queue, allow ownership-checked withdrawal, show observed Run revisions, preserve command IDs for uncertain retries, present structured approval requests and automatic-review retry, and keep Interrupt Turn separate from Stop Run through confirmation and terminal feedback. The current protocol has no generic Harness approval-decision command, so the clients explicitly disclose that limitation and offer only supported cancellation controls; they do not invent Approve or Reject effects.
 
 - Render the full turn queue with position, target, withdrawal, and the protocol's maximum-size behavior.
 - Present approvals inline with action, target, scope, consequence, and clear reject or cancel actions.

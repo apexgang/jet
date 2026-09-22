@@ -3,7 +3,7 @@ use serde::Serialize;
 use tauri::{ipc::Channel, State};
 
 use super::{
-    client::{EventSummary, NativeUpdate},
+    client::{ApprovalProjection, EventSummary, NativeUpdate},
     errors::PublicError,
     JetBridge,
 };
@@ -71,6 +71,41 @@ pub(crate) struct TimelineItemView {
     kind: &'static str,
     text: String,
     item_id: Option<String>,
+    approval: Option<ApprovalView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApprovalView {
+    request_id: String,
+    review_id: Option<String>,
+    run_id: Option<String>,
+    tool: String,
+    action: String,
+    target: String,
+    scope: &'static str,
+    consequence: String,
+    rationale: Option<String>,
+    state: &'static str,
+    can_authorize_retry: bool,
+}
+
+impl From<ApprovalProjection> for ApprovalView {
+    fn from(value: ApprovalProjection) -> Self {
+        Self {
+            request_id: value.request_id,
+            review_id: value.review_id,
+            run_id: value.run_id,
+            tool: value.tool,
+            action: value.action,
+            target: value.target,
+            scope: value.scope,
+            consequence: value.consequence,
+            rationale: value.rationale,
+            state: value.state,
+            can_authorize_retry: value.can_authorize_retry,
+        }
+    }
 }
 
 impl From<NativeUpdate> for PlaneUpdate {
@@ -98,6 +133,7 @@ impl From<NativeUpdate> for PlaneUpdate {
                         kind: item.kind,
                         text: item.text,
                         item_id: item.item_id,
+                        approval: item.approval.map(Into::into),
                     })
                     .collect(),
             },

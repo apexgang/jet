@@ -35,6 +35,10 @@ impl PlaneClient {
         }
     }
 
+    pub(crate) fn client_id(&self) -> Uuid {
+        self.client_id
+    }
+
     pub(crate) async fn status(&self) -> Result<PlaneStatus, Box<ClientError>> {
         let mut attempt = 0;
         loop {
@@ -293,6 +297,21 @@ pub(crate) struct TimelineProjection {
     pub(crate) kind: &'static str,
     pub(crate) text: String,
     pub(crate) item_id: Option<String>,
+    pub(crate) approval: Option<ApprovalProjection>,
+}
+
+pub(crate) struct ApprovalProjection {
+    pub(crate) request_id: String,
+    pub(crate) review_id: Option<String>,
+    pub(crate) run_id: Option<String>,
+    pub(crate) tool: String,
+    pub(crate) action: String,
+    pub(crate) target: String,
+    pub(crate) scope: &'static str,
+    pub(crate) consequence: String,
+    pub(crate) rationale: Option<String>,
+    pub(crate) state: &'static str,
+    pub(crate) can_authorize_retry: bool,
 }
 
 impl EventSummary {
@@ -326,6 +345,7 @@ fn timeline_projection(event: &Event) -> Vec<TimelineProjection> {
                 kind: "user",
                 text: bounded_event_text(text, 8_192),
                 item_id: Uuid::parse_str(turn_id).ok().map(|id| id.to_string()),
+                approval: None,
             }]
         }
         "run.output" => output_projection(&event.payload),
@@ -333,6 +353,7 @@ fn timeline_projection(event: &Event) -> Vec<TimelineProjection> {
             kind: "activity",
             text: activity_text(event.payload.get("activity")),
             item_id: None,
+            approval: None,
         }],
         "run.lifecycle_changed" => {
             let to = event
@@ -344,12 +365,45 @@ fn timeline_projection(event: &Event) -> Vec<TimelineProjection> {
                 kind: "activity",
                 text: format!("Run {}.", to.replace('_', " ")),
                 item_id: None,
+                approval: None,
             }]
         }
+        "run.control_requested" => vec![TimelineProjection {
+            kind: "activity",
+            text: control_request_text(event.payload.get("control")),
+            item_id: None,
+            approval: None,
+        }],
+        "run.terminated" => vec![TimelineProjection {
+            kind: "result",
+            text: termination_text(&event.payload),
+            item_id: None,
+            approval: None,
+        }],
+        "approval.requested" | "approval.reviewed" => approval_projection(event)
+            .into_iter()
+            .map(|approval| TimelineProjection {
+                kind: "approval",
+                text: approval_summary(&approval),
+                item_id: Some(format!(
+                    "approval-{}-{}",
+                    approval.run_id.as_deref().unwrap_or("run"),
+                    approval.request_id
+                )),
+                approval: Some(approval),
+            })
+            .collect(),
+        "approval.retry_authorized" => vec![TimelineProjection {
+            kind: "result",
+            text: "One exact approval retry was authorized.".into(),
+            item_id: None,
+            approval: None,
+        }],
         "change.checkpoint_recorded" => vec![TimelineProjection {
             kind: "result",
             text: "Jet recorded the completed turn and its changes.".into(),
             item_id: None,
+            approval: None,
         }],
         _ => Vec::new(),
     }
@@ -373,6 +427,7 @@ fn output_projection(payload: &serde_json::Value) -> Vec<TimelineProjection> {
                     kind: "agent",
                     text: bounded_event_text(&text, 16_384),
                     item_id: None,
+                    approval: None,
                 });
             }
             Ok(Some(Presentation::Actions { actions })) => {
@@ -384,17 +439,170 @@ fn output_projection(payload: &serde_json::Value) -> Vec<TimelineProjection> {
                         if count == 1 { " is" } else { "s are" }
                     ),
                     item_id: None,
+                    approval: None,
                 });
             }
             Ok(None) => projected.push(TimelineProjection {
                 kind: "activity",
                 text: "The Run published an additional presentation block.".into(),
                 item_id: None,
+                approval: None,
             }),
             Err(_) => {}
         }
     }
     projected
+}
+
+fn approval_projection(event: &Event) -> Option<ApprovalProjection> {
+    let (review_id, request, state, can_authorize_retry, rationale, consequence) = if event.kind
+        == "approval.requested"
+    {
+        (
+                None,
+                event.payload.get("request")?,
+                "requested",
+                false,
+                None,
+                "The Run stays paused until this request is decided. Manual approval decisions are not available through the current client protocol.".to_owned(),
+            )
+    } else {
+        let review = event.payload.get("review")?;
+        let outcome = review.get("outcome")?;
+        let status = outcome.get("status")?.as_str()?;
+        let decision = outcome.get("decision").and_then(|value| value.as_str());
+        let state = match (status, decision) {
+            ("decided", Some("allow")) => "allowed",
+            ("denied", _) | ("decided", Some("deny")) => "denied",
+            ("unavailable", _) => "unavailable",
+            _ => return None,
+        };
+        let can_retry = state == "denied";
+        let rationale = outcome
+            .get("verdict")
+            .and_then(|value| value.get("rationale"))
+            .and_then(|value| value.as_str())
+            .or_else(|| outcome.get("reason").and_then(|value| value.as_str()))
+            .map(|value| bounded_event_text(value, 1_024));
+        let consequence = match state {
+                "allowed" => "The reviewer allowed this exact action once.",
+                "denied" => {
+                    "The action remains blocked. You may authorize one review retry of the unchanged request."
+                }
+                _ => {
+                    "Automatic review could not decide. The Run remains paused for a person."
+                }
+            }
+            .to_owned();
+        (
+            review
+                .get("review_id")
+                .and_then(|value| value.as_str())
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .map(|value| value.to_string()),
+            review.get("request")?,
+            state,
+            can_retry,
+            rationale,
+            consequence,
+        )
+    };
+    let request_id = request.get("request_id")?.as_str()?;
+    let tool = request.get("tool")?.as_str()?;
+    let action = request.get("action")?.as_str()?;
+    if request_id.is_empty()
+        || request_id.len() > 128
+        || request_id.chars().any(char::is_control)
+        || tool.is_empty()
+        || tool.len() > 128
+        || tool.chars().any(char::is_control)
+        || action.len() > 4_096
+    {
+        return None;
+    }
+    // ASVS 1.2.1 and 1.5.2: approval content stays bounded data. The
+    // webview receives text fields only and Svelte performs contextual escaping.
+    Some(ApprovalProjection {
+        request_id: request_id.to_owned(),
+        review_id,
+        run_id: event.run_id.map(|id| id.to_string()),
+        tool: tool.to_owned(),
+        action: action.to_owned(),
+        target: action_target(action),
+        scope: "This action once",
+        consequence,
+        rationale,
+        state,
+        can_authorize_retry,
+    })
+}
+
+fn action_target(action: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(action) else {
+        return "Current Run".into();
+    };
+    let Some(object) = value.as_object() else {
+        return "Current Run".into();
+    };
+    for key in [
+        "file_path",
+        "filePath",
+        "path",
+        "directory",
+        "cwd",
+        "working_directory",
+        "workingDirectory",
+    ] {
+        if let Some(value) = object.get(key).and_then(|value| value.as_str()) {
+            return one_line(value, 512, "Current Run");
+        }
+    }
+    "Current Run".into()
+}
+
+fn one_line(value: &str, maximum_bytes: usize, fallback: &str) -> String {
+    let flattened = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flattened.is_empty() {
+        fallback.into()
+    } else {
+        bounded_event_text(&flattened, maximum_bytes)
+    }
+}
+
+fn approval_summary(approval: &ApprovalProjection) -> String {
+    match approval.state {
+        "allowed" => format!("{} was allowed once.", approval.tool),
+        "denied" => format!("{} was denied.", approval.tool),
+        "unavailable" => format!("{} still needs a decision.", approval.tool),
+        _ => format!("{} needs approval.", approval.tool),
+    }
+}
+
+fn control_request_text(value: Option<&serde_json::Value>) -> String {
+    match value.and_then(|value| value.as_str()) {
+        Some("interrupt_turn") => "Interrupt requested. Waiting for the active Turn to end.".into(),
+        Some("stop_run") => "Stop requested. Waiting for the Run to end.".into(),
+        _ => "Run control requested.".into(),
+    }
+}
+
+fn termination_text(payload: &serde_json::Value) -> String {
+    let termination = payload.get("termination").unwrap_or(payload);
+    let control = termination.get("control").and_then(|value| value.as_str());
+    let stage = termination.get("stage").and_then(|value| value.as_str());
+    match (control, stage) {
+        (Some("interrupt_turn"), Some("native_cancellation")) => {
+            "The active Turn was interrupted. The Run can accept the next Turn.".into()
+        }
+        (Some("interrupt_turn"), Some(_)) => {
+            "Interrupting the Turn required ending the Run process.".into()
+        }
+        (Some("stop_run"), Some("unobserved")) => {
+            "Jet sent every stop signal but could not observe the Run ending.".into()
+        }
+        (Some("stop_run"), Some(_)) => "The Run stopped and kept its recorded work.".into(),
+        _ => "The Run control request finished.".into(),
+    }
 }
 
 fn activity_text(value: Option<&serde_json::Value>) -> String {

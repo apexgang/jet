@@ -1,8 +1,11 @@
 import {
+  authorizeApprovalRetry,
   bindHarnessAccount,
   createConversation,
+  interruptTurn,
   loadConversation,
   loadConversations,
+  loadRunSupervision,
   loadSetup,
   openPlaneFeed,
   previewProject,
@@ -11,7 +14,10 @@ import {
   removeProject,
   searchConversations,
   startRun,
+  stopRun,
   submitTurn,
+  withdrawTurn,
+  type ApprovalPresentation,
   type ConversationDetail,
   type ConversationRow,
   type ConversationSearchResult,
@@ -20,7 +26,9 @@ import {
   type ProjectPreview,
   type ProjectRemovalPreview,
   type PublicError,
+  type RunSupervision,
   type SetupSnapshot,
+  type TurnQueueItem,
 } from "$lib/jet/bridge";
 import {
   fixtureForState,
@@ -48,11 +56,14 @@ export type SetupViewState =
 export type ConversationFreshness = "loading" | "live" | "cached" | "failed";
 export type LiveTimelineEntry = {
   id: string;
-  kind: "user" | "agent" | "activity" | "result";
+  kind: "user" | "agent" | "activity" | "approval" | "result";
   text: string;
   sequence: string | null;
   rawCount: number;
+  approval: ApprovalPresentation | null;
 };
+
+export type RunControlChoice = "interrupt_turn" | "stop_run";
 
 export class DesktopSession {
   scenario = $state<DesktopFixtureScenario>(fixtureForState("active"));
@@ -82,6 +93,10 @@ export class DesktopSession {
   conversationDetail = $state<ConversationDetail | null>(null);
   conversationFreshness = $state<ConversationFreshness>("loading");
   conversationBusy = $state(false);
+  supervision = $state<RunSupervision | null>(null);
+  supervisionBusy = $state(false);
+  controlBusy = $state<string | null>(null);
+  runControlConfirmation = $state<RunControlChoice | null>(null);
   timeline = $state<LiveTimelineEntry[]>([]);
   searchText = $state("");
   searchResult = $state<ConversationSearchResult | null>(null);
@@ -93,7 +108,35 @@ export class DesktopSession {
   private detailRefresh: ReturnType<typeof setTimeout> | null = null;
 
   get canSubmitDraft(): boolean {
-    return this.draft.trim().length > 0;
+    return (
+      this.draft.trim().length > 0 &&
+      this.draftBytes <= this.maximumPromptBytes &&
+      !this.queueIsFull
+    );
+  }
+
+  get draftBytes(): number {
+    return new TextEncoder().encode(this.draft).byteLength;
+  }
+
+  get maximumPromptBytes(): number {
+    return this.supervision?.maximumPromptBytes ?? 65_536;
+  }
+
+  get queueIsFull(): boolean {
+    return (
+      this.supervision !== null &&
+      this.supervision.turns.length >= this.supervision.maximumEntries
+    );
+  }
+
+  get attentionCount(): number {
+    return this.timeline.filter(
+      (entry) =>
+        entry.approval?.state === "requested" ||
+        entry.approval?.state === "unavailable" ||
+        (entry.approval?.state === "denied" && entry.approval.canAuthorizeRetry),
+    ).length;
   }
 
   get connectionLabel(): string {
@@ -155,13 +198,26 @@ export class DesktopSession {
   }
 
   get selectedRun() {
-    return this.conversationDetail?.runs.at(-1) ?? null;
+    return this.supervision?.execution?.run ?? this.conversationDetail?.runs.at(-1) ?? null;
   }
 
   get hasLiveRun(): boolean {
     return ["created", "starting", "active", "stopping"].includes(
       this.selectedRun?.lifecycle ?? "",
     );
+  }
+
+  get canInterruptTurn(): boolean {
+    return (
+      this.supervision?.execution?.run.lifecycle === "active" &&
+      this.supervision.turns.some(
+        (turn) => turn.state === "active" && turn.runId === this.selectedRun?.id,
+      )
+    );
+  }
+
+  get canStopRun(): boolean {
+    return this.supervision?.execution?.run.lifecycle === "active";
   }
 
   connect(): void {
@@ -356,12 +412,17 @@ export class DesktopSession {
           if (this.selectedConversationId !== selected) this.timeline = [];
           this.selectedConversationId = selected;
           this.conversationDetail = restoredDetail;
+          await this.refreshSupervision(
+            selected,
+            restoredDetail.runs.at(-1)?.id ?? null,
+          );
         } else {
           await this.openConversation(selected, false);
         }
       } else {
         this.selectedConversationId = null;
         this.conversationDetail = null;
+        this.supervision = null;
       }
     } catch (error: unknown) {
       if (request !== this.conversationRequest) return;
@@ -419,6 +480,7 @@ export class DesktopSession {
     if (this.selectedConversationId !== conversationId) {
       this.timeline = [];
       this.conversationDetail = null;
+      this.supervision = null;
     }
     this.selectedConversationId = conversationId;
     if (show) {
@@ -445,6 +507,7 @@ export class DesktopSession {
       this.conversationDetail = detail;
       this.conversationFreshness = "live";
       this.mergeConversation(detail.conversation);
+      await this.refreshSupervision(id, detail.runs.at(-1)?.id ?? null);
     } catch (error: unknown) {
       const failure = publicError(error);
       if (this.conversationDetail) {
@@ -468,6 +531,23 @@ export class DesktopSession {
     }
   }
 
+  private async refreshSupervision(
+    conversationId: string,
+    runId: string | null,
+  ): Promise<void> {
+    this.supervisionBusy = true;
+    try {
+      const supervision = await loadRunSupervision(conversationId, runId);
+      if (this.selectedConversationId !== conversationId) return;
+      this.supervision = supervision;
+    } catch (error: unknown) {
+      if (this.selectedConversationId !== conversationId) return;
+      this.actionNotice = publicError(error).message;
+    } finally {
+      this.supervisionBusy = false;
+    }
+  }
+
   select(destination: SidebarDestination): void {
     this.sidebarSelection = destination;
     this.actionNotice = null;
@@ -477,6 +557,7 @@ export class DesktopSession {
         this.selectedConversationId = null;
         this.conversationDetail = null;
         this.timeline = [];
+        this.supervision = null;
         this.workPanelPresented = false;
         this.composerFocusRequest += 1;
         break;
@@ -484,8 +565,12 @@ export class DesktopSession {
         this.workPanelPresented = false;
         break;
       case "attention":
-        this.actionNotice = "The attention inbox arrives with Run controls in Wave 2.1.";
-        this.workPanelPresented = false;
+        this.workPanelPresented = true;
+        this.selectedWorkPanel = "run";
+        this.actionNotice =
+          this.attentionCount > 0 || this.supervision?.execution?.needsAttention
+            ? "Review the highlighted request and the current Run controls."
+            : "No current task needs your attention.";
         break;
       case "project":
         this.workPanelPresented = false;
@@ -548,6 +633,81 @@ export class DesktopSession {
       await this.refreshConversations();
     } finally {
       this.conversationBusy = false;
+    }
+  }
+
+  async withdrawQueuedTurn(turn: TurnQueueItem): Promise<void> {
+    const conversationId = this.selectedConversationId;
+    if (!conversationId || !turn.withdrawable || this.controlBusy) return;
+    this.controlBusy = `withdraw-${turn.id}`;
+    this.actionNotice = null;
+    try {
+      await withdrawTurn(conversationId, turn.id);
+      this.actionNotice = "The queued Turn was withdrawn.";
+      await this.refreshSupervision(conversationId, this.selectedRun?.id ?? null);
+    } catch (error: unknown) {
+      this.actionNotice = publicError(error).message;
+    } finally {
+      this.controlBusy = null;
+    }
+  }
+
+  requestRunControl(control: RunControlChoice): void {
+    if (control === "interrupt_turn" && !this.canInterruptTurn) return;
+    if (control === "stop_run" && !this.canStopRun) return;
+    this.runControlConfirmation = control;
+  }
+
+  cancelRunControl(): void {
+    this.runControlConfirmation = null;
+  }
+
+  async confirmRunControl(): Promise<void> {
+    const control = this.runControlConfirmation;
+    const runId = this.selectedRun?.id;
+    if (!control || !runId || this.controlBusy) return;
+    this.runControlConfirmation = null;
+    this.controlBusy = control;
+    this.actionNotice = null;
+    try {
+      const accepted =
+        control === "interrupt_turn" ? await interruptTurn(runId) : await stopRun(runId);
+      this.actionNotice = accepted.message;
+      const conversationId = this.selectedConversationId;
+      if (conversationId) await this.refreshSupervision(conversationId, runId);
+    } catch (error: unknown) {
+      this.actionNotice = publicError(error).message;
+    } finally {
+      this.controlBusy = null;
+    }
+  }
+
+  async retryApproval(approval: ApprovalPresentation): Promise<void> {
+    if (
+      !approval.canAuthorizeRetry ||
+      !approval.reviewId ||
+      !approval.runId ||
+      this.controlBusy
+    ) {
+      return;
+    }
+    this.controlBusy = `approval-${approval.reviewId}`;
+    this.actionNotice = null;
+    try {
+      const accepted = await authorizeApprovalRetry(approval.runId, approval.reviewId);
+      this.actionNotice = accepted.message;
+      this.timeline = this.timeline.map((entry) =>
+        entry.approval?.reviewId === approval.reviewId
+          ? {
+              ...entry,
+              approval: { ...entry.approval, canAuthorizeRetry: false },
+            }
+          : entry,
+      );
+    } catch (error: unknown) {
+      this.actionNotice = publicError(error).message;
+    } finally {
+      this.controlBusy = null;
     }
   }
 
@@ -640,6 +800,7 @@ export class DesktopSession {
             text: "1 background update",
             sequence: update.sequence,
             rawCount: 1,
+            approval: null,
           },
         ];
       }
@@ -649,8 +810,12 @@ export class DesktopSession {
     for (const [index, item] of update.timeline.entries()) {
       const id = item.itemId ?? `${update.sequence}-${index}`;
       const existing = this.timeline.find((entry) => entry.id === id);
-      if (existing && item.kind === "user") {
-        existing.text += item.text;
+      if (existing && (item.kind === "user" || item.kind === "approval")) {
+        if (item.kind === "user") existing.text += item.text;
+        else {
+          existing.text = item.text;
+          existing.approval = item.approval;
+        }
         existing.sequence = update.sequence;
         this.timeline = [...this.timeline];
       } else {
@@ -662,6 +827,7 @@ export class DesktopSession {
             text: item.text,
             sequence: update.sequence,
             rawCount: 0,
+            approval: item.approval,
           },
         ].slice(-256);
       }

@@ -91,4 +91,31 @@ impl Client {
 			| QueryResponse::ExternalConversations(_)) => Err(unexpected(&other)),
 		}
 	}
+
+	/// Withdraws one queued user Turn admitted by this authenticated client.
+	/// A retry must reuse `command_id`, `conversation_id`, and `turn_id`.
+	///
+	/// # Errors
+	/// Returns a stable ownership, state, validation, or transport error.
+	pub async fn withdraw_turn(
+		&self,
+		command_id: Uuid,
+		conversation_id: Uuid,
+		turn_id: Uuid,
+	) -> Result<Turn, ClientError> {
+		self.require_minor(jet_protocol::TURN_QUEUE_MINOR)?;
+		match self
+			.execute_command(
+				command_id,
+				CommandRequest::WithdrawTurn {
+					conversation_id,
+					turn_id,
+				},
+			)
+			.await?
+		{
+			CommandResponse::TurnWithdrawn { turn } => Ok(turn),
+			other => Err(unexpected(&other)),
+		}
+	}
 }

@@ -152,6 +152,8 @@ enum JetRunLifecycle: String, Sendable, Equatable {
 
 struct JetRunSummary: Sendable, Equatable, Identifiable {
     let id: UUID
+    let conversationID: UUID
+    let revision: UInt64
     let lifecycle: JetRunLifecycle
     let title: String
     let createdAtUnixMilliseconds: Int64
@@ -186,10 +188,121 @@ struct JetSearchResult: Sendable, Equatable {
     let hits: [JetSearchHit]
 }
 
-struct JetTurnSummary: Sendable, Equatable {
+enum JetTurnSource: String, Sendable, Equatable {
+    case user
+    case schedule
+    case autoContinue = "auto_continue"
+}
+
+enum JetTurnState: String, Sendable, Equatable {
+    case queued
+    case active
+    case completed
+    case superseded
+    case canceled
+    case withdrawn
+    case failed
+    case outcomeUnknown = "outcome_unknown"
+}
+
+struct JetTurnSummary: Sendable, Equatable, Identifiable {
     let id: UUID
     let sequence: UInt64
-    let state: String
+    let state: JetTurnState
+}
+
+struct JetTurnQueueEntry: Sendable, Equatable, Identifiable {
+    let id: UUID
+    let sequence: UInt64
+    let position: Int
+    let source: JetTurnSource
+    let state: JetTurnState
+    let runID: UUID?
+    let withdrawable: Bool
+
+    var targetLabel: String { runID == nil ? "Next Run" : "Current Run" }
+}
+
+struct JetTurnQueue: Sendable, Equatable {
+    static let maximumEntries = 128
+    static let maximumPromptBytes = 65_536
+
+    let cursor: UInt64
+    let turns: [JetTurnQueueEntry]
+}
+
+enum JetRunActivity: String, Sendable, Equatable {
+    case working
+    case waitingForUser = "waiting_for_user"
+    case waitingForApproval = "waiting_for_approval"
+    case waitingForAuth = "waiting_for_auth"
+    case waitingForQuota = "waiting_for_quota"
+    case reconnecting
+}
+
+enum JetRunControl: String, Sendable, Equatable, Hashable {
+    case interruptTurn = "interrupt_turn"
+    case stopRun = "stop_run"
+}
+
+enum JetTerminationStage: String, Sendable, Equatable {
+    case nativeCancellation = "native_cancellation"
+    case interrupt
+    case terminate
+    case kill
+    case unobserved
+}
+
+struct JetRunTermination: Sendable, Equatable {
+    let control: JetRunControl
+    let stage: JetTerminationStage
+
+    var summary: String {
+        switch (control, stage) {
+        case (.interruptTurn, .nativeCancellation):
+            "The active Turn was interrupted. The Run can accept the next Turn."
+        case (.interruptTurn, _):
+            "Interrupting the Turn required ending the Run process."
+        case (.stopRun, .unobserved):
+            "Jet sent every stop signal but could not observe the Run ending."
+        case (.stopRun, _):
+            "The Run stopped and kept its recorded work."
+        }
+    }
+}
+
+struct JetRunExecution: Sendable, Equatable {
+    let cursor: UInt64
+    let run: JetRunSummary
+    let activity: JetRunActivity?
+    let needsAttention: Bool
+    let termination: JetRunTermination?
+}
+
+struct JetRunControlAccepted: Sendable, Equatable {
+    let run: JetRunSummary
+    let control: JetRunControl
+}
+
+enum JetApprovalState: String, Sendable, Equatable {
+    case requested
+    case allowed
+    case denied
+    case unavailable
+}
+
+struct JetApprovalPresentation: Sendable, Equatable {
+    let requestID: String
+    let reviewID: UUID?
+    let runID: UUID?
+    let tool: String
+    let action: String
+    let target: String
+    let scope: String
+    let consequence: String
+    let rationale: String?
+    let state: JetApprovalState
+    let canAuthorizeRetry: Bool
 }
 
 enum JetConversationFreshness: Sendable, Equatable {
@@ -203,6 +316,7 @@ enum JetTimelineKind: String, Sendable, Equatable {
     case user
     case agent
     case activity
+    case approval
     case result
 }
 
@@ -212,6 +326,7 @@ struct JetTimelineEntry: Sendable, Equatable, Identifiable {
     var text: String
     var sequence: UInt64?
     var rawCount: Int
+    var approval: JetApprovalPresentation? = nil
 }
 
 struct JetProjectSummary: Sendable, Equatable, Identifiable {
