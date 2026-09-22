@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prepare-delivery-acknowledgement"
+description = "Enables the prepare_delivery_acknowledgement command without any pre-configured scope."
+commands.allow = ["prepare_delivery_acknowledgement"]
+
+[[permission]]
+identifier = "deny-prepare-delivery-acknowledgement"
+description = "Denies the prepare_delivery_acknowledgement command without any pre-configured scope."
+commands.deny = ["prepare_delivery_acknowledgement"]

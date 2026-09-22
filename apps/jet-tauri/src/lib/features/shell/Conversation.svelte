@@ -1,4 +1,5 @@
 <script lang="ts">
+  import NotificationSettings from "$lib/features/notifications/NotificationSettings.svelte";
   import type { DesktopSession } from "./session.svelte";
   import SetupPanel from "$lib/features/setup/SetupPanel.svelte";
 
@@ -45,7 +46,9 @@
   }
 </script>
 
-{#if session.sidebarSelection === "project"}
+{#if session.sidebarSelection === "settings"}
+  <NotificationSettings />
+{:else if session.sidebarSelection === "project"}
   <SetupPanel {session} />
 {:else}
   <section class="conversation" aria-label="Current task">

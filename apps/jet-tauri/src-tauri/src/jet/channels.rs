@@ -115,6 +115,7 @@ impl From<NativeUpdate> for PlaneUpdate {
                 after: after.to_string(),
             },
             NativeUpdate::Event(EventSummary {
+                notification: _,
                 sequence,
                 recorded_at_unix_ms,
                 kind,
@@ -146,17 +147,26 @@ impl From<NativeUpdate> for PlaneUpdate {
 /// Opens the sole read-only webview boundary: a fenced status snapshot plus
 /// ordered, redacted updates that resume after the native cursor.
 pub(crate) async fn open_plane_feed(
+    app: tauri::AppHandle,
     bridge: State<'_, JetBridge>,
     on_update: Channel<PlaneUpdate>,
     after: Option<String>,
 ) -> Result<ConnectionSnapshot, PublicError> {
     let requested_cursor = parse_resume_cursor(after)?;
     let client = bridge.client.clone();
+    let notifications = bridge.notifications.clone();
     match client.status().await {
         Ok(status) => {
             let cursor = requested_cursor.unwrap_or_else(|| status.cursor.unwrap_or_default());
+            notifications.fence(status.cursor.unwrap_or_default());
             let snapshot = ConnectionSnapshot::from_status(status);
-            tauri::async_runtime::spawn(stream_updates(client, cursor, on_update));
+            tauri::async_runtime::spawn(stream_updates(
+                app,
+                notifications,
+                client,
+                cursor,
+                on_update,
+            ));
             Ok(snapshot)
         }
         Err(error) => {
@@ -176,6 +186,7 @@ pub(crate) async fn open_plane_feed(
                         Ok(status) => {
                             let cursor = requested_cursor
                                 .unwrap_or_else(|| status.cursor.unwrap_or_default());
+                            notifications.fence(status.cursor.unwrap_or_default());
                             let connection = ConnectionSnapshot::from_status(status);
                             if on_update
                                 .send(PlaneUpdate::Connected { connection })
@@ -183,7 +194,7 @@ pub(crate) async fn open_plane_feed(
                             {
                                 return;
                             }
-                            stream_updates(client, cursor, on_update).await;
+                            stream_updates(app, notifications, client, cursor, on_update).await;
                             return;
                         }
                         Err(error) => {
@@ -229,12 +240,19 @@ fn parse_resume_cursor(after: Option<String>) -> Result<Option<u64>, PublicError
 }
 
 async fn stream_updates(
+    app: tauri::AppHandle,
+    notifications: std::sync::Arc<super::notifications::NotificationState>,
     client: super::client::PlaneClient,
     cursor: u64,
     on_update: Channel<PlaneUpdate>,
 ) {
     client
-        .stream_updates(cursor, |update| on_update.send(update.into()).is_ok())
+        .stream_updates(cursor, |update| {
+            if let NativeUpdate::Event(ref event) = update {
+                notifications.observe(&app, event.sequence, event.notification);
+            }
+            on_update.send(update.into()).is_ok()
+        })
         .await;
 }
 

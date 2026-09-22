@@ -1280,13 +1280,22 @@ kbd {
   border-left: 1px solid var(--border);
 }
 
+.panel-navigation {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-close { margin-right: 8px; }
+
 .panel-tabs {
+  flex: 1;
+  min-width: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 2px;
   min-height: 58px;
-  padding: 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 4px;
 }
 
 .panel-tabs button {

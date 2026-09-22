@@ -4,6 +4,12 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "open_plane_feed",
+            "load_deliveries",
+            "prepare_delivery",
+            "execute_delivery",
+            "prepare_delivery_acknowledgement",
+            "load_notification_settings",
+            "set_notification_settings",
             "load_setup",
             "preview_project",
             "register_project",

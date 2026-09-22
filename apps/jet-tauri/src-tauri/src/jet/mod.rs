@@ -1,8 +1,10 @@
 mod channels;
 mod client;
 mod conversations;
+pub(crate) mod delivery;
 mod errors;
 mod identity;
+pub(crate) mod notifications;
 mod run_control;
 mod setup;
 mod work_panel;
@@ -21,6 +23,8 @@ use self::{
 /// webview boundary.
 pub(crate) struct JetBridge {
     client: PlaneClient,
+    delivery: delivery::DeliveryState,
+    notifications: std::sync::Arc<notifications::NotificationState>,
     setup: setup::SetupState,
     conversations: conversations::ConversationState,
     run_control: run_control::RunControlState,
@@ -45,6 +49,10 @@ impl JetBridge {
                 ],
                 Duration::from_millis(500),
             ),
+            delivery: delivery::DeliveryState::default(),
+            notifications: std::sync::Arc::new(notifications::NotificationState::new(
+                app_data_directory,
+            )),
             setup: setup::SetupState::default(),
             conversations: conversations::ConversationState::new(app_data_directory),
             run_control: run_control::RunControlState::default(),
@@ -55,11 +63,12 @@ impl JetBridge {
 
 #[tauri::command]
 pub(crate) async fn open_plane_feed(
+    app: tauri::AppHandle,
     bridge: State<'_, JetBridge>,
     on_update: Channel<PlaneUpdate>,
     after: Option<String>,
 ) -> Result<ConnectionSnapshot, PublicError> {
-    channels::open_plane_feed(bridge, on_update, after).await
+    channels::open_plane_feed(app, bridge, on_update, after).await
 }
 
 #[tauri::command]

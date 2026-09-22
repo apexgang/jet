@@ -1,4 +1,5 @@
 <script lang="ts">
+  import DeliveryPanel from "$lib/features/delivery/DeliveryPanel.svelte";
   import type { PublicRecoveryAction } from "$lib/jet/bridge";
   import type { DesktopSession, WorkPanelTab } from "./session.svelte";
 
@@ -9,6 +10,7 @@
     { id: "files", label: "Files" },
     { id: "terminal", label: "Terminal" },
     { id: "run", label: "Run" },
+    { id: "delivery", label: "Deliver" },
   ];
 
   function formatBytes(value: string | null): string {
@@ -63,6 +65,7 @@
 </script>
 
 <aside class="work-panel" class:hidden={!session.workPanelPresented} aria-label="Work panel">
+  <div class="panel-navigation">
   <div class="panel-tabs" role="tablist" aria-label="Work panel views">
     {#each tabs as tab}
       <button
@@ -76,8 +79,14 @@
       </button>
     {/each}
   </div>
+  <button class="icon-button panel-close" aria-label="Hide work panel" onclick={() => (session.workPanelPresented = false)}>Hide</button>
+  </div>
 
   <div class="panel-content" aria-busy={session.workPanelBusy}>
+    <div id="work-delivery" class="work-view" class:active={session.selectedWorkPanel === "delivery"} role="tabpanel" aria-label="Deliver">
+      <DeliveryPanel {session} />
+    </div>
+    {#if session.selectedWorkPanel !== "delivery"}
     {#if session.workPanelError && session.selectedWorkPanel !== "run"}
       <div class="work-alert" role="alert">
         <strong>Work details unavailable</strong>
@@ -335,6 +344,7 @@
           <span>Current revision {session.workPanelNoticeError.revisionConflict.currentRevision}</span>
         {/if}
       </div>
+    {/if}
     {/if}
   </div>
 </aside>

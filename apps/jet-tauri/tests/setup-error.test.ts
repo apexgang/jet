@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { publicError } from "../src/lib/features/shell/session.svelte";
+import { publicError } from "../src/lib/jet/errors";
 
 describe("setup error normalization", () => {
   it("preserves a structured stable error", () => {

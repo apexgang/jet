@@ -198,10 +198,12 @@ impl PlaneClient {
             };
 
             let mut resumed = false;
+            let mut replay_through = 0;
             loop {
                 match client.events_after(cursor).await {
                     Ok(page) => {
                         if !resumed {
+                            replay_through = page.cursor;
                             if !send(NativeUpdate::Resumed { after: cursor }) {
                                 return;
                             }
@@ -215,7 +217,11 @@ impl PlaneClient {
                                 return;
                             }
                             cursor = event.sequence;
-                            if !send(NativeUpdate::Event(EventSummary::from_event(event))) {
+                            let mut summary = EventSummary::from_event(event);
+                            if summary.sequence <= replay_through {
+                                summary.notification = None;
+                            }
+                            if !send(NativeUpdate::Event(summary)) {
                                 return;
                             }
                         }
@@ -285,6 +291,7 @@ pub(crate) enum NativeUpdate {
 }
 
 pub(crate) struct EventSummary {
+    pub(crate) notification: Option<super::notifications::NotificationSignal>,
     pub(crate) sequence: u64,
     pub(crate) recorded_at_unix_ms: i64,
     pub(crate) kind: String,
@@ -317,7 +324,9 @@ pub(crate) struct ApprovalProjection {
 impl EventSummary {
     fn from_event(event: Event) -> Self {
         let timeline = timeline_projection(&event);
+        let notification = super::notifications::NotificationSignal::from_event(&event);
         Self {
+            notification,
             sequence: event.sequence,
             recorded_at_unix_ms: event.recorded_at_unix_ms,
             kind: safe_event_kind(&event.kind),

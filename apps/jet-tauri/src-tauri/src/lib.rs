@@ -7,6 +7,7 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let home_directory = app.path().home_dir()?;
             let app_data_directory = app.path().app_data_dir()?;
@@ -18,6 +19,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             jet::open_plane_feed,
+            jet::delivery::load_deliveries,
+            jet::delivery::prepare_delivery,
+            jet::delivery::execute_delivery,
+            jet::delivery::prepare_delivery_acknowledgement,
+            jet::notifications::load_notification_settings,
+            jet::notifications::set_notification_settings,
             jet::load_setup,
             jet::preview_project,
             jet::register_project,

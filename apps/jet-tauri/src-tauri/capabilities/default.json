@@ -2,8 +2,13 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-plane-setup",
   "description": "Plane status and preview-gated local setup operations for the main window",
-  "windows": ["main"],
-  "platforms": ["linux", "macOS"],
+  "windows": [
+    "main"
+  ],
+  "platforms": [
+    "linux",
+    "macOS"
+  ],
   "permissions": [
     "allow-open-plane-feed",
     "allow-load-setup",
@@ -35,6 +40,12 @@
     "allow-send-terminal-input",
     "allow-resize-workspace-terminal",
     "allow-detach-workspace-terminal",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "allow-load-deliveries",
+    "allow-prepare-delivery",
+    "allow-execute-delivery",
+    "allow-prepare-delivery-acknowledgement",
+    "allow-load-notification-settings",
+    "allow-set-notification-settings"
   ]
 }
