@@ -4,9 +4,10 @@
 id = "codex"
 harness = "codex"
 schema = { major = 1, minor = 0 }
-broker_permissions = []
+broker_permissions = ["remote_tools"]
 host_access = [
     { kind = "filesystem", path = "Harness-native user extension configuration, caches, and explicitly selected native source checkouts" },
+    { kind = "filesystem", path = "Host-provisioned owner-only execution directory for the MCP socket and native input delivery marker" },
     { kind = "network", destination = "Harness-native configured extension sources" },
 	# Run launch uses the first executable as the Harness program.
 	{ kind = "executable", name = "codex" },
@@ -16,6 +17,8 @@ host_access = [
 	{ kind = "network", destination = "chatgpt.com" },
 ]
 features = [
+    { name = "remote_tools" },
+    { name = "resume" },
     { name = "extensions" },
     { name = "utility" },
     { name = "review" },
@@ -25,5 +28,5 @@ features = [
 
 [protocol]
 family = "craft"
-versions = [{ major = 1, minor = 8 }]
-capabilities = ["runs", "actions"]
+versions = [{ major = 1, minor = 10 }]
+capabilities = ["runs", "resume", "actions"]
