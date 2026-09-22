@@ -49,18 +49,20 @@ pub(crate) async fn execution(
 	let (commands, mut requests) = tokio::sync::mpsc::channel(8);
 	tokio::spawn(async move {
 		let mut receiver: CraftReceiver<OwnedReadHalf> = receiver;
-		while let Ok(command) = receiver.receive().await {
-			if commands.send(command).await.is_err() {
+		loop {
+			let command = receiver.receive().await;
+			let failed = command.is_err();
+			if commands.send(command).await.is_err() || failed {
 				break;
 			}
 		}
 	});
 
-	let first = requests.recv().await.ok_or(CraftError::Disconnected)?;
+	let first = requests.recv().await.ok_or(CraftError::Disconnected)??;
 	let (remote, first) = match first {
 		CraftCommand::ConfigureRemoteTools { selection } => (
 			Some(crate::execution::remote_tools::RemoteTools::new(selection)),
-			requests.recv().await.ok_or(CraftError::Disconnected)?,
+			requests.recv().await.ok_or(CraftError::Disconnected)??,
 		),
 		other => (None, other),
 	};
@@ -97,7 +99,11 @@ pub(crate) async fn execution(
 		| CraftCommand::ConstrainSubagents { .. }
 		| CraftCommand::ConfigureRemoteTools { .. }
 		| CraftCommand::RemoteToolResult { .. }
-		| CraftCommand::Shutdown => return Err(CraftError::InvalidMessage),
+		| CraftCommand::Shutdown => {
+			return Err(CraftError::invalid_message(
+				"execution requires start or recover as its first command",
+			));
+		}
 	};
 
 	let helper = UnixStream::connect(&helper_socket)
@@ -166,7 +172,7 @@ pub(crate) async fn execution(
 						return Err(CraftError::Disconnected);
 					}
 					if request(
-						command.expect("checked above"),
+						command.expect("checked above")?,
 						&mut turn,
 						&mut sender,
 						&mut writer,
@@ -198,7 +204,7 @@ pub(crate) async fn execution(
 			.is_some_and(crate::execution::remote_tools::RemoteTools::pending)
 		{
 			let command =
-				requests.recv().await.ok_or(CraftError::Disconnected)?;
+				requests.recv().await.ok_or(CraftError::Disconnected)??;
 			if request(command, &mut turn, &mut sender, &mut writer, minor)
 				.await? == Flow::Release
 			{
@@ -218,9 +224,11 @@ pub(crate) async fn execution(
 			})
 			.await?;
 		let CraftCommand::Acknowledge { source_offset } =
-			requests.recv().await.ok_or(CraftError::Disconnected)?
+			requests.recv().await.ok_or(CraftError::Disconnected)??
 		else {
-			return Err(CraftError::InvalidMessage);
+			return Err(CraftError::invalid_message(
+				"execution requires acknowledge after progress",
+			));
 		};
 		ask(&mut writer, &HelperCommand::Acknowledge { source_offset }).await?;
 		if ended {
@@ -308,7 +316,9 @@ async fn request(
 		// this Harness ends: no signal, and its output stays retained.
 		CraftCommand::ConstrainSubagents { .. }
 		| CraftCommand::ConfigureRemoteTools { .. } => {
-			Err(CraftError::InvalidMessage)
+			Err(CraftError::invalid_message(
+				"command cannot reconfigure an active execution",
+			))
 		}
 		CraftCommand::RemoteToolResult {
 			operation_id,
@@ -317,7 +327,11 @@ async fn request(
 			let reply = turn
 				.remote
 				.as_mut()
-				.ok_or(CraftError::InvalidMessage)?
+				.ok_or_else(|| {
+					CraftError::invalid_message(
+						"remote_tool_result requires configured remote tools",
+					)
+				})?
 				.reply(operation_id, outcome)?;
 			input(writer, reply).await?;
 			Ok(Flow::Continue)
@@ -338,7 +352,11 @@ async fn request(
 			let asking = turn
 				.asking
 				.take_if(|asking| asking.id == request_id)
-				.ok_or(CraftError::InvalidMessage)?;
+				.ok_or_else(|| {
+					CraftError::invalid_message(
+						"approval action does not match a held request",
+					)
+				})?;
 			input(writer, asking.decided(decision)).await?;
 			sender
 				.send(&CraftEvent::Activity {
@@ -351,7 +369,9 @@ async fn request(
 		CraftCommand::Action { .. }
 		| CraftCommand::Start { .. }
 		| CraftCommand::Recover { .. }
-		| CraftCommand::Acknowledge { .. } => Err(CraftError::InvalidMessage),
+		| CraftCommand::Acknowledge { .. } => Err(CraftError::invalid_message(
+			"command is unsupported during an active execution",
+		)),
 	}
 }
 

@@ -150,12 +150,13 @@ pub(super) async fn input(
 	ask(writer, &HelperCommand::Input { text }).await
 }
 
-pub(super) async fn ask(
+pub(super) async fn ask<T: serde::Serialize>(
 	writer: &mut FrameWriter<OwnedWriteHalf>,
-	message: &impl serde::Serialize,
+	message: &T,
 ) -> Result<(), CraftError> {
-	let payload =
-		encode_control(message).map_err(|_| CraftError::InvalidMessage)?;
+	let payload = encode_control(message).map_err(|error| {
+		CraftError::invalid_control_message::<T>("encode helper", &error)
+	})?;
 	writer
 		.write(&Frame::control(payload))
 		.await
@@ -167,10 +168,17 @@ pub(super) async fn hear<T: serde::de::DeserializeOwned>(
 ) -> Result<T, CraftError> {
 	match reader.read().await.map_err(|_| CraftError::Disconnected)? {
 		Frame::Control { stream_id, payload } if stream_id.is_connection() => {
-			decode_control(&payload).map_err(|_| CraftError::InvalidMessage)
+			decode_control(&payload).map_err(|error| {
+				CraftError::invalid_control_message::<T>(
+					"receive helper",
+					&error,
+				)
+			})
 		}
 		Frame::Control { .. } | Frame::Data { .. } => {
-			Err(CraftError::InvalidMessage)
+			Err(CraftError::invalid_message(
+				"helper receive requires a connection control frame",
+			))
 		}
 	}
 }
