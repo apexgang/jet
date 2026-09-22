@@ -5,6 +5,7 @@ mod errors;
 mod identity;
 mod run_control;
 mod setup;
+mod work_panel;
 
 use std::{io, path::Path, time::Duration};
 
@@ -23,6 +24,7 @@ pub(crate) struct JetBridge {
     setup: setup::SetupState,
     conversations: conversations::ConversationState,
     run_control: run_control::RunControlState,
+    work_panel: work_panel::WorkPanelState,
 }
 
 impl JetBridge {
@@ -46,6 +48,7 @@ impl JetBridge {
             setup: setup::SetupState::default(),
             conversations: conversations::ConversationState::new(app_data_directory),
             run_control: run_control::RunControlState::default(),
+            work_panel: work_panel::WorkPanelState::default(),
         })
     }
 }
@@ -200,4 +203,123 @@ pub(crate) async fn authorize_approval_retry(
     review_id: String,
 ) -> Result<run_control::ApprovalRetryView, PublicError> {
     run_control::authorize_approval_retry(bridge, run_id, review_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn load_work_panel(
+    bridge: State<'_, JetBridge>,
+    conversation_id: String,
+    run_id: String,
+    scope_kind: String,
+    turn: Option<u32>,
+    from_turn: Option<u32>,
+    to_turn: Option<u32>,
+) -> Result<work_panel::WorkPanelSnapshot, PublicError> {
+    work_panel::load_work_panel(
+        bridge,
+        conversation_id,
+        run_id,
+        scope_kind,
+        turn,
+        from_turn,
+        to_turn,
+    )
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn load_more_changes(
+    bridge: State<'_, JetBridge>,
+    page_id: String,
+) -> Result<work_panel::ChangePageView, PublicError> {
+    work_panel::load_more_changes(bridge, page_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn load_patch_chunk(
+    bridge: State<'_, JetBridge>,
+    artifact_read_id: String,
+) -> Result<work_panel::ArtifactChunkView, PublicError> {
+    work_panel::load_patch_chunk(bridge, artifact_read_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn load_work_file(
+    bridge: State<'_, JetBridge>,
+    file_id: String,
+) -> Result<work_panel::EditableFileView, PublicError> {
+    work_panel::load_work_file(bridge, file_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn save_work_file(
+    bridge: State<'_, JetBridge>,
+    file_id: String,
+    content: String,
+) -> Result<work_panel::FileSavedView, PublicError> {
+    work_panel::save_work_file(bridge, file_id, content).await
+}
+
+#[tauri::command]
+pub(crate) async fn submit_file_review(
+    bridge: State<'_, JetBridge>,
+    file_id: String,
+    line: u32,
+    comment: String,
+) -> Result<work_panel::ReviewSubmittedView, PublicError> {
+    work_panel::submit_file_review(bridge, file_id, line, comment).await
+}
+
+#[tauri::command]
+pub(crate) async fn open_workspace_terminal(
+    bridge: State<'_, JetBridge>,
+    conversation_id: String,
+    rows: u16,
+    columns: u16,
+) -> Result<work_panel::TerminalView, PublicError> {
+    work_panel::open_workspace_terminal(bridge, conversation_id, rows, columns).await
+}
+
+#[tauri::command]
+pub(crate) async fn close_workspace_terminal(
+    bridge: State<'_, JetBridge>,
+    terminal_id: String,
+) -> Result<work_panel::TerminalView, PublicError> {
+    work_panel::close_workspace_terminal(bridge, terminal_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn attach_workspace_terminal(
+    bridge: State<'_, JetBridge>,
+    terminal_id: String,
+    on_update: Channel<work_panel::TerminalUpdate>,
+) -> Result<(), PublicError> {
+    work_panel::attach_workspace_terminal(bridge, terminal_id, on_update).await
+}
+
+#[tauri::command]
+pub(crate) async fn send_terminal_input(
+    bridge: State<'_, JetBridge>,
+    terminal_id: String,
+    input: String,
+) -> Result<(), PublicError> {
+    work_panel::send_terminal_input(bridge, terminal_id, input).await
+}
+
+#[tauri::command]
+pub(crate) async fn resize_workspace_terminal(
+    bridge: State<'_, JetBridge>,
+    terminal_id: String,
+    rows: u16,
+    columns: u16,
+) -> Result<(), PublicError> {
+    work_panel::resize_workspace_terminal(bridge, terminal_id, rows, columns).await
+}
+
+#[tauri::command]
+pub(crate) fn detach_workspace_terminal(
+    bridge: State<'_, JetBridge>,
+    terminal_id: String,
+) -> Result<(), PublicError> {
+    work_panel::detach_workspace_terminal(bridge, terminal_id)
 }

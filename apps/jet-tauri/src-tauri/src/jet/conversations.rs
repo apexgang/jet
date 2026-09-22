@@ -92,6 +92,7 @@ pub(crate) struct ConversationPageView {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConversationRowView {
     id: String,
+    revision: Option<String>,
     title: String,
     created_at_unix_ms: String,
     project_id: Option<String>,
@@ -102,6 +103,7 @@ pub(crate) struct ConversationRowView {
 pub(crate) struct ConversationDetailView {
     conversation: ConversationRowView,
     cursor: String,
+    workspace_id: Option<String>,
     workspace_root: Option<String>,
     runs: Vec<RunView>,
 }
@@ -332,9 +334,14 @@ fn page_view(
 }
 
 fn detail_view(snapshot: ConversationSnapshot) -> ConversationDetailView {
+    let workspace_id = snapshot
+        .workspace
+        .as_ref()
+        .map(|workspace| workspace.workspace_id.to_string());
     ConversationDetailView {
         conversation: row_view(&snapshot.conversation),
         cursor: snapshot.cursor.to_string(),
+        workspace_id,
         workspace_root: snapshot
             .workspace
             .map(|workspace| bounded_text(&workspace.root, 4_096, "Workspace")),
@@ -345,6 +352,7 @@ fn detail_view(snapshot: ConversationSnapshot) -> ConversationDetailView {
 fn row_view(conversation: &Conversation) -> ConversationRowView {
     ConversationRowView {
         id: conversation.conversation_id.to_string(),
+        revision: conversation.revision.map(|value| value.to_string()),
         title: conversation
             .name
             .as_ref()

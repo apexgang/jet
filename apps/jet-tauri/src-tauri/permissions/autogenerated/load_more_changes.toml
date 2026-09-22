@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-load-more-changes"
+description = "Enables the load_more_changes command without any pre-configured scope."
+commands.allow = ["load_more_changes"]
+
+[[permission]]
+identifier = "deny-load-more-changes"
+description = "Denies the load_more_changes command without any pre-configured scope."
+commands.deny = ["load_more_changes"]

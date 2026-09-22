@@ -1,20 +1,32 @@
 import {
   authorizeApprovalRetry,
   bindHarnessAccount,
+  attachWorkspaceTerminal,
+  closeWorkspaceTerminal,
   createConversation,
+  detachWorkspaceTerminal,
   interruptTurn,
   loadConversation,
   loadConversations,
   loadRunSupervision,
   loadSetup,
+  loadMoreChanges,
+  loadPatchChunk,
+  loadWorkFile,
+  loadWorkPanel,
+  openWorkspaceTerminal,
   openPlaneFeed,
   previewProject,
   previewProjectRemoval,
   registerProject,
   removeProject,
+  resizeWorkspaceTerminal,
+  saveWorkFile,
   searchConversations,
+  sendTerminalInput,
   startRun,
   stopRun,
+  submitFileReview,
   submitTurn,
   withdrawTurn,
   type ApprovalPresentation,
@@ -22,14 +34,21 @@ import {
   type ConversationRow,
   type ConversationSearchResult,
   type ConnectionSnapshot,
+  type EditableFile,
   type PlaneUpdate,
   type ProjectPreview,
   type ProjectRemovalPreview,
   type PublicError,
+  type PublicRecoveryAction,
+  type WorkCheckpoint,
   type RunSupervision,
   type SetupSnapshot,
+  type TerminalUpdate,
   type TurnQueueItem,
+  type WorkPanelSnapshot,
 } from "$lib/jet/bridge";
+import { TerminalTranscriptDecoder } from "$lib/jet/terminal-text";
+import { shouldLoadNextWorkPage } from "$lib/jet/work-continuity";
 import {
   fixtureForState,
   type DesktopFixtureScenario,
@@ -101,11 +120,37 @@ export class DesktopSession {
   searchText = $state("");
   searchResult = $state<ConversationSearchResult | null>(null);
   searchBusy = $state(false);
+  workPanel = $state<WorkPanelSnapshot | null>(null);
+  workPanelBusy = $state(false);
+  workPanelError = $state<PublicError | null>(null);
+  workPanelNotice = $state<string | null>(null);
+  selectedWorkFileId = $state<string | null>(null);
+  editableFile = $state<EditableFile | null>(null);
+  fileDraft = $state("");
+  reviewLine = $state(1);
+  reviewComment = $state("");
+  selectedTerminalId = $state<string | null>(null);
+  attachedTerminalId = $state<string | null>(null);
+  terminalInput = $state("");
+  terminalOutput = $state<Record<string, string>>({});
+  checkpointKind = $state<WorkCheckpoint["kind"]>("current");
+  checkpointTurn = $state(1);
+  checkpointFromTurn = $state(0);
+  checkpointToTurn = $state(1);
+  terminalRows = $state(24);
+  terminalColumns = $state(80);
+  workPanelNoticeError = $state<PublicError | null>(null);
 
   private setupRequest = 0;
   private conversationRequest = 0;
   private searchRequest = 0;
+  private workRequest = 0;
+  private workFileRequest = 0;
   private detailRefresh: ReturnType<typeof setTimeout> | null = null;
+  private patchDecoder: TextDecoder | null = null;
+  private terminalDecoders = new Map<string, TerminalTranscriptDecoder>();
+  private lastTerminalSize: { terminalId: string; rows: number; columns: number } | null = null;
+  private feedGeneration = 0;
 
   get canSubmitDraft(): boolean {
     return (
@@ -227,23 +272,27 @@ export class DesktopSession {
 
   private async connectConversationFeed(): Promise<void> {
     await this.refreshConversations(true);
-    await openPlaneFeed((update) => this.receive(update), this.conversationCursor)
+    await this.restartConversationFeed(this.conversationCursor);
+  }
+
+  private async restartConversationFeed(after: string): Promise<void> {
+    const generation = ++this.feedGeneration;
+    await openPlaneFeed(
+      (update) => {
+        if (generation === this.feedGeneration) this.receive(update);
+      },
+      after,
+    )
       .then((snapshot) => {
+        if (generation !== this.feedGeneration) return;
         this.connection = snapshot.state === "online" ? snapshot : null;
         this.connectionState = snapshot.state;
       })
       .catch((error: unknown) => {
-        const candidate = error as Partial<PublicError>;
-        this.failure = {
-          category: typeof candidate.category === "string" ? candidate.category : "offline",
-          code: typeof candidate.code === "string" ? candidate.code : "transport.offline",
-          message:
-            typeof candidate.message === "string"
-              ? candidate.message
-              : "Jet could not reach this Plane.",
-          retryable: candidate.retryable === true,
-        };
-        this.connectionState = candidate.retryable === false ? "failed" : "reconnecting";
+        if (generation !== this.feedGeneration) return;
+        const failure = publicError(error);
+        this.failure = failure;
+        this.connectionState = failure.retryable ? "reconnecting" : "failed";
       });
   }
 
@@ -447,7 +496,7 @@ export class DesktopSession {
       this.conversationFreshness = "live";
     } catch (error: unknown) {
       const failure = publicError(error);
-      if (failure.code === "pagination.stale") {
+      if (failure.restart?.reason === "pagination_stale") {
         await this.refreshConversations();
       } else {
         this.actionNotice = failure.message;
@@ -478,9 +527,11 @@ export class DesktopSession {
 
   async openConversation(conversationId: string, show = true): Promise<void> {
     if (this.selectedConversationId !== conversationId) {
+      this.detachCurrentTerminal();
       this.timeline = [];
       this.conversationDetail = null;
       this.supervision = null;
+      this.resetWorkPanel();
     }
     this.selectedConversationId = conversationId;
     if (show) {
@@ -540,6 +591,8 @@ export class DesktopSession {
       const supervision = await loadRunSupervision(conversationId, runId);
       if (this.selectedConversationId !== conversationId) return;
       this.supervision = supervision;
+      const selectedRunId = supervision.execution?.run.id ?? runId;
+      if (selectedRunId) await this.refreshWorkPanel(conversationId, selectedRunId);
     } catch (error: unknown) {
       if (this.selectedConversationId !== conversationId) return;
       this.actionNotice = publicError(error).message;
@@ -714,6 +767,508 @@ export class DesktopSession {
   showPanel(tab: WorkPanelTab): void {
     this.selectedWorkPanel = tab;
     this.workPanelPresented = true;
+    const conversationId = this.selectedConversationId;
+    const runId = this.selectedRun?.id;
+    if (conversationId && runId && this.workPanel?.runId !== runId) {
+      void this.refreshWorkPanel(conversationId, runId);
+    }
+  }
+
+  get workCheckpoint(): WorkCheckpoint {
+    switch (this.checkpointKind) {
+      case "final":
+        return { kind: "final" };
+      case "turn":
+        return { kind: "turn", turn: Math.max(1, Math.trunc(this.checkpointTurn)) };
+      case "historical":
+        return {
+          kind: "historical",
+          fromTurn: Math.max(0, Math.trunc(this.checkpointFromTurn)),
+          toTurn: Math.max(1, Math.trunc(this.checkpointToTurn)),
+        };
+      default:
+        return { kind: "current" };
+    }
+  }
+
+  get canApplyWorkCheckpoint(): boolean {
+    if (this.workPanelBusy) return false;
+    const latestTurn = this.workPanel?.latestTurn ?? 0;
+    switch (this.checkpointKind) {
+      case "final":
+        return this.selectedRun?.lifecycle !== "active" &&
+          this.selectedRun?.lifecycle !== "starting" &&
+          this.selectedRun?.lifecycle !== "stopping";
+      case "turn":
+        return Number.isInteger(this.checkpointTurn) &&
+          this.checkpointTurn > 0 &&
+          this.checkpointTurn <= latestTurn;
+      case "historical":
+        return Number.isInteger(this.checkpointFromTurn) &&
+          Number.isInteger(this.checkpointToTurn) &&
+          this.checkpointFromTurn >= 0 &&
+          this.checkpointFromTurn <= this.checkpointToTurn &&
+          this.checkpointToTurn <= latestTurn;
+      default:
+        return true;
+    }
+  }
+
+  async applyWorkCheckpoint(): Promise<void> {
+    if (!this.canApplyWorkCheckpoint) return;
+    this.selectedWorkFileId = null;
+    this.editableFile = null;
+    this.fileDraft = "";
+    await this.refreshWorkPanel(undefined, undefined, false);
+  }
+
+  async refreshWorkPanel(
+    conversationId = this.selectedConversationId,
+    runId = this.selectedRun?.id ?? null,
+    preserveContinuity = true,
+  ): Promise<void> {
+    if (!conversationId || !runId) {
+      this.resetWorkPanel();
+      return;
+    }
+    const request = ++this.workRequest;
+    this.workPanelBusy = true;
+    this.workPanelError = null;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    const previous = this.workPanel;
+    const preservePrevious = preserveContinuity && previous?.runId === runId;
+    const previousSelectedFileId = preservePrevious ? this.selectedWorkFileId : null;
+    const targetFileCount = preservePrevious
+      ? previous.files.length
+      : 0;
+    if (previous?.runId !== runId) {
+      this.checkpointKind = this.selectedRun?.lifecycle === "completed" ||
+        this.selectedRun?.lifecycle === "failed" ||
+        this.selectedRun?.lifecycle === "canceled" ||
+        this.selectedRun?.lifecycle === "lost"
+        ? "final"
+        : "current";
+    }
+    try {
+      const snapshot = await loadWorkPanel(conversationId, runId, this.workCheckpoint);
+      while (shouldLoadNextWorkPage(
+        new Set(snapshot.files.map((file) => file.id)),
+        targetFileCount,
+        previousSelectedFileId,
+        snapshot.nextPage !== null,
+      ) && snapshot.nextPage) {
+        const page = await loadMoreChanges(snapshot.nextPage);
+        const known = new Set(snapshot.files.map((file) => file.id));
+        snapshot.files.push(...page.files.filter((file) => !known.has(file.id)));
+        snapshot.nextPage = page.nextPage;
+      }
+      if (
+        request !== this.workRequest ||
+        this.selectedConversationId !== conversationId ||
+        this.selectedRun?.id !== runId
+      ) {
+        return;
+      }
+      this.workPanel = snapshot;
+      this.patchDecoder = new TextDecoder("utf-8", { fatal: true });
+      this.workPanelNotice = snapshot.terminalIssue
+        ? `Changes loaded, but terminals are unavailable: ${snapshot.terminalIssue.message}`
+        : null;
+      const selectedFileStillExists = snapshot.files.some(
+        (file) => file.id === this.selectedWorkFileId,
+      );
+      if (!selectedFileStillExists) {
+        this.selectedWorkFileId = snapshot.files[0]?.id ?? null;
+        this.editableFile = null;
+        this.fileDraft = "";
+      }
+      const selectedTerminalStillExists = snapshot.terminals.some(
+        (terminal) => terminal.id === this.selectedTerminalId,
+      );
+      if (!selectedTerminalStillExists) {
+        this.selectedTerminalId =
+          snapshot.terminals.find((terminal) => terminal.state === "open")?.id ??
+          snapshot.terminals[0]?.id ??
+          null;
+      }
+    } catch (error: unknown) {
+      if (request === this.workRequest) {
+        this.workPanelError = publicError(error);
+        this.applyRevisionConflict(this.workPanelError);
+      }
+    } finally {
+      if (request === this.workRequest) this.workPanelBusy = false;
+    }
+  }
+
+  async applyWorkRecovery(action: PublicRecoveryAction): Promise<void> {
+    this.workPanelNoticeError = null;
+    switch (action.type) {
+      case "refresh_file":
+        if (this.selectedWorkFileId) await this.selectWorkFile(this.selectedWorkFileId);
+        return;
+      case "refresh_conversation":
+        await this.loadSelectedConversation(false);
+        return;
+      case "refresh_run":
+        if (this.selectedConversationId) {
+          await this.refreshSupervision(
+            this.selectedConversationId,
+            this.selectedRun?.id ?? null,
+          );
+        }
+        return;
+      case "resume_events":
+        await this.restartConversationFeed(action.after);
+        this.workPanelNotice = "Activity reconnected from the requested checkpoint.";
+        return;
+    }
+  }
+
+  async loadMoreWorkFiles(): Promise<void> {
+    const pageId = this.workPanel?.nextPage;
+    if (!pageId || this.workPanelBusy || !this.workPanel) return;
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      const page = await loadMoreChanges(pageId);
+      const known = new Set(this.workPanel.files.map((file) => file.id));
+      this.workPanel.files = [
+        ...this.workPanel.files,
+        ...page.files.filter((file) => !known.has(file.id)),
+      ];
+      this.workPanel.nextPage = page.nextPage;
+      this.workPanel = { ...this.workPanel };
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      this.workPanelNotice = failure.message;
+      this.workPanelNoticeError = failure;
+      this.applyRevisionConflict(failure);
+      if (failure.restart?.reason === "pagination_stale") {
+        await this.refreshWorkPanel();
+      }
+    } finally {
+      this.workPanelBusy = false;
+    }
+  }
+
+  async loadMorePatch(): Promise<void> {
+    const readId = this.workPanel?.artifactReadId;
+    if (!readId || this.workPanelBusy || !this.workPanel) return;
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      const chunk = await loadPatchChunk(readId);
+      const decoder = this.patchDecoder ?? new TextDecoder("utf-8", { fatal: true });
+      this.patchDecoder = decoder;
+      this.workPanel.patch += decoder.decode(new Uint8Array(chunk.bytes), {
+        stream: !chunk.complete,
+      });
+      if (chunk.complete) {
+        this.workPanel.artifactReadId = null;
+        this.workPanel.patchTruncated = false;
+      }
+      this.workPanel = { ...this.workPanel };
+      if (chunk.complete && chunk.verified) {
+        this.workPanelNotice = "The complete patch was verified.";
+      }
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      this.workPanelNotice = failure.message;
+      this.workPanelNoticeError = failure;
+      this.applyRevisionConflict(failure);
+    } finally {
+      this.workPanelBusy = false;
+    }
+  }
+
+  async selectWorkFile(fileId: string): Promise<void> {
+    if (!this.workPanel?.files.some((file) => file.id === fileId)) return;
+    const request = ++this.workFileRequest;
+    this.selectedWorkFileId = fileId;
+    this.selectedWorkPanel = "files";
+    this.editableFile = null;
+    this.fileDraft = "";
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      const file = await loadWorkFile(fileId);
+      if (request !== this.workFileRequest || this.selectedWorkFileId !== fileId) return;
+      this.editableFile = file;
+      this.fileDraft = file.content ?? "";
+    } catch (error: unknown) {
+      if (request === this.workFileRequest) this.recordWorkFailure(error);
+    } finally {
+      if (request === this.workFileRequest) this.workPanelBusy = false;
+    }
+  }
+
+  async saveSelectedFile(): Promise<void> {
+    const fileId = this.selectedWorkFileId;
+    if (!fileId || !this.editableFile || this.workPanelBusy) return;
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      const saved = await saveWorkFile(fileId, this.fileDraft);
+      this.editableFile.revision = saved.revision;
+      this.editableFile.content = this.fileDraft;
+      this.editableFile.contentBytes = new TextEncoder().encode(this.fileDraft).byteLength;
+      this.editableFile = { ...this.editableFile };
+      this.workPanelNotice = saved.message;
+    } catch (error: unknown) {
+      this.recordWorkFailure(error);
+    } finally {
+      this.workPanelBusy = false;
+    }
+  }
+
+  async submitSelectedFileReview(): Promise<void> {
+    const fileId = this.selectedWorkFileId;
+    const comment = this.reviewComment.trim();
+    if (!fileId || !comment || this.reviewLine < 1 || this.workPanelBusy) return;
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      const submitted = await submitFileReview(fileId, this.reviewLine, comment);
+      this.reviewComment = "";
+      this.workPanelNotice = submitted.message;
+      const conversationId = this.selectedConversationId;
+      if (conversationId) await this.refreshSupervision(conversationId, this.selectedRun?.id ?? null);
+    } catch (error: unknown) {
+      this.recordWorkFailure(error);
+    } finally {
+      this.workPanelBusy = false;
+    }
+  }
+
+  async createTerminal(): Promise<void> {
+    const conversationId = this.selectedConversationId;
+    if (!conversationId || this.workPanelBusy) return;
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      const terminal = await openWorkspaceTerminal(
+        conversationId,
+        this.terminalRows,
+        this.terminalColumns,
+      );
+      if (this.workPanel) {
+        this.workPanel.terminals = [
+          ...this.workPanel.terminals.filter((item) => item.id !== terminal.id),
+          terminal,
+        ];
+        this.workPanel = { ...this.workPanel };
+      }
+      this.selectedTerminalId = terminal.id;
+      await this.attachTerminal(terminal.id);
+    } catch (error: unknown) {
+      this.recordWorkFailure(error);
+    } finally {
+      this.workPanelBusy = false;
+    }
+  }
+
+  selectTerminal(terminalId: string): void {
+    if (!this.workPanel?.terminals.some((terminal) => terminal.id === terminalId)) return;
+    this.selectedTerminalId = terminalId;
+  }
+
+  async attachSelectedTerminal(): Promise<void> {
+    if (this.selectedTerminalId) await this.attachTerminal(this.selectedTerminalId);
+  }
+
+  async detachSelectedTerminal(): Promise<void> {
+    const terminalId = this.attachedTerminalId;
+    if (!terminalId) return;
+    this.attachedTerminalId = null;
+    try {
+      await detachWorkspaceTerminal(terminalId);
+    } catch (error: unknown) {
+      this.recordWorkFailure(error);
+    }
+  }
+
+  async closeSelectedTerminal(): Promise<void> {
+    const terminalId = this.selectedTerminalId;
+    if (!terminalId || this.workPanelBusy) return;
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      if (this.attachedTerminalId === terminalId) await this.detachSelectedTerminal();
+      const terminal = await closeWorkspaceTerminal(terminalId);
+      if (this.workPanel) {
+        this.workPanel.terminals = this.workPanel.terminals.map((item) =>
+          item.id === terminal.id ? terminal : item,
+        );
+        this.workPanel = { ...this.workPanel };
+      }
+      this.workPanelNotice = "The Workspace terminal was closed.";
+    } catch (error: unknown) {
+      this.recordWorkFailure(error);
+    } finally {
+      this.workPanelBusy = false;
+    }
+  }
+
+  async sendTerminalLine(): Promise<void> {
+    const terminalId = this.attachedTerminalId;
+    if (!terminalId || !this.terminalInput) return;
+    const input = `${this.terminalInput}\n`;
+    this.terminalInput = "";
+    try {
+      await sendTerminalInput(terminalId, input);
+    } catch (error: unknown) {
+      this.terminalInput = input.slice(0, -1);
+      this.recordWorkFailure(error);
+    }
+  }
+
+  setTerminalGeometry(rows: number, columns: number): void {
+    const boundedRows = Math.min(1000, Math.max(1, Math.trunc(rows)));
+    const boundedColumns = Math.min(1000, Math.max(1, Math.trunc(columns)));
+    if (boundedRows === this.terminalRows && boundedColumns === this.terminalColumns) return;
+    this.terminalRows = boundedRows;
+    this.terminalColumns = boundedColumns;
+    void this.resizeAttachedTerminal();
+  }
+
+  private async resizeAttachedTerminal(): Promise<void> {
+    const terminalId = this.attachedTerminalId;
+    if (!terminalId) return;
+    if (
+      this.lastTerminalSize?.terminalId === terminalId &&
+      this.lastTerminalSize.rows === this.terminalRows &&
+      this.lastTerminalSize.columns === this.terminalColumns
+    ) return;
+    try {
+      await resizeWorkspaceTerminal(terminalId, this.terminalRows, this.terminalColumns);
+      this.lastTerminalSize = {
+        terminalId,
+        rows: this.terminalRows,
+        columns: this.terminalColumns,
+      };
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      this.workPanelNotice = failure.message;
+      this.workPanelNoticeError = failure;
+    }
+  }
+
+  private async attachTerminal(terminalId: string): Promise<void> {
+    if (this.attachedTerminalId === terminalId) return;
+    this.detachCurrentTerminal();
+    this.attachedTerminalId = terminalId;
+    try {
+      await attachWorkspaceTerminal(terminalId, (update) => this.receiveTerminal(update));
+      await this.resizeAttachedTerminal();
+    } catch (error: unknown) {
+      if (this.attachedTerminalId === terminalId) this.attachedTerminalId = null;
+      this.recordWorkFailure(error);
+    }
+  }
+
+  private receiveTerminal(update: TerminalUpdate): void {
+    if (update.terminalId !== this.attachedTerminalId) return;
+    if (update.type === "output") {
+      const previous = this.terminalOutput[update.terminalId] ?? "";
+      const decoder = this.terminalDecoders.get(update.terminalId) ?? new TerminalTranscriptDecoder();
+      this.terminalDecoders.set(update.terminalId, decoder);
+      this.terminalOutput[update.terminalId] = `${previous}${decoder.push(update.bytes)}`.slice(-1_048_576);
+      this.terminalOutput = { ...this.terminalOutput };
+    } else if (update.type === "gap") {
+      this.terminalDecoders.set(update.terminalId, new TerminalTranscriptDecoder());
+      const previous = this.terminalOutput[update.terminalId] ?? "";
+      this.terminalOutput[update.terminalId] = `${previous}\n[${update.missingBytes} earlier bytes unavailable]\n`.slice(-1_048_576);
+      this.terminalOutput = { ...this.terminalOutput };
+    } else if (update.type === "finished") {
+      const tail = this.terminalDecoders.get(update.terminalId)?.finish() ?? "";
+      if (tail) {
+        this.terminalOutput[update.terminalId] = `${this.terminalOutput[update.terminalId] ?? ""}${tail}`.slice(-1_048_576);
+        this.terminalOutput = { ...this.terminalOutput };
+      }
+      this.attachedTerminalId = null;
+      this.workPanelNotice = "The terminal session finished.";
+    } else if (update.type === "failed") {
+      this.attachedTerminalId = null;
+      this.workPanelNotice = update.error.message;
+      this.workPanelNoticeError = update.error;
+    }
+  }
+
+  private detachCurrentTerminal(): void {
+    const terminalId = this.attachedTerminalId;
+    this.attachedTerminalId = null;
+    if (terminalId) void detachWorkspaceTerminal(terminalId);
+  }
+
+  private resetWorkPanel(): void {
+    this.workRequest += 1;
+    this.workFileRequest += 1;
+    this.workPanel = null;
+    this.workPanelBusy = false;
+    this.workPanelError = null;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    this.selectedWorkFileId = null;
+    this.editableFile = null;
+    this.fileDraft = "";
+    this.patchDecoder = null;
+    this.selectedTerminalId = null;
+    this.terminalDecoders.clear();
+    this.lastTerminalSize = null;
+    this.detachCurrentTerminal();
+  }
+
+  private applyRevisionConflict(error: PublicError): void {
+    const safeState = error.revisionConflict?.safeState;
+    if (!safeState) return;
+    if (safeState.type === "conversation") {
+      this.conversations = this.conversations.map((conversation) =>
+        conversation.id === safeState.conversationId
+          ? { ...conversation, revision: safeState.revision }
+          : conversation,
+      );
+      if (this.conversationDetail?.conversation.id === safeState.conversationId) {
+        this.conversationDetail.conversation = {
+          ...this.conversationDetail.conversation,
+          revision: safeState.revision,
+        };
+        this.conversationDetail = { ...this.conversationDetail };
+      }
+      return;
+    }
+    if (this.conversationDetail) {
+      this.conversationDetail.runs = this.conversationDetail.runs.map((run) =>
+        run.id === safeState.runId
+          ? { ...run, revision: safeState.revision, lifecycle: safeState.lifecycle }
+          : run,
+      );
+      this.conversationDetail = { ...this.conversationDetail };
+    }
+    if (this.supervision?.execution?.run.id === safeState.runId) {
+      this.supervision.execution.run = {
+        ...this.supervision.execution.run,
+        revision: safeState.revision,
+        lifecycle: safeState.lifecycle,
+      };
+      this.supervision = { ...this.supervision };
+    }
+  }
+
+  private recordWorkFailure(error: unknown): PublicError {
+    const failure = publicError(error);
+    this.workPanelNotice = failure.message;
+    this.workPanelNoticeError = failure;
+    this.applyRevisionConflict(failure);
+    return failure;
   }
 
   handleShortcut(event: KeyboardEvent): void {
@@ -770,8 +1325,8 @@ export class DesktopSession {
         break;
       case "failed":
         if (
-          update.error.code === "event.cursor_expired" ||
-          update.error.code === "event.cursor_ahead"
+          update.error.restart?.reason === "cursor_expired" ||
+          update.error.restart?.reason === "cursor_ahead"
         ) {
           void this.recoverSnapshot();
           break;
@@ -847,12 +1402,7 @@ export class DesktopSession {
     this.actionNotice = "The activity cursor expired. Jet refreshed the full Conversation snapshot.";
     await this.refreshConversations();
     try {
-      const snapshot = await openPlaneFeed(
-        (update) => this.receive(update),
-        this.conversationCursor,
-      );
-      this.connection = snapshot.state === "online" ? snapshot : null;
-      this.connectionState = snapshot.state;
+      await this.restartConversationFeed(this.conversationCursor);
     } catch (error: unknown) {
       const failure = publicError(error);
       this.failure = failure;
@@ -872,7 +1422,26 @@ export function publicError(error: unknown): PublicError {
         ? candidate.message
         : "Jet could not complete the request.",
     retryable: candidate.retryable === true,
+    recoveryActions: Array.isArray(candidate.recoveryActions)
+      ? candidate.recoveryActions.filter(isPublicRecoveryAction)
+      : [],
+    restart: candidate.restart && typeof candidate.restart === "object"
+      ? candidate.restart
+      : null,
+    revisionConflict:
+      candidate.revisionConflict && typeof candidate.revisionConflict === "object"
+        ? candidate.revisionConflict
+        : null,
   };
+}
+
+function isPublicRecoveryAction(value: unknown): value is PublicRecoveryAction {
+  if (!value || typeof value !== "object" || !("type" in value)) return false;
+  const type = (value as { type?: unknown }).type;
+  if (type === "refresh_file" || type === "refresh_conversation" || type === "refresh_run") {
+    return true;
+  }
+  return type === "resume_events" && typeof (value as { after?: unknown }).after === "string";
 }
 
 function publicErrorCandidate(error: unknown): Partial<PublicError> {

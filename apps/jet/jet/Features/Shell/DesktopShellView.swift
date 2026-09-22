@@ -995,31 +995,488 @@ private struct WorkPanelView: View {
             Divider()
 
             Group {
-                switch session.selectedWorkPanel {
-                case .changes:
-                    WorkPanelEmptyState(
-                        title: "No change details yet",
-                        message: "Changes will load here when the Run exposes a diff.",
-                        symbol: "doc.text.magnifyingglass"
-                    )
-                case .files:
-                    WorkPanelEmptyState(
-                        title: "No file selected",
-                        message: "Choose a file from a Run to inspect it without leaving the task.",
-                        symbol: "doc"
-                    )
-                case .terminal:
-                    WorkPanelEmptyState(
-                        title: "No terminal open",
-                        message: "Workspace terminals will appear here when the Plane provides one.",
-                        symbol: "terminal"
-                    )
-                case .run:
-                    RunSummaryView(session: session)
+                if let error = session.workError, session.selectedWorkPanel != .run {
+                    ContentUnavailableView {
+                        Label("Work details unavailable", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error.message)
+                    } actions: {
+                        ForEach(error.recoveryActions) { action in
+                            Button(action.label) {
+                                Task { await session.applyWorkRecovery(action) }
+                            }
+                        }
+                        if error.recoveryActions.isEmpty, error.retryable {
+                            Button("Try Again") { Task { await session.loadWorkPanel() } }
+                        }
+                    }
+                    .padding()
+                } else if session.workOperation == "refresh",
+                          session.workDiff == nil,
+                          session.selectedWorkPanel != .run
+                {
+                    ProgressView("Loading work details")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    switch session.selectedWorkPanel {
+                    case .changes:
+                        ChangesWorkView(session: session)
+                    case .files:
+                        FilesWorkView(session: session)
+                    case .terminal:
+                        TerminalWorkView(session: session)
+                    case .run:
+                        RunSummaryView(session: session)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if let notice = session.workNotice {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(notice)
+                    if let error = session.workNoticeError {
+                        HStack(spacing: 8) {
+                            ForEach(error.recoveryActions) { action in
+                                Button(action.label) {
+                                    Task { await session.applyWorkRecovery(action) }
+                                }
+                                .controlSize(.small)
+                            }
+                            if let conflict = error.revisionConflict {
+                                Text("Current revision \(conflict.currentRevision)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(.bar)
+            }
         }
+    }
+}
+
+private struct ChangesWorkView: View {
+    @Bindable var session: DesktopSession
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                WorkSectionHeader(
+                    title: "Changed files",
+                    detail: "\(session.workDiff?.scope.label ?? "Current") checkpoint · \(session.workDiff?.totalFiles ?? 0) files"
+                ) {
+                    Button("Refresh") { Task { await session.loadWorkPanel() } }
+                        .disabled(session.workOperation != nil)
+                }
+                .id("changes-heading")
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Picker("Checkpoint", selection: $session.checkpointKind) {
+                            ForEach(WorkCheckpointKind.allCases, id: \.self) { kind in
+                                Text(kind.title)
+                                    .tag(kind)
+                                    .disabled(kind == .final && session.selectedRun?.lifecycle.isLive == true)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        Spacer(minLength: 4)
+                        Button("Apply") {
+                            Task { await session.applyWorkCheckpoint() }
+                        }
+                        .disabled(!session.canApplyWorkCheckpoint)
+                    }
+                    switch session.checkpointKind {
+                    case .turn:
+                        TextField("Turn", value: $session.checkpointTurn, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                    case .historical:
+                        HStack(spacing: 8) {
+                            TextField("From", value: $session.checkpointFromTurn, format: .number)
+                            TextField("To", value: $session.checkpointToTurn, format: .number)
+                        }
+                        .textFieldStyle(.roundedBorder)
+                    case .current, .final:
+                        EmptyView()
+                    }
+                }
+                .controlSize(.small)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
+
+                if session.workFiles.isEmpty {
+                    WorkPanelEmptyState(
+                        title: "No changes recorded",
+                        message: "The selected Run has not produced a file change at this checkpoint.",
+                        symbol: "checkmark.circle"
+                    )
+                    .frame(minHeight: 180)
+                } else {
+                    ForEach(session.workFiles) { file in
+                        Button {
+                            Task { await session.selectWorkFile(file.path) }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text(file.status.prefix(1).uppercased())
+                                    .font(.caption2.bold().monospaced())
+                                    .foregroundStyle(statusColor(file.status))
+                                    .frame(width: 16)
+                                Text(file.path)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Spacer(minLength: 4)
+                                Text(file.origin)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .contentShape(Rectangle())
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(
+                                session.selectedWorkFilePath == file.path
+                                    ? Color.accentColor.opacity(0.12)
+                                    : Color.clear
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .id("file-\(file.path)")
+                    }
+                    if session.workNextPage != nil {
+                        Button("Load more files") {
+                            Task { await session.loadMoreWorkFiles() }
+                        }
+                        .disabled(session.workOperation != nil)
+                        .frame(maxWidth: .infinity)
+                        .padding(12)
+                    }
+                }
+
+                Divider().padding(.top, 6)
+                WorkSectionHeader(
+                    title: "Patch",
+                    detail: ByteCountFormatter.string(
+                        fromByteCount: Int64(session.workDiff?.artifact.size ?? 0),
+                        countStyle: .file
+                    ) + " retained artifact"
+                )
+                .id("patch-heading")
+
+                if patchIsBinary {
+                    WorkPanelEmptyState(
+                        title: "Binary change",
+                        message: "Jet records the file change, but this patch is not readable as text.",
+                        symbol: "doc.badge.ellipsis"
+                    )
+                    .frame(minHeight: 160)
+                } else if session.workPatch.isEmpty {
+                    Text("No text patch is available.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(16)
+                } else {
+                    ScrollView(.horizontal) {
+                        Text(session.workPatch)
+                            .font(.system(.caption2, design: .monospaced))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(14)
+                    }
+                    .frame(maxHeight: 420)
+                    .background(Color.primary.opacity(0.035))
+                }
+
+                if let diff = session.workDiff,
+                   diff.patchTruncated,
+                   session.workPatchBytesLoaded < diff.artifact.size
+                {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(artifactMessage(diff.artifact.availability))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if diff.artifact.availability == .stored {
+                            Button("Load next chunk") {
+                                Task { await session.loadMorePatch() }
+                            }
+                            .disabled(session.workOperation != nil)
+                        }
+                    }
+                    .padding(14)
+                    .id("artifact-state")
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollPosition(id: scrollAnchor)
+    }
+
+    private var scrollAnchor: Binding<String?> {
+        Binding(
+            get: { session.workScrollAnchors[.changes] },
+            set: { session.workScrollAnchors[.changes] = $0 }
+        )
+    }
+
+    private var patchIsBinary: Bool {
+        session.workPatch.contains("GIT binary patch")
+            || session.workPatch.contains("Binary files")
+    }
+
+    private func statusColor(_ status: String) -> Color {
+        switch status {
+        case "added": .green
+        case "deleted": .red
+        default: .orange
+        }
+    }
+
+    private func artifactMessage(_ availability: JetArtifactAvailability) -> String {
+        switch availability {
+        case .stored: "The complete patch can be loaded in verified chunks."
+        case .diskPressure: "The full patch was not retained because storage is constrained."
+        case .runBudgetExceeded: "The Run reached its retained-artifact budget."
+        case .artifactSizeExceeded: "The complete patch exceeds the artifact size limit."
+        }
+    }
+}
+
+private struct FilesWorkView: View {
+    @Bindable var session: DesktopSession
+
+    var body: some View {
+        VStack(spacing: 0) {
+            WorkSectionHeader(
+                title: "Workspace file",
+                detail: session.editableFile?.path ?? "Choose a changed file"
+            ) {
+                if !session.workFiles.isEmpty {
+                    Menu("Choose") {
+                        ForEach(session.workFiles) { file in
+                            Button(file.path) { Task { await session.selectWorkFile(file.path) } }
+                        }
+                    }
+                }
+            }
+            Divider()
+
+            if session.selectedWorkFilePath == nil {
+                WorkPanelEmptyState(
+                    title: "No file selected",
+                    message: "Choose a file in Changes. Only files from this Run can be opened here.",
+                    symbol: "doc"
+                )
+            } else if session.workOperation == "file", session.editableFile == nil {
+                ProgressView("Loading file")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let file = session.editableFile, file.content != nil {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("\(file.content?.utf8.count ?? 0) bytes")
+                        Spacer()
+                        Text("Revision bound")
+                            .help(file.revision.label)
+                    }
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+
+                    TextEditor(text: $session.fileDraft)
+                        .font(.system(.caption, design: .monospaced))
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .background(Color.primary.opacity(0.035))
+                        .accessibilityLabel("Edit \(file.path)")
+
+                    HStack {
+                        Button("Reload") { Task { await session.selectWorkFile(file.path) } }
+                        Spacer()
+                        Button("Save Edit") { Task { await session.saveSelectedWorkFile() } }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(session.workOperation != nil || session.fileDraft == file.content)
+                    }
+                    .padding(12)
+
+                    Divider()
+                    VStack(alignment: .leading, spacing: 9) {
+                        Text("Review comment").font(.subheadline.weight(.semibold))
+                        TextField("Line", value: $session.reviewLine, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                        TextField(
+                            "Describe the issue or requested change",
+                            text: $session.reviewComment,
+                            axis: .vertical
+                        )
+                        .lineLimit(3 ... 6)
+                        .textFieldStyle(.roundedBorder)
+                        HStack {
+                            Spacer()
+                            Button("Add Review Comment") {
+                                Task { await session.submitSelectedReview() }
+                            }
+                            .disabled(
+                                session.workOperation != nil
+                                    || session.reviewLine == 0
+                                    || session.reviewComment.trimmingCharacters(
+                                        in: .whitespacesAndNewlines
+                                    ).isEmpty
+                            )
+                        }
+                    }
+                    .padding(14)
+                }
+            } else {
+                WorkPanelEmptyState(
+                    title: "Content unavailable",
+                    message: "The file may be binary, oversized, deleted, or no longer available as bounded UTF-8 text.",
+                    symbol: "doc.badge.ellipsis"
+                )
+            }
+        }
+    }
+}
+
+private struct TerminalWorkView: View {
+    @Bindable var session: DesktopSession
+
+    var body: some View {
+        VStack(spacing: 0) {
+            WorkSectionHeader(
+                title: "Workspace terminal",
+                detail: session.workDiff?.workspaceID == nil
+                    ? "Requires a managed Workspace"
+                    : "Scoped to this managed Workspace"
+            ) {
+                Button("New") { Task { await session.createWorkspaceTerminal() } }
+                    .disabled(session.workDiff?.workspaceID == nil || session.workOperation != nil)
+            }
+            Divider()
+
+            if session.workDiff?.workspaceID == nil {
+                WorkPanelEmptyState(
+                    title: "No managed Workspace",
+                    message: "This Run does not expose a terminal-capable Workspace.",
+                    symbol: "terminal"
+                )
+            } else if session.workTerminals.isEmpty {
+                WorkPanelEmptyState(
+                    title: "No terminal open",
+                    message: "Create a terminal owned by this Workspace. Jet does not launch an unrestricted host shell.",
+                    symbol: "terminal"
+                )
+            } else {
+                Picker("Session", selection: $session.selectedTerminalID) {
+                    ForEach(session.workTerminals) { terminal in
+                        Text("\(terminal.id.uuidString.prefix(8)) · \(terminal.state.rawValue)")
+                            .tag(Optional(terminal.id))
+                    }
+                }
+                .padding(12)
+
+                GeometryReader { geometry in
+                    ScrollView([.horizontal, .vertical]) {
+                        Text(
+                            session.selectedTerminalID.flatMap { session.terminalOutput[$0] }
+                                ?? "Terminal output will appear here."
+                        )
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(12)
+                    }
+                    .onAppear {
+                        session.setTerminalGeometry(
+                            width: geometry.size.width,
+                            height: geometry.size.height
+                        )
+                    }
+                    .onChange(of: geometry.size) { _, size in
+                        session.setTerminalGeometry(width: size.width, height: size.height)
+                    }
+                }
+                .defaultScrollAnchor(.bottom)
+                .background(Color.primary.opacity(0.035))
+
+                HStack(spacing: 8) {
+                    TextField("Send input", text: $session.terminalInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .disabled(session.attachedTerminalID == nil)
+                        .onSubmit { Task { await session.sendTerminalLine() } }
+                    Button("Send") { Task { await session.sendTerminalLine() } }
+                        .disabled(session.attachedTerminalID == nil || session.terminalInput.isEmpty)
+                }
+                .padding(12)
+
+                HStack {
+                    if session.attachedTerminalID == session.selectedTerminalID {
+                        Button("Detach", action: session.detachSelectedTerminal)
+                    } else {
+                        Button("Attach") { Task { await session.attachSelectedTerminal() } }
+                            .disabled(selectedTerminal?.state != .open)
+                    }
+                    Spacer()
+                    Button("Close", role: .destructive) {
+                        Task { await session.closeSelectedTerminal() }
+                    }
+                    .disabled(session.selectedTerminalID == nil || session.workOperation != nil)
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+            }
+        }
+    }
+
+    private var selectedTerminal: JetWorkspaceTerminal? {
+        guard let selectedTerminalID = session.selectedTerminalID else { return nil }
+        return session.workTerminals.first { $0.id == selectedTerminalID }
+    }
+}
+
+private struct WorkSectionHeader<Actions: View>: View {
+    let title: String
+    let detail: String
+    let actions: Actions
+
+    init(
+        title: String,
+        detail: String,
+        @ViewBuilder actions: () -> Actions
+    ) {
+        self.title = title
+        self.detail = detail
+        self.actions = actions()
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 6)
+            actions
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+}
+
+private extension WorkSectionHeader where Actions == EmptyView {
+    init(title: String, detail: String) {
+        self.init(title: title, detail: detail) { EmptyView() }
     }
 }
 
@@ -1047,6 +1504,18 @@ private struct RunSummaryView: View {
                 LabeledContent("Lifecycle", value: lifecycleLabel)
                 LabeledContent("Activity", value: activityLabel)
                 LabeledContent("Runs on", value: "This Mac")
+                LabeledContent(
+                    "Checkpoint",
+                    value: session.workDiff?.scope.label ?? "Unavailable"
+                )
+                LabeledContent(
+                    "Latest Turn",
+                    value: session.workDiff?.latestTurn.formatted() ?? "—"
+                )
+                LabeledContent(
+                    "Changed files",
+                    value: session.workDiff?.totalFiles.formatted() ?? "0"
+                )
                 if let run = session.selectedRun {
                     LabeledContent("Revision", value: run.revision.formatted())
                 }
@@ -1103,6 +1572,7 @@ private struct RunSummaryView: View {
             }
         }
         .listStyle(.inset)
+        .refreshable { await session.loadWorkPanel() }
     }
 
     private var lifecycleLabel: String {

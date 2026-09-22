@@ -1,6 +1,6 @@
 # Jet desktop design language
 
-Status: confirmed for implementation planning on 2026-09-21.
+Status: confirmed design authority. Work-panel behavior was updated from Wave 2.2 on 2026-09-22.
 
 This document is the design authority for Jet's main desktop experience. It covers the native macOS app in `apps/jet/` and the Linux desktop app in `apps/jet-tauri/`. The current ChatGPT desktop application is the interaction reference for both clients. Jet does not copy ChatGPT branding, assets, product modes, or visual identity.
 
@@ -94,6 +94,23 @@ The trailing work panel is contextual, resizable where the platform supports it,
 Its primary tabs are Changes, Files, Terminal, and Queue or Run details. It is an inspector, not a second navigation system. A selected diff, file, approval, artifact, or terminal should preserve the Conversation as the surrounding context.
 
 On narrow windows, present the panel as an overlay or focused destination. Never compress the conversation into an unreadable strip.
+
+#### Changes and checkpoints
+
+- Let users inspect Current, Final, Turn, and Historical checkpoints. Current follows live work, Final is available after the Run reaches a terminal state, Turn selects one Turn boundary, and Historical compares an explicit Turn range. Show the active checkpoint beside the changed-file count.
+- Page changed files incrementally. Load retained patch Artifacts in bounded chunks and verify the declared size and SHA-256 before calling the complete Artifact verified. Give binary files, unavailable text, truncation, storage pressure, Run-budget limits, and Artifact-size limits their own plain-language states.
+- Refresh back to the loaded depth and stable file identity. If insertions move the selected file to a later page, keep paging until Jet finds it or reaches the end. Preserve the selected tab, file, unsaved draft, terminal transcript, and scroll anchor while their Run, checkpoint, and scope remain valid. Collapsing the panel must not discard them. A deliberate checkpoint change may clear file-specific state rather than carry a draft into another snapshot.
+
+#### Files, terminals, and recovery
+
+- Files remain inside the Project or managed Workspace binding issued by the native client. Only open files exposed by the selected Run, bind edits to the exact file revision, and present conflicts before overwriting newer content.
+- Terminals belong to a managed Workspace. The presentation layer chooses an existing terminal or asks the native client to create one; it never supplies an arbitrary host path, command, or shell construction. Detaching or losing the connection does not imply closing the terminal.
+- Decode terminal bytes incrementally so split UTF-8 remains intact, strip control sequences from the readable transcript, and mark byte gaps at the point where output is missing. Keep the transcript bounded. Resize the attached terminal when its viewport changes, and suppress duplicate resize requests.
+- Render structured recovery actions by name, such as Reload File, Refresh Task, Refresh Run, or Reconnect Activity. Use restart metadata to replace stale pagination or event projections with the required snapshot. On a revision conflict, update from the supplied safe Conversation or Run state, show the current revision, and keep the failed effect unclaimed.
+
+#### Work-panel states
+
+Empty copy must identify what is absent: no selected Run, no changes at this checkpoint, no selected file, unavailable file content, no managed Workspace, or no open terminal. Offline and reconnecting panels may retain clearly stale content, but they must not invent a Run, changed-file count, patch, file, or terminal. A partial terminal failure must not hide usable Changes or Files.
 
 ## Core flows
 

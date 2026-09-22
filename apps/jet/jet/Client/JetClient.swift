@@ -9,8 +9,20 @@ actor JetClient {
         let cancellationFailure: JetClientFailure
     }
 
+    private struct TerminalReply {
+        let terminalID: UUID
+        var nextOffset: UInt64
+        var continuation: AsyncThrowingStream<JetTerminalEvent, Error>.Continuation?
+        let attachRequestID: UInt64
+        var resizeRequestIDs: Set<UInt64>
+        var attached: Bool
+        var active: Bool
+    }
+
     private static let preface = Data("jet-protocol\n".utf8)
     private static let maximumInFlightRequests = 256
+    private static let maximumTerminalStreams = 16
+    private static let maximumTerminalCredit: UInt64 = 16 * 1_024 * 1_024
     private static let protocolVersion = JetClientConfiguration.protocolVersion
     private static let protocolMinor = JetClientConfiguration.protocolMinor
     private static let codec = JetClientConfiguration.codec
@@ -29,6 +41,7 @@ actor JetClient {
     private var pending: [UInt32: PendingReply] = [:]
     private var nextRequestID: UInt64 = 1
     private var nextStreamID: UInt32 = 1
+    private var terminalReplies: [UInt32: TerminalReply] = [:]
 
     init(
         configuration: JetClientConfiguration,
@@ -510,6 +523,273 @@ actor JetClient {
         return try decodeRemovedProject(data, requestID: requestID)
     }
 
+    func changeDiff(runID: UUID, scope: JetChangeScope) async throws -> JetChangeDiff {
+        let wireScope: [String: Any] = switch scope {
+        case .current:
+            ["kind": "current"]
+        case .final:
+            ["kind": "final"]
+        case let .historical(fromTurn, toTurn):
+            [
+                "kind": "historical",
+                "from_turn": NSNumber(value: fromTurn),
+                "to_turn": NSNumber(value: toTurn),
+            ]
+        case let .turn(turn):
+            ["kind": "turn", "turn": NSNumber(value: turn)]
+        }
+        let (data, requestID) = try await sendQuery([
+            "type": "change_diff",
+            "run_id": runID.uuidString.lowercased(),
+            "scope": wireScope,
+        ])
+        return try decodeChangeDiff(data, requestID: requestID)
+    }
+
+    func nextChangeDiff(_ cursor: UUID) async throws -> JetChangeDiff {
+        let (data, requestID) = try await sendQuery([
+            "type": "next_change_diff",
+            "cursor": cursor.uuidString.lowercased(),
+        ])
+        return try decodeChangeDiff(data, requestID: requestID)
+    }
+
+    func changeArtifact(sha256: String, offset: UInt64) async throws -> JetChangeArtifactChunk {
+        guard sha256.count == 64,
+              sha256.utf8.allSatisfy({ (48 ... 57).contains($0) || (97 ... 102).contains($0) })
+        else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "artifact.identity_invalid",
+                message: "The patch identity is not valid."
+            ))
+        }
+        let (data, requestID) = try await sendQuery([
+            "type": "change_artifact",
+            "sha256": sha256,
+            "offset": String(offset),
+        ])
+        return try decodeChangeArtifactChunk(data, requestID: requestID)
+    }
+
+    func editableFile(target: JetFileTarget, path: String) async throws -> JetEditableFile {
+        try validateRelativePath(path)
+        let (data, requestID) = try await sendQuery([
+            "type": "editable_file",
+            "target": wireFileTarget(target),
+            "path": path,
+        ])
+        return try decodeEditableFile(data, requestID: requestID)
+    }
+
+    func applyUserEdit(
+        target: JetFileTarget,
+        path: String,
+        expectedRevision: JetFileRevision,
+        content: String,
+        commandID: UUID
+    ) async throws -> JetFileRevision {
+        try validateRelativePath(path)
+        guard content.utf8.count <= 128 * 1_024 else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "user_edit.too_large",
+                message: "A file edit can contain at most 128 KiB of UTF-8 text."
+            ))
+        }
+        // ASVS 2.2.1, 5.1.4, and 8.3.1: the client binds a validated relative
+        // path to the exact registered target and revision it read.
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "apply_user_edit",
+                "target": wireFileTarget(target),
+                "path": path,
+                "expected_revision": wireFileRevision(expectedRevision),
+                "content": content,
+            ],
+            commandID: commandID
+        )
+        return try decodeAppliedUserEdit(
+            data,
+            requestID: requestID,
+            expectedTarget: target,
+            expectedPath: path
+        )
+    }
+
+    func submitReview(
+        conversationID: UUID,
+        path: String,
+        line: UInt32,
+        comment: String,
+        commandID: UUID
+    ) async throws -> JetTurnSummary {
+        try validateRelativePath(path)
+        guard line > 0,
+              !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              comment.utf8.count <= 8_192
+        else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "review.comment_invalid",
+                message: "Enter a line and a comment between 1 and 8,192 UTF-8 bytes."
+            ))
+        }
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "submit_review",
+                "conversation_id": conversationID.uuidString.lowercased(),
+                "comments": [[
+                    "path": path,
+                    "line": NSNumber(value: line),
+                    "comment": comment,
+                ]],
+            ],
+            commandID: commandID
+        )
+        return try decodeAdmittedTurn(data, requestID: requestID)
+    }
+
+    func workspaceTerminals(workspaceID: UUID) async throws -> [JetWorkspaceTerminal] {
+        let (data, requestID) = try await sendQuery([
+            "type": "workspace_terminals",
+            "workspace_id": workspaceID.uuidString.lowercased(),
+        ])
+        return try decodeWorkspaceTerminals(data, requestID: requestID)
+    }
+
+    func openTerminal(
+        workspaceID: UUID,
+        rows: UInt16 = 24,
+        columns: UInt16 = 80,
+        commandID: UUID
+    ) async throws -> JetWorkspaceTerminal {
+        try validateTerminalDimensions(rows: rows, columns: columns)
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "open_terminal",
+                "workspace_id": workspaceID.uuidString.lowercased(),
+                "rows": NSNumber(value: rows),
+                "columns": NSNumber(value: columns),
+            ],
+            commandID: commandID
+        )
+        return try decodeTerminalCommand(data, requestID: requestID)
+    }
+
+    func closeTerminal(
+        terminalID: UUID,
+        commandID: UUID
+    ) async throws -> JetWorkspaceTerminal {
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "close_terminal",
+                "terminal_id": terminalID.uuidString.lowercased(),
+            ],
+            commandID: commandID
+        )
+        return try decodeTerminalCommand(data, requestID: requestID)
+    }
+
+    func attachTerminal(
+        terminalID: UUID,
+        after: UInt64,
+        credit: UInt64 = 65_536
+    ) async throws -> AsyncThrowingStream<JetTerminalEvent, Error> {
+        try await ensureConnected()
+        guard let negotiation, negotiation.minorVersion >= 18 else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "protocol.feature_unavailable",
+                message: "This Plane does not support Workspace terminals."
+            ))
+        }
+        guard credit > 0, credit <= Self.maximumTerminalCredit,
+              terminalReplies.count < Self.maximumTerminalStreams
+        else {
+            throw JetClientFailure.presentation(.overloaded)
+        }
+        let streamID = takeStreamID()
+        guard pending[streamID] == nil, terminalReplies[streamID] == nil else {
+            throw JetClientFailure.presentation(.overloaded)
+        }
+        let requestID = takeRequestID()
+        let (stream, continuation) = AsyncThrowingStream.makeStream(
+            of: JetTerminalEvent.self,
+            bufferingPolicy: .bufferingNewest(64)
+        )
+        terminalReplies[streamID] = TerminalReply(
+            terminalID: terminalID,
+            nextOffset: after,
+            continuation: continuation,
+            attachRequestID: requestID,
+            resizeRequestIDs: [],
+            attached: false,
+            active: true
+        )
+        continuation.onTermination = { _ in
+            Task { await self.detachTerminal(terminalID: terminalID) }
+        }
+        do {
+            let payload = try encode([
+                "kind": "attach_terminal",
+                "id": NSNumber(value: requestID),
+                "terminal_id": terminalID.uuidString.lowercased(),
+                "after": String(after),
+                "credit": String(credit),
+            ], definition: "ClientMessage")
+            try await writeFrame(.control, streamID: streamID, payload: payload)
+            return stream
+        } catch {
+            terminalReplies.removeValue(forKey: streamID)?.continuation?.finish(
+                throwing: normalized(error)
+            )
+            throw normalized(error)
+        }
+    }
+
+    func sendTerminalInput(terminalID: UUID, bytes: Data) async throws {
+        guard !bytes.isEmpty, bytes.count <= 65_536,
+              let streamID = activeTerminalStream(for: terminalID)
+        else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "terminal.input_invalid",
+                message: "Attach the terminal before sending up to 65,536 bytes of input."
+            ))
+        }
+        try await writeFrame(.data, streamID: streamID, payload: bytes)
+    }
+
+    func resizeTerminal(terminalID: UUID, rows: UInt16, columns: UInt16) async throws {
+        try validateTerminalDimensions(rows: rows, columns: columns)
+        guard let streamID = activeTerminalStream(for: terminalID),
+              var reply = terminalReplies[streamID]
+        else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "terminal.not_attached",
+                message: "Attach this terminal before resizing it."
+            ))
+        }
+        let requestID = takeRequestID()
+        reply.resizeRequestIDs.insert(requestID)
+        terminalReplies[streamID] = reply
+        let payload = try encode([
+            "kind": "resize_terminal",
+            "id": NSNumber(value: requestID),
+            "rows": NSNumber(value: rows),
+            "columns": NSNumber(value: columns),
+        ], definition: "ClientMessage")
+        try await writeFrame(.control, streamID: streamID, payload: payload)
+    }
+
+    func detachTerminal(terminalID: UUID) {
+        guard let streamID = terminalReplies.first(where: { _, reply in
+            reply.terminalID == terminalID && reply.active
+        })?.key,
+              var reply = terminalReplies[streamID]
+        else { return }
+        reply.active = false
+        reply.continuation?.finish()
+        reply.continuation = nil
+        terminalReplies[streamID] = reply
+    }
+
     func events(after cursor: UInt64) async throws -> JetEventBatch {
         var attempt = 0
         while true {
@@ -850,6 +1130,10 @@ actor JetClient {
                     multiplexed: negotiation.minorVersion >= 2,
                     limits: negotiation.frameLimits
                 )
+                if terminalReplies[frame.streamID] != nil {
+                    try await routeTerminalFrame(frame)
+                    continue
+                }
                 guard frame.kind == .control else {
                     throw JetClientFailure.presentation(.invalidResponse)
                 }
@@ -888,6 +1172,161 @@ actor JetClient {
         } catch {
             await connectionFailed(normalized(error), generation: expectedGeneration)
         }
+    }
+
+    private func routeTerminalFrame(_ frame: JetFrame) async throws {
+        guard var reply = terminalReplies[frame.streamID] else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        switch frame.kind {
+        case .data:
+            let addition = reply.nextOffset.addingReportingOverflow(
+                UInt64(frame.payload.count)
+            )
+            guard reply.attached, !frame.payload.isEmpty, !addition.overflow else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            let offset = reply.nextOffset
+            reply.nextOffset = addition.partialValue
+            terminalReplies[frame.streamID] = reply
+            if try yieldTerminal(
+                .output(offset: offset, bytes: frame.payload),
+                to: reply
+            ) {
+                try await sendTerminalCredit(
+                    streamID: frame.streamID,
+                    bytes: UInt64(frame.payload.count)
+                )
+            }
+        case .control:
+            if let document = try? schema.validate(frame.payload, definition: "ServerMessage"),
+               let object = document.value as? [String: Any],
+               let kind = object["kind"] as? String
+            {
+                switch kind {
+                case "terminal_attached":
+                    guard !reply.attached,
+                          unsigned64(object["id"]) == reply.attachRequestID
+                    else {
+                        throw JetClientFailure.presentation(.invalidResponse)
+                    }
+                    reply.attached = true
+                    terminalReplies[frame.streamID] = reply
+                    _ = try yieldTerminal(.attached, to: reply)
+                case "terminal_resized":
+                    guard let id = unsigned64(object["id"]),
+                          reply.resizeRequestIDs.remove(id) != nil
+                    else {
+                        throw JetClientFailure.presentation(.invalidResponse)
+                    }
+                    terminalReplies[frame.streamID] = reply
+                    _ = try yieldTerminal(.resized, to: reply)
+                case "error":
+                    guard let errorNode = document.root.member("error") else {
+                        throw JetClientFailure.presentation(.invalidResponse)
+                    }
+                    let failure = try decodeRemoteError(document, node: errorNode)
+                    terminalReplies.removeValue(forKey: frame.streamID)?
+                        .continuation?.finish(throwing: JetClientFailure.presentation(failure))
+                default:
+                    throw JetClientFailure.presentation(.invalidResponse)
+                }
+                return
+            }
+
+            let document = try schema.validate(frame.payload, definition: "StreamControl")
+            guard let object = document.value as? [String: Any],
+                  let type = object["type"] as? String
+            else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            switch type {
+            case "terminal_gap":
+                guard let first = object["first_missing_offset"] as? String,
+                      let first = UInt64(first),
+                      let missing = object["missing_bytes"] as? String,
+                      let missing = UInt64(missing),
+                      first == reply.nextOffset,
+                      missing > 0,
+                      !first.addingReportingOverflow(missing).overflow
+                else {
+                    throw JetClientFailure.presentation(.invalidResponse)
+                }
+                reply.nextOffset = first + missing
+                terminalReplies[frame.streamID] = reply
+                _ = try yieldTerminal(
+                    .gap(firstMissingOffset: first, missingBytes: missing),
+                    to: reply
+                )
+            case "terminal_finished":
+                guard let total = object["total_bytes"] as? String,
+                      let total = UInt64(total),
+                      total == reply.nextOffset
+                else {
+                    throw JetClientFailure.presentation(.invalidResponse)
+                }
+                _ = try yieldTerminal(.finished(totalBytes: total), to: reply)
+                terminalReplies.removeValue(forKey: frame.streamID)?.continuation?.finish()
+            default:
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+        }
+    }
+
+    private func yieldTerminal(
+        _ event: JetTerminalEvent,
+        to reply: TerminalReply
+    ) throws -> Bool {
+        guard reply.active, let continuation = reply.continuation else { return false }
+        switch continuation.yield(event) {
+        case .enqueued:
+            return true
+        case .terminated:
+            return false
+        case .dropped:
+            throw JetClientFailure.presentation(.overloaded)
+        @unknown default:
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+    }
+
+    private func sendTerminalCredit(streamID: UInt32, bytes: UInt64) async throws {
+        guard bytes > 0, bytes <= Self.maximumTerminalCredit else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let payload = try encode([
+            "type": "credit",
+            "bytes": NSNumber(value: bytes),
+        ], definition: "StreamControl")
+        try await writeFrame(.control, streamID: streamID, payload: payload)
+    }
+
+    private func writeFrame(
+        _ kind: JetFrameKind,
+        streamID: UInt32,
+        payload: Data
+    ) async throws {
+        guard let transport, let negotiation else {
+            throw JetClientFailure.presentation(.offline)
+        }
+        let data = try JetFrameCodec.encode(
+            JetFrame(kind: kind, streamID: streamID, payload: payload),
+            multiplexed: negotiation.minorVersion >= 2,
+            limits: negotiation.frameLimits
+        )
+        let expectedGeneration = generation
+        do {
+            try await transport.write(data)
+        } catch {
+            await connectionFailed(.presentation(.offline), generation: expectedGeneration)
+            throw JetClientFailure.presentation(.offline)
+        }
+    }
+
+    private func activeTerminalStream(for terminalID: UUID) -> UInt32? {
+        terminalReplies.first { _, reply in
+            reply.terminalID == terminalID && reply.active && reply.attached
+        }?.key
     }
 
     private func exchange(
@@ -996,6 +1435,9 @@ actor JetClient {
         let continuations = pending.values.compactMap(\.continuation)
         pending.removeAll(keepingCapacity: true)
         continuations.forEach { $0.resume(throwing: failure) }
+        let terminalContinuations = terminalReplies.values.compactMap(\.continuation)
+        terminalReplies.removeAll(keepingCapacity: true)
+        terminalContinuations.forEach { $0.finish(throwing: failure) }
         await oldTransport?.close()
     }
 
@@ -1160,21 +1602,305 @@ actor JetClient {
         else {
             throw JetClientFailure.presentation(.invalidResponse)
         }
+        let workspaceID: UUID?
         let workspaceRoot: String?
         if let workspace = result["workspace"] as? [String: Any] {
-            guard let root = workspace["root"] as? String else {
+            guard let id = uuid(workspace["workspace_id"]),
+                  let root = workspace["root"] as? String
+            else {
                 throw JetClientFailure.presentation(.invalidResponse)
             }
+            workspaceID = id
             workspaceRoot = safeDisplayText(root, maximumBytes: 4_096, fallback: "Workspace")
         } else {
+            workspaceID = nil
             workspaceRoot = nil
         }
         return JetConversationSnapshot(
             cursor: cursor,
             conversation: try decodeConversationSummary(conversation),
+            workspaceID: workspaceID,
             workspaceRoot: workspaceRoot,
             runs: try runs.map(decodeRun)
         )
+    }
+
+    private func decodeChangeDiff(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetChangeDiff {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "change_diff"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let runID = uuid(result["run_id"]),
+              let scopeValue = result["scope"] as? [String: Any],
+              let scope = try? decodeChangeScope(scopeValue),
+              let latestTurn = unsigned32(result["latest_turn"]),
+              let totalFiles = unsigned32(result["total_files"]),
+              let before = result["before"] as? [String: Any],
+              let beforeComplete = before["content_complete"] as? Bool,
+              let after = result["after"] as? [String: Any],
+              let afterComplete = after["content_complete"] as? Bool,
+              let values = result["files"] as? [[String: Any]],
+              let patch = result["patch"] as? String,
+              patch.utf8.count <= 1_048_576,
+              let patchTruncated = result["patch_truncated"] as? Bool,
+              let artifactValue = result["artifact"] as? [String: Any]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let workspaceID = try optionalUUID(result["workspace_id"])
+        let nextPage = try optionalUUID(result["next_page"])
+        return JetChangeDiff(
+            cursor: cursor,
+            runID: runID,
+            workspaceID: workspaceID,
+            scope: scope,
+            latestTurn: latestTurn,
+            totalFiles: totalFiles,
+            files: try values.map(decodeChangedFile),
+            nextPage: nextPage,
+            patch: patch,
+            patchTruncated: patchTruncated,
+            contentComplete: beforeComplete && afterComplete,
+            artifact: try decodeChangeArtifact(artifactValue)
+        )
+    }
+
+    private func decodeChangeScope(_ value: [String: Any]) throws -> JetChangeScope {
+        guard let kind = value["kind"] as? String else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        switch kind {
+        case "current":
+            return .current
+        case "final":
+            return .final
+        case "historical":
+            guard let fromTurn = unsigned32(value["from_turn"]),
+                  let toTurn = unsigned32(value["to_turn"]),
+                  fromTurn <= toTurn,
+                  toTurn > 0
+            else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return .historical(fromTurn: fromTurn, toTurn: toTurn)
+        case "turn":
+            guard let turn = unsigned32(value["turn"]), turn > 0 else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return .turn(turn)
+        default:
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+    }
+
+    private func decodeChangedFile(_ value: [String: Any]) throws -> JetChangedFile {
+        guard let path = value["path"] as? String,
+              let origin = value["origin"] as? [String: Any],
+              let originKind = origin["kind"] as? String
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        try validateRelativePath(path)
+        let originLabel: String = switch originKind {
+        case "user_edit": "user edit"
+        case "workspace_terminal": "terminal"
+        case "harness": "agent"
+        case "mixed": "mixed"
+        case "external_or_unknown": "external or unknown"
+        default: throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetChangedFile(
+            path: path,
+            beforeObject: try optionalString(value["before_object"]),
+            afterObject: try optionalString(value["after_object"]),
+            beforeSize: try optionalUnsigned64(value["before_size"]),
+            afterSize: try optionalUnsigned64(value["after_size"]),
+            origin: originLabel
+        )
+    }
+
+    private func decodeChangeArtifact(_ value: [String: Any]) throws -> JetChangeArtifact {
+        guard let sha256 = value["sha256"] as? String,
+              sha256.count == 64,
+              sha256.utf8.allSatisfy({ (48 ... 57).contains($0) || (97 ... 102).contains($0) }),
+              let size = unsigned64(value["size"]),
+              let availability = JetArtifactAvailability(
+                rawValue: value["availability"] as? String ?? "stored"
+              )
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetChangeArtifact(sha256: sha256, size: size, availability: availability)
+    }
+
+    private func decodeChangeArtifactChunk(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetChangeArtifactChunk {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "change_artifact"
+        )
+        guard let artifact = result["artifact"] as? [String: Any],
+              let offsetText = result["offset"] as? String,
+              let offset = UInt64(offsetText),
+              let bytes = result["bytes"] as? [NSNumber],
+              bytes.count <= 65_536
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        var data = Data(capacity: bytes.count)
+        for number in bytes {
+            let value = number.intValue
+            guard (0 ... 255).contains(value) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            data.append(UInt8(value))
+        }
+        return JetChangeArtifactChunk(
+            artifact: try decodeChangeArtifact(artifact),
+            offset: offset,
+            bytes: data
+        )
+    }
+
+    private func decodeEditableFile(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetEditableFile {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "editable_file"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let targetValue = result["target"] as? [String: Any],
+              let path = result["path"] as? String,
+              let revisionValue = result["revision"] as? [String: Any]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        try validateRelativePath(path)
+        let content = try optionalString(result["content"])
+        guard content?.utf8.count ?? 0 <= 128 * 1_024 else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetEditableFile(
+            cursor: cursor,
+            target: try decodeFileTarget(targetValue),
+            path: path,
+            content: content,
+            revision: try decodeFileRevision(revisionValue)
+        )
+    }
+
+    private func decodeAppliedUserEdit(
+        _ data: Data,
+        requestID: UInt64,
+        expectedTarget: JetFileTarget,
+        expectedPath: String
+    ) throws -> JetFileRevision {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "user_edit_applied"
+        )
+        guard let target = result["target"] as? [String: Any],
+              try decodeFileTarget(target) == expectedTarget,
+              result["path"] as? String == expectedPath,
+              let revision = result["revision"] as? [String: Any]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return try decodeFileRevision(revision)
+    }
+
+    private func decodeWorkspaceTerminals(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> [JetWorkspaceTerminal] {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "workspace_terminals"
+        )
+        guard result["cursor"] is String,
+              let terminals = result["terminals"] as? [[String: Any]],
+              terminals.count <= 64
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return try terminals.map(decodeWorkspaceTerminal)
+    }
+
+    private func decodeTerminalCommand(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetWorkspaceTerminal {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "terminal"
+        )
+        guard let terminal = result["terminal"] as? [String: Any] else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return try decodeWorkspaceTerminal(terminal)
+    }
+
+    private func decodeWorkspaceTerminal(
+        _ value: [String: Any]
+    ) throws -> JetWorkspaceTerminal {
+        guard let terminalID = uuid(value["terminal_id"]),
+              let workspaceID = uuid(value["workspace_id"]),
+              let stateText = value["state"] as? String,
+              let state = JetTerminalState(rawValue: stateText)
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetWorkspaceTerminal(id: terminalID, workspaceID: workspaceID, state: state)
+    }
+
+    private func decodeFileRevision(_ value: [String: Any]) throws -> JetFileRevision {
+        guard let object = value["object"] as? String,
+              let mode = value["mode"] as? String,
+              !object.isEmpty,
+              !mode.isEmpty
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetFileRevision(object: object, mode: mode)
+    }
+
+    private func decodeFileTarget(_ value: [String: Any]) throws -> JetFileTarget {
+        switch value["kind"] as? String {
+        case "project":
+            guard let id = uuid(value["project_id"]) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return .project(id)
+        case "workspace":
+            guard let id = uuid(value["workspace_id"]) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return .workspace(id)
+        default:
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
     }
 
     private func decodeSearch(
@@ -1426,8 +2152,20 @@ actor JetClient {
         } else {
             projectID = nil
         }
+        let revision: UInt64?
+        if let revisionText = value["revision"] as? String {
+            guard let parsed = UInt64(revisionText) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            revision = parsed
+        } else if value["revision"] == nil || value["revision"] is NSNull {
+            revision = nil
+        } else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
         return JetConversationSummary(
             id: id,
+            revision: revision,
             title: title,
             createdAtUnixMilliseconds: createdAt,
             projectID: projectID
@@ -1895,16 +2633,107 @@ actor JetClient {
         else {
             throw JetClientFailure.presentation(.invalidResponse)
         }
-        let actions = try node.member("recovery_actions")?.elements?.map {
-            try document.rawJSON(for: $0)
-        } ?? []
+        let actions = try (error["recovery_actions"] as? [[String: Any]] ?? []).map(
+            decodeRecoveryAction
+        )
         return JetPresentationError(
             category: category,
             code: code,
             message: message,
             retryable: retryable,
-            recoveryActions: actions
+            recoveryActions: actions,
+            restart: try decodeRestart(error["restart"]),
+            revisionConflict: try decodeRevisionConflict(error["revision_conflict"])
         )
+    }
+
+    private func decodeRecoveryAction(_ value: [String: Any]) throws -> JetRecoveryAction {
+        guard let type = value["type"] as? String else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        switch type {
+        case "refresh_file":
+            return .refreshFile
+        case "refresh_conversation":
+            guard let id = uuid(value["conversation_id"]) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return .refreshConversation(id)
+        case "refresh_run":
+            guard let id = uuid(value["run_id"]) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return .refreshRun(id)
+        case "resume_events":
+            guard let after = unsigned64(value["after"]) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return .resumeEvents(after: after)
+        default:
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+    }
+
+    private func decodeRestart(_ value: Any?) throws -> JetRestartMetadata? {
+        guard let value else { return nil }
+        guard let restart = value as? [String: Any],
+              let reason = restart["reason"] as? String
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        switch reason {
+        case "cursor_expired":
+            guard let minimum = unsigned64(restart["minimum_available_cursor"]),
+                  let revision = unsigned64(restart["current_snapshot_revision"])
+            else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return .cursorExpired(minimumAvailable: minimum, snapshotRevision: revision)
+        case "cursor_ahead":
+            guard let revision = unsigned64(restart["current_snapshot_revision"]) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return .cursorAhead(snapshotRevision: revision)
+        case "pagination_stale":
+            guard let revision = unsigned64(restart["current_snapshot_revision"]) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return .paginationStale(snapshotRevision: revision)
+        default:
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+    }
+
+    private func decodeRevisionConflict(_ value: Any?) throws -> JetRevisionConflict? {
+        guard let value else { return nil }
+        guard let conflict = value as? [String: Any],
+              let currentRevision = unsigned64(conflict["current_revision"]),
+              let safeState = conflict["safe_state"] as? [String: Any],
+              let type = safeState["type"] as? String
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let decoded: JetConflictSafeState
+        switch type {
+        case "conversation":
+            guard let conversation = safeState["conversation"] as? [String: Any],
+                  let id = uuid(conversation["conversation_id"])
+            else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            decoded = .conversation(
+                id: id,
+                revision: try optionalUnsigned64(conversation["revision"])
+            )
+        case "run":
+            guard let run = safeState["run"] as? [String: Any] else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            decoded = .run(try decodeRun(run))
+        default:
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetRevisionConflict(currentRevision: currentRevision, safeState: decoded)
     }
 
     private func encodeClientMessage(_ object: [String: Any]) throws -> Data {
@@ -1991,6 +2820,25 @@ actor JetClient {
         }
     }
 
+    private func wireFileTarget(_ target: JetFileTarget) -> [String: Any] {
+        switch target {
+        case let .project(projectID):
+            [
+                "kind": "project",
+                "project_id": projectID.uuidString.lowercased(),
+            ]
+        case let .workspace(workspaceID):
+            [
+                "kind": "workspace",
+                "workspace_id": workspaceID.uuidString.lowercased(),
+            ]
+        }
+    }
+
+    private func wireFileRevision(_ revision: JetFileRevision) -> [String: Any] {
+        ["object": revision.object, "mode": revision.mode]
+    }
+
     private func wireObservation(
         _ observation: JetCapabilityObservation
     ) -> [String: Any] {
@@ -2023,6 +2871,30 @@ actor JetClient {
                     message: "Enter a task between 1 and 65,536 UTF-8 bytes."
                 )
             )
+        }
+    }
+
+    private func validateRelativePath(_ path: String) throws {
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard !path.isEmpty,
+              path.utf8.count <= 4_096,
+              !path.hasPrefix("/"),
+              !components.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }),
+              !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "file.path_invalid",
+                message: "Choose a file from the selected registered root."
+            ))
+        }
+    }
+
+    private func validateTerminalDimensions(rows: UInt16, columns: UInt16) throws {
+        guard (1 ... 1_000).contains(rows), (1 ... 1_000).contains(columns) else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "terminal.dimensions_invalid",
+                message: "Terminal rows and columns must be between 1 and 1,000."
+            ))
         }
     }
 
@@ -2067,6 +2939,22 @@ actor JetClient {
             throw JetClientFailure.presentation(.invalidResponse)
         }
         return parsed
+    }
+
+    private func optionalString(_ value: Any?) throws -> String? {
+        guard let value, !(value is NSNull) else { return nil }
+        guard let value = value as? String else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return value
+    }
+
+    private func optionalUnsigned64(_ value: Any?) throws -> UInt64? {
+        guard let value, !(value is NSNull) else { return nil }
+        guard let value = unsigned64(value) else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return value
     }
 
     private func uuid(_ value: Any?) -> UUID? {

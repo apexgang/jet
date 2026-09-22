@@ -74,7 +74,7 @@ typed client constructs these values.
 | Patch Artifact chunks | `change_artifact` with a byte offset | None | Advance through bounded chunks and verify declared size and SHA-256 before treating an Artifact as complete | Supported |
 | Files | `project_entry`, `editable_file` | `apply_user_edit` | Paths are relative to a registered Project or Workspace. Edits send the exact `FileRevision` | Supported |
 | Structured review comments | `editable_file` and Change data | `submit_review` | The complete comment batch becomes one user Turn | Supported |
-| Workspace terminals | `workspace_terminals` | `open_terminal`, attach and resize client messages, `close_terminal` | Terminal streams use byte credit and explicit gap or finish controls. Disconnect does not close a terminal | Supported after Wave 0.2 streaming |
+| Workspace terminals | `workspace_terminals` | `open_terminal`, attach and resize client messages, `close_terminal` | Terminal streams use byte credit and explicit gap or finish controls. Disconnect does not close a terminal | Implemented in both Wave 2.2 clients |
 | Commit, push, or draft pull request | `git_deliveries`, Change checkpoint data | `deliver_git`, `acknowledge_git_delivery` | Gate on Git capability. Preserve `outcome_unknown`; never retry uncertain external work automatically | Supported |
 | Completion notification | Run Events | None | Notification preference and delivery are client-local. A notification never changes Run state | Client-local |
 

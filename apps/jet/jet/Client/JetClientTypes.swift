@@ -121,6 +121,7 @@ struct JetInstalledCraft: Sendable, Equatable, Identifiable {
 
 struct JetConversationSummary: Sendable, Equatable, Identifiable {
     let id: UUID
+    let revision: UInt64?
     let title: String
     let createdAtUnixMilliseconds: Int64
     let projectID: UUID?
@@ -163,8 +164,120 @@ struct JetRunSummary: Sendable, Equatable, Identifiable {
 struct JetConversationSnapshot: Sendable, Equatable {
     let cursor: UInt64
     let conversation: JetConversationSummary
+    let workspaceID: UUID?
     let workspaceRoot: String?
     let runs: [JetRunSummary]
+}
+
+enum JetFileTarget: Sendable, Equatable, Hashable {
+    case project(UUID)
+    case workspace(UUID)
+}
+
+struct JetFileRevision: Sendable, Equatable {
+    let object: String
+    let mode: String
+
+    var label: String { "\(mode) · \(object)" }
+}
+
+enum JetChangeScope: Sendable, Equatable {
+    case current
+    case final
+    case historical(fromTurn: UInt32, toTurn: UInt32)
+    case turn(UInt32)
+
+    var label: String {
+        switch self {
+        case .current: "Current"
+        case .final: "Final"
+        case let .historical(fromTurn, toTurn): "Turns \(fromTurn)–\(toTurn)"
+        case let .turn(turn): "Turn \(turn)"
+        }
+    }
+}
+
+enum JetArtifactAvailability: String, Sendable, Equatable {
+    case stored
+    case diskPressure = "disk_pressure"
+    case runBudgetExceeded = "run_budget_exceeded"
+    case artifactSizeExceeded = "artifact_size_exceeded"
+}
+
+struct JetChangeArtifact: Sendable, Equatable {
+    let sha256: String
+    let size: UInt64
+    let availability: JetArtifactAvailability
+}
+
+struct JetChangedFile: Sendable, Equatable, Identifiable {
+    let path: String
+    let beforeObject: String?
+    let afterObject: String?
+    let beforeSize: UInt64?
+    let afterSize: UInt64?
+    let origin: String
+
+    var id: String { path }
+
+    var status: String {
+        if beforeObject?.allSatisfy({ $0 == "0" }) == true { return "added" }
+        if afterObject?.allSatisfy({ $0 == "0" }) == true { return "deleted" }
+        return "modified"
+    }
+
+    var contentAvailable: Bool { beforeObject != nil && afterObject != nil }
+}
+
+struct JetChangeDiff: Sendable, Equatable {
+    let cursor: UInt64
+    let runID: UUID
+    let workspaceID: UUID?
+    let scope: JetChangeScope
+    let latestTurn: UInt32
+    let totalFiles: UInt32
+    let files: [JetChangedFile]
+    let nextPage: UUID?
+    let patch: String
+    let patchTruncated: Bool
+    let contentComplete: Bool
+    let artifact: JetChangeArtifact
+}
+
+struct JetChangeArtifactChunk: Sendable, Equatable {
+    let artifact: JetChangeArtifact
+    let offset: UInt64
+    let bytes: Data
+}
+
+struct JetEditableFile: Sendable, Equatable {
+    let cursor: UInt64
+    let target: JetFileTarget
+    let path: String
+    let content: String?
+    let revision: JetFileRevision
+}
+
+enum JetTerminalState: String, Sendable, Equatable {
+    case opening
+    case open
+    case closing
+    case closed
+    case unavailable
+}
+
+struct JetWorkspaceTerminal: Sendable, Equatable, Identifiable {
+    let id: UUID
+    let workspaceID: UUID
+    let state: JetTerminalState
+}
+
+enum JetTerminalEvent: Sendable, Equatable {
+    case attached
+    case output(offset: UInt64, bytes: Data)
+    case gap(firstMissingOffset: UInt64, missingBytes: UInt64)
+    case resized
+    case finished(totalBytes: UInt64)
 }
 
 enum JetSearchField: String, Sendable, Equatable {
@@ -491,12 +604,85 @@ enum JetPresentationErrorCategory: String, Sendable {
     case cancelled
 }
 
+enum JetRecoveryAction: Sendable, Equatable, Identifiable {
+    case refreshFile
+    case refreshConversation(UUID)
+    case refreshRun(UUID)
+    case resumeEvents(after: UInt64)
+
+    var id: String {
+        switch self {
+        case .refreshFile: "refresh-file"
+        case let .refreshConversation(id): "refresh-conversation-\(id)"
+        case let .refreshRun(id): "refresh-run-\(id)"
+        case let .resumeEvents(after): "resume-events-\(after)"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .refreshFile: "Reload File"
+        case .refreshConversation: "Refresh Task"
+        case .refreshRun: "Refresh Run"
+        case .resumeEvents: "Reconnect Activity"
+        }
+    }
+}
+
+enum JetRestartMetadata: Sendable, Equatable {
+    case cursorExpired(minimumAvailable: UInt64, snapshotRevision: UInt64)
+    case cursorAhead(snapshotRevision: UInt64)
+    case paginationStale(snapshotRevision: UInt64)
+
+    var requiresEventSnapshot: Bool {
+        switch self {
+        case .cursorExpired, .cursorAhead: true
+        case .paginationStale: false
+        }
+    }
+
+    var requiresPaginationSnapshot: Bool {
+        if case .paginationStale = self { return true }
+        return false
+    }
+}
+
+enum JetConflictSafeState: Sendable, Equatable {
+    case conversation(id: UUID, revision: UInt64?)
+    case run(JetRunSummary)
+}
+
+struct JetRevisionConflict: Sendable, Equatable {
+    let currentRevision: UInt64
+    let safeState: JetConflictSafeState
+}
+
 struct JetPresentationError: Error, Sendable, Equatable {
     let category: JetPresentationErrorCategory
     let code: String
     let message: String
     let retryable: Bool
-    let recoveryActions: [JetRawJSON]
+    let recoveryActions: [JetRecoveryAction]
+    let restart: JetRestartMetadata?
+    let revisionConflict: JetRevisionConflict?
+
+    init(
+        category: JetPresentationErrorCategory,
+        code: String,
+        message: String,
+        retryable: Bool,
+        recoveryActions: [JetRecoveryAction] = [],
+        restart: JetRestartMetadata? = nil,
+        revisionConflict: JetRevisionConflict? = nil
+    ) {
+        self.category = category
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.recoveryActions = recoveryActions
+        self.restart = restart
+        self.revisionConflict = revisionConflict
+    }
 
     static let offline = JetPresentationError(
         category: .offline,

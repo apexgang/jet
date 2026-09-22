@@ -108,6 +108,61 @@ struct JetTransportIntegrationTests {
         #expect(failures.isEmpty, Comment(rawValue: failures.joined(separator: "\n")))
     }
 
+    @Test("Work queries and terminal frames share one multiplexed connection")
+    func workQueriesAndTerminalFrames() async throws {
+        let server = HermeticJetd()
+        let client = JetClient(
+            configuration: JetClientConfiguration(
+                clientID: UUID(),
+                reconnectDelays: [.zero],
+                eventPollDelay: .seconds(60)
+            ),
+            schema: try JetWireSchema.bundled(),
+            makeTransport: { HermeticJetdTransport(server: server) }
+        )
+        try await client.connect()
+
+        let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000010")!
+        let diff = try await client.changeDiff(runID: runID, scope: .current)
+        #expect(diff.runID == runID)
+        #expect(diff.files.map(\.path) == ["Sources/App.swift"])
+        #expect(diff.files.first?.status == "modified")
+
+        let turnDiff = try await client.changeDiff(runID: runID, scope: .turn(1))
+        #expect(turnDiff.scope == .turn(1))
+        let historicalDiff = try await client.changeDiff(
+            runID: runID,
+            scope: .historical(fromTurn: 0, toTurn: 1)
+        )
+        #expect(historicalDiff.scope == .historical(fromTurn: 0, toTurn: 1))
+
+        let terminalID = UUID(uuidString: "00000000-0000-0000-0000-000000000020")!
+        let stream = try await client.attachTerminal(terminalID: terminalID, after: 0)
+        var events: [JetTerminalEvent] = []
+        for try await event in stream {
+            events.append(event)
+        }
+        #expect(events == [
+            .attached,
+            .output(offset: 0, bytes: Data("hello".utf8)),
+            .finished(totalBytes: 5),
+        ])
+        await client.disconnect()
+    }
+
+    @Test("Terminal transcript decoding survives split UTF-8 and escape sequences")
+    func terminalTranscriptDecodingIsIncrementalAndSafe() {
+        var decoder = TerminalTranscriptDecoder()
+        let prefix = Data([0x68, 0x69, 0x20, 0xF0, 0x9F])
+        let suffix = Data([0x91, 0x8B, 0x1B, 0x5B, 0x33])
+        let final = Data([0x31, 0x6D, 0x21, 0x1B, 0x5D, 0x30, 0x3B, 0x78, 0x07])
+
+        #expect(decoder.decode(prefix).isEmpty == false)
+        #expect(decoder.decode(suffix) == "👋")
+        #expect(decoder.decode(final) == "!")
+        #expect(decoder.decode(Data(), final: true).isEmpty)
+    }
+
     @Test("The production validator matches every shared fixture decision")
     func productionValidatorMatchesSharedCorpus() throws {
         let schema = try JetWireSchema.bundled()
@@ -317,6 +372,7 @@ private actor HermeticJetd {
     func handle(_ frameData: Data, connection: Int) throws -> Action {
         let frame = try decodeFrame(frameData)
         let request = try JSONSerialization.jsonObject(with: frame.payload) as! [String: Any]
+        if request["type"] as? String == "credit" { return .hold }
         let requestID = (request["id"] as! NSNumber).uint64Value
         switch request["kind"] as! String {
         case "query":
@@ -389,9 +445,80 @@ private actor HermeticJetd {
                     cursor: UInt64(after)!,
                     sequences: []
                 ))
+            case "change_diff":
+                let runID = query["run_id"] as! String
+                let scope = query["scope"] as! [String: Any]
+                let emptySHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                let snapshot: [String: Any] = [
+                    "content_complete": true,
+                    "commit": String(repeating: "a", count: 40),
+                    "tree": String(repeating: "b", count: 40),
+                    "uncommitted": [
+                        "sha256": emptySHA256,
+                        "size": 0,
+                    ],
+                ]
+                return .reply(try replyFrame(
+                    streamID: frame.streamID,
+                    object: [
+                        "kind": "query_result",
+                        "id": NSNumber(value: requestID),
+                        "result": [
+                            "type": "change_diff",
+                            "total_files": 1,
+                            "cursor": "4",
+                            "plane_id": "00000000-0000-0000-0000-000000000001",
+                            "run_id": runID,
+                            "workspace_id": "00000000-0000-0000-0000-000000000030",
+                            "scope": scope,
+                            "latest_turn": 1,
+                            "before": snapshot,
+                            "after": snapshot,
+                            "files": [[
+                                "path": "Sources/App.swift",
+                                "before_mode": "100644",
+                                "after_mode": "100644",
+                                "before_object": String(repeating: "c", count: 40),
+                                "after_object": String(repeating: "d", count: 40),
+                                "origin": ["kind": "external_or_unknown"],
+                            ]],
+                            "next_page": NSNull(),
+                            "artifact": [
+                                "sha256": emptySHA256,
+                                "size": 0,
+                                "availability": "stored",
+                            ],
+                            "patch": "",
+                            "patch_truncated": false,
+                            "outcome": NSNull(),
+                        ],
+                    ]
+                ))
             default:
                 throw JetClientFailure.presentation(.invalidResponse)
             }
+        case "attach_terminal":
+            var frames = try replyFrame(
+                streamID: frame.streamID,
+                object: [
+                    "kind": "terminal_attached",
+                    "id": NSNumber(value: requestID),
+                ]
+            )
+            frames.append(try JetFrameCodec.encode(
+                JetFrame(
+                    kind: .data,
+                    streamID: frame.streamID,
+                    payload: Data("hello".utf8)
+                ),
+                multiplexed: true,
+                limits: .protocolMaximum
+            ))
+            frames.append(try replyFrame(
+                streamID: frame.streamID,
+                object: ["type": "terminal_finished", "total_bytes": "5"]
+            ))
+            return .reply(frames)
         case "command":
             let command = request["command"] as! [String: Any]
             commandBodies.append(try JSONSerialization.data(

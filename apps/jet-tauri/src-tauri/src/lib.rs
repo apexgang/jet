@@ -35,6 +35,18 @@ pub fn run() {
             jet::interrupt_turn,
             jet::stop_run,
             jet::authorize_approval_retry,
+            jet::load_work_panel,
+            jet::load_more_changes,
+            jet::load_patch_chunk,
+            jet::load_work_file,
+            jet::save_work_file,
+            jet::submit_file_review,
+            jet::open_workspace_terminal,
+            jet::close_workspace_terminal,
+            jet::attach_workspace_terminal,
+            jet::send_terminal_input,
+            jet::resize_workspace_terminal,
+            jet::detach_workspace_terminal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Jet desktop application");

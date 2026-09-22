@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 
@@ -29,6 +30,108 @@ enum WorkPanelTab: String, CaseIterable, Hashable, Sendable {
     }
 }
 
+enum WorkCheckpointKind: String, CaseIterable, Hashable, Sendable {
+    case current
+    case final
+    case turn
+    case historical
+
+    var title: String {
+        switch self {
+        case .current: "Current"
+        case .final: "Final"
+        case .turn: "Turn"
+        case .historical: "Historical Range"
+        }
+    }
+}
+
+struct TerminalTranscriptDecoder {
+    private enum EscapeState {
+        case text
+        case escape
+        case controlSequence
+        case operatingSystemCommand
+        case operatingSystemCommandEscape
+    }
+
+    private var pending = Data()
+    private var escapeState = EscapeState.text
+
+    mutating func decode(_ bytes: Data, final: Bool = false) -> String {
+        pending.append(bytes)
+        let split = final ? pending.count : completeUTF8PrefixLength(in: pending)
+        let complete = pending.prefix(split)
+        pending.removeFirst(split)
+        if final, !pending.isEmpty {
+            pending.removeAll(keepingCapacity: true)
+        }
+        return sanitize(String(decoding: complete, as: UTF8.self))
+    }
+
+    private func completeUTF8PrefixLength(in data: Data) -> Int {
+        guard !data.isEmpty else { return 0 }
+        let bytes = [UInt8](data)
+        let lowerBound = max(0, bytes.count - 4)
+        for index in stride(from: bytes.count - 1, through: lowerBound, by: -1) {
+            let byte = bytes[index]
+            if byte & 0b1100_0000 == 0b1000_0000 { continue }
+            let expected: Int
+            switch byte {
+            case 0xC2 ... 0xDF: expected = 2
+            case 0xE0 ... 0xEF: expected = 3
+            case 0xF0 ... 0xF4: expected = 4
+            default: return bytes.count
+            }
+            return bytes.count - index < expected ? index : bytes.count
+        }
+        return bytes.count
+    }
+
+    private mutating func sanitize(_ value: String) -> String {
+        var result = ""
+        for scalar in value.unicodeScalars {
+            switch escapeState {
+            case .text:
+                if scalar.value == 0x1B {
+                    escapeState = .escape
+                } else if scalar.value == 0x0A || scalar.value == 0x0D || scalar.value == 0x09
+                    || (scalar.value >= 0x20 && scalar.value != 0x7F)
+                {
+                    result.unicodeScalars.append(scalar)
+                }
+            case .escape:
+                if scalar == "[" { escapeState = .controlSequence }
+                else if scalar == "]" { escapeState = .operatingSystemCommand }
+                else { escapeState = .text }
+            case .controlSequence:
+                if (0x40 ... 0x7E).contains(scalar.value) { escapeState = .text }
+            case .operatingSystemCommand:
+                if scalar.value == 0x07 { escapeState = .text }
+                else if scalar.value == 0x1B { escapeState = .operatingSystemCommandEscape }
+            case .operatingSystemCommandEscape:
+                if scalar == "\\" { escapeState = .text }
+                else if scalar.value != 0x1B { escapeState = .operatingSystemCommand }
+            }
+        }
+        return result
+    }
+}
+
+struct WorkRefreshContinuity {
+    static func shouldLoadNextPage(
+        loadedCount: Int,
+        targetCount: Int,
+        selectedPath: String?,
+        loadedPaths: Set<String>,
+        hasNextPage: Bool
+    ) -> Bool {
+        guard hasNextPage else { return false }
+        return loadedCount < targetCount
+            || selectedPath.map { !loadedPaths.contains($0) } == true
+    }
+}
+
 @MainActor
 @Observable
 final class DesktopSession {
@@ -48,6 +151,19 @@ final class DesktopSession {
     private struct RunControlKey: Hashable {
         let runID: UUID
         let control: JetRunControl
+    }
+
+    private struct PendingWorkEdit {
+        let path: String
+        let content: String
+        let commandID: UUID
+    }
+
+    private struct PendingReview {
+        let path: String
+        let line: UInt32
+        let comment: String
+        let commandID: UUID
     }
 
     enum ContentState {
@@ -100,6 +216,32 @@ final class DesktopSession {
     var searchText = ""
     var searchResult: JetSearchResult?
     var searchIsLoading = false
+    var workDiff: JetChangeDiff?
+    var workFiles: [JetChangedFile] = []
+    var workNextPage: UUID?
+    var workPatch = ""
+    var workTarget: JetFileTarget?
+    var workTerminals: [JetWorkspaceTerminal] = []
+    var workOperation: String?
+    var workError: JetPresentationError?
+    var workNotice: String?
+    var workNoticeError: JetPresentationError?
+    var checkpointKind: WorkCheckpointKind = .current
+    var checkpointTurn: UInt32 = 1
+    var checkpointFromTurn: UInt32 = 0
+    var checkpointToTurn: UInt32 = 1
+    var selectedWorkFilePath: String?
+    var editableFile: JetEditableFile?
+    var fileDraft = ""
+    var reviewLine: UInt32 = 1
+    var reviewComment = ""
+    var selectedTerminalID: UUID?
+    var attachedTerminalID: UUID?
+    var terminalInput = ""
+    var terminalOutput: [UUID: String] = [:]
+    var terminalRows: UInt16 = 24
+    var terminalColumns: UInt16 = 80
+    var workScrollAnchors: [WorkPanelTab: String] = [:]
 
     private var scenarios: [DesktopFixtureState: DesktopFixtureScenario] = [:]
     private var didLoadFixtures = false
@@ -120,6 +262,18 @@ final class DesktopSession {
     private var eventObservationTask: Task<Void, Never>?
     private var conversationRequest = 0
     private var searchRequest = 0
+    private var workRequest = 0
+    private var workFileRequest = 0
+    private var workArtifactBytes = Data()
+    private var pendingWorkEdit: PendingWorkEdit?
+    private var pendingReview: PendingReview?
+    private var terminalOpenCommandID = UUID()
+    private var terminalCloseCommandIDs: [UUID: UUID] = [:]
+    private var terminalOffsets: [UUID: UInt64] = [:]
+    private var terminalDecoders: [UUID: TerminalTranscriptDecoder] = [:]
+    private var lastTerminalSize: (terminalID: UUID, rows: UInt16, columns: UInt16)?
+    private var terminalStreamTerminalID: UUID?
+    private var terminalObservationTask: Task<Void, Never>?
 
     init(makeJetClient: JetClientFactory? = nil) {
         self.makeJetClient = makeJetClient
@@ -195,6 +349,41 @@ final class DesktopSession {
     var selectedRun: JetRunSummary? {
         runExecution?.run ?? conversationSnapshot?.runs.last
     }
+
+    var selectedWorkFile: JetChangedFile? {
+        guard let selectedWorkFilePath else { return nil }
+        return workFiles.first { $0.path == selectedWorkFilePath }
+    }
+
+    var selectedChangeScope: JetChangeScope {
+        switch checkpointKind {
+        case .current: .current
+        case .final: .final
+        case .turn: .turn(max(1, checkpointTurn))
+        case .historical:
+            .historical(
+                fromTurn: checkpointFromTurn,
+                toTurn: max(1, checkpointToTurn)
+            )
+        }
+    }
+
+    var canApplyWorkCheckpoint: Bool {
+        guard workOperation == nil else { return false }
+        let latestTurn = workDiff?.latestTurn ?? 0
+        switch checkpointKind {
+        case .current:
+            return true
+        case .final:
+            return selectedRun?.lifecycle.isLive != true
+        case .turn:
+            return checkpointTurn > 0 && checkpointTurn <= latestTurn
+        case .historical:
+            return checkpointFromTurn <= checkpointToTurn && checkpointToTurn <= latestTurn
+        }
+    }
+
+    var workPatchBytesLoaded: UInt64 { UInt64(workArtifactBytes.count) }
 
     var hasLiveRun: Bool {
         selectedRun?.lifecycle.isLive == true
@@ -319,8 +508,10 @@ final class DesktopSession {
                 conversations.contains(where: { $0.id == wanted }) ? wanted : nil
             } ?? conversations.first?.id
             if selectedConversationID != previousConversationID {
+                detachCurrentTerminal()
                 timeline = []
                 conversationSnapshot = nil
+                resetWorkPanel()
             }
             if let restoredSnapshot,
                restoredSnapshot.conversation.id == selectedConversationID
@@ -333,6 +524,7 @@ final class DesktopSession {
                 conversationSnapshot = nil
                 turnQueue = nil
                 runExecution = nil
+                resetWorkPanel()
             }
             if eventObservationTask == nil {
                 observeEvents(after: page.cursor)
@@ -356,7 +548,7 @@ final class DesktopSession {
             conversationFreshness = .live
         } catch {
             let failure = presentationError(error)
-            if failure.code == "pagination.stale" {
+            if failure.restart?.requiresPaginationSnapshot == true {
                 await loadConversations()
             } else {
                 actionNotice = failure.message
@@ -388,10 +580,12 @@ final class DesktopSession {
 
     func selectConversation(_ conversationID: UUID) {
         if selectedConversationID != conversationID {
+            detachCurrentTerminal()
             timeline = []
             conversationSnapshot = nil
             turnQueue = nil
             runExecution = nil
+            resetWorkPanel()
         }
         selectedConversationID = conversationID
         sidebarSelection = .conversation
@@ -451,6 +645,505 @@ final class DesktopSession {
         } catch {
             guard selectedConversationID == conversationID else { return }
             actionNotice = presentationError(error).message
+        }
+        if selectedConversationID == conversationID, selectedRun != nil {
+            await loadWorkPanel()
+        } else if selectedConversationID == conversationID {
+            resetWorkPanel()
+        }
+    }
+
+    func loadWorkPanel(preserveContinuity: Bool = true) async {
+        guard usesLivePlane,
+              let conversationID = selectedConversationID,
+              let run = selectedRun
+        else {
+            resetWorkPanel()
+            return
+        }
+        workRequest += 1
+        let request = workRequest
+        workOperation = "refresh"
+        workError = nil
+        workNotice = nil
+        workNoticeError = nil
+        let previousRunID = workDiff?.runID
+        if previousRunID != run.id {
+            checkpointKind = run.lifecycle.isLive ? .current : .final
+        }
+        let requestedScope = selectedChangeScope
+        let previousTarget = workTarget
+        let previousSelectedPath = preserveContinuity
+            && previousRunID == run.id
+            && workDiff?.scope == requestedScope
+            ? selectedWorkFilePath
+            : nil
+        let targetFileCount = preserveContinuity
+            && previousRunID == run.id
+            && workDiff?.scope == requestedScope
+            ? workFiles.count
+            : 0
+        do {
+            let client = try await activeClient()
+            let diff = try await client.changeDiff(runID: run.id, scope: requestedScope)
+            guard request == workRequest,
+                  selectedConversationID == conversationID,
+                  selectedRun?.id == run.id,
+                  diff.runID == run.id
+            else { return }
+
+            let target: JetFileTarget?
+            if let workspaceID = diff.workspaceID {
+                target = .workspace(workspaceID)
+            } else if let projectID = selectedConversation?.projectID {
+                target = .project(projectID)
+            } else {
+                target = nil
+            }
+            let preview = Data(diff.patch.utf8)
+            guard UInt64(preview.count) <= diff.artifact.size else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+
+            var refreshedFiles = diff.files
+            var refreshedNextPage = diff.nextPage
+            while WorkRefreshContinuity.shouldLoadNextPage(
+                loadedCount: refreshedFiles.count,
+                targetCount: targetFileCount,
+                selectedPath: previousSelectedPath,
+                loadedPaths: Set(refreshedFiles.map(\.path)),
+                hasNextPage: refreshedNextPage != nil
+            ), let pageCursor = refreshedNextPage {
+                let page = try await client.nextChangeDiff(pageCursor)
+                guard page.runID == run.id, page.scope == requestedScope else {
+                    throw JetClientFailure.presentation(.invalidResponse)
+                }
+                let known = Set(refreshedFiles.map(\.path))
+                refreshedFiles.append(contentsOf: page.files.filter { !known.contains($0.path) })
+                refreshedNextPage = page.nextPage
+            }
+
+            workDiff = diff
+            workFiles = refreshedFiles
+            workNextPage = refreshedNextPage
+            workPatch = diff.patch
+            workArtifactBytes = preview
+            workTarget = target
+            if previousTarget != target
+                || !workFiles.contains(where: { $0.path == selectedWorkFilePath })
+            {
+                selectedWorkFilePath = workFiles.first?.path
+                editableFile = nil
+                fileDraft = ""
+            }
+
+            if let workspaceID = diff.workspaceID {
+                do {
+                    let terminals = try await client.workspaceTerminals(workspaceID: workspaceID)
+                    guard request == workRequest else { return }
+                    workTerminals = terminals
+                    if !terminals.contains(where: { $0.id == selectedTerminalID }) {
+                        selectedTerminalID = terminals.first(where: { $0.state == .open })?.id
+                            ?? terminals.first?.id
+                    }
+                    if let terminalStreamTerminalID,
+                       !terminals.contains(where: { $0.id == terminalStreamTerminalID })
+                    {
+                        detachCurrentTerminal()
+                    }
+                } catch {
+                    workTerminals = []
+                    workNotice = "Changes loaded, but Workspace terminals are unavailable."
+                }
+            } else {
+                workTerminals = []
+                selectedTerminalID = nil
+                detachCurrentTerminal()
+            }
+        } catch {
+            guard request == workRequest else { return }
+            let failure = presentationError(error)
+            workError = failure
+            applyRevisionConflict(failure)
+        }
+        if request == workRequest { workOperation = nil }
+    }
+
+    func applyWorkCheckpoint() async {
+        guard canApplyWorkCheckpoint else { return }
+        selectedWorkFilePath = nil
+        editableFile = nil
+        fileDraft = ""
+        await loadWorkPanel(preserveContinuity: false)
+    }
+
+    func applyWorkRecovery(_ action: JetRecoveryAction) async {
+        workNoticeError = nil
+        switch action {
+        case .refreshFile:
+            if let selectedWorkFilePath {
+                await selectWorkFile(selectedWorkFilePath)
+            }
+        case let .refreshConversation(conversationID):
+            guard conversationID == selectedConversationID else { return }
+            await loadSelectedConversation()
+        case let .refreshRun(runID):
+            guard runID == selectedRun?.id else { return }
+            await loadRunSupervision()
+        case let .resumeEvents(after):
+            observeEvents(after: after)
+            workNotice = "Activity reconnected from the requested checkpoint."
+        }
+    }
+
+    func loadMoreWorkFiles() async {
+        guard workOperation == nil,
+              let cursor = workNextPage,
+              let runID = workDiff?.runID
+        else { return }
+        workOperation = "files"
+        workNotice = nil
+        workNoticeError = nil
+        do {
+            let page = try await activeClient().nextChangeDiff(cursor)
+            guard page.runID == runID, page.scope == workDiff?.scope else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            let known = Set(workFiles.map(\.path))
+            workFiles.append(contentsOf: page.files.filter { !known.contains($0.path) })
+            workNextPage = page.nextPage
+        } catch {
+            let failure = presentationError(error)
+            workNotice = failure.message
+            workNoticeError = failure
+            applyRevisionConflict(failure)
+            if failure.restart?.requiresPaginationSnapshot == true {
+                await loadWorkPanel()
+            }
+        }
+        workOperation = nil
+    }
+
+    func loadMorePatch() async {
+        guard workOperation == nil,
+              let diff = workDiff,
+              diff.patchTruncated,
+              diff.artifact.availability == .stored,
+              UInt64(workArtifactBytes.count) < diff.artifact.size
+        else { return }
+        workOperation = "patch"
+        workNotice = nil
+        workNoticeError = nil
+        do {
+            let chunk = try await activeClient().changeArtifact(
+                sha256: diff.artifact.sha256,
+                offset: UInt64(workArtifactBytes.count)
+            )
+            guard chunk.artifact == diff.artifact,
+                  chunk.offset == UInt64(workArtifactBytes.count),
+                  !chunk.bytes.isEmpty,
+                  UInt64(workArtifactBytes.count + chunk.bytes.count) <= diff.artifact.size
+            else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            workArtifactBytes.append(chunk.bytes)
+            workPatch = String(decoding: workArtifactBytes, as: UTF8.self)
+            if UInt64(workArtifactBytes.count) == diff.artifact.size {
+                let digest = SHA256.hash(data: workArtifactBytes)
+                    .map { String(format: "%02x", $0) }
+                    .joined()
+                guard digest == diff.artifact.sha256 else {
+                    throw JetClientFailure.presentation(.invalidResponse)
+                }
+                workNotice = "The complete patch was verified."
+            }
+        } catch {
+            recordWorkFailure(error)
+        }
+        workOperation = nil
+    }
+
+    func selectWorkFile(_ path: String) async {
+        guard workFiles.contains(where: { $0.path == path }),
+              let target = workTarget
+        else { return }
+        workFileRequest += 1
+        let request = workFileRequest
+        selectedWorkFilePath = path
+        selectedWorkPanel = .files
+        workOperation = "file"
+        workNotice = nil
+        workNoticeError = nil
+        editableFile = nil
+        fileDraft = ""
+        do {
+            let file = try await activeClient().editableFile(target: target, path: path)
+            guard request == workFileRequest,
+                  selectedWorkFilePath == path,
+                  file.target == target,
+                  file.path == path
+            else { return }
+            editableFile = file
+            fileDraft = file.content ?? ""
+            pendingWorkEdit = nil
+        } catch {
+            if request == workFileRequest { recordWorkFailure(error) }
+        }
+        if request == workFileRequest { workOperation = nil }
+    }
+
+    func saveSelectedWorkFile() async {
+        guard workOperation == nil,
+              let target = workTarget,
+              let file = editableFile,
+              file.path == selectedWorkFilePath
+        else { return }
+        workOperation = "save"
+        workNotice = nil
+        workNoticeError = nil
+        let pending: PendingWorkEdit
+        if let existing = pendingWorkEdit,
+           existing.path == file.path,
+           existing.content == fileDraft
+        {
+            pending = existing
+        } else {
+            pending = PendingWorkEdit(path: file.path, content: fileDraft, commandID: UUID())
+            pendingWorkEdit = pending
+        }
+        do {
+            let revision = try await activeClient().applyUserEdit(
+                target: target,
+                path: file.path,
+                expectedRevision: file.revision,
+                content: fileDraft,
+                commandID: pending.commandID
+            )
+            editableFile = JetEditableFile(
+                cursor: file.cursor,
+                target: file.target,
+                path: file.path,
+                content: fileDraft,
+                revision: revision
+            )
+            pendingWorkEdit = nil
+            workNotice = "Saved through the selected Workspace."
+        } catch {
+            recordWorkFailure(error)
+        }
+        workOperation = nil
+    }
+
+    func submitSelectedReview() async {
+        let trimmed = reviewComment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard workOperation == nil,
+              let conversationID = selectedConversationID,
+              let path = selectedWorkFilePath,
+              reviewLine > 0,
+              !trimmed.isEmpty
+        else { return }
+        workOperation = "review"
+        workNotice = nil
+        workNoticeError = nil
+        let pending: PendingReview
+        if let existing = pendingReview,
+           existing.path == path,
+           existing.line == reviewLine,
+           existing.comment == trimmed
+        {
+            pending = existing
+        } else {
+            pending = PendingReview(
+                path: path,
+                line: reviewLine,
+                comment: trimmed,
+                commandID: UUID()
+            )
+            pendingReview = pending
+        }
+        do {
+            _ = try await activeClient().submitReview(
+                conversationID: conversationID,
+                path: path,
+                line: reviewLine,
+                comment: trimmed,
+                commandID: pending.commandID
+            )
+            pendingReview = nil
+            reviewComment = ""
+            workNotice = "The review comment was added as one queued Turn."
+            await loadRunSupervision()
+        } catch {
+            recordWorkFailure(error)
+        }
+        workOperation = nil
+    }
+
+    func createWorkspaceTerminal() async {
+        guard workOperation == nil, let workspaceID = workDiff?.workspaceID else { return }
+        workOperation = "open-terminal"
+        workNotice = nil
+        workNoticeError = nil
+        do {
+            let terminal = try await activeClient().openTerminal(
+                workspaceID: workspaceID,
+                rows: terminalRows,
+                columns: terminalColumns,
+                commandID: terminalOpenCommandID
+            )
+            terminalOpenCommandID = UUID()
+            workTerminals.removeAll { $0.id == terminal.id }
+            workTerminals.append(terminal)
+            selectedTerminalID = terminal.id
+            await attachSelectedTerminal()
+        } catch {
+            recordWorkFailure(error)
+        }
+        workOperation = nil
+    }
+
+    func attachSelectedTerminal() async {
+        guard let terminalID = selectedTerminalID,
+              workTerminals.contains(where: { $0.id == terminalID && $0.state == .open })
+        else { return }
+        detachCurrentTerminal()
+        workNotice = nil
+        workNoticeError = nil
+        do {
+            let client = try await activeClient()
+            let stream = try await client.attachTerminal(
+                terminalID: terminalID,
+                after: terminalOffsets[terminalID] ?? 0
+            )
+            terminalStreamTerminalID = terminalID
+            terminalObservationTask = Task { [weak self] in
+                do {
+                    for try await event in stream {
+                        guard !Task.isCancelled else { return }
+                        self?.receiveTerminal(event, terminalID: terminalID)
+                    }
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    if let self {
+                        self.attachedTerminalID = nil
+                        self.terminalStreamTerminalID = nil
+                        self.recordWorkFailure(error)
+                    }
+                }
+            }
+        } catch {
+            recordWorkFailure(error)
+        }
+    }
+
+    func detachSelectedTerminal() {
+        detachCurrentTerminal()
+    }
+
+    func closeSelectedTerminal() async {
+        guard workOperation == nil, let terminalID = selectedTerminalID else { return }
+        workOperation = "close-terminal"
+        workNotice = nil
+        workNoticeError = nil
+        if terminalStreamTerminalID == terminalID { detachCurrentTerminal() }
+        let commandID = terminalCloseCommandIDs[terminalID] ?? UUID()
+        terminalCloseCommandIDs[terminalID] = commandID
+        do {
+            let terminal = try await activeClient().closeTerminal(
+                terminalID: terminalID,
+                commandID: commandID
+            )
+            terminalCloseCommandIDs.removeValue(forKey: terminalID)
+            if let index = workTerminals.firstIndex(where: { $0.id == terminalID }) {
+                workTerminals[index] = terminal
+            }
+            workNotice = "The Workspace terminal was closed."
+        } catch {
+            recordWorkFailure(error)
+        }
+        workOperation = nil
+    }
+
+    func sendTerminalLine() async {
+        guard let terminalID = attachedTerminalID, !terminalInput.isEmpty else { return }
+        let input = terminalInput + "\n"
+        terminalInput = ""
+        do {
+            try await activeClient().sendTerminalInput(
+                terminalID: terminalID,
+                bytes: Data(input.utf8)
+            )
+        } catch {
+            terminalInput = String(input.dropLast())
+            recordWorkFailure(error)
+        }
+    }
+
+    func setTerminalGeometry(width: Double, height: Double) {
+        let rows = UInt16(clamping: max(1, min(1000, Int(height / 16))))
+        let columns = UInt16(clamping: max(1, min(1000, Int(width / 7.2))))
+        guard rows != terminalRows || columns != terminalColumns else { return }
+        terminalRows = rows
+        terminalColumns = columns
+        Task { await resizeAttachedTerminal() }
+    }
+
+    private func resizeAttachedTerminal() async {
+        guard let terminalID = attachedTerminalID else { return }
+        if let lastTerminalSize,
+           lastTerminalSize.terminalID == terminalID,
+           lastTerminalSize.rows == terminalRows,
+           lastTerminalSize.columns == terminalColumns
+        {
+            return
+        }
+        do {
+            try await activeClient().resizeTerminal(
+                terminalID: terminalID,
+                rows: terminalRows,
+                columns: terminalColumns
+            )
+            lastTerminalSize = (terminalID, terminalRows, terminalColumns)
+        } catch {
+            recordWorkFailure(error)
+        }
+    }
+
+    private func receiveTerminal(_ event: JetTerminalEvent, terminalID: UUID) {
+        guard terminalStreamTerminalID == terminalID else { return }
+        switch event {
+        case .attached:
+            attachedTerminalID = terminalID
+            Task { await resizeAttachedTerminal() }
+        case let .output(offset, bytes):
+            terminalOffsets[terminalID] = offset + UInt64(bytes.count)
+            var decoder = terminalDecoders[terminalID] ?? TerminalTranscriptDecoder()
+            let text = decoder.decode(bytes)
+            terminalDecoders[terminalID] = decoder
+            terminalOutput[terminalID] = String(
+                ((terminalOutput[terminalID] ?? "") + text).suffix(1_048_576)
+            )
+        case let .gap(firstMissingOffset, missingBytes):
+            terminalOffsets[terminalID] = firstMissingOffset + missingBytes
+            terminalDecoders[terminalID] = TerminalTranscriptDecoder()
+            let text = "\n[\(missingBytes) earlier bytes unavailable]\n"
+            terminalOutput[terminalID] = String(
+                ((terminalOutput[terminalID] ?? "") + text).suffix(1_048_576)
+            )
+        case .resized:
+            break
+        case let .finished(totalBytes):
+            terminalOffsets[terminalID] = totalBytes
+            if var decoder = terminalDecoders[terminalID] {
+                let tail = decoder.decode(Data(), final: true)
+                terminalDecoders[terminalID] = decoder
+                terminalOutput[terminalID] = String(
+                    ((terminalOutput[terminalID] ?? "") + tail).suffix(1_048_576)
+                )
+            }
+            attachedTerminalID = nil
+            terminalStreamTerminalID = nil
+            workNotice = "The terminal session finished."
         }
     }
 
@@ -704,12 +1397,14 @@ final class DesktopSession {
     }
 
     func beginNewTask() {
+        detachCurrentTerminal()
         sidebarSelection = .newTask
         selectedConversationID = nil
         conversationSnapshot = nil
         turnQueue = nil
         runExecution = nil
         timeline = []
+        resetWorkPanel()
         isWorkPanelPresented = false
         actionNotice = nil
         composerFocusRequest += 1
@@ -725,11 +1420,13 @@ final class DesktopSession {
         actionNotice = nil
         switch sidebarSelection {
         case .newTask:
+            detachCurrentTerminal()
             selectedConversationID = nil
             conversationSnapshot = nil
             turnQueue = nil
             runExecution = nil
             timeline = []
+            resetWorkPanel()
             isWorkPanelPresented = false
             composerFocusRequest += 1
         case .search:
@@ -848,6 +1545,102 @@ final class DesktopSession {
         Task { await loadFoundationFixture() }
     }
 
+    private func resetWorkPanel() {
+        workRequest += 1
+        workFileRequest += 1
+        workDiff = nil
+        workFiles = []
+        workNextPage = nil
+        workPatch = ""
+        workTarget = nil
+        workTerminals = []
+        workOperation = nil
+        workError = nil
+        workNotice = nil
+        workNoticeError = nil
+        selectedWorkFilePath = nil
+        editableFile = nil
+        fileDraft = ""
+        selectedTerminalID = nil
+        terminalInput = ""
+        terminalOutput = [:]
+        workScrollAnchors = [:]
+        terminalOffsets = [:]
+        terminalDecoders = [:]
+        lastTerminalSize = nil
+        workArtifactBytes = Data()
+        pendingWorkEdit = nil
+        pendingReview = nil
+        terminalOpenCommandID = UUID()
+        terminalCloseCommandIDs = [:]
+        detachCurrentTerminal()
+    }
+
+    private func detachCurrentTerminal() {
+        terminalObservationTask?.cancel()
+        terminalObservationTask = nil
+        let terminalID = terminalStreamTerminalID
+        terminalStreamTerminalID = nil
+        attachedTerminalID = nil
+        if let terminalID, let client {
+            Task { await client.detachTerminal(terminalID: terminalID) }
+        }
+    }
+
+    private func recordWorkFailure(_ error: Error) {
+        let failure = presentationError(error)
+        workNotice = failure.message
+        workNoticeError = failure
+        applyRevisionConflict(failure)
+    }
+
+    private func applyRevisionConflict(_ error: JetPresentationError) {
+        guard let conflict = error.revisionConflict else { return }
+        switch conflict.safeState {
+        case let .conversation(id, revision):
+            func updated(_ conversation: JetConversationSummary) -> JetConversationSummary {
+                JetConversationSummary(
+                    id: conversation.id,
+                    revision: revision,
+                    title: conversation.title,
+                    createdAtUnixMilliseconds: conversation.createdAtUnixMilliseconds,
+                    projectID: conversation.projectID
+                )
+            }
+            if let index = conversations.firstIndex(where: { $0.id == id }) {
+                conversations[index] = updated(conversations[index])
+            }
+            if let snapshot = conversationSnapshot, snapshot.conversation.id == id {
+                conversationSnapshot = JetConversationSnapshot(
+                    cursor: snapshot.cursor,
+                    conversation: updated(snapshot.conversation),
+                    workspaceID: snapshot.workspaceID,
+                    workspaceRoot: snapshot.workspaceRoot,
+                    runs: snapshot.runs
+                )
+            }
+        case let .run(safeRun):
+            if let snapshot = conversationSnapshot {
+                conversationSnapshot = JetConversationSnapshot(
+                    cursor: snapshot.cursor,
+                    conversation: snapshot.conversation,
+                    workspaceID: snapshot.workspaceID,
+                    workspaceRoot: snapshot.workspaceRoot,
+                    runs: snapshot.runs.map { $0.id == safeRun.id ? safeRun : $0 }
+                )
+            }
+            if let execution = runExecution, execution.run.id == safeRun.id {
+                runExecution = JetRunExecution(
+                    cursor: execution.cursor,
+                    run: safeRun,
+                    activity: execution.activity,
+                    needsAttention: execution.needsAttention,
+                    termination: execution.termination
+                )
+            }
+        }
+    }
+
     private func mergeConversation(_ conversation: JetConversationSummary) {
         if let index = conversations.firstIndex(where: { $0.id == conversation.id }) {
             conversations[index] = conversation
@@ -913,9 +1706,7 @@ final class DesktopSession {
                     }
                 } catch {
                     let failure = presentationError(error)
-                    if failure.code == "event.cursor_expired"
-                        || failure.code == "event.cursor_ahead"
-                    {
+                    if failure.restart?.requiresEventSnapshot == true {
                         timeline = []
                         actionNotice = "The activity cursor expired. Jet refreshed the full Conversation snapshot."
                         await loadConversations()

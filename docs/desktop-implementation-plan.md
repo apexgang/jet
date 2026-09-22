@@ -1,6 +1,6 @@
 # Jet desktop implementation plan
 
-Status: Wave 0, Wave 1, and the protocol-supported portion of Wave 2.1 were completed on 2026-09-22. Wave 2.2 is next; generic Harness approval decisions remain a backend dependency.
+Status: Wave 0, Wave 1, and Waves 2.1–2.2 were completed on 2026-09-22. Wave 2.3 is next; generic Harness approval decisions remain a backend dependency.
 
 This plan turns `docs/design-language.md` into a staged desktop product for macOS and Linux. It is repository-specific and preserves the boundaries in `apps/jet/AGENTS.md`, `apps/jet-tauri/AGENTS.md`, and the Jet protocol ADRs.
 
@@ -177,6 +177,10 @@ Implemented on 2026-09-22 in both desktop clients. The clients render the bounde
 - Preserve command IDs and expected revisions across retries. Never infer a successful effect from a disconnected response.
 
 ### 2.2 Work panel
+
+Implemented on 2026-09-22 in both desktop clients. Changes page incrementally, retained patch Artifacts load in bounded verified chunks, Files stay within native-issued Project or Workspace bindings, and Workspace terminals use multiplexed byte-credit streams without exposing arbitrary paths or shell construction to the Tauri webview. Current, final, Turn, and historical checkpoints are selectable. Structured recovery, restart metadata, and revision-conflict safe state drive named recovery actions. Refresh preserves loaded pages, file identity, drafts, terminal transcript continuity, and panel selection; split UTF-8, terminal control sequences, and insertions before a selected later-page file have regression coverage.
+
+Verification: the Swift macOS unit suite and iOS Simulator build passed; the Tauri Svelte/TypeScript checks, frontend tests and build, strict Rust lint, and native tests passed; the shared `jet-client` formatting, strict lint, and tests passed. Both macOS bundles were visually reviewed in the truthful reconnect/no-Run state because no live local Plane was available for populated capture.
 
 - Build Changes with incremental file lists, bounded diff loading, binary and oversized-file states, and review actions.
 - Add scoped Files and Terminals without exposing arbitrary host paths or shell commands through the webview.

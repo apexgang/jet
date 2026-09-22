@@ -5,6 +5,36 @@ export type PublicError = {
   code: string;
   message: string;
   retryable: boolean;
+  recoveryActions: PublicRecoveryAction[];
+  restart: PublicRestart | null;
+  revisionConflict: PublicRevisionConflict | null;
+};
+
+export type PublicRecoveryAction =
+  | { type: "refresh_file" }
+  | { type: "refresh_conversation" }
+  | { type: "refresh_run" }
+  | { type: "resume_events"; after: string };
+
+export type PublicRestart =
+  | {
+      reason: "cursor_expired";
+      minimumAvailableCursor: string;
+      currentSnapshotRevision: string;
+    }
+  | { reason: "cursor_ahead" | "pagination_stale"; currentSnapshotRevision: string };
+
+export type PublicRevisionConflict = {
+  currentRevision: string;
+  safeState:
+    | { type: "conversation"; conversationId: string; revision: string | null }
+    | {
+        type: "run";
+        runId: string;
+        conversationId: string;
+        revision: string;
+        lifecycle: RunSummary["lifecycle"];
+      };
 };
 
 export type ConnectionSnapshot = {
@@ -129,6 +159,7 @@ export type MutationResult = {
 
 export type ConversationRow = {
   id: string;
+  revision: string | null;
   title: string;
   createdAtUnixMs: string;
   projectId: string | null;
@@ -154,9 +185,103 @@ export type RunSummary = {
 export type ConversationDetail = {
   conversation: ConversationRow;
   cursor: string;
+  workspaceId: string | null;
   workspaceRoot: string | null;
   runs: RunSummary[];
 };
+
+export type ChangedFile = {
+  id: string;
+  path: string;
+  beforeSize: string | null;
+  afterSize: string | null;
+  status: "added" | "modified" | "deleted";
+  origin: "user edit" | "terminal" | "agent" | "mixed" | "external or unknown";
+  contentAvailable: boolean;
+};
+
+export type WorkArtifact = {
+  availability: "stored" | "disk_pressure" | "run_budget_exceeded" | "artifact_size_exceeded";
+  sha256: string;
+  size: string;
+};
+
+export type WorkspaceTerminal = {
+  id: string;
+  workspaceId: string;
+  state: "opening" | "open" | "closing" | "closed" | "unavailable";
+};
+
+export type WorkPanelSnapshot = {
+  runId: string;
+  scope: "Current" | "Final" | "Historical" | "Turn";
+  cursor: string;
+  totalFiles: number;
+  files: ChangedFile[];
+  nextPage: string | null;
+  patch: string;
+  patchTruncated: boolean;
+  artifact: WorkArtifact;
+  artifactReadId: string | null;
+  contentComplete: boolean;
+  latestTurn: number;
+  workspaceId: string | null;
+  terminals: WorkspaceTerminal[];
+  terminalIssue: PublicError | null;
+};
+
+export type WorkCheckpoint =
+  | { kind: "current" }
+  | { kind: "final" }
+  | { kind: "turn"; turn: number }
+  | { kind: "historical"; fromTurn: number; toTurn: number };
+
+export type ChangePage = {
+  files: ChangedFile[];
+  nextPage: string | null;
+};
+
+export type ArtifactChunk = {
+  bytes: number[];
+  offset: string;
+  nextOffset: string;
+  complete: boolean;
+  verified: boolean;
+};
+
+export type EditableFile = {
+  fileId: string;
+  path: string;
+  content: string | null;
+  contentBytes: number;
+  revision: string;
+};
+
+export type FileSaved = {
+  fileId: string;
+  revision: string;
+  message: string;
+};
+
+export type ReviewSubmitted = {
+  turnId: string;
+  state: string;
+  message: string;
+};
+
+export type TerminalUpdate =
+  | { type: "attached"; terminalId: string; after: string }
+  | { type: "output"; terminalId: string; offset: string; bytes: number[]; nextOffset: string }
+  | {
+      type: "gap";
+      terminalId: string;
+      firstMissingOffset: string;
+      missingBytes: string;
+      nextOffset: string;
+    }
+  | { type: "resized"; terminalId: string }
+  | { type: "finished"; terminalId: string; totalBytes: string }
+  | { type: "failed"; terminalId: string; error: PublicError };
 
 export type ConversationSearchResult = {
   cursor: string;
@@ -326,4 +451,84 @@ export function authorizeApprovalRetry(
   reviewId: string,
 ): Promise<ApprovalRetryAccepted> {
   return invoke<ApprovalRetryAccepted>("authorize_approval_retry", { runId, reviewId });
+}
+
+export function loadWorkPanel(
+  conversationId: string,
+  runId: string,
+  scope: WorkCheckpoint,
+): Promise<WorkPanelSnapshot> {
+  return invoke<WorkPanelSnapshot>("load_work_panel", {
+    conversationId,
+    runId,
+    scopeKind: scope.kind,
+    turn: scope.kind === "turn" ? scope.turn : null,
+    fromTurn: scope.kind === "historical" ? scope.fromTurn : null,
+    toTurn: scope.kind === "historical" ? scope.toTurn : null,
+  });
+}
+
+export function loadMoreChanges(pageId: string): Promise<ChangePage> {
+  return invoke<ChangePage>("load_more_changes", { pageId });
+}
+
+export function loadPatchChunk(artifactReadId: string): Promise<ArtifactChunk> {
+  return invoke<ArtifactChunk>("load_patch_chunk", { artifactReadId });
+}
+
+export function loadWorkFile(fileId: string): Promise<EditableFile> {
+  return invoke<EditableFile>("load_work_file", { fileId });
+}
+
+export function saveWorkFile(fileId: string, content: string): Promise<FileSaved> {
+  return invoke<FileSaved>("save_work_file", { fileId, content });
+}
+
+export function submitFileReview(
+  fileId: string,
+  line: number,
+  comment: string,
+): Promise<ReviewSubmitted> {
+  return invoke<ReviewSubmitted>("submit_file_review", { fileId, line, comment });
+}
+
+export function openWorkspaceTerminal(
+  conversationId: string,
+  rows = 24,
+  columns = 80,
+): Promise<WorkspaceTerminal> {
+  return invoke<WorkspaceTerminal>("open_workspace_terminal", {
+    conversationId,
+    rows,
+    columns,
+  });
+}
+
+export function closeWorkspaceTerminal(terminalId: string): Promise<WorkspaceTerminal> {
+  return invoke<WorkspaceTerminal>("close_workspace_terminal", { terminalId });
+}
+
+export function attachWorkspaceTerminal(
+  terminalId: string,
+  receive: (update: TerminalUpdate) => void,
+): Promise<void> {
+  const onUpdate = new Channel<TerminalUpdate>();
+  onUpdate.onmessage = receive;
+  return invoke<void>("attach_workspace_terminal", { terminalId, onUpdate });
+}
+
+export function sendTerminalInput(terminalId: string, input: string): Promise<void> {
+  return invoke<void>("send_terminal_input", { terminalId, input });
+}
+
+export function resizeWorkspaceTerminal(
+  terminalId: string,
+  rows: number,
+  columns: number,
+): Promise<void> {
+  return invoke<void>("resize_workspace_terminal", { terminalId, rows, columns });
+}
+
+export function detachWorkspaceTerminal(terminalId: string): Promise<void> {
+  return invoke<void>("detach_workspace_terminal", { terminalId });
 }

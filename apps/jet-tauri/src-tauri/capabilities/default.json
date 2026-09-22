@@ -23,6 +23,18 @@
     "allow-interrupt-turn",
     "allow-stop-run",
     "allow-authorize-approval-retry",
+    "allow-load-work-panel",
+    "allow-load-more-changes",
+    "allow-load-patch-chunk",
+    "allow-load-work-file",
+    "allow-save-work-file",
+    "allow-submit-file-review",
+    "allow-open-workspace-terminal",
+    "allow-close-workspace-terminal",
+    "allow-attach-workspace-terminal",
+    "allow-send-terminal-input",
+    "allow-resize-workspace-terminal",
+    "allow-detach-workspace-terminal",
     "dialog:allow-open"
   ]
 }

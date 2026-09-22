@@ -1,15 +1,80 @@
 use jet_client::ClientError;
-use jet_protocol::{ErrorCategory, FrameError, WireError};
+use jet_protocol::{
+    ConflictState, ErrorCategory, FrameError, RecoveryAction, RestartMetadata, RunLifecycle,
+    WireError,
+};
 use serde::Serialize;
 
 /// Stable, bounded failure information that is safe to render in the webview.
 /// Native error strings and protocol payloads stay in the Rust process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct PublicError {
     pub(crate) category: &'static str,
     pub(crate) code: String,
     pub(crate) message: &'static str,
     pub(crate) retryable: bool,
+    pub(crate) recovery_actions: Vec<PublicRecoveryAction>,
+    pub(crate) restart: Option<Box<PublicRestart>>,
+    pub(crate) revision_conflict: Option<Box<PublicRevisionConflict>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub(crate) enum PublicRecoveryAction {
+    RefreshFile,
+    RefreshConversation,
+    RefreshRun,
+    ResumeEvents { after: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "reason",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub(crate) enum PublicRestart {
+    CursorExpired {
+        minimum_available_cursor: String,
+        current_snapshot_revision: String,
+    },
+    CursorAhead {
+        current_snapshot_revision: String,
+    },
+    PaginationStale {
+        current_snapshot_revision: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PublicRevisionConflict {
+    current_revision: String,
+    safe_state: PublicSafeState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+enum PublicSafeState {
+    Conversation {
+        conversation_id: String,
+        revision: Option<String>,
+    },
+    Run {
+        run_id: String,
+        conversation_id: String,
+        revision: String,
+        lifecycle: &'static str,
+    },
 }
 
 impl PublicError {
@@ -23,12 +88,18 @@ impl PublicError {
                 code: "protocol.incompatible".into(),
                 message: "This Plane uses an incompatible Jet protocol.",
                 retryable: false,
+                recovery_actions: Vec::new(),
+                restart: None,
+                revision_conflict: None,
             },
             ClientError::FeatureUnavailable { .. } => Self {
                 category: "incompatible",
                 code: "protocol.feature_unavailable".into(),
                 message: "This feature is unavailable on the connected Plane.",
                 retryable: false,
+                recovery_actions: Vec::new(),
+                restart: None,
+                revision_conflict: None,
             },
             ClientError::Io(_)
             | ClientError::Frame(FrameError::Io(_) | FrameError::Closed)
@@ -45,6 +116,9 @@ impl PublicError {
             code: "protocol.invalid_event_order".into(),
             message: "The Plane returned events out of order.",
             retryable: false,
+            recovery_actions: Vec::new(),
+            restart: None,
+            revision_conflict: None,
         }
     }
 
@@ -54,6 +128,9 @@ impl PublicError {
             code: code.into(),
             message,
             retryable: false,
+            recovery_actions: Vec::new(),
+            restart: None,
+            revision_conflict: None,
         }
     }
 
@@ -63,6 +140,9 @@ impl PublicError {
             code: "client.state_unavailable".into(),
             message: "Jet could not complete the request.",
             retryable: true,
+            recovery_actions: Vec::new(),
+            restart: None,
+            revision_conflict: None,
         }
     }
 
@@ -72,6 +152,9 @@ impl PublicError {
             code: "protocol.invalid_response".into(),
             message: "The Plane returned an invalid response.",
             retryable: false,
+            recovery_actions: Vec::new(),
+            restart: None,
+            revision_conflict: None,
         }
     }
 
@@ -81,6 +164,9 @@ impl PublicError {
             code: "transport.offline".into(),
             message: "Jet could not reach this Plane.",
             retryable: true,
+            recovery_actions: Vec::new(),
+            restart: None,
+            revision_conflict: None,
         }
     }
 
@@ -93,7 +179,78 @@ impl PublicError {
             code: safe_code(&error.code).unwrap_or_else(|| format!("{category}.request_failed")),
             message: category_message(error.category),
             retryable: error.retryable,
+            recovery_actions: error
+                .recovery_actions
+                .iter()
+                .map(public_recovery_action)
+                .collect(),
+            restart: error.restart.map(public_restart).map(Box::new),
+            revision_conflict: error.revision_conflict.as_ref().map(|conflict| {
+                Box::new(PublicRevisionConflict {
+                    current_revision: conflict.current_revision.to_string(),
+                    safe_state: match &conflict.safe_state {
+                        ConflictState::Conversation { conversation } => {
+                            PublicSafeState::Conversation {
+                                conversation_id: conversation.conversation_id.to_string(),
+                                revision: conversation.revision.map(|value| value.to_string()),
+                            }
+                        }
+                        ConflictState::Run { run } => PublicSafeState::Run {
+                            run_id: run.run_id.to_string(),
+                            conversation_id: run.conversation_id.to_string(),
+                            revision: run.revision.to_string(),
+                            lifecycle: lifecycle_name(run.lifecycle),
+                        },
+                    },
+                })
+            }),
         }
+    }
+}
+
+fn public_recovery_action(action: &RecoveryAction) -> PublicRecoveryAction {
+    match action {
+        RecoveryAction::RefreshFile { .. } => PublicRecoveryAction::RefreshFile,
+        RecoveryAction::RefreshConversation { .. } => PublicRecoveryAction::RefreshConversation,
+        RecoveryAction::RefreshRun { .. } => PublicRecoveryAction::RefreshRun,
+        RecoveryAction::ResumeEvents { after } => PublicRecoveryAction::ResumeEvents {
+            after: after.to_string(),
+        },
+    }
+}
+
+fn public_restart(restart: RestartMetadata) -> PublicRestart {
+    match restart {
+        RestartMetadata::CursorExpired {
+            minimum_available_cursor,
+            current_snapshot_revision,
+        } => PublicRestart::CursorExpired {
+            minimum_available_cursor: minimum_available_cursor.to_string(),
+            current_snapshot_revision: current_snapshot_revision.to_string(),
+        },
+        RestartMetadata::CursorAhead {
+            current_snapshot_revision,
+        } => PublicRestart::CursorAhead {
+            current_snapshot_revision: current_snapshot_revision.to_string(),
+        },
+        RestartMetadata::PaginationStale {
+            current_snapshot_revision,
+        } => PublicRestart::PaginationStale {
+            current_snapshot_revision: current_snapshot_revision.to_string(),
+        },
+    }
+}
+
+fn lifecycle_name(lifecycle: RunLifecycle) -> &'static str {
+    match lifecycle {
+        RunLifecycle::Created => "created",
+        RunLifecycle::Starting => "starting",
+        RunLifecycle::Active => "active",
+        RunLifecycle::Stopping => "stopping",
+        RunLifecycle::Completed => "completed",
+        RunLifecycle::Failed => "failed",
+        RunLifecycle::Canceled => "canceled",
+        RunLifecycle::Lost => "lost",
     }
 }
 

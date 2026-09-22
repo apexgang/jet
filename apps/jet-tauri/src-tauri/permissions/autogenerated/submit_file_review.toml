@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-submit-file-review"
+description = "Enables the submit_file_review command without any pre-configured scope."
+commands.allow = ["submit_file_review"]
+
+[[permission]]
+identifier = "deny-submit-file-review"
+description = "Denies the submit_file_review command without any pre-configured scope."
+commands.deny = ["submit_file_review"]

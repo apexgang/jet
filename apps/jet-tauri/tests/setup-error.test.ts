@@ -16,6 +16,9 @@ describe("setup error normalization", () => {
       code: "transport.offline",
       message: "Jet could not reach this Plane.",
       retryable: true,
+      recoveryActions: [],
+      restart: null,
+      revisionConflict: null,
     });
   });
 
@@ -38,6 +41,9 @@ describe("setup error normalization", () => {
       code: "client.request_failed",
       message: "Jet could not complete the request.",
       retryable: false,
+      recoveryActions: [],
+      restart: null,
+      revisionConflict: null,
     });
   });
 });

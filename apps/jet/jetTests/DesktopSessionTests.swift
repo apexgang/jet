@@ -163,10 +163,12 @@ struct DesktopSessionTests {
     @Test
     func selectingAnotherConversationClearsThePreviousTimeline() {
         let first = JetConversationSummary(
-            id: UUID(), title: "First", createdAtUnixMilliseconds: 1, projectID: nil
+            id: UUID(), revision: nil, title: "First", createdAtUnixMilliseconds: 1,
+            projectID: nil
         )
         let second = JetConversationSummary(
-            id: UUID(), title: "Second", createdAtUnixMilliseconds: 2, projectID: nil
+            id: UUID(), revision: nil, title: "Second", createdAtUnixMilliseconds: 2,
+            projectID: nil
         )
         let session = DesktopSession()
         session.conversations = [first, second]
@@ -181,6 +183,27 @@ struct DesktopSessionTests {
 
         #expect(session.selectedConversationID == second.id)
         #expect(session.timeline.isEmpty)
+    }
+
+    @Test
+    func refreshKeepsPagingWhenInsertionPushesSelectionPastPreviousPageCount() {
+        let selected = "Sources/Zeta.swift"
+        let firstPageAfterInsertion = Set(["Sources/Alpha.swift", "Sources/Beta.swift"])
+
+        #expect(WorkRefreshContinuity.shouldLoadNextPage(
+            loadedCount: 2,
+            targetCount: 2,
+            selectedPath: selected,
+            loadedPaths: firstPageAfterInsertion,
+            hasNextPage: true
+        ))
+        #expect(!WorkRefreshContinuity.shouldLoadNextPage(
+            loadedCount: 3,
+            targetCount: 2,
+            selectedPath: selected,
+            loadedPaths: firstPageAfterInsertion.union([selected]),
+            hasNextPage: true
+        ))
     }
 
     @Test
