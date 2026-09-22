@@ -93,6 +93,17 @@ First launch has three essential outcomes: connect to the local Jet service, con
 
 Use progressive onboarding inside the real workspace. Avoid a long introductory carousel. Provide safe defaults, explain why access is needed at the moment it is requested, and allow the user to revisit setup from Settings.
 
+### Setup and Projects
+
+Keep setup inside the main workspace. Present local Plane health, Projects, Harness access, and remote pairing as independent sections so one unavailable source does not replace usable setup data.
+
+- Keep connection status independent from setup data. If capabilities, Projects, accounts, or pairing fails, leave successful sections usable and show the stable error code in the affected section. Do not label a connected Plane offline because one section could not load.
+- Add a Project through the platform's folder picker, then show the resolved working-tree root and whether Jet can register it. On Tauri, manual absolute-path entry is a disclosed expert fallback.
+- Before removing a Project, show an authoritative preview of its folder, disk use, changed files, unpushed commits, managed Workspaces, and any blockers. Do not enable removal without a current preview. When blockers exist, explain them and keep confirmation unavailable.
+- Move to Trash is the default removal action. Offer permanent deletion only when Trash is unavailable and after showing the permanent-deletion warning.
+- Project removal uses a modal confirmation that blocks interaction outside the dialog. Require the exact Project name, focus the confirmation field or Cancel when removal is blocked, keep focus within the dialog, support Escape to cancel, and return focus to the invoking control.
+- Harness setup records only a non-secret binding. Credential entry and sign-in remain with the Harness or an operating-system credential flow; credentials never pass through the presentation layer.
+
 ### New task
 
 Opening New task focuses an empty composer immediately. The user can type before choosing a Project, Harness, or Plane.

@@ -50,6 +50,203 @@ struct JetEventBatch: Sendable, Equatable {
     let events: [JetEvent]
 }
 
+enum JetCapabilityObservation: Sendable {
+    case lastObserved
+    case fresh
+}
+
+enum JetCredentialStoreState: String, Sendable, Equatable {
+    case available
+    case locked
+    case unavailable
+
+    var label: String {
+        switch self {
+        case .available: "Secure storage ready"
+        case .locked: "Secure storage locked"
+        case .unavailable: "Secure storage unavailable"
+        }
+    }
+}
+
+struct JetAuthProvider: Sendable, Equatable, Identifiable {
+    let provider: String
+    let harness: String
+    let label: String
+
+    var id: String { provider }
+}
+
+struct JetCapabilitySummary: Sendable, Equatable {
+    let coreVersion: String
+    let platform: String
+    let harnesses: [String]
+    let credentialStore: JetCredentialStoreState
+    let degraded: [String]
+
+    var authProviders: [JetAuthProvider] {
+        var providers: [JetAuthProvider] = []
+        for harness in harnesses {
+            let normalized = harness.lowercased()
+            let candidate: JetAuthProvider?
+            if normalized.contains("codex") {
+                candidate = JetAuthProvider(
+                    provider: "openai",
+                    harness: "Codex",
+                    label: "Codex login"
+                )
+            } else if normalized.contains("claude") {
+                candidate = JetAuthProvider(
+                    provider: "anthropic",
+                    harness: "Claude Code",
+                    label: "Claude Code login"
+                )
+            } else {
+                candidate = nil
+            }
+            if let candidate, !providers.contains(where: { $0.provider == candidate.provider }) {
+                providers.append(candidate)
+            }
+        }
+        return providers
+    }
+}
+
+struct JetProjectSummary: Sendable, Equatable, Identifiable {
+    let id: UUID
+    let root: String
+
+    var name: String {
+        URL(fileURLWithPath: root).lastPathComponent.isEmpty
+            ? "Project"
+            : URL(fileURLWithPath: root).lastPathComponent
+    }
+}
+
+struct JetProjectList: Sendable, Equatable {
+    let cursor: UInt64
+    let projects: [JetProjectSummary]
+}
+
+enum JetProjectRegistrability: Sendable, Equatable {
+    case registrable(detail: String)
+    case unavailable(verdict: String, detail: String)
+}
+
+struct JetProjectPreview: Sendable, Equatable {
+    let root: String
+    let registrability: JetProjectRegistrability
+
+    var canRegister: Bool {
+        if case .registrable = registrability { return true }
+        return false
+    }
+}
+
+struct JetProjectRemovalPreview: Sendable, Equatable, Identifiable {
+    let id = UUID()
+    let projectID: UUID
+    let root: String
+    let diskUseBytes: UInt64
+    let liveRuns: UInt64
+    let schedules: UInt64
+    let dirtyFiles: UInt64
+    let unpushedCommits: UInt64
+    let workspaceCount: Int
+    let obstacles: [String]
+    let permanentWarning: String
+    let binding: JetRawJSON
+
+    var name: String {
+        URL(fileURLWithPath: root).lastPathComponent.isEmpty
+            ? "Project"
+            : URL(fileURLWithPath: root).lastPathComponent
+    }
+}
+
+enum JetProjectDisposal: Sendable, Equatable {
+    case systemTrash
+    case permanent(acknowledgedWarning: String)
+}
+
+struct JetProjectRemoved: Sendable, Equatable {
+    let projectID: UUID
+    let root: String
+    let disposition: String
+}
+
+struct JetAccountBindingSummary: Sendable, Equatable, Identifiable {
+    let id: UUID
+    let provider: String
+    let label: String
+    let state: String
+    let stateLabel: String
+}
+
+struct JetAccountBindingList: Sendable, Equatable {
+    let cursor: UInt64
+    let bindings: [JetAccountBindingSummary]
+}
+
+struct JetPairingSummary: Sendable, Equatable {
+    let cursor: UInt64
+    let gate: String
+    let pairedClients: Int
+    let hasPendingOffer: Bool
+}
+
+enum JetSetupSection: String, Sendable, Equatable {
+    case capabilities
+    case projects
+    case accounts
+    case pairing
+
+    var title: String {
+        switch self {
+        case .capabilities: "Plane capabilities"
+        case .projects: "Projects"
+        case .accounts: "Harness access"
+        case .pairing: "Remote pairing"
+        }
+    }
+}
+
+struct JetSetupIssue: Sendable, Equatable, Identifiable {
+    let section: JetSetupSection
+    let error: JetPresentationError
+
+    var id: JetSetupSection { section }
+}
+
+struct JetSetupSnapshot: Sendable, Equatable {
+    let status: JetPlaneStatus
+    let capabilities: JetCapabilitySummary
+    let projects: JetProjectList
+    let accounts: JetAccountBindingList
+    let pairing: JetPairingSummary
+    let issues: [JetSetupIssue]
+
+    init(
+        status: JetPlaneStatus,
+        capabilities: JetCapabilitySummary,
+        projects: JetProjectList,
+        accounts: JetAccountBindingList,
+        pairing: JetPairingSummary,
+        issues: [JetSetupIssue] = []
+    ) {
+        self.status = status
+        self.capabilities = capabilities
+        self.projects = projects
+        self.accounts = accounts
+        self.pairing = pairing
+        self.issues = issues
+    }
+
+    func issue(for section: JetSetupSection) -> JetSetupIssue? {
+        issues.first { $0.section == section }
+    }
+}
+
 enum JetSettingScope: Sendable, Equatable {
     case plane
     case project(UUID)
@@ -115,6 +312,16 @@ struct JetPresentationError: Error, Sendable, Equatable {
         retryable: false,
         recoveryActions: []
     )
+
+    static func invalidInput(code: String, message: String) -> JetPresentationError {
+        JetPresentationError(
+            category: .invalidInput,
+            code: code,
+            message: message,
+            retryable: false,
+            recoveryActions: []
+        )
+    }
 }
 
 enum JetClientFailure: Error, Sendable, Equatable {
@@ -130,14 +337,17 @@ struct JetClientConfiguration: Sendable {
     let clientID: UUID
     let reconnectDelays: [Duration]
     let eventPollDelay: Duration
+    let connectionTimeout: Duration
 
     init(
         clientID: UUID,
         reconnectDelays: [Duration] = [.milliseconds(100), .milliseconds(500), .seconds(1)],
-        eventPollDelay: Duration = .milliseconds(500)
+        eventPollDelay: Duration = .milliseconds(500),
+        connectionTimeout: Duration = .seconds(3)
     ) {
         self.clientID = clientID
         self.reconnectDelays = reconnectDelays
         self.eventPollDelay = eventPollDelay
+        self.connectionTimeout = connectionTimeout
     }
 }

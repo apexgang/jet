@@ -1,8 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "main-plane-status",
-  "description": "Read-only Plane status feed for the main window",
+  "identifier": "main-plane-setup",
+  "description": "Plane status and preview-gated local setup operations for the main window",
   "windows": ["main"],
   "platforms": ["linux", "macOS"],
-  "permissions": ["allow-open-plane-feed"]
+  "permissions": [
+    "allow-open-plane-feed",
+    "allow-load-setup",
+    "allow-preview-project",
+    "allow-register-project",
+    "allow-preview-project-removal",
+    "allow-remove-project",
+    "allow-bind-harness-account",
+    "dialog:allow-open"
+  ]
 }

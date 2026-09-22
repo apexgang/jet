@@ -48,6 +48,24 @@ impl PublicError {
         }
     }
 
+    pub(crate) fn invalid_input(code: &'static str, message: &'static str) -> Self {
+        Self {
+            category: "invalid_input",
+            code: code.into(),
+            message,
+            retryable: false,
+        }
+    }
+
+    pub(crate) fn internal() -> Self {
+        Self {
+            category: "internal",
+            code: "client.state_unavailable".into(),
+            message: "Jet could not complete the request.",
+            retryable: true,
+        }
+    }
+
     fn invalid_response() -> Self {
         Self {
             category: "invalid_response",

@@ -32,8 +32,18 @@
 
     <div class="nav-group">
       <p class="nav-heading">Projects</p>
+      {#if session.setupSnapshot?.projects.length}
+        {#each session.setupSnapshot.projects as project (project.id)}
+          <button
+            class:active={selected("project") && session.selectedProjectId === project.id}
+            onclick={() => session.selectProject(project.id)}
+          >
+            {project.name}
+          </button>
+        {/each}
+      {/if}
       <button class:active={selected("project")} onclick={() => session.select("project")}>
-        {session.scenario.project?.name ?? "Choose a Project"}
+        {session.setupSnapshot?.projects.length ? "Manage Projects" : "Add a Project"}
       </button>
     </div>
 

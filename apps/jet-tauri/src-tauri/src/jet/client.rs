@@ -1,7 +1,10 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use jet_client::{Client, ClientError};
-use jet_protocol::{Event, PlaneStatus};
+use jet_protocol::{
+    AccountBinding, CapabilityObservation, CredentialSource, Event, PlaneStatus, Project,
+    ProjectDisposal, ProjectRemovalBinding, ProjectRemoved,
+};
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -48,6 +51,100 @@ impl PlaneClient {
                 Err(error) => return Err(error),
             }
         }
+    }
+
+    pub(crate) async fn register_project(
+        &self,
+        command_id: Uuid,
+        path: &str,
+    ) -> Result<Project, Box<ClientError>> {
+        let mut attempt = 0;
+        loop {
+            let result = match self.connect().await {
+                Ok(client) => client
+                    .register_project(command_id, path)
+                    .await
+                    .map_err(Box::new),
+                Err(error) => Err(error),
+            };
+            match result {
+                Ok(project) => return Ok(project),
+                Err(error) if reconnectable(&error) && attempt < self.reconnect_delays.len() => {
+                    self.wait_to_reconnect(attempt).await;
+                    attempt += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    pub(crate) async fn bind_harness_account(
+        &self,
+        command_id: Uuid,
+        provider: &str,
+        label: &str,
+    ) -> Result<AccountBinding, Box<ClientError>> {
+        let mut attempt = 0;
+        loop {
+            let result = match self.connect().await {
+                Ok(client) => client
+                    .bind_account(
+                        command_id,
+                        provider,
+                        label,
+                        None,
+                        CredentialSource::HarnessNative,
+                    )
+                    .await
+                    .map_err(Box::new),
+                Err(error) => Err(error),
+            };
+            match result {
+                Ok(binding) => return Ok(binding),
+                Err(error) if reconnectable(&error) && attempt < self.reconnect_delays.len() => {
+                    self.wait_to_reconnect(attempt).await;
+                    attempt += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    pub(crate) async fn remove_project(
+        &self,
+        command_id: Uuid,
+        binding: ProjectRemovalBinding,
+        typed_name: &str,
+        disposal: ProjectDisposal,
+    ) -> Result<ProjectRemoved, Box<ClientError>> {
+        let mut attempt = 0;
+        loop {
+            let result = match self.connect().await {
+                Ok(client) => client
+                    .remove_project(command_id, binding.clone(), typed_name, disposal.clone())
+                    .await
+                    .map_err(Box::new),
+                Err(error) => Err(error),
+            };
+            match result {
+                Ok(removed) => return Ok(removed),
+                Err(error) if reconnectable(&error) && attempt < self.reconnect_delays.len() => {
+                    self.wait_to_reconnect(attempt).await;
+                    attempt += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    pub(crate) async fn current_capabilities(
+        &self,
+    ) -> Result<jet_protocol::CapabilitySnapshot, Box<ClientError>> {
+        let client = self.connect().await?;
+        client
+            .capabilities(CapabilityObservation::Fresh)
+            .await
+            .map_err(Box::new)
     }
 
     #[cfg(test)]
@@ -140,7 +237,7 @@ impl PlaneClient {
         }
     }
 
-    async fn connect(&self) -> Result<Client, Box<ClientError>> {
+    pub(crate) async fn connect(&self) -> Result<Client, Box<ClientError>> {
         Client::connect_local(self.socket.as_ref(), self.client_id)
             .await
             .map_err(Box::new)

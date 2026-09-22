@@ -16,7 +16,11 @@ struct DesktopShellView: View {
                 .navigationSplitViewColumnWidth(min: 210, ideal: 244, max: 300)
 #endif
         } detail: {
-            ConversationView(session: session)
+            if session.sidebarSelection == .project {
+                ProjectSetupView(session: session)
+            } else {
+                ConversationView(session: session)
+            }
         }
 #if os(macOS)
         .inspector(isPresented: $session.isWorkPanelPresented) {
@@ -50,6 +54,7 @@ struct DesktopShellView: View {
             } else {
                 session.beginNewTask()
             }
+            await session.loadSetup(openWhenIncomplete: true)
         }
         .onChange(of: session.sidebarSelection) { _, value in
             storedSelection = value.rawValue
@@ -83,7 +88,7 @@ private struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            PlaneStatusFooter(scenario: session.scenario)
+            PlaneStatusFooter(session: session)
         }
         .navigationTitle("Jet")
         .onChange(of: session.sidebarSelection) { _, _ in
@@ -110,7 +115,28 @@ private struct SidebarView: View {
             }
 
             Section("Projects") {
-                Label(session.scenario?.project?.name ?? "Choose a Project", systemImage: "folder")
+                if let projects = session.setupSnapshot?.projects.projects {
+                    ForEach(projects) { project in
+                        Button {
+                            session.selectProject(project.id)
+                        } label: {
+                            Label(project.name, systemImage: "folder")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                Button(action: session.requestAddProject) {
+                    Label(
+                        session.setupSnapshot?.projects.projects.isEmpty == false
+                            ? "Add Project…"
+                            : "Add a Project",
+                        systemImage: "plus"
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Label("Manage Projects", systemImage: "folder.badge.gearshape")
                     .tag(SidebarDestination.project)
             }
 
@@ -141,7 +167,7 @@ private struct SidebarView: View {
 }
 
 private struct PlaneStatusFooter: View {
-    let scenario: DesktopFixtureScenario?
+    let session: DesktopSession
 
     var body: some View {
         HStack(spacing: 8) {
@@ -150,9 +176,9 @@ private struct PlaneStatusFooter: View {
                 .frame(width: 7, height: 7)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
-                Text(scenario?.plane.name ?? "This Mac")
+                Text("This Mac")
                     .font(.caption.weight(.medium))
-                Text(connectionLabel)
+                Text(session.planeConnectionLabel)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -164,22 +190,12 @@ private struct PlaneStatusFooter: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var connectionLabel: String {
-        switch scenario?.plane.connection {
-        case .online: "Connected"
-        case .connecting: "Connecting"
-        case .recovering: "Recovering"
-        case .offline: "Offline"
-        case nil: "Loading"
-        }
-    }
-
     private var connectionColor: Color {
-        switch scenario?.plane.connection {
-        case .online: .green
-        case .connecting, .recovering: .orange
-        case .offline: .red
-        case nil: .secondary
+        switch session.connectionState {
+        case .connected: .green
+        case .connecting, .reconnecting: .orange
+        case .failed: .red
+        case .disconnected: .secondary
         }
     }
 }
@@ -203,7 +219,7 @@ private struct ConversationView: View {
             }
         case let .ready(scenario):
             VStack(spacing: 0) {
-                ConversationHeader(scenario: scenario)
+                ConversationHeader(session: session, scenario: scenario)
                 Divider()
                 TimelineView(scenario: scenario)
                 Divider()
@@ -218,6 +234,7 @@ private struct ConversationView: View {
 }
 
 private struct ConversationHeader: View {
+    let session: DesktopSession
     let scenario: DesktopFixtureScenario
 
     var body: some View {
@@ -226,7 +243,7 @@ private struct ConversationHeader: View {
                 Text(scenario.conversation?.title ?? "New task")
                     .font(.headline)
                 HStack(spacing: 6) {
-                    Text(scenario.project?.name ?? "Choose a Project")
+                    Text(session.selectedProjectName)
                     Text("·")
                     Text("Runs on \(scenario.plane.name)")
                 }
@@ -455,10 +472,10 @@ private struct ComposerView: View {
             }
 
             HStack(spacing: 12) {
-                ContextValue(label: "Project", value: scenario.project?.name ?? "Choose")
+                ContextValue(label: "Project", value: session.selectedProjectName)
                 ContextValue(
                     label: "Agent",
-                    value: scenario.capabilities.harnesses.first?.capitalized ?? "Choose"
+                    value: session.selectedHarnessName
                 )
                 ContextValue(label: "Runs on", value: scenario.plane.name)
                 Spacer(minLength: 0)

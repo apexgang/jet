@@ -2,7 +2,26 @@ import SwiftUI
 
 @main
 struct jetApp: App {
-    @State private var session = DesktopSession()
+    @State private var session: DesktopSession
+
+    init() {
+#if os(macOS)
+        let socketURL = JetClient.defaultLocalSocketURL(
+            homeDirectory: FileManager.default.homeDirectoryForCurrentUser
+        )
+        let configuration = JetClientConfiguration(clientID: JetClientIdentity.load())
+        _session = State(
+            initialValue: DesktopSession {
+                try await JetClient.connectLocal(
+                    socketURL: socketURL,
+                    configuration: configuration
+                )
+            }
+        )
+#else
+        _session = State(initialValue: DesktopSession())
+#endif
+    }
 
     var body: some Scene {
 #if os(macOS)
@@ -15,7 +34,7 @@ struct jetApp: App {
         }
 
         Settings {
-            JetSettingsView()
+            JetSettingsView(session: session)
         }
 #else
         WindowGroup {

@@ -1,8 +1,9 @@
 <script lang="ts">
   import type { DesktopSession } from "./session.svelte";
+  import SetupPanel from "$lib/features/setup/SetupPanel.svelte";
 
   let { session }: { session: DesktopSession } = $props();
-  let composer: HTMLTextAreaElement;
+  let composer = $state<HTMLTextAreaElement>();
 
   const status = $derived.by(() => {
     switch (session.scenario.state) {
@@ -48,6 +49,9 @@
   }
 </script>
 
+{#if session.sidebarSelection === "project"}
+  <SetupPanel {session} />
+{:else}
 <section class="conversation" aria-label="Current task">
   <header class="conversation-header">
     <button
@@ -61,7 +65,7 @@
     <div class="conversation-title">
       <h1>{session.scenario.conversation?.title ?? "New task"}</h1>
       <p>
-        {session.scenario.project?.name ?? "Choose a Project"}
+        {session.selectedProjectName}
         <span aria-hidden="true">·</span>
         Runs on {session.scenario.plane.name}
       </p>
@@ -130,10 +134,11 @@
         </button>
       </div>
       <div class="context-row" aria-label="Task context">
-        <span><small>Project</small>{session.scenario.project?.name ?? "Choose"}</span>
-        <span><small>Agent</small>{session.scenario.capabilities.harnesses[0] ?? "Choose"}</span>
+        <span><small>Project</small>{session.selectedProjectName}</span>
+        <span><small>Agent</small>{session.selectedHarnessName}</span>
         <span><small>Runs on</small>{session.scenario.plane.name}</span>
       </div>
     </div>
   </footer>
 </section>
+{/if}

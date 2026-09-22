@@ -1,6 +1,6 @@
 # Jet desktop implementation plan
 
-Status: Wave 0 foundation and Wave 1.1 native shell completed on 2026-09-22. Wave 1.2 is next.
+Status: Wave 0 foundation and Waves 1.1–1.2 completed on 2026-09-22. Wave 1.3 is next.
 
 This plan turns `docs/design-language.md` into a staged desktop product for macOS and Linux. It is repository-specific and preserves the boundaries in `apps/jet/AGENTS.md`, `apps/jet-tauri/AGENTS.md`, and the Jet protocol ADRs.
 
@@ -50,7 +50,7 @@ apps/jet/jet/
     Conversation/
     Composer/
     WorkPanel/
-    Onboarding/
+    Setup/
     Settings/
   PreviewSupport/
   Protocol/JetModels.swift
@@ -140,6 +140,8 @@ Status: completed on 2026-09-22 for the independent SwiftUI and Tauri clients.
 - Build components against fixtures before connecting them to live adapters.
 
 ### 1.2 Local setup and Projects
+
+Status: completed on 2026-09-22 for the independent SwiftUI and Tauri clients.
 
 - Detect and connect to the local Plane, show service health, and preserve meaningful stable errors.
 - List, register, select, and remove Projects using protocol commands and capability checks.

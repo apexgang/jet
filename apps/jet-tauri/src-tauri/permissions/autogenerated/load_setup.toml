@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-load-setup"
+description = "Enables the load_setup command without any pre-configured scope."
+commands.allow = ["load_setup"]
+
+[[permission]]
+identifier = "deny-load-setup"
+description = "Denies the load_setup command without any pre-configured scope."
+commands.deny = ["load_setup"]

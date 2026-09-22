@@ -24,6 +24,7 @@ actor JetClient {
     private var state: JetConnectionState = .disconnected
     private var connectionTask: Task<Void, Error>?
     private var readerTask: Task<Void, Never>?
+    private var connectionObservers: [UUID: AsyncStream<JetConnectionState>.Continuation] = [:]
     private var generation: UInt64 = 0
     private var pending: [UInt32: PendingReply] = [:]
     private var nextRequestID: UInt64 = 1
@@ -64,6 +65,20 @@ actor JetClient {
         state
     }
 
+    func connectionStates() -> AsyncStream<JetConnectionState> {
+        let observerID = UUID()
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: JetConnectionState.self,
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        connectionObservers[observerID] = continuation
+        continuation.yield(state)
+        continuation.onTermination = { _ in
+            Task { await self.removeConnectionObserver(observerID) }
+        }
+        return stream
+    }
+
     func connect() async throws {
         try await ensureConnected()
     }
@@ -98,6 +113,216 @@ actor JetClient {
                 attempt += 1
             }
         }
+    }
+
+    func setupSnapshot() async throws -> JetSetupSnapshot {
+        let status = try await status()
+        var issues: [JetSetupIssue] = []
+
+        let capabilities: JetCapabilitySummary
+        do {
+            capabilities = try await self.capabilities(.fresh)
+        } catch {
+            issues.append(setupIssue(.capabilities, error: error))
+            capabilities = JetCapabilitySummary(
+                coreVersion: status.coreVersion,
+                platform: "Platform unavailable",
+                harnesses: [],
+                credentialStore: .unavailable,
+                degraded: []
+            )
+        }
+
+        let projects: JetProjectList
+        do {
+            projects = try await self.projects()
+        } catch {
+            issues.append(setupIssue(.projects, error: error))
+            projects = JetProjectList(cursor: status.cursor ?? 0, projects: [])
+        }
+
+        let accounts: JetAccountBindingList
+        do {
+            accounts = try await accountBindings(.lastObserved)
+        } catch {
+            issues.append(setupIssue(.accounts, error: error))
+            accounts = JetAccountBindingList(cursor: status.cursor ?? 0, bindings: [])
+        }
+
+        let pairing: JetPairingSummary
+        do {
+            pairing = try await self.pairing()
+        } catch {
+            issues.append(setupIssue(.pairing, error: error))
+            pairing = JetPairingSummary(
+                cursor: status.cursor ?? 0,
+                gate: "closed",
+                pairedClients: 0,
+                hasPendingOffer: false
+            )
+        }
+        return JetSetupSnapshot(
+            status: status,
+            capabilities: capabilities,
+            projects: projects,
+            accounts: accounts,
+            pairing: pairing,
+            issues: issues
+        )
+    }
+
+    func capabilities(
+        _ observation: JetCapabilityObservation
+    ) async throws -> JetCapabilitySummary {
+        let (data, requestID) = try await sendQuery([
+            "type": "capabilities",
+            "observation": wireObservation(observation),
+        ])
+        return try decodeCapabilities(data, requestID: requestID)
+    }
+
+    func projects() async throws -> JetProjectList {
+        let (data, requestID) = try await sendQuery(["type": "projects"])
+        return try decodeProjects(data, requestID: requestID)
+    }
+
+    func previewProject(path: String) async throws -> JetProjectPreview {
+        guard !path.isEmpty,
+              path.utf8.count <= 4_096,
+              path.first == "/",
+              !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+        else {
+            throw JetClientFailure.presentation(
+                .invalidInput(
+                    code: "project.path_invalid",
+                    message: "Choose an absolute folder path without control characters."
+                )
+            )
+        }
+        let (data, requestID) = try await sendQuery([
+            "type": "preview_project",
+            "path": path,
+            "observation": wireObservation(.fresh),
+        ])
+        return try decodeProjectPreview(data, requestID: requestID)
+    }
+
+    func registerProject(
+        preview: JetProjectPreview,
+        commandID: UUID = UUID()
+    ) async throws -> JetProjectSummary {
+        guard preview.canRegister else {
+            throw JetClientFailure.presentation(
+                .invalidInput(
+                    code: "project.preview_not_registrable",
+                    message: "Review a registrable Project folder before adding it."
+                )
+            )
+        }
+        let (data, requestID) = try await sendCommand(
+            ["type": "register_project", "path": preview.root],
+            commandID: commandID
+        )
+        return try decodeRegisteredProject(data, requestID: requestID)
+    }
+
+    func accountBindings(
+        _ observation: JetCapabilityObservation
+    ) async throws -> JetAccountBindingList {
+        let (data, requestID) = try await sendQuery([
+            "type": "account_bindings",
+            "observation": wireObservation(observation),
+        ])
+        return try decodeAccountBindings(data, requestID: requestID)
+    }
+
+    func bindHarnessAccount(
+        _ option: JetAuthProvider,
+        commandID: UUID = UUID()
+    ) async throws -> JetAccountBindingSummary {
+        guard ["openai", "anthropic"].contains(option.provider) else {
+            throw JetClientFailure.presentation(
+                .invalidInput(
+                    code: "account.provider_unavailable",
+                    message: "That Harness is not available on this Plane."
+                )
+            )
+        }
+        // ASVS 13.3.1 and 14.3.3: the request carries no credential.
+        // Authentication stays in the Harness environment.
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "bind_account",
+                "provider": option.provider,
+                "label": option.label,
+                "credential_source": ["source": "harness_native"],
+            ],
+            commandID: commandID
+        )
+        return try decodeBoundAccount(data, requestID: requestID)
+    }
+
+    func pairing() async throws -> JetPairingSummary {
+        let (data, requestID) = try await sendQuery(["type": "pairing"])
+        return try decodePairing(data, requestID: requestID)
+    }
+
+    func previewProjectRemoval(
+        projectID: UUID
+    ) async throws -> JetProjectRemovalPreview {
+        let (data, requestID) = try await sendQuery([
+            "type": "preview_project_removal",
+            "project_id": projectID.uuidString.lowercased(),
+        ])
+        return try decodeProjectRemovalPreview(data, requestID: requestID)
+    }
+
+    func removeProject(
+        preview: JetProjectRemovalPreview,
+        typedName: String,
+        disposal: JetProjectDisposal,
+        commandID: UUID = UUID()
+    ) async throws -> JetProjectRemoved {
+        guard typedName == preview.name else {
+            throw JetClientFailure.presentation(
+                .invalidInput(
+                    code: "project.name_mismatch",
+                    message: "Type the Project folder name exactly as shown."
+                )
+            )
+        }
+        guard preview.obstacles.isEmpty else {
+            throw JetClientFailure.presentation(
+                .invalidInput(
+                    code: "project.live_work",
+                    message: "Resolve the listed blockers before removing this Project."
+                )
+            )
+        }
+        let binding = try JSONSerialization.jsonObject(
+            with: Data(preview.binding.source.utf8)
+        )
+        let wireDisposal: [String: Any] = switch disposal {
+        case .systemTrash:
+            ["kind": "system_trash"]
+        case let .permanent(acknowledgedWarning):
+            [
+                "kind": "permanent",
+                "acknowledged_warning": acknowledgedWarning,
+            ]
+        }
+        // ASVS 2.3.1 and 8.3.1: the command carries the exact validated
+        // Plane binding shown by the preview and only the intended choices.
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "remove_project",
+                "binding": binding,
+                "typed_name": typedName,
+                "disposal": wireDisposal,
+            ],
+            commandID: commandID
+        )
+        return try decodeRemovedProject(data, requestID: requestID)
     }
 
     func events(after cursor: UInt64) async throws -> JetEventBatch {
@@ -229,17 +454,90 @@ actor JetClient {
             connectionTask = nil
             let failure = normalized(error)
             if case let .presentation(presentation) = failure {
-                state = .failed(presentation)
+                publishState(.failed(presentation))
             }
             throw failure
         }
     }
 
+    private func sendQuery(
+        _ query: [String: Any]
+    ) async throws -> (Data, UInt64) {
+        var attempt = 0
+        while true {
+            do {
+                try await ensureConnected()
+                let requestID = takeRequestID()
+                let payload = try encodeClientMessage([
+                    "kind": "query",
+                    "id": NSNumber(value: requestID),
+                    "query": query,
+                ])
+                let response = try await exchange(
+                    payload,
+                    cancellationFailure: .presentation(.cancelled)
+                )
+                return (response, requestID)
+            } catch {
+                guard try await prepareReadRetry(error, attempt: attempt) else {
+                    throw normalized(error)
+                }
+                attempt += 1
+            }
+        }
+    }
+
+    private func sendCommand(
+        _ command: [String: Any],
+        commandID: UUID
+    ) async throws -> (Data, UInt64) {
+        var attempt = 0
+        while true {
+            do {
+                try await ensureConnected()
+                let requestID = takeRequestID()
+                let payload = try encodeClientMessage([
+                    "kind": "command",
+                    "id": NSNumber(value: requestID),
+                    "command_id": commandID.uuidString.lowercased(),
+                    "command": command,
+                ])
+                let response = try await exchange(
+                    payload,
+                    cancellationFailure: .commandOutcomeUnknown(commandID: commandID)
+                )
+                return (response, requestID)
+            } catch {
+                if isOffline(error), attempt < configuration.reconnectDelays.count {
+                    try await waitBeforeReconnect(attempt: attempt)
+                    attempt += 1
+                    continue
+                }
+                if isOffline(error) {
+                    throw JetClientFailure.commandOutcomeUnknown(commandID: commandID)
+                }
+                throw normalized(error)
+            }
+        }
+    }
+
     private func openConnection() async throws {
-        state = .connecting
+        publishState(.connecting)
         let candidate = makeTransport()
         do {
-            try await candidate.connect()
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    try await candidate.connect()
+                }
+                group.addTask { [connectionTimeout = configuration.connectionTimeout] in
+                    try await Task.sleep(for: connectionTimeout)
+                    throw JetClientFailure.presentation(.offline)
+                }
+                defer { group.cancelAll() }
+                guard try await group.next() != nil else {
+                    throw JetClientFailure.presentation(.offline)
+                }
+            }
             let hello = try encodeClientHello()
             try await candidate.write(Self.preface)
             try await candidate.write(
@@ -262,7 +560,7 @@ actor JetClient {
             let acceptedGeneration = generation
             transport = candidate
             negotiation = accepted
-            state = .connected(accepted)
+            publishState(.connected(accepted))
             readerTask = Task {
                 await self.readReplies(
                     from: candidate,
@@ -508,7 +806,7 @@ actor JetClient {
         readerTask = nil
         connectionTask?.cancel()
         connectionTask = nil
-        state = newState
+        publishState(newState)
 
         let continuations = pending.values.compactMap(\.continuation)
         pending.removeAll(keepingCapacity: true)
@@ -561,6 +859,353 @@ actor JetClient {
                 value: result["recovery"]
             )
         )
+    }
+
+    private func decodeCapabilities(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetCapabilitySummary {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "capabilities"
+        )
+        guard let coreVersion = result["core_version"] as? String,
+              let platform = result["platform"] as? [String: Any],
+              let operatingSystem = platform["operating_system"] as? String,
+              let architecture = platform["architecture"] as? String,
+              let harnesses = result["harnesses"] as? [String],
+              let credentialStore = result["credential_store"] as? [String: Any],
+              let credentialStatus = credentialStore["status"] as? String,
+              let storeState = JetCredentialStoreState(rawValue: credentialStatus),
+              let degraded = result["degraded"] as? [[String: Any]]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetCapabilitySummary(
+            coreVersion: coreVersion,
+            platform: "\(operatingSystem) · \(architecture)",
+            harnesses: harnesses,
+            credentialStore: storeState,
+            degraded: degraded.compactMap(degradedLabel)
+        )
+    }
+
+    private func decodeProjects(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetProjectList {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "projects"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let values = result["projects"] as? [[String: Any]]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetProjectList(
+            cursor: cursor,
+            projects: try values.map(decodeProject)
+        )
+    }
+
+    private func decodeProjectPreview(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetProjectPreview {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "project_preview"
+        )
+        guard let root = result["root"] as? String,
+              let value = result["registrability"] as? [String: Any],
+              let verdict = value["verdict"] as? String
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let registrability: JetProjectRegistrability
+        switch verdict {
+        case "registrable":
+            guard let repository = value["repository"] as? [String: Any],
+                  let worktree = repository["worktree"] as? [String: Any],
+                  let worktreeKind = worktree["kind"] as? String,
+                  let lfs = repository["lfs"] as? [String: Any],
+                  let lfsStatus = lfs["status"] as? String
+            else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            let tree = worktreeKind == "linked" ? "linked working tree" : "main working tree"
+            let lfsLabel = lfsStatus == "present" ? "Git LFS available" : "Git LFS not installed"
+            registrability = .registrable(detail: "\(tree), \(lfsLabel)")
+        case "not_a_repository":
+            registrability = .unavailable(
+                verdict: verdict,
+                detail: "Choose the top folder of a Git working tree."
+            )
+        case "broken_repository":
+            registrability = .unavailable(
+                verdict: verdict,
+                detail: "Git cannot open this repository."
+            )
+        case "bare_repository":
+            registrability = .unavailable(
+                verdict: verdict,
+                detail: "Jet needs a working tree, not a bare repository."
+            )
+        case "inside_git_dir":
+            registrability = .unavailable(
+                verdict: verdict,
+                detail: "Choose the working tree instead of its .git directory."
+            )
+        case "inside_working_tree":
+            guard let topLevel = value["toplevel"] as? String else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            registrability = .unavailable(
+                verdict: verdict,
+                detail: "Choose the repository root at \(topLevel)."
+            )
+        default:
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetProjectPreview(root: root, registrability: registrability)
+    }
+
+    private func decodeRegisteredProject(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetProjectSummary {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "project_registered"
+        )
+        return try decodeProject(result)
+    }
+
+    private func decodeAccountBindings(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetAccountBindingList {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "account_bindings"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let values = result["bindings"] as? [[String: Any]]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let bindings = try values.map { value -> JetAccountBindingSummary in
+            guard let binding = value["binding"] as? [String: Any],
+                  let credential = value["credential_state"] as? [String: Any],
+                  let state = credential["state"] as? String
+            else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return try decodeAccount(binding, state: state)
+        }
+        return JetAccountBindingList(cursor: cursor, bindings: bindings)
+    }
+
+    private func decodeBoundAccount(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetAccountBindingSummary {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "account_bound"
+        )
+        return try decodeAccount(result, state: "resolved_at_use")
+    }
+
+    private func decodePairing(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetPairingSummary {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "pairing"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let gate = result["gate"] as? String,
+              ["open", "closed"].contains(gate)
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let clients = result["clients"] as? [[String: Any]] ?? []
+        return JetPairingSummary(
+            cursor: cursor,
+            gate: gate,
+            pairedClients: clients.count,
+            hasPendingOffer: result["pending"] != nil && !(result["pending"] is NSNull)
+        )
+    }
+
+    private func decodeProjectRemovalPreview(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetProjectRemovalPreview {
+        let (document, result, resultNode) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "project_removal_preview"
+        )
+        guard let binding = result["binding"] as? [String: Any],
+              let bindingNode = resultNode.member("binding"),
+              let projectID = uuid(binding["project_id"]),
+              let root = binding["root"] as? String,
+              let liveRuns = unsigned64(binding["live_runs"]),
+              let schedules = unsigned64(binding["schedules"]),
+              let dirtyFiles = unsigned64(binding["dirty_files"]),
+              let unpushedCommits = unsigned64(binding["unpushed_commits"]),
+              let workspaces = binding["workspaces"] as? [String],
+              let diskUseBytes = unsigned64(result["disk_use_bytes"]),
+              let obstacles = result["obstacles"] as? [String],
+              let warning = result["permanent_removal_warning"] as? String
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetProjectRemovalPreview(
+            projectID: projectID,
+            root: root,
+            diskUseBytes: diskUseBytes,
+            liveRuns: liveRuns,
+            schedules: schedules,
+            dirtyFiles: dirtyFiles,
+            unpushedCommits: unpushedCommits,
+            workspaceCount: workspaces.count,
+            obstacles: obstacles.map(removalObstacleLabel),
+            permanentWarning: warning,
+            binding: try document.rawJSON(for: bindingNode)
+        )
+    }
+
+    private func decodeRemovedProject(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetProjectRemoved {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "project_removed"
+        )
+        guard let projectID = uuid(result["project_id"]),
+              let root = result["root"] as? String,
+              let disposition = result["disposition"] as? String,
+              ["trashed", "deleted"].contains(disposition)
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetProjectRemoved(
+            projectID: projectID,
+            root: root,
+            disposition: disposition
+        )
+    }
+
+    private func responseResult(
+        _ data: Data,
+        requestID: UInt64,
+        kind: String,
+        type: String
+    ) throws -> (JetJSONDocument, [String: Any], JetJSONNode) {
+        let document = try responseDocument(data, requestID: requestID)
+        guard let root = document.value as? [String: Any],
+              root["kind"] as? String == kind,
+              let result = root["result"] as? [String: Any],
+              result["type"] as? String == type,
+              let resultNode = document.root.member("result")
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return (document, result, resultNode)
+    }
+
+    private func decodeProject(_ value: [String: Any]) throws -> JetProjectSummary {
+        guard let projectID = uuid(value["project_id"]),
+              let root = value["root"] as? String
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetProjectSummary(id: projectID, root: root)
+    }
+
+    private func decodeAccount(
+        _ value: [String: Any],
+        state: String
+    ) throws -> JetAccountBindingSummary {
+        guard let bindingID = uuid(value["binding_id"]),
+              let provider = value["provider"] as? String,
+              let label = value["label"] as? String
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let stateLabel = switch state {
+        case "resolvable": "Ready"
+        case "resolved_at_use": "Checked when used"
+        case "waiting_for_unlock": "Unlock required"
+        case "unavailable": "Unavailable"
+        case "invalidated_by_restart": "Reconnect required"
+        default: "Unknown"
+        }
+        guard stateLabel != "Unknown" else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetAccountBindingSummary(
+            id: bindingID,
+            provider: provider,
+            label: label,
+            state: state,
+            stateLabel: stateLabel
+        )
+    }
+
+    private func degradedLabel(_ value: [String: Any]) -> String? {
+        switch value["condition"] as? String {
+        case "missing_external_tool":
+            switch value["tool"] as? String {
+            case "git": "Git is not available"
+            case "git-lfs": "Git LFS is not available"
+            case "ssh": "SSH is not available"
+            case "tailscale": "Tailscale is not available"
+            default: nil
+            }
+        case "no_harness_available": "No Harness is installed"
+        case "credential_store_unavailable": "Secure storage is unavailable"
+        case "credential_store_locked": "Secure storage is locked"
+        default: nil
+        }
+    }
+
+    private func removalObstacleLabel(_ value: String) -> String {
+        switch value {
+        case "live_runs": "Stop active Runs first"
+        case "schedules": "Disable scheduled tasks first"
+        case "filesystem_root": "A filesystem root cannot be removed"
+        case "user_home": "Your home directory cannot be removed"
+        case "jet_home": "Jet's data directory cannot be removed"
+        case "contains_project": "Remove nested Projects first"
+        default: "Refresh the removal preview"
+        }
     }
 
     private func decodeEvents(
@@ -733,8 +1378,30 @@ actor JetClient {
     }
 
     private func waitBeforeReconnect(attempt: Int) async throws {
-        state = .reconnecting(attempt: attempt + 1)
+        publishState(.reconnecting(attempt: attempt + 1))
         try await ContinuousClock().sleep(for: configuration.reconnectDelays[attempt])
+    }
+
+    private func publishState(_ newState: JetConnectionState) {
+        state = newState
+        for continuation in connectionObservers.values {
+            continuation.yield(newState)
+        }
+    }
+
+    private func removeConnectionObserver(_ observerID: UUID) {
+        connectionObservers.removeValue(forKey: observerID)
+    }
+
+    private func setupIssue(
+        _ section: JetSetupSection,
+        error: Error
+    ) -> JetSetupIssue {
+        let presentation: JetPresentationError = switch normalized(error) {
+        case let .presentation(error): error
+        case .commandOutcomeUnknown: .invalidResponse
+        }
+        return JetSetupIssue(section: section, error: presentation)
     }
 
     private func takeRequestID() -> UInt64 {
@@ -764,6 +1431,15 @@ actor JetClient {
                 "type": "conversation",
                 "conversation_id": conversationID.uuidString.lowercased(),
             ]
+        }
+    }
+
+    private func wireObservation(
+        _ observation: JetCapabilityObservation
+    ) -> [String: Any] {
+        switch observation {
+        case .lastObserved: ["type": "last_observed"]
+        case .fresh: ["type": "fresh"]
         }
     }
 

@@ -41,6 +41,7 @@ body,
 }
 
 button,
+input,
 textarea {
   font: inherit;
 }
@@ -50,9 +51,544 @@ button {
 }
 
 button:focus-visible,
+input:focus-visible,
 textarea:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.setup-panel {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--background);
+}
+
+.setup-header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 92px;
+  padding: 18px 28px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--background) 94%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.setup-header h1 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+}
+
+.setup-header p,
+.setup-copy p,
+.project-preview p,
+.setup-failure p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.setup-content,
+.setup-loading,
+.setup-failure {
+  width: min(100%, 880px);
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.setup-content {
+  display: grid;
+}
+
+.setup-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 19px 2px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.setup-row.expanded {
+  align-items: start;
+}
+
+.setup-row h2,
+.setup-failure h2,
+.removal-dialog h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.setup-wide {
+  grid-column: 2 / -1;
+}
+
+.setup-row-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.setup-icon {
+  width: 11px;
+  height: 11px;
+  margin: 5px auto 0;
+  border: 2px solid var(--quiet);
+  border-radius: 3px;
+}
+
+.setup-icon.online {
+  border-radius: 50%;
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.setup-icon.online.warning {
+  border-color: var(--warning);
+  background: var(--warning);
+}
+
+.setup-copy .service-warning {
+  color: var(--warning);
+}
+
+.setup-icon.folder {
+  border-color: var(--accent);
+  border-radius: 2px;
+}
+
+.setup-icon.account {
+  border-radius: 50%;
+}
+
+.setup-icon.remote {
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px var(--background), 0 0 0 4px var(--quiet);
+}
+
+.status-text {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.status-text.success {
+  color: var(--success);
+}
+
+.status-text.warning {
+  color: var(--warning);
+}
+
+.project-list,
+.account-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 16px;
+}
+
+.project-line,
+.account-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 6px 8px;
+  border-radius: 9px;
+}
+
+.project-line:hover,
+.project-line.selected {
+  background: var(--hover);
+}
+
+.project-line > span,
+.account-line > span:last-child {
+  color: var(--quiet);
+  font-size: 11px;
+}
+
+.project-select {
+  display: grid;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.project-select strong,
+.account-line strong {
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.project-select small,
+.account-line small {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--quiet);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-line {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-inline: 0;
+}
+
+.account-line > span:first-child {
+  display: grid;
+}
+
+.path-form {
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+}
+
+.choose-folder {
+  margin-top: 18px;
+}
+
+.expert-path {
+  margin-top: 12px;
+  color: var(--quiet);
+  font-size: 11px;
+}
+
+.expert-path summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.expert-path .path-form {
+  margin-top: 10px;
+}
+
+.section-error {
+  color: var(--warning) !important;
+}
+
+.section-error code,
+.service-warning code {
+  margin-left: 4px;
+  color: var(--quiet);
+  font-size: 10px;
+}
+
+.path-form label,
+.removal-dialog label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.field-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.field-action input,
+.removal-dialog input[type="text"],
+.removal-dialog input:not([type]) {
+  min-width: 0;
+  height: 36px;
+  padding: 7px 10px;
+  border: 1px solid #3a454c;
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--text);
+}
+
+.project-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--raised));
+}
+
+.project-preview.warning {
+  background: color-mix(in srgb, var(--warning) 8%, var(--raised));
+}
+
+.project-preview strong {
+  font-size: 12px;
+}
+
+.project-preview .path {
+  max-width: 60ch;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.primary-button,
+.secondary-button,
+.danger-button,
+.text-button {
+  min-height: 32px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.primary-button {
+  border: 0;
+  background: var(--accent);
+  color: #071116;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+
+.secondary-button {
+  border: 1px solid var(--border);
+  background: var(--raised);
+  color: var(--text);
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: #43515a;
+  background: var(--hover);
+}
+
+.text-button {
+  padding-inline: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+}
+
+.text-button.danger {
+  color: #ff9a9a;
+}
+
+.danger-button {
+  border: 0;
+  background: #a83d45;
+  color: white;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: #bd4851;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled,
+.danger-button:disabled,
+.text-button:disabled {
+  opacity: 0.45;
+}
+
+.inline-empty,
+.setup-notice {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.setup-notice {
+  padding: 11px 2px 0 42px;
+}
+
+.setup-failure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  min-height: 260px;
+}
+
+.setup-failure code {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--quiet);
+  font-size: 11px;
+}
+
+.setup-loading {
+  display: grid;
+  gap: 16px;
+  padding-top: 54px;
+}
+
+.loading-bar {
+  width: 100%;
+  height: 64px;
+  border-radius: 10px;
+  background: var(--raised);
+  animation: setup-pulse 1.5s ease-in-out infinite alternate;
+}
+
+.loading-bar.short {
+  width: 72%;
+}
+
+@keyframes setup-pulse {
+  from { opacity: 0.55; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-bar {
+    animation: none;
+  }
+}
+
+.removal-dialog {
+  z-index: 21;
+  width: min(92vw, 520px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.48);
+}
+
+.removal-dialog::backdrop {
+  background: rgb(0 0 0 / 0.55);
+}
+
+.removal-dialog form {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.removal-dialog header p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.removal-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.removal-facts div {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.removal-facts dt,
+.removal-facts dd {
+  margin: 0;
+  font-size: 12px;
+}
+
+.removal-facts dt {
+  color: var(--quiet);
+}
+
+.removal-facts dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.removal-obstacles {
+  padding: 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning) 10%, var(--background));
+  font-size: 12px;
+}
+
+.removal-obstacles ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.removal-dialog input:not([type="checkbox"]) {
+  width: 100%;
+  margin-top: -10px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: start;
+  gap: 9px;
+  color: var(--text) !important;
+}
+
+.checkbox-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.removal-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .setup-header,
+  .setup-failure,
+  .setup-row-heading,
+  .project-preview {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .setup-header {
+    position: static;
+  }
+
+  .setup-row {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .service-row .status-text,
+  .setup-row > .text-button {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .project-line {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .project-line > span {
+    display: none;
+  }
 }
 
 ::selection {

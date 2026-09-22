@@ -9,10 +9,10 @@ struct JetCommands: Commands {
             Button("New Task", action: session.beginNewTask)
                 .keyboardShortcut("n", modifiers: [.command])
 
-            Button("Add Project…") {}
-                .disabled(true)
-            Button("Open Project…") {}
-                .disabled(true)
+            Button("Add Project…", action: session.requestAddProject)
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+
+            Button("Manage Projects", action: session.showProjects)
         }
 
         CommandGroup(after: .textEditing) {
