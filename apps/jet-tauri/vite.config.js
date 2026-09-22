@@ -3,6 +3,7 @@ import { sveltekit } from "@sveltejs/kit/vite";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+const repositoryRoot = decodeURIComponent(new URL("../../", import.meta.url).pathname);
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
@@ -14,6 +15,8 @@ export default defineConfig(async () => ({
   clearScreen: false,
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
+    // The desktop fixture corpus is shared by both independent clients.
+    fs: { allow: [repositoryRoot] },
     port: 1420,
     strictPort: true,
     host: host || false,

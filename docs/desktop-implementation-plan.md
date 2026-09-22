@@ -1,6 +1,6 @@
 # Jet desktop implementation plan
 
-Status: planning approved on 2026-09-21. Implementation has not started.
+Status: Wave 0 foundation completed through the architecture checkpoint on 2026-09-22. Wave 1 has not started.
 
 This plan turns `docs/design-language.md` into a staged desktop product for macOS and Linux. It is repository-specific and preserves the boundaries in `apps/jet/AGENTS.md`, `apps/jet-tauri/AGENTS.md`, and the Jet protocol ADRs.
 
@@ -85,6 +85,8 @@ Goal: prove the architecture before building the shell.
 
 ### 0.1 Contract and fixture inventory
 
+Status: completed on 2026-09-22.
+
 - Map each confirmed screen and action to its query, command, response, event, capability, stable error, and revision rule.
 - Create a checked-in presentation fixture corpus for first launch, ready, active, queued, approval, completed, offline, stale cursor, denied, unsupported, and recovery states.
 - Record unsupported UI actions rather than mocking them with local state.
@@ -93,6 +95,8 @@ Goal: prove the architecture before building the shell.
 Exit: every Wave 1 and Wave 2 interaction has a named protocol path or a tracked backend dependency.
 
 ### 0.2 Swift transport spike
+
+Status: completed on 2026-09-22.
 
 - Prove a local UNIX-domain connection, framed JSON request and response, authentication handshake, event stream, cancellation, reconnect, and cursor resume.
 - Evaluate the structured-concurrency `NetworkConnection` API against `NWEndpoint.unix(path:)` on the current deployment target.
@@ -103,6 +107,8 @@ Exit: a non-UI integration test can connect to a real or hermetic `jetd`, run on
 
 ### 0.3 Tauri bridge spike and shell hardening
 
+Status: completed on 2026-09-22.
+
 - Add `packages/jet-client` to the Rust shell and prove the same query, command, stream, reconnect, and cursor-resume path.
 - Replace the starter `greet` surface with a minimal typed bridge boundary.
 - Replace `csp: null` with a restrictive policy that includes at least `object-src 'none'` and `base-uri 'none'`, then add only measured exceptions.
@@ -112,7 +118,11 @@ Exit: the webview can render a sanitized fixture and a live connection status wi
 
 ### 0.4 Architecture decision checkpoint
 
+Status: completed on 2026-09-22 in [ADR-0106](adr/0106-freeze-independent-desktop-client-foundations.md).
+
 Capture the spike results in an ADR or an amendment to this plan. Freeze the adapter interfaces, connection state machine, error taxonomy, fixture format, and client-state ownership before shell implementation.
+
+The checkpoint freezes both apps as independent peer clients of `jetd`, with shared protocol and presentation contracts but no shared runtime bridge. Wave 1 changes to a frozen boundary require a superseding ADR.
 
 Estimated effort: 2 to 4 engineer-weeks. The Swift production transport and decoder are the largest uncertainty.
 

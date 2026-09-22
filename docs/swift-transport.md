@@ -5,6 +5,9 @@ implementation lives under `apps/jet/jet/Client/`; feature code uses
 `JetClient` and does not see Network.framework callbacks, frame headers, JSON
 dictionaries, or native error text.
 
+The cross-client architecture and frozen Wave 0 boundary are recorded in
+[ADR-0106](adr/0106-freeze-independent-desktop-client-foundations.md).
+
 ## Adapter decision
 
 The macOS 26 SDK's structured-concurrency Network API was evaluated with
