@@ -21,7 +21,9 @@ struct JetCommands: Commands {
         }
 
         CommandMenu("Conversation") {
-            Button("Send", action: session.submitDraft)
+            Button("Send") {
+                Task { await session.submitDraft() }
+            }
                 .keyboardShortcut(.return, modifiers: [.command])
                 .disabled(!session.canSubmitDraft)
             Divider()

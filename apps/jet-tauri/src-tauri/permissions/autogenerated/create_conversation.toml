@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-create-conversation"
+description = "Allows creating a Conversation in a registered Project."
+commands.allow = ["create_conversation"]
+
+[[permission]]
+identifier = "deny-create-conversation"
+description = "Denies creating Conversations."
+commands.deny = ["create_conversation"]

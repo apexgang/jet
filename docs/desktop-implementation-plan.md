@@ -1,6 +1,6 @@
 # Jet desktop implementation plan
 
-Status: Wave 0 foundation and Waves 1.1–1.2 completed on 2026-09-22. Wave 1.3 is next.
+Status: Wave 0 foundation and Wave 1 completed on 2026-09-22. Wave 2.1 is next.
 
 This plan turns `docs/design-language.md` into a staged desktop product for macOS and Linux. It is repository-specific and preserves the boundaries in `apps/jet/AGENTS.md`, `apps/jet-tauri/AGENTS.md`, and the Jet protocol ADRs.
 
@@ -150,10 +150,14 @@ Status: completed on 2026-09-22 for the independent SwiftUI and Tauri clients.
 
 ### 1.3 Conversation vertical slice
 
+Status: completed on 2026-09-22 for the independent SwiftUI and Tauri clients.
+
 - List and search Conversations with pagination and stable selection.
 - Create a Conversation, create or start a Run, submit a Turn, and stream useful activity into the timeline.
 - Group low-value raw events and preserve the protocol's order within each Plane.
 - Support relaunch, offline cache labeling, reconnect, cursor resume, and full snapshot recovery after cursor expiry.
+
+Verification: rebuilt SwiftUI and Tauri application bundles were visually inspected in their offline and reconnecting states. Automated tests cover the protocol and client behavior in this slice. This validation pass did not complete a task against a live local daemon.
 
 Exit: on macOS and Linux, a new user can complete one local task, relaunch the app, and return to the same Conversation. VoiceOver or keyboard-only operation covers every critical action on macOS.
 

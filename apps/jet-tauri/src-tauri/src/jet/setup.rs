@@ -70,10 +70,19 @@ struct PlaneSetupView {
 #[serde(rename_all = "camelCase")]
 struct CapabilityView {
     harnesses: Vec<String>,
+    crafts: Vec<CraftView>,
     credential_store: &'static str,
     credential_store_label: &'static str,
     degraded: Vec<String>,
     auth_providers: Vec<AuthProviderView>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CraftView {
+    id: String,
+    version: String,
+    harnesses: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -442,6 +451,19 @@ fn snapshot(
                     .iter()
                     .map(|value| safe_text(value, 64, "Unknown Harness"))
                     .collect(),
+                crafts: capabilities
+                    .crafts
+                    .iter()
+                    .map(|craft| CraftView {
+                        id: safe_text(&craft.craft_id, 128, "unavailable"),
+                        version: safe_text(&craft.version, 64, "Unknown"),
+                        harnesses: craft
+                            .harnesses
+                            .iter()
+                            .map(|value| safe_text(value, 64, "Unknown Harness"))
+                            .collect(),
+                    })
+                    .collect(),
                 credential_store,
                 credential_store_label,
                 degraded: capabilities.degraded.iter().map(degraded_label).collect(),
@@ -453,6 +475,7 @@ fn snapshot(
             "Platform unavailable".into(),
             CapabilityView {
                 harnesses: Vec::new(),
+                crafts: Vec::new(),
                 credential_store: "unavailable",
                 credential_store_label: "Secure storage status unavailable",
                 degraded: Vec::new(),

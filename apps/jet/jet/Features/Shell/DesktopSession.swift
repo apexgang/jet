@@ -32,6 +32,19 @@ enum WorkPanelTab: String, CaseIterable, Hashable, Sendable {
 @MainActor
 @Observable
 final class DesktopSession {
+    private struct PendingStart {
+        let conversationID: UUID
+        let craft: String
+        let prompt: String
+        let commandID: UUID
+    }
+
+    private struct PendingTurn {
+        let conversationID: UUID
+        let prompt: String
+        let commandID: UUID
+    }
+
     enum ContentState {
         case loading
         case ready(DesktopFixtureScenario)
@@ -67,6 +80,17 @@ final class DesktopSession {
     var setupNotice: String?
     var setupOperation: String?
     var remotePairingSkipped = false
+    var conversations: [JetConversationSummary] = []
+    var conversationCursor: UInt64 = 0
+    var nextConversationPage: UUID?
+    var selectedConversationID: UUID?
+    var conversationSnapshot: JetConversationSnapshot?
+    var conversationFreshness: JetConversationFreshness = .loading
+    var conversationOperation: String?
+    var timeline: [JetTimelineEntry] = []
+    var searchText = ""
+    var searchResult: JetSearchResult?
+    var searchIsLoading = false
 
     private var scenarios: [DesktopFixtureState: DesktopFixtureScenario] = [:]
     private var didLoadFixtures = false
@@ -77,6 +101,13 @@ final class DesktopSession {
     private var removalTrashCommandID = UUID()
     private var removalPermanentCommandID = UUID()
     private var accountCommandIDs: [String: UUID] = [:]
+    private var createCommandProjectID: UUID?
+    private var createCommandID = UUID()
+    private var pendingStart: PendingStart?
+    private var pendingTurn: PendingTurn?
+    private var eventObservationTask: Task<Void, Never>?
+    private var conversationRequest = 0
+    private var searchRequest = 0
 
     init(makeJetClient: JetClientFactory? = nil) {
         self.makeJetClient = makeJetClient
@@ -86,6 +117,8 @@ final class DesktopSession {
         guard case let .ready(scenario) = contentState else { return nil }
         return scenario
     }
+
+    var usesLivePlane: Bool { makeJetClient != nil }
 
     var canSubmitDraft: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -101,14 +134,44 @@ final class DesktopSession {
     }
 
     var selectedProjectName: String {
-        selectedProject?.name ?? scenario?.project?.name ?? "Choose a Project"
+        if selectedConversationID != nil {
+            guard let projectID = selectedConversation?.projectID else {
+                return selectedConversation == nil ? "Project unavailable" : "No Project"
+            }
+            return setupSnapshot?.projects.projects.first(where: { $0.id == projectID })?.name
+                ?? "Project unavailable"
+        }
+        if let selectedProject { return selectedProject.name }
+        return usesLivePlane ? "Choose a Project" : scenario?.project?.name ?? "Choose a Project"
     }
 
     var selectedHarnessName: String {
-        setupSnapshot?.accounts.bindings.first?.label
+        if let label = setupSnapshot?.accounts.bindings.first?.label
             ?? setupSnapshot?.capabilities.authProviders.first?.harness
-            ?? scenario?.capabilities.harnesses.first?.capitalized
-            ?? "Choose"
+        {
+            return label
+        }
+        return usesLivePlane ? "Choose an Agent" : scenario?.capabilities.harnesses.first?.capitalized ?? "Choose"
+    }
+
+    var selectedCraftID: String? {
+        setupSnapshot?.capabilities.crafts.first?.id
+    }
+
+    var selectedConversation: JetConversationSummary? {
+        conversations.first { $0.id == selectedConversationID }
+    }
+
+    var selectedConversationTitle: String {
+        selectedConversation?.title ?? "New task"
+    }
+
+    var selectedRun: JetRunSummary? {
+        conversationSnapshot?.runs.last
+    }
+
+    var hasLiveRun: Bool {
+        selectedRun?.lifecycle.isLive == true
     }
 
     var planeConnectionLabel: String {
@@ -190,6 +253,132 @@ final class DesktopSession {
                 ? .reconnecting(attempt: 1)
                 : .failed(failure)
         }
+    }
+
+    func loadConversations(restoring restoredID: UUID? = nil) async {
+        guard makeJetClient != nil else { return }
+        conversationRequest += 1
+        let request = conversationRequest
+        if conversations.isEmpty { conversationFreshness = .loading }
+        do {
+            let client = try await activeClient()
+            let page = try await client.conversations()
+            guard request == conversationRequest else { return }
+            conversations = page.conversations
+            conversationCursor = page.cursor
+            nextConversationPage = page.nextPage
+            conversationFreshness = .live
+            let previousConversationID = selectedConversationID
+            let candidate = restoredID ?? selectedConversationID
+            var restoredSnapshot: JetConversationSnapshot?
+            if let candidate,
+               !conversations.contains(where: { $0.id == candidate })
+            {
+                restoredSnapshot = try? await client.conversation(candidate)
+                guard request == conversationRequest else { return }
+                if let restoredSnapshot {
+                    conversations.append(restoredSnapshot.conversation)
+                }
+            }
+            selectedConversationID = candidate.flatMap { wanted in
+                conversations.contains(where: { $0.id == wanted }) ? wanted : nil
+            } ?? conversations.first?.id
+            if selectedConversationID != previousConversationID {
+                timeline = []
+                conversationSnapshot = nil
+            }
+            if let restoredSnapshot,
+               restoredSnapshot.conversation.id == selectedConversationID
+            {
+                conversationSnapshot = restoredSnapshot
+            } else if selectedConversationID != nil {
+                await loadSelectedConversation()
+            } else {
+                conversationSnapshot = nil
+            }
+            if eventObservationTask == nil {
+                observeEvents(after: page.cursor)
+            }
+        } catch {
+            guard request == conversationRequest else { return }
+            let failure = presentationError(error)
+            conversationFreshness = conversations.isEmpty ? .failed : .cached
+            actionNotice = failure.message
+        }
+    }
+
+    func loadMoreConversations() async {
+        guard let nextConversationPage, conversationOperation == nil else { return }
+        conversationOperation = "page"
+        do {
+            let page = try await activeClient().nextConversations(nextConversationPage)
+            let known = Set(conversations.map(\.id))
+            conversations.append(contentsOf: page.conversations.filter { !known.contains($0.id) })
+            self.nextConversationPage = page.nextPage
+            conversationFreshness = .live
+        } catch {
+            let failure = presentationError(error)
+            if failure.code == "pagination.stale" {
+                await loadConversations()
+            } else {
+                actionNotice = failure.message
+            }
+        }
+        conversationOperation = nil
+    }
+
+    func searchConversations() async {
+        searchRequest += 1
+        let request = searchRequest
+        let text = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            searchResult = nil
+            searchIsLoading = false
+            return
+        }
+        searchIsLoading = true
+        do {
+            let result = try await activeClient().searchConversations(text)
+            guard request == searchRequest else { return }
+            searchResult = result
+        } catch {
+            guard request == searchRequest else { return }
+            actionNotice = presentationError(error).message
+        }
+        if request == searchRequest { searchIsLoading = false }
+    }
+
+    func selectConversation(_ conversationID: UUID) {
+        if selectedConversationID != conversationID {
+            timeline = []
+            conversationSnapshot = nil
+        }
+        selectedConversationID = conversationID
+        sidebarSelection = .conversation
+        isWorkPanelPresented = true
+        actionNotice = nil
+        Task { await loadSelectedConversation() }
+    }
+
+    func selectSearchHit(_ conversationID: UUID) {
+        selectConversation(conversationID)
+    }
+
+    private func loadSelectedConversation() async {
+        guard let selectedConversationID else { return }
+        conversationOperation = "snapshot"
+        do {
+            let snapshot = try await activeClient().conversation(selectedConversationID)
+            guard self.selectedConversationID == selectedConversationID else { return }
+            conversationSnapshot = snapshot
+            mergeConversation(snapshot.conversation)
+            conversationFreshness = .live
+        } catch {
+            guard self.selectedConversationID == selectedConversationID else { return }
+            conversationFreshness = conversationSnapshot == nil ? .failed : .cached
+            actionNotice = presentationError(error).message
+        }
+        conversationOperation = nil
     }
 
     func requestAddProject() {
@@ -335,7 +524,9 @@ final class DesktopSession {
 
     func beginNewTask() {
         sidebarSelection = .newTask
-        showScenario(.ready)
+        selectedConversationID = nil
+        conversationSnapshot = nil
+        timeline = []
         isWorkPanelPresented = false
         actionNotice = nil
         composerFocusRequest += 1
@@ -343,26 +534,33 @@ final class DesktopSession {
 
     func selectSearch() {
         sidebarSelection = .search
-        actionNotice = "Search arrives with the Conversation list in Wave 1.3."
+        isWorkPanelPresented = false
+        actionNotice = nil
     }
 
     func applySidebarSelection() {
         actionNotice = nil
         switch sidebarSelection {
         case .newTask:
-            showScenario(.ready)
+            selectedConversationID = nil
+            conversationSnapshot = nil
+            timeline = []
             isWorkPanelPresented = false
             composerFocusRequest += 1
         case .search:
-            actionNotice = "Search arrives with the Conversation list in Wave 1.3."
+            isWorkPanelPresented = false
         case .needsAttention:
-            showScenario(.approval, fallback: .recovery)
-            isWorkPanelPresented = true
+            if usesLivePlane {
+                actionNotice = "The attention inbox arrives with Run controls in Wave 2.1."
+                isWorkPanelPresented = false
+            } else {
+                showScenario(.approval, fallback: .recovery)
+                isWorkPanelPresented = true
+            }
         case .project:
             showScenario(.ready)
             isWorkPanelPresented = false
         case .conversation:
-            showScenario(.active)
             isWorkPanelPresented = true
         case .schedules:
             actionNotice = "Schedules are planned for Wave 3."
@@ -371,12 +569,84 @@ final class DesktopSession {
         }
     }
 
-    func submitDraft() {
-        guard canSubmitDraft else { return }
-        // ASVS 2.1.1 and 2.2.2: Wave 1.1 keeps the draft in presentation
-        // state. A later typed adapter must validate it at the trusted Plane
-        // boundary before it can become a Command.
-        actionNotice = "Task submission is not connected in this shell yet. Your draft was kept."
+    func submitDraft() async {
+        guard canSubmitDraft, conversationOperation == nil else { return }
+        guard planeIsConnected else {
+            actionNotice = "Reconnect to the Plane before sending. Your draft was kept."
+            return
+        }
+        guard let craft = selectedCraftID else {
+            actionNotice = "Install an available Craft before starting work."
+            return
+        }
+
+        conversationOperation = "send"
+        actionNotice = nil
+        let prompt = draft
+        do {
+            var conversationID = selectedConversationID
+            if conversationID == nil {
+                guard let selectedProjectID else {
+                    actionNotice = "Choose a Project before starting a task."
+                    conversationOperation = nil
+                    return
+                }
+                if createCommandProjectID != selectedProjectID {
+                    createCommandProjectID = selectedProjectID
+                    createCommandID = UUID()
+                }
+                let conversation = try await activeClient().createConversation(
+                    projectID: selectedProjectID,
+                    commandID: createCommandID
+                )
+                createCommandProjectID = nil
+                createCommandID = UUID()
+                mergeConversation(conversation)
+                conversationID = conversation.id
+                self.selectedConversationID = conversation.id
+                sidebarSelection = .conversation
+                isWorkPanelPresented = true
+                conversationSnapshot = try await activeClient().conversation(conversation.id)
+            }
+
+            guard let conversationID else {
+                conversationOperation = nil
+                actionNotice = "Jet could not prepare this Conversation. Try again."
+                return
+            }
+            if hasLiveRun {
+                let pending = pendingTurnFor(
+                    conversationID: conversationID,
+                    prompt: prompt
+                )
+                _ = try await activeClient().submitTurn(
+                    conversationID: conversationID,
+                    prompt: prompt,
+                    commandID: pending.commandID
+                )
+                pendingTurn = nil
+            } else {
+                let pending = pendingStartFor(
+                    conversationID: conversationID,
+                    craft: craft,
+                    prompt: prompt
+                )
+                _ = try await activeClient().startRun(
+                    conversationID: conversationID,
+                    craft: craft,
+                    prompt: prompt,
+                    commandID: pending.commandID
+                )
+                pendingStart = nil
+            }
+            draft = ""
+            actionNotice = "Sent to the Plane."
+            await loadSelectedConversation()
+        } catch {
+            actionNotice = presentationError(error).message
+            await loadConversations()
+        }
+        conversationOperation = nil
     }
 
     func showFixture(_ state: DesktopFixtureState) {
@@ -388,6 +658,142 @@ final class DesktopSession {
         didLoadFixtures = false
         contentState = .loading
         Task { await loadFoundationFixture() }
+    }
+
+    private func mergeConversation(_ conversation: JetConversationSummary) {
+        if let index = conversations.firstIndex(where: { $0.id == conversation.id }) {
+            conversations[index] = conversation
+        } else {
+            conversations.insert(conversation, at: 0)
+        }
+    }
+
+    private func pendingStartFor(
+        conversationID: UUID,
+        craft: String,
+        prompt: String
+    ) -> PendingStart {
+        if let pendingStart,
+           pendingStart.conversationID == conversationID,
+           pendingStart.craft == craft,
+           pendingStart.prompt == prompt
+        {
+            return pendingStart
+        }
+        let pending = PendingStart(
+            conversationID: conversationID,
+            craft: craft,
+            prompt: prompt,
+            commandID: UUID()
+        )
+        pendingStart = pending
+        return pending
+    }
+
+    private func pendingTurnFor(
+        conversationID: UUID,
+        prompt: String
+    ) -> PendingTurn {
+        if let pendingTurn,
+           pendingTurn.conversationID == conversationID,
+           pendingTurn.prompt == prompt
+        {
+            return pendingTurn
+        }
+        let pending = PendingTurn(
+            conversationID: conversationID,
+            prompt: prompt,
+            commandID: UUID()
+        )
+        pendingTurn = pending
+        return pending
+    }
+
+    private func observeEvents(after initialCursor: UInt64) {
+        eventObservationTask?.cancel()
+        eventObservationTask = Task { [weak self] in
+            guard let self else { return }
+            var cursor = initialCursor
+            while !Task.isCancelled {
+                do {
+                    let client = try await activeClient()
+                    let events = await client.eventStream(after: cursor)
+                    for try await event in events {
+                        guard !Task.isCancelled else { return }
+                        cursor = event.sequence
+                        await receive(event)
+                    }
+                } catch {
+                    let failure = presentationError(error)
+                    if failure.code == "event.cursor_expired"
+                        || failure.code == "event.cursor_ahead"
+                    {
+                        timeline = []
+                        actionNotice = "The activity cursor expired. Jet refreshed the full Conversation snapshot."
+                        await loadConversations()
+                        cursor = conversationCursor
+                        continue
+                    }
+                    if conversationSnapshot != nil { conversationFreshness = .cached }
+                    actionNotice = failure.message
+                    try? await Task.sleep(for: .seconds(1))
+                }
+            }
+        }
+    }
+
+    private func receive(_ event: JetEvent) async {
+        if event.conversationID == selectedConversationID {
+            let projections = event.timelineProjections()
+            if projections.isEmpty {
+                groupRawEvent(sequence: event.sequence)
+            } else {
+                for projection in projections {
+                    mergeTimeline(projection)
+                }
+            }
+            if event.kind == "run.lifecycle_changed"
+                || event.kind == "run.activity_changed"
+                || event.kind == "turn.changed"
+            {
+                await loadSelectedConversation()
+            }
+        }
+        if ["conversation.created", "conversation.name_changed", "conversation.trashed"]
+            .contains(event.kind)
+        {
+            await loadConversations()
+        }
+    }
+
+    private func mergeTimeline(_ entry: JetTimelineEntry) {
+        if entry.kind == .user,
+           let index = timeline.firstIndex(where: { $0.id == entry.id })
+        {
+            timeline[index].text += entry.text
+            timeline[index].sequence = entry.sequence
+        } else {
+            timeline.append(entry)
+            if timeline.count > 256 { timeline.removeFirst(timeline.count - 256) }
+        }
+    }
+
+    private func groupRawEvent(sequence: UInt64) {
+        if let index = timeline.indices.last, timeline[index].rawCount > 0 {
+            timeline[index].rawCount += 1
+            timeline[index].text = "\(timeline[index].rawCount) background updates"
+            timeline[index].sequence = sequence
+        } else {
+            timeline.append(
+                JetTimelineEntry(
+                    id: "raw-\(sequence)",
+                    kind: .activity,
+                    text: "1 background update",
+                    sequence: sequence,
+                    rawCount: 1
+                )
+            )
+        }
     }
 
     private func showScenario(
@@ -417,6 +823,19 @@ final class DesktopSession {
             for await state in states {
                 guard !Task.isCancelled else { return }
                 self?.connectionState = state
+                if case .connected = state,
+                   self?.conversationFreshness == .cached
+                {
+                    await self?.loadConversations()
+                } else if case .reconnecting = state,
+                          self?.conversationSnapshot != nil
+                {
+                    self?.conversationFreshness = .cached
+                } else if case .disconnected = state,
+                          self?.conversationSnapshot != nil
+                {
+                    self?.conversationFreshness = .cached
+                }
             }
         }
     }

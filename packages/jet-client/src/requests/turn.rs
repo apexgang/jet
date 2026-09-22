@@ -3,10 +3,42 @@ use crate::{
 	connection::{Client, ClientError},
 	requests::unexpected,
 };
-use jet_protocol::{QueryRequest, QueryResponse};
+use jet_protocol::{
+	CommandRequest, CommandResponse, QueryRequest, QueryResponse, Turn,
+	TurnSource,
+};
 use uuid::Uuid;
 
 impl Client {
+	/// Admits one Turn to the authoritative Conversation queue. The Plane
+	/// assigns its order; a retry must reuse `command_id` and the exact body.
+	///
+	/// # Errors
+	/// Returns a stable validation, queue, authorization, or transport error.
+	pub async fn submit_turn(
+		&self,
+		command_id: Uuid,
+		conversation_id: Uuid,
+		source: TurnSource,
+		prompt: &str,
+	) -> Result<Turn, ClientError> {
+		self.require_minor(jet_protocol::TURN_QUEUE_MINOR)?;
+		match self
+			.execute_command(
+				command_id,
+				CommandRequest::SubmitTurn {
+					conversation_id,
+					source,
+					prompt: prompt.into(),
+				},
+			)
+			.await?
+		{
+			CommandResponse::TurnAdmitted { turn } => Ok(turn),
+			other => Err(unexpected(&other)),
+		}
+	}
+
 	/// Reads the authoritative Turn queue and Event fence (protocol minor 16).
 	/// Vector order is queue position; admission identity is stable as it moves.
 	///

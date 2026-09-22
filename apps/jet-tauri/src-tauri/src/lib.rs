@@ -24,6 +24,12 @@ pub fn run() {
             jet::preview_project_removal,
             jet::remove_project,
             jet::bind_harness_account,
+            jet::load_conversations,
+            jet::search_conversations,
+            jet::load_conversation,
+            jet::create_conversation,
+            jet::start_run,
+            jet::submit_turn,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Jet desktop application");

@@ -7,6 +7,7 @@ struct DesktopShellView: View {
     @SceneStorage("jet.shell.work-panel") private var storedWorkPanel = WorkPanelTab.run.rawValue
     @SceneStorage("jet.shell.work-panel-presented") private var storedPanelPresented = true
     @AppStorage("jet.settings.restore-last-task") private var restoresLastTask = true
+    @AppStorage("jet.last-conversation") private var storedConversationID = ""
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
@@ -55,6 +56,9 @@ struct DesktopShellView: View {
                 session.beginNewTask()
             }
             await session.loadSetup(openWhenIncomplete: true)
+            await session.loadConversations(
+                restoring: restoresLastTask ? UUID(uuidString: storedConversationID) : nil
+            )
         }
         .onChange(of: session.sidebarSelection) { _, value in
             storedSelection = value.rawValue
@@ -64,6 +68,9 @@ struct DesktopShellView: View {
         }
         .onChange(of: session.isWorkPanelPresented) { _, value in
             storedPanelPresented = value
+        }
+        .onChange(of: session.selectedConversationID) { _, value in
+            storedConversationID = value?.uuidString.lowercased() ?? ""
         }
     }
 }
@@ -91,6 +98,11 @@ private struct SidebarView: View {
             PlaneStatusFooter(session: session)
         }
         .navigationTitle("Jet")
+        .searchable(text: $session.searchText, prompt: "Search tasks")
+        .onSubmit(of: .search) {
+            session.selectSearch()
+            Task { await session.searchConversations() }
+        }
         .onChange(of: session.sidebarSelection) { _, _ in
             session.applySidebarSelection()
         }
@@ -110,7 +122,6 @@ private struct SidebarView: View {
                 .buttonStyle(.plain)
 
                 Label("Needs attention", systemImage: "bell")
-                    .badge(1)
                     .tag(SidebarDestination.needsAttention)
             }
 
@@ -141,12 +152,65 @@ private struct SidebarView: View {
             }
 
             Section("Recent") {
-                Label(
-                    session.scenario?.conversation?.title ?? "New task",
-                    systemImage: "bubble.left.and.bubble.right"
-                )
-                .lineLimit(2)
-                .tag(SidebarDestination.conversation)
+                ForEach(session.conversations) { conversation in
+                    Button {
+                        session.selectConversation(conversation.id)
+                    } label: {
+                        Label(conversation.title, systemImage: "bubble.left.and.bubble.right")
+                            .lineLimit(2)
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(
+                        session.selectedConversationID == conversation.id
+                            ? Color.accentColor.opacity(0.16)
+                            : Color.clear
+                    )
+                    .accessibilityValue(
+                        session.selectedConversationID == conversation.id ? "Selected" : ""
+                    )
+                }
+
+                if session.conversations.isEmpty, session.conversationFreshness != .loading {
+                    Text(
+                        session.conversationFreshness == .live
+                            ? "No tasks yet"
+                            : "Tasks unavailable"
+                    )
+                        .foregroundStyle(.secondary)
+                }
+
+                if session.nextConversationPage != nil {
+                    Button {
+                        Task { await session.loadMoreConversations() }
+                    } label: {
+                        Label("Show more", systemImage: "ellipsis")
+                    }
+                    .disabled(session.conversationOperation != nil)
+                }
+            }
+
+            if session.sidebarSelection == .search, let result = session.searchResult {
+                Section("Search results") {
+                    ForEach(result.hits) { hit in
+                        Button {
+                            session.selectSearchHit(hit.conversationID)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(hit.excerpt)
+                                    .lineLimit(2)
+                                Text(hit.field.rawValue.capitalized)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if result.hits.isEmpty {
+                        Text("No matching tasks")
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             Section {
@@ -205,6 +269,18 @@ private struct ConversationView: View {
     @FocusState private var composerFocused: Bool
 
     var body: some View {
+        if session.usesLivePlane {
+            LiveConversationView(session: session, composerFocused: $composerFocused)
+                .onChange(of: session.composerFocusRequest) { _, _ in
+                    composerFocused = true
+                }
+        } else {
+            fixtureContent
+        }
+    }
+
+    @ViewBuilder
+    private var fixtureContent: some View {
         switch session.contentState {
         case .loading:
             ProgressView("Loading workspace")
@@ -230,6 +306,233 @@ private struct ConversationView: View {
                 composerFocused = true
             }
         }
+    }
+}
+
+private struct LiveConversationView: View {
+    @Bindable var session: DesktopSession
+    let composerFocused: FocusState<Bool>.Binding
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(session.selectedConversationTitle)
+                        .font(.headline)
+                    HStack(spacing: 6) {
+                        Text(session.selectedProjectName)
+                        Text("·")
+                        Text("Runs on This Mac")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 12)
+                LiveStatusLabel(session: session)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 13)
+
+            Divider()
+            LiveTimelineView(session: session)
+            Divider()
+            LiveComposerView(session: session, composerFocused: composerFocused)
+        }
+        .navigationTitle(session.selectedConversationTitle)
+    }
+}
+
+private struct LiveStatusLabel: View {
+    let session: DesktopSession
+
+    var body: some View {
+        Label(label, systemImage: symbol)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(color.opacity(0.10), in: Capsule())
+            .accessibilityLabel("Task status: \(label)")
+    }
+
+    private var label: String {
+        if session.conversationFreshness == .cached { return "Offline cache" }
+        if session.conversationOperation != nil { return "Loading" }
+        switch session.selectedRun?.lifecycle {
+        case .starting: return "Starting"
+        case .active: return "Working"
+        case .stopping: return "Stopping"
+        case .completed: return "Completed"
+        case .failed: return "Failed"
+        case .canceled: return "Canceled"
+        case .lost: return "Recovery needed"
+        case .created, nil: return "Ready"
+        }
+    }
+
+    private var symbol: String {
+        switch session.selectedRun?.lifecycle {
+        case .starting, .active, .stopping: "bolt.horizontal.circle"
+        case .completed: "checkmark.circle"
+        case .failed, .canceled, .lost: "exclamationmark.circle"
+        case .created, nil: "circle"
+        }
+    }
+
+    private var color: Color {
+        if session.conversationFreshness == .cached { return .orange }
+        return switch session.selectedRun?.lifecycle {
+        case .starting, .active, .stopping:
+            Color(red: 41 / 255, green: 182 / 255, blue: 246 / 255)
+        case .completed: .green
+        case .failed, .canceled, .lost: .orange
+        case .created, nil: .secondary
+        }
+    }
+}
+
+private struct LiveTimelineView: View {
+    let session: DesktopSession
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                if session.conversationFreshness == .cached {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "wifi.slash")
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Showing cached state")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Jet will refresh this Conversation after the local Plane reconnects.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(12)
+                    .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityElement(children: .combine)
+                }
+
+                if session.timeline.isEmpty {
+                    ContentUnavailableView {
+                        Label(
+                            session.selectedConversationID == nil
+                                ? "What should Jet do?"
+                                : "Live activity starts here",
+                            systemImage: "text.bubble"
+                        )
+                    } description: {
+                        Text(
+                            session.selectedConversationID == nil
+                                ? "Describe the outcome. Jet will create an isolated Workspace in the selected Project."
+                                : "The current Run state is restored above. New ordered activity will appear here."
+                        )
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 260)
+                } else {
+                    ForEach(session.timeline) { entry in
+                        LiveTimelineEntryView(entry: entry)
+                    }
+                }
+            }
+            .frame(maxWidth: 760)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 24)
+            .frame(maxWidth: .infinity)
+        }
+        .defaultScrollAnchor(.bottom)
+    }
+}
+
+private struct LiveTimelineEntryView: View {
+    let entry: JetTimelineEntry
+
+    var body: some View {
+        switch entry.kind {
+        case .user:
+            HStack {
+                Spacer(minLength: 52)
+                Text(entry.text)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 13))
+            }
+        case .activity:
+            Label(entry.text, systemImage: "bolt.horizontal.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Activity: \(entry.text)")
+        case .result:
+            Label(entry.text, systemImage: "checkmark.circle")
+                .font(.subheadline)
+                .foregroundStyle(.green)
+        case .agent:
+            Text(entry.text)
+                .textSelection(.enabled)
+                .font(.body)
+                .lineSpacing(3)
+        }
+    }
+}
+
+private struct LiveComposerView: View {
+    @Bindable var session: DesktopSession
+    let composerFocused: FocusState<Bool>.Binding
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if let actionNotice = session.actionNotice {
+                Text(actionNotice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 760, alignment: .leading)
+                    .accessibilityLabel(actionNotice)
+            }
+
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField(
+                    "Describe what you want Jet to do",
+                    text: $session.draft,
+                    axis: .vertical
+                )
+                .textFieldStyle(.plain)
+                .lineLimit(2 ... 6)
+                .focused(composerFocused)
+                .accessibilityLabel("Task message")
+
+                Button("Send") {
+                    Task { await session.submitDraft() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    !session.canSubmitDraft
+                        || session.conversationOperation != nil
+                        || !session.planeIsConnected
+                )
+                .keyboardShortcut(.return, modifiers: [.command])
+            }
+            .padding(12)
+            .background(.background, in: RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(.separator, lineWidth: 1)
+            }
+
+            HStack(spacing: 12) {
+                ContextValue(label: "Project", value: session.selectedProjectName)
+                ContextValue(label: "Agent", value: session.selectedHarnessName)
+                ContextValue(label: "Runs on", value: "This Mac")
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: 760)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 24)
+        .padding(.top, 12)
+        .padding(.bottom, 16)
+        .background(.bar)
     }
 }
 
@@ -459,7 +762,9 @@ private struct ComposerView: View {
                 .focused(composerFocused)
                 .accessibilityLabel("Task message")
 
-                Button("Send", action: session.submitDraft)
+                Button("Send") {
+                    Task { await session.submitDraft() }
+                }
                     .buttonStyle(.borderedProminent)
                     .disabled(!session.canSubmitDraft)
                     .keyboardShortcut(.return, modifiers: [.command])
@@ -543,7 +848,7 @@ private struct WorkPanelView: View {
                         symbol: "terminal"
                     )
                 case .run:
-                    RunSummaryView(scenario: session.scenario)
+                    RunSummaryView(session: session)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -567,38 +872,29 @@ private struct WorkPanelEmptyState: View {
 }
 
 private struct RunSummaryView: View {
-    let scenario: DesktopFixtureScenario?
+    let session: DesktopSession
 
     var body: some View {
         List {
             Section("Current Run") {
-                LabeledContent("Lifecycle", value: scenario?.run?.lifecycle.rawValue.capitalized ?? "Not started")
-                LabeledContent("Activity", value: activityLabel)
-                LabeledContent("Runs on", value: scenario?.plane.name ?? "This Mac")
+                LabeledContent("Lifecycle", value: lifecycleLabel)
+                LabeledContent("Activity", value: session.hasLiveRun ? "Streaming" : "Idle")
+                LabeledContent("Runs on", value: "This Mac")
             }
 
             Section("Queue") {
-                if let queue = scenario?.queue, !queue.isEmpty {
-                    ForEach(queue, id: \.id) { turn in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(turn.summary)
-                            Text("Position \(turn.position)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } else {
-                    Text("No queued turns")
-                        .foregroundStyle(.secondary)
-                }
+                Text("Queue controls arrive in Wave 2.1. Submitted Turns still follow Plane order.")
+                    .foregroundStyle(.secondary)
             }
         }
         .listStyle(.inset)
     }
 
-    private var activityLabel: String {
-        guard let activity = scenario?.run?.activity else { return "Idle" }
-        return activity.rawValue.replacingOccurrences(of: "_", with: " ").capitalized
+    private var lifecycleLabel: String {
+        if session.usesLivePlane {
+            return session.selectedRun?.lifecycle.rawValue.capitalized ?? "Not started"
+        }
+        return session.scenario?.run?.lifecycle.rawValue.capitalized ?? "Not started"
     }
 }
 

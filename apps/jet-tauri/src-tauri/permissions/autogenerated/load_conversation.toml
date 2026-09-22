@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-load-conversation"
+description = "Allows loading one Conversation snapshot."
+commands.allow = ["load_conversation"]
+
+[[permission]]
+identifier = "deny-load-conversation"
+description = "Denies loading Conversation snapshots."
+commands.deny = ["load_conversation"]

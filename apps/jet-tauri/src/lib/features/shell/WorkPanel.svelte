@@ -45,24 +45,16 @@
       <section class="run-summary">
         <h2>Current Run</h2>
         <dl>
-          <div><dt>Lifecycle</dt><dd>{session.scenario.run?.lifecycle ?? "Not started"}</dd></div>
-          <div><dt>Activity</dt><dd>{session.scenario.run?.activity?.replaceAll("_", " ") ?? "Idle"}</dd></div>
+          <div><dt>Lifecycle</dt><dd>{session.selectedRun?.lifecycle ?? "Not started"}</dd></div>
+          <div><dt>Activity</dt><dd>{session.hasLiveRun ? "Streaming" : "Idle"}</dd></div>
           <div><dt>Runs on</dt><dd>{session.scenario.plane.name}</dd></div>
-          <div><dt>Cursor</dt><dd>{session.connection?.cursor ?? session.scenario.plane.cursor}</dd></div>
+          <div><dt>Cursor</dt><dd>{session.conversationDetail?.cursor ?? session.conversationCursor}</dd></div>
         </dl>
       </section>
 
       <section class="queue-summary">
         <h2>Queue</h2>
-        {#if session.scenario.queue.length > 0}
-          <ol>
-            {#each session.scenario.queue as turn (turn.id)}
-              <li><span>{turn.summary}</span><small>Position {turn.position}</small></li>
-            {/each}
-          </ol>
-        {:else}
-          <p>No queued turns</p>
-        {/if}
+        <p>Queue controls arrive in Wave 2.1. Submitted Turns still follow Plane order.</p>
       </section>
     {:else}
       <div class="panel-empty">

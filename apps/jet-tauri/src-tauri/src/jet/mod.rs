@@ -1,5 +1,6 @@
 mod channels;
 mod client;
+mod conversations;
 mod errors;
 mod identity;
 mod setup;
@@ -19,6 +20,7 @@ use self::{
 pub(crate) struct JetBridge {
     client: PlaneClient,
     setup: setup::SetupState,
+    conversations: conversations::ConversationState,
 }
 
 impl JetBridge {
@@ -40,6 +42,7 @@ impl JetBridge {
                 Duration::from_millis(500),
             ),
             setup: setup::SetupState::default(),
+            conversations: conversations::ConversationState::new(app_data_directory),
         })
     }
 }
@@ -48,8 +51,9 @@ impl JetBridge {
 pub(crate) async fn open_plane_feed(
     bridge: State<'_, JetBridge>,
     on_update: Channel<PlaneUpdate>,
+    after: Option<String>,
 ) -> Result<ConnectionSnapshot, PublicError> {
-    channels::open_plane_feed(bridge, on_update).await
+    channels::open_plane_feed(bridge, on_update, after).await
 }
 
 #[tauri::command]
@@ -99,4 +103,55 @@ pub(crate) async fn bind_harness_account(
     provider: String,
 ) -> Result<setup::MutationResult, PublicError> {
     setup::bind_harness_account(bridge, provider).await
+}
+
+#[tauri::command]
+pub(crate) async fn load_conversations(
+    bridge: State<'_, JetBridge>,
+    next_page: Option<String>,
+) -> Result<conversations::ConversationPageView, PublicError> {
+    conversations::load_conversations(bridge, next_page).await
+}
+
+#[tauri::command]
+pub(crate) async fn search_conversations(
+    bridge: State<'_, JetBridge>,
+    text: String,
+) -> Result<conversations::SearchResultView, PublicError> {
+    conversations::search_conversations(bridge, text).await
+}
+
+#[tauri::command]
+pub(crate) async fn load_conversation(
+    bridge: State<'_, JetBridge>,
+    conversation_id: String,
+) -> Result<conversations::ConversationDetailView, PublicError> {
+    conversations::load_conversation(bridge, conversation_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn create_conversation(
+    bridge: State<'_, JetBridge>,
+    project_id: String,
+) -> Result<conversations::ConversationRowView, PublicError> {
+    conversations::create_conversation(bridge, project_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn start_run(
+    bridge: State<'_, JetBridge>,
+    conversation_id: String,
+    craft: String,
+    prompt: String,
+) -> Result<conversations::StartResultView, PublicError> {
+    conversations::start_run(bridge, conversation_id, craft, prompt).await
+}
+
+#[tauri::command]
+pub(crate) async fn submit_turn(
+    bridge: State<'_, JetBridge>,
+    conversation_id: String,
+    prompt: String,
+) -> Result<conversations::TurnResultView, PublicError> {
+    conversations::submit_turn(bridge, conversation_id, prompt).await
 }

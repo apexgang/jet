@@ -2,8 +2,8 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use jet_client::{Client, ClientError};
 use jet_protocol::{
-    AccountBinding, CapabilityObservation, CredentialSource, Event, PlaneStatus, Project,
-    ProjectDisposal, ProjectRemovalBinding, ProjectRemoved,
+    AccountBinding, CapabilityObservation, CredentialSource, Event, PlaneStatus, Presentation,
+    PresentationBlock, Project, ProjectDisposal, ProjectRemovalBinding, ProjectRemoved,
 };
 use uuid::Uuid;
 
@@ -284,16 +284,144 @@ pub(crate) struct EventSummary {
     pub(crate) sequence: u64,
     pub(crate) recorded_at_unix_ms: i64,
     pub(crate) kind: String,
+    pub(crate) conversation_id: Option<Uuid>,
+    pub(crate) run_id: Option<Uuid>,
+    pub(crate) timeline: Vec<TimelineProjection>,
+}
+
+pub(crate) struct TimelineProjection {
+    pub(crate) kind: &'static str,
+    pub(crate) text: String,
+    pub(crate) item_id: Option<String>,
 }
 
 impl EventSummary {
     fn from_event(event: Event) -> Self {
+        let timeline = timeline_projection(&event);
         Self {
             sequence: event.sequence,
             recorded_at_unix_ms: event.recorded_at_unix_ms,
             kind: safe_event_kind(&event.kind),
+            conversation_id: event.conversation_id,
+            run_id: event.run_id,
+            timeline,
         }
     }
+}
+
+fn timeline_projection(event: &Event) -> Vec<TimelineProjection> {
+    match event.kind.as_str() {
+        "turn.input" => {
+            let Some(turn_id) = event
+                .payload
+                .get("turn_id")
+                .and_then(|value| value.as_str())
+            else {
+                return Vec::new();
+            };
+            let Some(text) = event.payload.get("text").and_then(|value| value.as_str()) else {
+                return Vec::new();
+            };
+            vec![TimelineProjection {
+                kind: "user",
+                text: bounded_event_text(text, 8_192),
+                item_id: Uuid::parse_str(turn_id).ok().map(|id| id.to_string()),
+            }]
+        }
+        "run.output" => output_projection(&event.payload),
+        "run.activity_changed" => vec![TimelineProjection {
+            kind: "activity",
+            text: activity_text(event.payload.get("activity")),
+            item_id: None,
+        }],
+        "run.lifecycle_changed" => {
+            let to = event
+                .payload
+                .get("to")
+                .and_then(|value| value.as_str())
+                .unwrap_or("updated");
+            vec![TimelineProjection {
+                kind: "activity",
+                text: format!("Run {}.", to.replace('_', " ")),
+                item_id: None,
+            }]
+        }
+        "change.checkpoint_recorded" => vec![TimelineProjection {
+            kind: "result",
+            text: "Jet recorded the completed turn and its changes.".into(),
+            item_id: None,
+        }],
+        _ => Vec::new(),
+    }
+}
+
+fn output_projection(payload: &serde_json::Value) -> Vec<TimelineProjection> {
+    let mut projected = Vec::new();
+    let Some(blocks) = payload
+        .get("presentation_json")
+        .and_then(|value| value.as_array())
+    else {
+        return projected;
+    };
+    for raw in blocks.iter().take(32).filter_map(|value| value.as_str()) {
+        let Ok(block) = serde_json::from_str::<PresentationBlock>(raw) else {
+            continue;
+        };
+        match block.known() {
+            Ok(Some(Presentation::Text { text } | Presentation::Markdown { text })) => {
+                projected.push(TimelineProjection {
+                    kind: "agent",
+                    text: bounded_event_text(&text, 16_384),
+                    item_id: None,
+                });
+            }
+            Ok(Some(Presentation::Actions { actions })) => {
+                let count = actions.len().min(128);
+                projected.push(TimelineProjection {
+                    kind: "activity",
+                    text: format!(
+                        "{count} Run action{} available.",
+                        if count == 1 { " is" } else { "s are" }
+                    ),
+                    item_id: None,
+                });
+            }
+            Ok(None) => projected.push(TimelineProjection {
+                kind: "activity",
+                text: "The Run published an additional presentation block.".into(),
+                item_id: None,
+            }),
+            Err(_) => {}
+        }
+    }
+    projected
+}
+
+fn activity_text(value: Option<&serde_json::Value>) -> String {
+    let label = value
+        .and_then(|value| value.get("activity").or(Some(value)))
+        .and_then(|value| value.as_str())
+        .unwrap_or("idle")
+        .replace('_', " ");
+    if label == "idle" {
+        "Run activity paused.".into()
+    } else {
+        format!("Run is {label}.")
+    }
+}
+
+fn bounded_event_text(value: &str, maximum_bytes: usize) -> String {
+    if value.len() <= maximum_bytes {
+        return value.into();
+    }
+    let mut end = maximum_bytes;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{}\n\n[Output truncated by the desktop client.]",
+        &value[..end]
+    )
 }
 
 fn safe_event_kind(value: &str) -> String {
@@ -327,7 +455,7 @@ mod unit_tests {
     };
     use uuid::Uuid;
 
-    use super::{safe_event_kind, NativeUpdate, PlaneClient};
+    use super::{safe_event_kind, EventSummary, NativeUpdate, PlaneClient};
 
     #[test]
     fn event_kind_is_bounded_before_it_reaches_the_webview() {
@@ -336,6 +464,87 @@ mod unit_tests {
             "run.lifecycle_changed"
         );
         assert_eq!(safe_event_kind("<img src=x onerror=alert(1)>"), "unknown");
+    }
+
+    #[test]
+    fn timeline_projects_only_portable_inert_presentation() {
+        let turn_id = Uuid::from_u128(9);
+        let input = EventSummary::from_event(Event {
+            sequence: 7,
+            event_id: Uuid::from_u128(7),
+            actor: Actor::InteractiveClient {
+                client_id: Uuid::from_u128(1),
+            },
+            origin: None,
+            recorded_at_unix_ms: 1,
+            conversation_id: Some(Uuid::from_u128(2)),
+            run_id: Some(Uuid::from_u128(3)),
+            kind: "turn.input".into(),
+            payload_version: 1,
+            payload: serde_json::json!({
+                "turn_id": turn_id,
+                "text": "Ship Wave 1.3",
+                "private": "not forwarded"
+            }),
+        });
+        assert_eq!(input.timeline.len(), 1);
+        assert_eq!(input.timeline[0].kind, "user");
+        assert_eq!(input.timeline[0].text, "Ship Wave 1.3");
+        assert_eq!(
+            input.timeline[0].item_id.as_deref(),
+            Some(turn_id.to_string().as_str())
+        );
+
+        let output = EventSummary::from_event(Event {
+            sequence: 8,
+            event_id: Uuid::from_u128(8),
+            actor: Actor::InteractiveClient {
+                client_id: Uuid::from_u128(1),
+            },
+            origin: None,
+            recorded_at_unix_ms: 2,
+            conversation_id: Some(Uuid::from_u128(2)),
+            run_id: Some(Uuid::from_u128(3)),
+            kind: "run.output".into(),
+            payload_version: 1,
+            payload: serde_json::json!({
+                "native_json": r#"{"secret":true}"#,
+                "presentation_json": [
+                    r#"{"kind":"markdown","text":"**Done**"}"#,
+                    r#"{"kind":"future","private":"hidden"}"#
+                ]
+            }),
+        });
+        assert_eq!(output.timeline.len(), 2);
+        assert_eq!(output.timeline[0].kind, "agent");
+        assert_eq!(output.timeline[0].text, "**Done**");
+        assert_eq!(output.timeline[1].kind, "activity");
+        assert!(output
+            .timeline
+            .iter()
+            .all(|item| !item.text.contains("secret")));
+        assert!(output
+            .timeline
+            .iter()
+            .all(|item| !item.text.contains("private")));
+
+        let lifecycle = EventSummary::from_event(Event {
+            sequence: 9,
+            event_id: Uuid::from_u128(9),
+            actor: Actor::InteractiveClient {
+                client_id: Uuid::from_u128(1),
+            },
+            origin: None,
+            recorded_at_unix_ms: 3,
+            conversation_id: Some(Uuid::from_u128(2)),
+            run_id: Some(Uuid::from_u128(3)),
+            kind: "run.lifecycle_changed".into(),
+            payload_version: 1,
+            payload: serde_json::json!({ "to": "active" }),
+        });
+        assert_eq!(lifecycle.timeline.len(), 1);
+        assert_eq!(lifecycle.timeline[0].text, "Run active.");
+        assert_eq!(lifecycle.timeline[0].item_id, None);
     }
 
     #[tokio::test]

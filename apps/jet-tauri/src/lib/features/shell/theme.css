@@ -719,6 +719,83 @@ textarea:focus-visible {
   line-height: 1.25;
 }
 
+.empty-nav {
+  margin: 6px 9px;
+  color: var(--quiet);
+  font-size: 11px;
+}
+
+.load-more {
+  color: var(--accent) !important;
+  font-size: 11px;
+}
+
+.sidebar-search {
+  display: grid;
+  gap: 6px;
+  padding: 8px 4px 6px;
+}
+
+.sidebar-search label {
+  color: var(--quiet);
+  font-size: 11px;
+}
+
+.sidebar-search > div {
+  display: grid;
+  gap: 6px;
+}
+
+.sidebar-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.sidebar-search button {
+  justify-content: center;
+  min-height: 30px;
+  background: var(--raised);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.search-results {
+  display: grid;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 2px 0 6px;
+}
+
+.search-results button {
+  align-items: start;
+  gap: 8px;
+}
+
+.search-results button span {
+  overflow: hidden;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+
+.search-results button small {
+  color: var(--quiet);
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.search-results p {
+  margin: 8px;
+  color: var(--quiet);
+  font-size: 11px;
+}
+
 kbd {
   color: var(--quiet);
   font-family: inherit;

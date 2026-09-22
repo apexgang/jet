@@ -128,6 +128,7 @@ actor JetClient {
                 coreVersion: status.coreVersion,
                 platform: "Platform unavailable",
                 harnesses: [],
+                crafts: [],
                 credentialStore: .unavailable,
                 degraded: []
             )
@@ -184,6 +185,118 @@ actor JetClient {
     func projects() async throws -> JetProjectList {
         let (data, requestID) = try await sendQuery(["type": "projects"])
         return try decodeProjects(data, requestID: requestID)
+    }
+
+    func conversations() async throws -> JetConversationPage {
+        let (data, requestID) = try await sendQuery(["type": "conversations"])
+        return try decodeConversations(data, requestID: requestID)
+    }
+
+    func nextConversations(_ cursor: UUID) async throws -> JetConversationPage {
+        let (data, requestID) = try await sendQuery([
+            "type": "next_conversations",
+            "cursor": cursor.uuidString.lowercased(),
+        ])
+        return try decodeConversations(data, requestID: requestID)
+    }
+
+    func conversation(_ conversationID: UUID) async throws -> JetConversationSnapshot {
+        let (data, requestID) = try await sendQuery([
+            "type": "conversation",
+            "conversation_id": conversationID.uuidString.lowercased(),
+        ])
+        return try decodeConversation(data, requestID: requestID)
+    }
+
+    func searchConversations(_ text: String) async throws -> JetSearchResult {
+        let terms = text.split(whereSeparator: { $0.isWhitespace })
+        guard !terms.isEmpty, terms.count <= 16, text.utf8.count <= 256 else {
+            throw JetClientFailure.presentation(
+                .invalidInput(
+                    code: "search.invalid_text",
+                    message: "Search for 1 to 16 terms using at most 256 UTF-8 bytes."
+                )
+            )
+        }
+        let (data, requestID) = try await sendQuery([
+            "type": "search",
+            "text": text,
+        ])
+        return try decodeSearch(data, requestID: requestID)
+    }
+
+    func createConversation(
+        projectID: UUID,
+        commandID: UUID = UUID()
+    ) async throws -> JetConversationSummary {
+        // ASVS 2.2.2 and 8.3.1: the typed adapter exposes only Jet's
+        // managed-Workspace choice. The Plane revalidates Project authority.
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "create_conversation",
+                "retention": "retain",
+                "working_tree": [
+                    "kind": "workspace",
+                    "project_id": projectID.uuidString.lowercased(),
+                ],
+            ],
+            commandID: commandID
+        )
+        return try decodeCreatedConversation(data, requestID: requestID)
+    }
+
+    func startRun(
+        conversationID: UUID,
+        craft: String,
+        prompt: String,
+        commandID: UUID = UUID()
+    ) async throws -> JetRunSummary {
+        try validatePrompt(prompt)
+        guard isSafeToken(craft, maximumBytes: 128) else {
+            throw JetClientFailure.presentation(
+                .invalidInput(
+                    code: "craft.identifier_invalid",
+                    message: "Choose an installed Craft."
+                )
+            )
+        }
+        let capabilities = try await capabilities(.fresh)
+        guard capabilities.crafts.contains(where: { $0.id == craft }) else {
+            throw JetClientFailure.presentation(
+                .invalidInput(
+                    code: "craft.unavailable",
+                    message: "Choose a Craft that is installed on this Plane."
+                )
+            )
+        }
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "start_run",
+                "conversation_id": conversationID.uuidString.lowercased(),
+                "craft": craft,
+                "prompt": prompt,
+            ],
+            commandID: commandID
+        )
+        return try decodeCreatedRun(data, requestID: requestID)
+    }
+
+    func submitTurn(
+        conversationID: UUID,
+        prompt: String,
+        commandID: UUID = UUID()
+    ) async throws -> JetTurnSummary {
+        try validatePrompt(prompt)
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "submit_turn",
+                "conversation_id": conversationID.uuidString.lowercased(),
+                "source": "user",
+                "prompt": prompt,
+            ],
+            commandID: commandID
+        )
+        return try decodeAdmittedTurn(data, requestID: requestID)
     }
 
     func previewProject(path: String) async throws -> JetProjectPreview {
@@ -876,6 +989,7 @@ actor JetClient {
               let operatingSystem = platform["operating_system"] as? String,
               let architecture = platform["architecture"] as? String,
               let harnesses = result["harnesses"] as? [String],
+              let crafts = result["crafts"] as? [[String: Any]],
               let credentialStore = result["credential_store"] as? [String: Any],
               let credentialStatus = credentialStore["status"] as? String,
               let storeState = JetCredentialStoreState(rawValue: credentialStatus),
@@ -887,6 +1001,17 @@ actor JetClient {
             coreVersion: coreVersion,
             platform: "\(operatingSystem) · \(architecture)",
             harnesses: harnesses,
+            crafts: try crafts.map { craft in
+                guard let id = craft["craft_id"] as? String,
+                      let version = craft["version"] as? String,
+                      let harnesses = craft["harnesses"] as? [String],
+                      !id.isEmpty,
+                      id.utf8.count <= 128
+                else {
+                    throw JetClientFailure.presentation(.invalidResponse)
+                }
+                return JetInstalledCraft(id: id, version: version, harnesses: harnesses)
+            },
             credentialStore: storeState,
             degraded: degraded.compactMap(degradedLabel)
         )
@@ -911,6 +1036,222 @@ actor JetClient {
         return JetProjectList(
             cursor: cursor,
             projects: try values.map(decodeProject)
+        )
+    }
+
+    private func decodeConversations(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetConversationPage {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "conversations"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let values = result["conversations"] as? [[String: Any]]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let nextPage: UUID?
+        if let value = result["next_page"], !(value is NSNull) {
+            guard let parsed = uuid(value) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            nextPage = parsed
+        } else {
+            nextPage = nil
+        }
+        return JetConversationPage(
+            cursor: cursor,
+            conversations: try values.map(decodeConversationSummary),
+            nextPage: nextPage
+        )
+    }
+
+    private func decodeConversation(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetConversationSnapshot {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "conversation"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let conversation = result["conversation"] as? [String: Any],
+              let runs = result["runs"] as? [[String: Any]]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let workspaceRoot: String?
+        if let workspace = result["workspace"] as? [String: Any] {
+            guard let root = workspace["root"] as? String else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            workspaceRoot = safeDisplayText(root, maximumBytes: 4_096, fallback: "Workspace")
+        } else {
+            workspaceRoot = nil
+        }
+        return JetConversationSnapshot(
+            cursor: cursor,
+            conversation: try decodeConversationSummary(conversation),
+            workspaceRoot: workspaceRoot,
+            runs: try runs.map(decodeRun)
+        )
+    }
+
+    private func decodeSearch(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetSearchResult {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "search"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let indexedText = result["indexed_through"] as? String,
+              let indexedThrough = UInt64(indexedText),
+              let values = result["hits"] as? [[String: Any]]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let hits = try values.map { value -> JetSearchHit in
+            guard let conversationID = uuid(value["conversation_id"]),
+                  let sequenceText = value["sequence"] as? String,
+                  let sequence = UInt64(sequenceText),
+                  let fieldText = value["field"] as? String,
+                  let field = JetSearchField(rawValue: fieldText),
+                  let excerpt = value["excerpt"] as? String
+            else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return JetSearchHit(
+                conversationID: conversationID,
+                sequence: sequence,
+                field: field,
+                excerpt: safeDisplayText(excerpt, maximumBytes: 512, fallback: "Matching task")
+            )
+        }
+        return JetSearchResult(cursor: cursor, indexedThrough: indexedThrough, hits: hits)
+    }
+
+    private func decodeCreatedConversation(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetConversationSummary {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "conversation_created"
+        )
+        return try decodeConversationSummary(result)
+    }
+
+    private func decodeCreatedRun(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetRunSummary {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "run_created"
+        )
+        return try decodeRun(result)
+    }
+
+    private func decodeAdmittedTurn(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetTurnSummary {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "turn_admitted"
+        )
+        guard let turn = result["turn"] as? [String: Any],
+              let id = uuid(turn["turn_id"]),
+              let sequenceText = turn["sequence"] as? String,
+              let sequence = UInt64(sequenceText),
+              let state = turn["state"] as? String
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetTurnSummary(id: id, sequence: sequence, state: state)
+    }
+
+    private func decodeConversationSummary(
+        _ value: [String: Any]
+    ) throws -> JetConversationSummary {
+        guard let id = uuid(value["conversation_id"]),
+              let createdAt = signed64(value["created_at_unix_ms"])
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let title: String
+        if let name = value["name"] as? [String: Any], let raw = name["value"] as? String {
+            title = safeDisplayText(raw, maximumBytes: 256, fallback: "Untitled task")
+        } else {
+            title = "Untitled task"
+        }
+        let projectID: UUID?
+        if let workingTree = value["working_tree"] as? [String: Any],
+           workingTree["kind"] as? String != "no_project"
+        {
+            guard let parsed = uuid(workingTree["project_id"]) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            projectID = parsed
+        } else {
+            projectID = nil
+        }
+        return JetConversationSummary(
+            id: id,
+            title: title,
+            createdAtUnixMilliseconds: createdAt,
+            projectID: projectID
+        )
+    }
+
+    private func decodeRun(_ value: [String: Any]) throws -> JetRunSummary {
+        guard let id = uuid(value["run_id"]),
+              let lifecycleText = value["lifecycle"] as? String,
+              let lifecycle = JetRunLifecycle(rawValue: lifecycleText),
+              let createdAt = signed64(value["created_at_unix_ms"])
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let title: String
+        if let name = value["name"] as? [String: Any], let raw = name["value"] as? String {
+            title = safeDisplayText(raw, maximumBytes: 256, fallback: "Run")
+        } else {
+            title = "Run"
+        }
+        let endedAt: Int64?
+        if let value = value["ended_at_unix_ms"], !(value is NSNull) {
+            guard let parsed = signed64(value) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            endedAt = parsed
+        } else {
+            endedAt = nil
+        }
+        return JetRunSummary(
+            id: id,
+            lifecycle: lifecycle,
+            title: title,
+            createdAtUnixMilliseconds: createdAt,
+            endedAtUnixMilliseconds: endedAt
         )
     }
 
@@ -1456,6 +1797,43 @@ actor JetClient {
             return uuid(scope["conversation_id"]).map(JetSettingScope.conversation)
         default: return nil
         }
+    }
+
+    private func validatePrompt(_ prompt: String) throws {
+        guard !prompt.isEmpty, prompt.utf8.count <= 65_536 else {
+            throw JetClientFailure.presentation(
+                .invalidInput(
+                    code: "turn.invalid_prompt",
+                    message: "Enter a task between 1 and 65,536 UTF-8 bytes."
+                )
+            )
+        }
+    }
+
+    private func isSafeToken(_ value: String, maximumBytes: Int) -> Bool {
+        !value.isEmpty
+            && value.utf8.count <= maximumBytes
+            && value.utf8.allSatisfy { byte in
+                (48 ... 57).contains(byte)
+                    || (65 ... 90).contains(byte)
+                    || (97 ... 122).contains(byte)
+                    || byte == 45
+                    || byte == 95
+            }
+    }
+
+    private func safeDisplayText(
+        _ value: String,
+        maximumBytes: Int,
+        fallback: String
+    ) -> String {
+        guard !value.isEmpty,
+              value.utf8.count <= maximumBytes,
+              !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else {
+            return fallback
+        }
+        return value
     }
 
     private func optionalRawJSON(

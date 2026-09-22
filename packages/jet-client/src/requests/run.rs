@@ -6,6 +6,38 @@ use jet_protocol::{CommandRequest, CommandResponse, Run, RunLifecycle};
 use uuid::Uuid;
 
 impl Client {
+	/// Starts one managed Run and admits its initial user Turn under the
+	/// Command identity `command_id`. A retry must reuse the same identity,
+	/// Conversation, Craft, and prompt.
+	///
+	/// # Errors
+	///
+	/// Returns a stable validation, capability, Conversation, or transport
+	/// error. A lost response must be retried with the same Command identity.
+	pub async fn start_run(
+		&self,
+		command_id: Uuid,
+		conversation_id: Uuid,
+		craft: &str,
+		prompt: &str,
+	) -> Result<Run, ClientError> {
+		self.require_minor(jet_protocol::MANAGED_RUNS_MINOR)?;
+		match self
+			.execute_command(
+				command_id,
+				CommandRequest::StartRun {
+					conversation_id,
+					craft: craft.into(),
+					prompt: prompt.into(),
+				},
+			)
+			.await?
+		{
+			CommandResponse::RunCreated(run) => Ok(run),
+			other => Err(unexpected(&other)),
+		}
+	}
+
 	/// Records a new Run of a Conversation that has no live Run under the
 	/// Command identity `command_id`, which a retry must reuse (ADR-0093).
 	///

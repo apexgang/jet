@@ -81,6 +81,7 @@ struct JetCapabilitySummary: Sendable, Equatable {
     let coreVersion: String
     let platform: String
     let harnesses: [String]
+    let crafts: [JetInstalledCraft]
     let credentialStore: JetCredentialStoreState
     let degraded: [String]
 
@@ -110,6 +111,107 @@ struct JetCapabilitySummary: Sendable, Equatable {
         }
         return providers
     }
+}
+
+struct JetInstalledCraft: Sendable, Equatable, Identifiable {
+    let id: String
+    let version: String
+    let harnesses: [String]
+}
+
+struct JetConversationSummary: Sendable, Equatable, Identifiable {
+    let id: UUID
+    let title: String
+    let createdAtUnixMilliseconds: Int64
+    let projectID: UUID?
+}
+
+struct JetConversationPage: Sendable, Equatable {
+    let cursor: UInt64
+    let conversations: [JetConversationSummary]
+    let nextPage: UUID?
+}
+
+enum JetRunLifecycle: String, Sendable, Equatable {
+    case created
+    case starting
+    case active
+    case stopping
+    case completed
+    case failed
+    case canceled
+    case lost
+
+    var isLive: Bool {
+        switch self {
+        case .created, .starting, .active, .stopping: true
+        case .completed, .failed, .canceled, .lost: false
+        }
+    }
+}
+
+struct JetRunSummary: Sendable, Equatable, Identifiable {
+    let id: UUID
+    let lifecycle: JetRunLifecycle
+    let title: String
+    let createdAtUnixMilliseconds: Int64
+    let endedAtUnixMilliseconds: Int64?
+}
+
+struct JetConversationSnapshot: Sendable, Equatable {
+    let cursor: UInt64
+    let conversation: JetConversationSummary
+    let workspaceRoot: String?
+    let runs: [JetRunSummary]
+}
+
+enum JetSearchField: String, Sendable, Equatable {
+    case name
+    case path
+    case branch
+}
+
+struct JetSearchHit: Sendable, Equatable, Identifiable {
+    let conversationID: UUID
+    let sequence: UInt64
+    let field: JetSearchField
+    let excerpt: String
+
+    var id: String { "\(conversationID.uuidString)-\(sequence)" }
+}
+
+struct JetSearchResult: Sendable, Equatable {
+    let cursor: UInt64
+    let indexedThrough: UInt64
+    let hits: [JetSearchHit]
+}
+
+struct JetTurnSummary: Sendable, Equatable {
+    let id: UUID
+    let sequence: UInt64
+    let state: String
+}
+
+enum JetConversationFreshness: Sendable, Equatable {
+    case loading
+    case live
+    case cached
+    case failed
+}
+
+enum JetTimelineKind: String, Sendable, Equatable {
+    case user
+    case agent
+    case activity
+    case result
+}
+
+struct JetTimelineEntry: Sendable, Equatable, Identifiable {
+    let id: String
+    var kind: JetTimelineKind
+    var text: String
+    var sequence: UInt64?
+    var rawCount: Int
 }
 
 struct JetProjectSummary: Sendable, Equatable, Identifiable {

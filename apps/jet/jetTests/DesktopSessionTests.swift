@@ -14,12 +14,13 @@ struct DesktopSessionTests {
         #expect(session.isWorkPanelPresented)
 
         session.beginNewTask()
-        #expect(session.scenario?.state == .ready)
+        #expect(session.scenario?.state == .active)
         #expect(session.sidebarSelection == .newTask)
+        #expect(session.selectedConversationID == nil)
         #expect(!session.isWorkPanelPresented)
 
         session.draft = "Keep this draft"
-        session.submitDraft()
+        await session.submitDraft()
         #expect(session.draft == "Keep this draft")
         #expect(session.actionNotice != nil)
     }
@@ -53,6 +54,7 @@ struct DesktopSessionTests {
             coreVersion: "test",
             platform: "macos",
             harnesses: ["codex", "unknown", "claude-code", "Codex CLI"],
+            crafts: [],
             credentialStore: .available,
             degraded: []
         )
@@ -79,6 +81,7 @@ struct DesktopSessionTests {
                     coreVersion: "test",
                     platform: "macos",
                     harnesses: [],
+                    crafts: [],
                     credentialStore: .available,
                     degraded: []
                 ),
@@ -120,5 +123,83 @@ struct DesktopSessionTests {
 
         #expect(session.planeConnectionLabel == "Connected")
         #expect(session.planeIsConnected)
+    }
+
+    @Test
+    func timelineProjectsOnlyPortableInertPresentation() throws {
+        let turnID = UUID()
+        let conversationID = UUID()
+        let input = event(
+            sequence: 7,
+            conversationID: conversationID,
+            kind: "turn.input",
+            payload: #"{"turn_id":"\#(turnID.uuidString)","text":"Ship Wave 1.3"}"#
+        )
+        let output = event(
+            sequence: 8,
+            conversationID: conversationID,
+            kind: "run.output",
+            payload: #"{"native_json":"{\"secret\":true}","presentation_json":["{\"kind\":\"markdown\",\"text\":\"**Done**\"}","{\"kind\":\"future\",\"private\":\"hidden\"}"]}"#
+        )
+
+        #expect(input.timelineProjections() == [
+            JetTimelineEntry(
+                id: turnID.uuidString.lowercased(),
+                kind: .user,
+                text: "Ship Wave 1.3",
+                sequence: 7,
+                rawCount: 0
+            ),
+        ])
+        let projected = output.timelineProjections()
+        #expect(projected.count == 2)
+        #expect(projected[0].kind == .agent)
+        #expect(projected[0].text == "**Done**")
+        #expect(projected[1].kind == .activity)
+        #expect(!projected.map(\.text).joined().contains("secret"))
+        #expect(!projected.map(\.text).joined().contains("private"))
+    }
+
+    @Test
+    func selectingAnotherConversationClearsThePreviousTimeline() {
+        let first = JetConversationSummary(
+            id: UUID(), title: "First", createdAtUnixMilliseconds: 1, projectID: nil
+        )
+        let second = JetConversationSummary(
+            id: UUID(), title: "Second", createdAtUnixMilliseconds: 2, projectID: nil
+        )
+        let session = DesktopSession()
+        session.conversations = [first, second]
+        session.selectedConversationID = first.id
+        session.timeline = [
+            JetTimelineEntry(
+                id: "old", kind: .agent, text: "Old task", sequence: 1, rawCount: 0
+            ),
+        ]
+
+        session.selectConversation(second.id)
+
+        #expect(session.selectedConversationID == second.id)
+        #expect(session.timeline.isEmpty)
+    }
+
+    private func event(
+        sequence: UInt64,
+        conversationID: UUID,
+        kind: String,
+        payload: String
+    ) -> JetEvent {
+        JetEvent(
+            sequence: sequence,
+            eventID: UUID(),
+            actor: JetRawJSON(source: #"{"interactive_client":{}}"#),
+            origin: nil,
+            recordedAtUnixMilliseconds: 1,
+            conversationID: conversationID,
+            runID: nil,
+            kind: kind,
+            payloadVersion: 1,
+            payload: JetRawJSON(source: payload)
+        )
     }
 }

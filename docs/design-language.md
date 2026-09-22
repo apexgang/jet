@@ -77,6 +77,16 @@ The center column is the reading and composing surface.
 - The composer remains available while a Run is active when the protocol allows queued turns.
 - A compact context row below the composer shows Project, Harness, and **Runs on**. Missing required context is resolved inline when the user sends.
 
+#### Selection, continuity, and activity
+
+- Search and paginated lists preserve stable Conversation identity and selection, including when the selected Conversation is outside the current page or search result set.
+- Starting the first task is one create-and-start operation: create the Conversation, start its Run, and include the first Turn atomically. Later messages use the Turn submission path and retain a stable command ID across exact-body retries.
+- The selected Conversation determines the Project shown in its header and context. New-task Project choices must not overwrite the context of an existing Conversation.
+- Timeline activity is ordered by its Plane cursor and fenced to the active Conversation. Project only the known, safe fields of recognized events into the narrative; group unknown or low-value raw activity without interpreting or executing it.
+- Reconnect from the last accepted cursor when possible. If the cursor has expired, discard the potentially gapped projection and rebuild it from a full snapshot before resuming the stream.
+- Cached presentation remains available while offline when useful, but it is visibly labeled stale. Live surfaces must show unavailable or missing data truthfully and must never substitute fixture, preview, or synthetic values.
+- Persist only the selected Conversation UUID as client-local restoration state. Keep Conversation content in bounded memory caches, and never place prompts, outputs, event payloads, or other Jet content in browser storage.
+
 ### Work panel
 
 The trailing work panel is contextual, resizable where the platform supports it, and hidden by default when it has no useful content.

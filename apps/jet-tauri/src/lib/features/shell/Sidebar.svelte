@@ -24,9 +24,36 @@
         Search
         <kbd>⌘K</kbd>
       </button>
+      {#if selected("search")}
+        <form class="sidebar-search" onsubmit={(event) => { event.preventDefault(); void session.search(); }}>
+          <label for="conversation-search">Search tasks</label>
+          <div>
+            <input
+              id="conversation-search"
+              bind:value={session.searchText}
+              maxlength="256"
+              placeholder="Name, path, or branch"
+            />
+            <button type="submit" disabled={session.searchBusy || !session.searchText.trim()}>
+              {session.searchBusy ? "Searching" : "Search"}
+            </button>
+          </div>
+        </form>
+        {#if session.searchResult}
+          <div class="search-results" aria-live="polite">
+            {#each session.searchResult.hits as hit (`${hit.conversationId}-${hit.sequence}`)}
+              <button onclick={() => session.openSearchHit(hit.conversationId)}>
+                <span>{hit.excerpt}</span>
+                <small>{hit.field}</small>
+              </button>
+            {:else}
+              <p>No matching tasks</p>
+            {/each}
+          </div>
+        {/if}
+      {/if}
       <button class:active={selected("attention")} onclick={() => session.select("attention")}>
         <span>Needs attention</span>
-        <span class="count" aria-label="1 item">1</span>
       </button>
     </div>
 
@@ -49,13 +76,25 @@
 
     <div class="nav-group">
       <p class="nav-heading">Recent</p>
-      <button
-        class:active={selected("conversation")}
-        class="conversation-link"
-        onclick={() => session.select("conversation")}
-      >
-        {session.scenario.conversation?.title ?? "New task"}
-      </button>
+      {#each session.conversations as conversation (conversation.id)}
+        <button
+          class:active={selected("conversation") && session.selectedConversationId === conversation.id}
+          class="conversation-link"
+          aria-current={session.selectedConversationId === conversation.id ? "page" : undefined}
+          onclick={() => session.openConversation(conversation.id)}
+        >
+          {conversation.title}
+        </button>
+      {:else}
+        <p class="empty-nav">
+          {session.conversationFreshness === "live" ? "No tasks yet" : "Tasks unavailable"}
+        </p>
+      {/each}
+      {#if session.nextConversationPage}
+        <button class="load-more" disabled={session.conversationBusy} onclick={() => session.loadMoreConversations()}>
+          {session.conversationBusy ? "Loading" : "Show more"}
+        </button>
+      {/if}
     </div>
 
     <div class="nav-group secondary-actions">

@@ -12,6 +12,12 @@
     "allow-preview-project-removal",
     "allow-remove-project",
     "allow-bind-harness-account",
+    "allow-load-conversations",
+    "allow-search-conversations",
+    "allow-load-conversation",
+    "allow-create-conversation",
+    "allow-start-run",
+    "allow-submit-turn",
     "dialog:allow-open"
   ]
 }

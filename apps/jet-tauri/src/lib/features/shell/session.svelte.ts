@@ -1,11 +1,20 @@
 import {
   bindHarnessAccount,
+  createConversation,
+  loadConversation,
+  loadConversations,
   loadSetup,
   openPlaneFeed,
   previewProject,
   previewProjectRemoval,
   registerProject,
   removeProject,
+  searchConversations,
+  startRun,
+  submitTurn,
+  type ConversationDetail,
+  type ConversationRow,
+  type ConversationSearchResult,
   type ConnectionSnapshot,
   type PlaneUpdate,
   type ProjectPreview,
@@ -36,6 +45,15 @@ export type SetupViewState =
   | { kind: "ready"; snapshot: SetupSnapshot }
   | { kind: "failed"; error: PublicError };
 
+export type ConversationFreshness = "loading" | "live" | "cached" | "failed";
+export type LiveTimelineEntry = {
+  id: string;
+  kind: "user" | "agent" | "activity" | "result";
+  text: string;
+  sequence: string | null;
+  rawCount: number;
+};
+
 export class DesktopSession {
   scenario = $state<DesktopFixtureScenario>(fixtureForState("active"));
   sidebarSelection = $state<SidebarDestination>("conversation");
@@ -57,8 +75,22 @@ export class DesktopSession {
   setupBusy = $state<string | null>(null);
   setupNotice = $state<string | null>(null);
   remotePairingSkipped = $state(false);
+  conversations = $state<ConversationRow[]>([]);
+  conversationCursor = $state("0");
+  nextConversationPage = $state<string | null>(null);
+  selectedConversationId = $state<string | null>(null);
+  conversationDetail = $state<ConversationDetail | null>(null);
+  conversationFreshness = $state<ConversationFreshness>("loading");
+  conversationBusy = $state(false);
+  timeline = $state<LiveTimelineEntry[]>([]);
+  searchText = $state("");
+  searchResult = $state<ConversationSearchResult | null>(null);
+  searchBusy = $state(false);
 
   private setupRequest = 0;
+  private conversationRequest = 0;
+  private searchRequest = 0;
+  private detailRefresh: ReturnType<typeof setTimeout> | null = null;
 
   get canSubmitDraft(): boolean {
     return this.draft.trim().length > 0;
@@ -90,21 +122,56 @@ export class DesktopSession {
   }
 
   get selectedProjectName(): string {
-    return this.selectedProject?.name ?? this.scenario.project?.name ?? "Choose a Project";
+    if (this.selectedConversationId) {
+      if (!this.selectedConversation) return "Project unavailable";
+      if (!this.selectedConversation.projectId) return "No Project";
+      return (
+        this.setupSnapshot?.projects.find(
+          (project) => project.id === this.selectedConversation?.projectId,
+        )?.name ?? "Project unavailable"
+      );
+    }
+    return this.selectedProject?.name ?? "Choose a Project";
   }
 
   get selectedHarnessName(): string {
     return (
       this.setupSnapshot?.accounts[0]?.label ??
       this.setupSnapshot?.capabilities.authProviders[0]?.harness ??
-      this.scenario.capabilities.harnesses[0] ??
-      "Choose"
+      "Choose an Agent"
+    );
+  }
+
+  get selectedCraftId(): string | null {
+    return this.setupSnapshot?.capabilities.crafts[0]?.id ?? null;
+  }
+
+  get selectedConversation(): ConversationRow | null {
+    return this.conversations.find((item) => item.id === this.selectedConversationId) ?? null;
+  }
+
+  get selectedConversationTitle(): string {
+    return this.selectedConversation?.title ?? "New task";
+  }
+
+  get selectedRun() {
+    return this.conversationDetail?.runs.at(-1) ?? null;
+  }
+
+  get hasLiveRun(): boolean {
+    return ["created", "starting", "active", "stopping"].includes(
+      this.selectedRun?.lifecycle ?? "",
     );
   }
 
   connect(): void {
     void this.refreshSetup(true);
-    void openPlaneFeed((update) => this.receive(update))
+    void this.connectConversationFeed();
+  }
+
+  private async connectConversationFeed(): Promise<void> {
+    await this.refreshConversations(true);
+    await openPlaneFeed((update) => this.receive(update), this.conversationCursor)
       .then((snapshot) => {
         this.connection = snapshot.state === "online" ? snapshot : null;
         this.connectionState = snapshot.state;
@@ -259,28 +326,171 @@ export class DesktopSession {
     this.setupNotice = "Remote pairing was skipped. You can return here at any time.";
   }
 
+  async refreshConversations(restoreSelection = false): Promise<void> {
+    const request = ++this.conversationRequest;
+    if (this.conversations.length === 0) this.conversationFreshness = "loading";
+    try {
+      const previousSelection = this.selectedConversationId;
+      const page = await loadConversations();
+      if (request !== this.conversationRequest) return;
+      this.conversations = page.conversations;
+      this.conversationCursor = page.cursor;
+      this.nextConversationPage = page.nextPage;
+      this.conversationFreshness = "live";
+      const restored = restoreSelection ? page.restoredId : previousSelection;
+      let restoredDetail: ConversationDetail | null = null;
+      if (restored && !this.conversations.some((item) => item.id === restored)) {
+        try {
+          restoredDetail = await loadConversation(restored);
+          this.conversations = [...this.conversations, restoredDetail.conversation];
+        } catch {
+          restoredDetail = null;
+        }
+        if (request !== this.conversationRequest) return;
+      }
+      const selected = page.conversations.some((item) => item.id === restored)
+        ? restored
+        : restoredDetail?.conversation.id ?? page.conversations[0]?.id ?? null;
+      if (selected) {
+        if (restoredDetail?.conversation.id === selected) {
+          if (this.selectedConversationId !== selected) this.timeline = [];
+          this.selectedConversationId = selected;
+          this.conversationDetail = restoredDetail;
+        } else {
+          await this.openConversation(selected, false);
+        }
+      } else {
+        this.selectedConversationId = null;
+        this.conversationDetail = null;
+      }
+    } catch (error: unknown) {
+      if (request !== this.conversationRequest) return;
+      const failure = publicError(error);
+      this.failure = failure;
+      this.conversationFreshness = this.conversations.length > 0 ? "cached" : "failed";
+    }
+  }
+
+  async loadMoreConversations(): Promise<void> {
+    if (!this.nextConversationPage || this.conversationBusy) return;
+    this.conversationBusy = true;
+    const pageCursor = this.nextConversationPage;
+    try {
+      const page = await loadConversations(pageCursor);
+      const known = new Set(this.conversations.map((item) => item.id));
+      this.conversations = [
+        ...this.conversations,
+        ...page.conversations.filter((item) => !known.has(item.id)),
+      ];
+      this.nextConversationPage = page.nextPage;
+      this.conversationFreshness = "live";
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      if (failure.code === "pagination.stale") {
+        await this.refreshConversations();
+      } else {
+        this.actionNotice = failure.message;
+      }
+    } finally {
+      this.conversationBusy = false;
+    }
+  }
+
+  async search(): Promise<void> {
+    const text = this.searchText.trim();
+    const request = ++this.searchRequest;
+    if (!text) {
+      this.searchResult = null;
+      this.searchBusy = false;
+      return;
+    }
+    this.searchBusy = true;
+    try {
+      const result = await searchConversations(text);
+      if (request === this.searchRequest) this.searchResult = result;
+    } catch (error: unknown) {
+      if (request === this.searchRequest) this.actionNotice = publicError(error).message;
+    } finally {
+      if (request === this.searchRequest) this.searchBusy = false;
+    }
+  }
+
+  async openConversation(conversationId: string, show = true): Promise<void> {
+    if (this.selectedConversationId !== conversationId) {
+      this.timeline = [];
+      this.conversationDetail = null;
+    }
+    this.selectedConversationId = conversationId;
+    if (show) {
+      this.sidebarSelection = "conversation";
+      this.workPanelPresented = true;
+    }
+    await this.loadSelectedConversation(true);
+  }
+
+  async openSearchHit(conversationId: string): Promise<void> {
+    if (!this.conversations.some((item) => item.id === conversationId)) {
+      await this.refreshConversations();
+    }
+    await this.openConversation(conversationId);
+  }
+
+  private async loadSelectedConversation(showLoading: boolean): Promise<void> {
+    const id = this.selectedConversationId;
+    if (!id) return;
+    if (showLoading) this.conversationBusy = true;
+    try {
+      const detail = await loadConversation(id);
+      if (this.selectedConversationId !== id) return;
+      this.conversationDetail = detail;
+      this.conversationFreshness = "live";
+      this.mergeConversation(detail.conversation);
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      if (this.conversationDetail) {
+        this.conversationFreshness = "cached";
+      } else {
+        this.conversationFreshness = "failed";
+      }
+      this.actionNotice = failure.message;
+    } finally {
+      this.conversationBusy = false;
+    }
+  }
+
+  private mergeConversation(conversation: ConversationRow): void {
+    const index = this.conversations.findIndex((item) => item.id === conversation.id);
+    if (index === -1) {
+      this.conversations = [conversation, ...this.conversations];
+    } else {
+      this.conversations[index] = conversation;
+      this.conversations = [...this.conversations];
+    }
+  }
+
   select(destination: SidebarDestination): void {
     this.sidebarSelection = destination;
     this.actionNotice = null;
 
     switch (destination) {
       case "new-task":
-        this.showFixture("ready");
+        this.selectedConversationId = null;
+        this.conversationDetail = null;
+        this.timeline = [];
         this.workPanelPresented = false;
         this.composerFocusRequest += 1;
         break;
       case "search":
-        this.actionNotice = "Search arrives with the Conversation list in Wave 1.3.";
+        this.workPanelPresented = false;
         break;
       case "attention":
-        this.showFixture("approval");
-        this.workPanelPresented = true;
+        this.actionNotice = "The attention inbox arrives with Run controls in Wave 2.1.";
+        this.workPanelPresented = false;
         break;
       case "project":
         this.workPanelPresented = false;
         break;
       case "conversation":
-        this.showFixture("active");
         this.workPanelPresented = true;
         break;
       case "schedules":
@@ -295,11 +505,50 @@ export class DesktopSession {
     }
   }
 
-  submitDraft(): void {
-    if (!this.canSubmitDraft) return;
-    // ASVS 2.1.1 and 2.2.2: this draft remains presentation-only. A later
-    // typed Rust command must validate it again at the trusted boundary.
-    this.actionNotice = "Task submission is not connected in this shell yet. Your draft was kept.";
+  async submitDraft(): Promise<void> {
+    if (!this.canSubmitDraft || this.conversationBusy) return;
+    if (this.connectionState !== "online") {
+      this.actionNotice = "Reconnect to the Plane before sending. Your draft was kept.";
+      return;
+    }
+    const prompt = this.draft;
+    const craft = this.selectedCraftId;
+    if (!craft) {
+      this.actionNotice = "Install an available Craft before starting work.";
+      return;
+    }
+    this.conversationBusy = true;
+    this.actionNotice = null;
+    try {
+      let conversationId = this.selectedConversationId;
+      if (!conversationId) {
+        if (!this.selectedProjectId) {
+          this.actionNotice = "Choose a Project before starting a task.";
+          return;
+        }
+        const conversation = await createConversation(this.selectedProjectId);
+        this.mergeConversation(conversation);
+        conversationId = conversation.id;
+        this.selectedConversationId = conversation.id;
+        this.sidebarSelection = "conversation";
+        this.workPanelPresented = true;
+        this.conversationDetail = await loadConversation(conversation.id);
+      }
+
+      if (this.hasLiveRun) {
+        await submitTurn(conversationId, prompt);
+      } else {
+        await startRun(conversationId, craft, prompt);
+      }
+      this.draft = "";
+      this.actionNotice = "Sent to the Plane.";
+      await this.loadSelectedConversation(false);
+    } catch (error: unknown) {
+      this.actionNotice = publicError(error).message;
+      await this.refreshConversations();
+    } finally {
+      this.conversationBusy = false;
+    }
   }
 
   showPanel(tab: WorkPanelTab): void {
@@ -335,18 +584,114 @@ export class DesktopSession {
         this.failure = null;
         break;
       case "resumed":
+        this.connectionState = "online";
+        this.failure = null;
+        void this.refreshConversations();
+        break;
       case "event":
         this.connectionState = "online";
         this.failure = null;
+        if (update.conversation_id === this.selectedConversationId) {
+          this.receiveTimeline(update);
+          this.scheduleDetailRefresh();
+        }
+        if (
+          update.kind === "conversation.created" ||
+          update.kind === "conversation.name_changed" ||
+          update.kind === "conversation.trashed"
+        ) {
+          void this.refreshConversations();
+        }
         break;
       case "reconnecting":
         this.connectionState = "reconnecting";
         this.failure = update.error;
+        if (this.conversationDetail) this.conversationFreshness = "cached";
         break;
       case "failed":
+        if (
+          update.error.code === "event.cursor_expired" ||
+          update.error.code === "event.cursor_ahead"
+        ) {
+          void this.recoverSnapshot();
+          break;
+        }
         this.connectionState = "failed";
         this.failure = update.error;
+        if (this.conversationDetail) this.conversationFreshness = "cached";
         break;
+    }
+  }
+
+  private receiveTimeline(update: Extract<PlaneUpdate, { type: "event" }>): void {
+    if (update.timeline.length === 0) {
+      const last = this.timeline.at(-1);
+      if (last && last.rawCount > 0) {
+        last.rawCount += 1;
+        last.sequence = update.sequence;
+        last.text = `${last.rawCount} background updates`;
+        this.timeline = [...this.timeline];
+      } else {
+        this.timeline = [
+          ...this.timeline,
+          {
+            id: `raw-${update.sequence}`,
+            kind: "activity",
+            text: "1 background update",
+            sequence: update.sequence,
+            rawCount: 1,
+          },
+        ];
+      }
+      return;
+    }
+
+    for (const [index, item] of update.timeline.entries()) {
+      const id = item.itemId ?? `${update.sequence}-${index}`;
+      const existing = this.timeline.find((entry) => entry.id === id);
+      if (existing && item.kind === "user") {
+        existing.text += item.text;
+        existing.sequence = update.sequence;
+        this.timeline = [...this.timeline];
+      } else {
+        this.timeline = [
+          ...this.timeline,
+          {
+            id,
+            kind: item.kind,
+            text: item.text,
+            sequence: update.sequence,
+            rawCount: 0,
+          },
+        ].slice(-256);
+      }
+    }
+  }
+
+  private scheduleDetailRefresh(): void {
+    if (this.detailRefresh) clearTimeout(this.detailRefresh);
+    this.detailRefresh = setTimeout(() => {
+      this.detailRefresh = null;
+      void this.loadSelectedConversation(false);
+    }, 200);
+  }
+
+  private async recoverSnapshot(): Promise<void> {
+    this.timeline = [];
+    this.actionNotice = "The activity cursor expired. Jet refreshed the full Conversation snapshot.";
+    await this.refreshConversations();
+    try {
+      const snapshot = await openPlaneFeed(
+        (update) => this.receive(update),
+        this.conversationCursor,
+      );
+      this.connection = snapshot.state === "online" ? snapshot : null;
+      this.connectionState = snapshot.state;
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      this.failure = failure;
+      this.connectionState = failure.retryable ? "reconnecting" : "failed";
+      this.actionNotice = failure.message;
     }
   }
 }
