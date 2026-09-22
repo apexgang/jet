@@ -1,32 +1,26 @@
-//
-//  jetApp.swift
-//  jet
-//
-//  Created by Ivan King on 28.08.2026.
-//
-
 import SwiftUI
-import SwiftData
 
 @main
 struct jetApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    @State private var session = DesktopSession()
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+#if os(macOS)
+        Window("Jet", id: "main") {
+            ContentView(session: session)
         }
-        .modelContainer(sharedModelContainer)
+        .defaultSize(width: 1280, height: 800)
+        .commands {
+            JetCommands(session: session)
+        }
+
+        Settings {
+            JetSettingsView()
+        }
+#else
+        WindowGroup {
+            ContentView(session: session)
+        }
+#endif
     }
 }

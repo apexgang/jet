@@ -1,6 +1,6 @@
 # Jet desktop implementation plan
 
-Status: Wave 0 foundation completed through the architecture checkpoint on 2026-09-22. Wave 1 has not started.
+Status: Wave 0 foundation and Wave 1.1 native shell completed on 2026-09-22. Wave 1.2 is next.
 
 This plan turns `docs/design-language.md` into a staged desktop product for macOS and Linux. It is repository-specific and preserves the boundaries in `apps/jet/AGENTS.md`, `apps/jet-tauri/AGENTS.md`, and the Jet protocol ADRs.
 
@@ -131,6 +131,8 @@ Estimated effort: 2 to 4 engineer-weeks. The Swift production transport and deco
 Goal: a new user can connect locally, choose a Project, start work, watch it, and return to it.
 
 ### 1.1 Native shell
+
+Status: completed on 2026-09-22 for the independent SwiftUI and Tauri clients.
 
 - Replace both starter screens with the sidebar, Conversation column, composer, and contextual work-panel shell.
 - Implement macOS menus, shortcuts, focus routing, window restoration, and Settings scene using native SwiftUI APIs.

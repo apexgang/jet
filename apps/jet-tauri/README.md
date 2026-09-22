@@ -21,11 +21,7 @@ The cross-client architecture and frozen Wave 0 boundary are recorded in
 Run these commands from this directory:
 
 ```sh
-bun install --frozen-lockfile
-bun run check
-bun run build
-cargo fmt --manifest-path src-tauri/Cargo.toml --check
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path src-tauri/Cargo.toml
-bun run tauri build --debug --bundles app
+just install
+just check
+just bundle
 ```
