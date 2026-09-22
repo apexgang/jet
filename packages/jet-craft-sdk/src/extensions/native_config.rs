@@ -46,7 +46,7 @@ pub(crate) fn read(path: &Path) -> io::Result<Vec<u8>> {
 	Ok(bytes)
 }
 pub(crate) fn digest(bytes: &[u8]) -> String {
-	format!("{:x}", Sha256::digest(bytes))
+	hex::encode(Sha256::digest(bytes))
 }
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 	let parent = path.parent().ok_or_else(extension_error)?;

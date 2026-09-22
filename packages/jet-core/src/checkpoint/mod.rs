@@ -1133,10 +1133,7 @@ pub(crate) mod tests {
 				.contains(&format!("+{content}"))
 		);
 		use sha2::{Digest, Sha256};
-		assert_eq!(
-			format!("{:x}", Sha256::digest(&bytes)),
-			diff.artifact.sha256
-		);
+		assert_eq!(hex::encode(Sha256::digest(&bytes)), diff.artifact.sha256);
 		let current = wait_diff(&core, run.run_id, DiffScope::Current).await;
 		let cursor = current.next_page.unwrap();
 		std::fs::write(root.join("aaa-inserted.txt"), "Changed between pages")
@@ -1272,10 +1269,9 @@ pub(crate) mod tests {
 				let executable = Path::new("/bin/cat").canonicalize().unwrap();
 				Ok(PinnedCraft {
 					id: "fake".into(),
-					sha256: format!(
-						"{:x}",
-						Sha256::digest(std::fs::read(&executable).unwrap())
-					),
+					sha256: hex::encode(Sha256::digest(
+						std::fs::read(&executable).unwrap(),
+					)),
 					executable,
 					adapter_state: "fixture".into(),
 				})

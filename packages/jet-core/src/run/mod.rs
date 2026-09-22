@@ -271,10 +271,8 @@ pub(crate) mod tests {
 		let installed = home.join("crafts/fake-craft");
 		std::fs::copy(executable, &installed).unwrap();
 		let executable = installed.canonicalize().unwrap();
-		let digest = format!(
-			"{:x}",
-			Sha256::digest(std::fs::read(&executable).unwrap())
-		);
+		let digest =
+			hex::encode(Sha256::digest(std::fs::read(&executable).unwrap()));
 		let installation = serde_json::json!({
 			"executable": executable, "sha256": digest,
 			"specification": {

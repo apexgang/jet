@@ -21,7 +21,7 @@ impl SourcePrefix {
 		let mut hash = Sha256::new();
 		hash.update(self.digest.as_bytes());
 		hash.update(bytes);
-		self.digest = format!("{:x}", hash.finalize());
+		self.digest = hex::encode(hash.finalize());
 		self.count += 1;
 		Ok(())
 	}

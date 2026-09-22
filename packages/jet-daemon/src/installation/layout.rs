@@ -241,7 +241,7 @@ mod tests {
 			fs::write(dir.join(name), &body).unwrap();
 			executables.insert(
 				name.to_owned(),
-				format!("{:x}", Sha256::digest(body.as_bytes())),
+				hex::encode(Sha256::digest(body.as_bytes())),
 			);
 		}
 		let manifest = ReleaseManifest {

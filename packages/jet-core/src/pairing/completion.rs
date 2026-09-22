@@ -509,7 +509,7 @@ pub(crate) mod tests {
 		assert_eq!(
 			(
 				transcript.len(),
-				format!("{:x}", Sha256::digest(&transcript)),
+				hex::encode(Sha256::digest(&transcript)),
 				authentication_string(&transcript)
 			),
 			(

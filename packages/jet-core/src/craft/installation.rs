@@ -546,7 +546,7 @@ sha256 = "{sha256}"
 	async fn a_qualifying_release_is_discovered_as_an_exact_confirmation() {
 		let dir = tempfile::tempdir().unwrap();
 		let artifact = b"verified executable".to_vec();
-		let sha256 = format!("{:x}", Sha256::digest(&artifact));
+		let sha256 = hex::encode(Sha256::digest(&artifact));
 		let repository = FixedCraftRepository::release(
 			"apex/jet-craft-demo",
 			"v1.2.3",
@@ -603,7 +603,7 @@ sha256 = "{sha256}"
 	async fn an_exact_confirmation_publishes_an_audited_installed_craft() {
 		let dir = tempfile::tempdir().unwrap();
 		let artifact = b"verified executable".to_vec();
-		let sha256 = format!("{:x}", Sha256::digest(&artifact));
+		let sha256 = hex::encode(Sha256::digest(&artifact));
 		let repository = FixedCraftRepository::release(
 			"apex/jet-craft-demo",
 			"v1.2.3",
@@ -803,7 +803,7 @@ sha256 = "{sha256}"
 	async fn an_unknown_required_declaration_rejects_the_release() {
 		let dir = tempfile::tempdir().unwrap();
 		let artifact = b"verified executable".to_vec();
-		let sha256 = format!("{:x}", Sha256::digest(&artifact));
+		let sha256 = hex::encode(Sha256::digest(&artifact));
 		let specification = String::from_utf8(published_specification(&sha256))
 			.unwrap()
 			.replace(
@@ -850,7 +850,7 @@ sha256 = "{sha256}"
 		] {
 			let dir = tempfile::tempdir().unwrap();
 			let artifact = b"verified executable".to_vec();
-			let sha256 = format!("{:x}", Sha256::digest(&artifact));
+			let sha256 = hex::encode(Sha256::digest(&artifact));
 			let specification =
 				String::from_utf8(published_specification(&sha256))
 					.unwrap()
@@ -893,7 +893,7 @@ sha256 = "{sha256}"
 	 {
 		let dir = tempfile::tempdir().unwrap();
 		let artifact = b"verified executable".to_vec();
-		let sha256 = format!("{:x}", Sha256::digest(&artifact));
+		let sha256 = hex::encode(Sha256::digest(&artifact));
 		let specification = String::from_utf8(published_specification(&sha256))
 			.unwrap()
 			.replace(
@@ -949,7 +949,7 @@ sha256 = "{sha256}"
 	 {
 		let dir = tempfile::tempdir().unwrap();
 		let artifact = b"locally built executable".to_vec();
-		let sha256 = format!("{:x}", Sha256::digest(&artifact));
+		let sha256 = hex::encode(Sha256::digest(&artifact));
 		let specification_path = dir.path().join("craft-spec.toml");
 		let artifact_path = dir.path().join("jet-craft-demo-linux-aarch64");
 		std::fs::write(&specification_path, published_specification(&sha256))
@@ -1035,7 +1035,7 @@ sha256 = "{sha256}"
 	async fn developer_mode_does_not_follow_a_local_artifact_symlink() {
 		let dir = tempfile::tempdir().unwrap();
 		let artifact = b"locally built executable".to_vec();
-		let sha256 = format!("{:x}", Sha256::digest(&artifact));
+		let sha256 = hex::encode(Sha256::digest(&artifact));
 		let specification_path = dir.path().join("craft-spec.toml");
 		let real_directory = dir.path().join("real");
 		std::fs::create_dir(&real_directory).unwrap();
@@ -1092,7 +1092,7 @@ sha256 = "{sha256}"
 	async fn local_installation_rechecks_developer_mode_in_its_transaction() {
 		let dir = tempfile::tempdir().unwrap();
 		let artifact = b"locally built executable".to_vec();
-		let sha256 = format!("{:x}", Sha256::digest(&artifact));
+		let sha256 = hex::encode(Sha256::digest(&artifact));
 		let specification_path = dir.path().join("craft-spec.toml");
 		let artifact_path = dir.path().join("jet-craft-demo-linux-aarch64");
 		std::fs::write(&specification_path, published_specification(&sha256))
@@ -1171,7 +1171,7 @@ sha256 = "{sha256}"
 		let dir = tempfile::tempdir().unwrap();
 		let store_path = dir.path().join("plane.sqlite3");
 		let artifact = b"locally built executable".to_vec();
-		let sha256 = format!("{:x}", Sha256::digest(&artifact));
+		let sha256 = hex::encode(Sha256::digest(&artifact));
 		let specification_path = dir.path().join("craft-spec.toml");
 		let artifact_path = dir.path().join("jet-craft-demo-linux-aarch64");
 		std::fs::write(&specification_path, published_specification(&sha256))
@@ -1230,7 +1230,7 @@ sha256 = "{sha256}"
 	async fn changed_confirmation_and_changed_artifact_are_both_refused() {
 		let dir = tempfile::tempdir().unwrap();
 		let declared_artifact = b"declared executable".to_vec();
-		let sha256 = format!("{:x}", Sha256::digest(&declared_artifact));
+		let sha256 = hex::encode(Sha256::digest(&declared_artifact));
 		let repository = FixedCraftRepository::release(
 			"apex/jet-craft-demo",
 			"v1.2.3",

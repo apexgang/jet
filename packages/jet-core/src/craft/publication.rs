@@ -175,7 +175,7 @@ impl ArtifactStaging {
 	}
 
 	pub(crate) async fn finish(self) -> Result<(), CoreError> {
-		let digest = format!("{:x}", self.digest.clone().finalize());
+		let digest = hex::encode(self.digest.clone().finalize());
 		if self.written != self.size || digest != self.sha256 {
 			self.abort().await;
 			return Err(artifact_mismatch());
@@ -376,7 +376,7 @@ fn verify_artifact(
 		}
 		digest.update(&buffer[..read]);
 	}
-	if format!("{:x}", digest.finalize()) != sha256 {
+	if hex::encode(digest.finalize()) != sha256 {
 		return Err(std::io::Error::other("Artifact digest changed"));
 	}
 	Ok(())

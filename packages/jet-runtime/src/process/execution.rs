@@ -121,7 +121,7 @@ pub fn execution_digest(path: &Path) -> io::Result<String> {
 		digest.update(&buffer[..count]);
 	}
 	// ASVS 11.4.1: execution identity uses a collision-resistant artifact digest.
-	Ok(format!("{:x}", digest.finalize()))
+	Ok(hex::encode(digest.finalize()))
 }
 fn invalid() -> io::Error {
 	io::Error::other("execution identity is unavailable or unsafe")

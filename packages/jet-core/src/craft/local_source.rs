@@ -205,7 +205,7 @@ async fn hash_bounded_file(
 				})?;
 			digest.update(&buffer[..read]);
 		}
-		Ok((format!("{:x}", digest.finalize()), size))
+		Ok((hex::encode(digest.finalize()), size))
 	})
 	.await?
 	.map_err(|_| local_file_invalid())
