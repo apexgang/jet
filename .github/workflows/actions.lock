@@ -3,6 +3,10 @@
 # Docs: https://gh.io/actions-lockfile
 version: 'v0.0.2'
 workflows:
+    '.github/workflows/codeql.yml':
+        - 'actions/checkout@v7.0.1'
+        - 'extractions/setup-just@v4.0.0'
+        - 'github/codeql-action@v4.38.1'
     '.github/workflows/contracts.yml':
         - 'actions/cache@v6.1.0'
         - 'actions/checkout@v7.0.1'
@@ -63,6 +67,11 @@ dependencies:
         repo_id: 258510356
         uses:
             - 'extractions/setup-crate@0551596312d4008a6dfbc4d3c38fa20eaef46d2d'
+    'github/codeql-action@v4.38.1':
+        ref: 'v4.38.1'
+        commit: 'sha1-1c5b675653bb5c22dbe9b12b556ec555138e09fd'
+        owner_id: 9919
+        repo_id: 259445878
     'taiki-e/install-action@v2.87.13':
         ref: 'v2.87.13'
         commit: 'sha1-26e9283f268b880168bdbd2c545dfcd60ec2c6ab'
