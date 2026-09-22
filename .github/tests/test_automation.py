@@ -13,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import changes
 import release_assets
 
+ROOT = Path(__file__).resolve().parents[2]
+
 
 class ChangeSelection(unittest.TestCase):
     def test_unrelated_changes_skip_builds(self):
@@ -37,6 +39,28 @@ class ChangeSelection(unittest.TestCase):
     def test_gui_models_run_contract_tests(self):
         self.assertEqual(changes.classify(['apps/jet/jet/Protocol/JetModels.swift']),
                          {'core': False, 'contracts': True})
+
+
+class CodeScanning(unittest.TestCase):
+    """CodeQL only sees the Swift that the manual build step compiles (codeql.yml)."""
+    # Roots the Swift build step compiles: the GUI target and the wire models with their corpus runner.
+    COMPILED = ('apps/jet/jet/', 'packages/jet-protocol/contracts/')
+    # Xcode test bundles the build step leaves out on purpose, as the autobuilder would.
+    XCODE_TESTS = ('apps/jet/jetTests/', 'apps/jet/jetUITests/')
+
+    def test_every_swift_source_root_is_compiled_or_an_xcode_test_bundle(self):
+        tracked = subprocess.check_output(['git', 'ls-files', '--', '*.swift'], cwd=ROOT, text=True).split()
+        self.assertTrue(tracked)
+        for path in tracked:
+            with self.subTest(path=path):
+                self.assertTrue(path.startswith(self.COMPILED + self.XCODE_TESTS),
+                                f'{path} is outside every root the CodeQL Swift build compiles')
+
+    def test_swift_build_step_compiles_the_known_roots(self):
+        workflow = (ROOT / '.github/workflows/codeql.yml').read_text()
+        self.assertIn('-project apps/jet/jet.xcodeproj -target jet', workflow)
+        self.assertIn('contracts-test-swift', workflow)
+        self.assertIn('build-mode: manual', workflow)
 
 
 class ReleaseAssets(unittest.TestCase):
