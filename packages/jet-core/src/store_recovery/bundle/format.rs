@@ -50,7 +50,7 @@ pub(super) struct CraftMetadata {
 	pub(super) harnesses: Vec<String>,
 }
 pub(crate) fn hash(bytes: &[u8]) -> String {
-	format!("{:x}", Sha256::digest(bytes))
+	hex::encode(Sha256::digest(bytes))
 }
 pub(crate) fn artifact_name(name: &str) -> Option<&str> {
 	name.strip_prefix("artifacts/").filter(|hash| {

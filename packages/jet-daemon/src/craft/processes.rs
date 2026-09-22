@@ -228,7 +228,7 @@ mod tests {
 		let pin = PinnedCraft {
 			id: "idle-test".into(),
 			executable: program,
-			sha256: format!("{:x}", Sha256::digest(script)),
+			sha256: hex::encode(Sha256::digest(script)),
 			adapter_state: String::new(),
 		};
 		let host = CraftProcesses {

@@ -65,7 +65,7 @@ fn payload(
 		let source = Path::new(env!("CARGO_BIN_EXE_jetd")).with_file_name(name);
 		std::fs::copy(&source, dir.join(name)).unwrap();
 		let digest = Sha256::digest(std::fs::read(&source).unwrap());
-		executables.insert(name.to_owned(), json!(format!("{digest:x}")));
+		executables.insert(name.to_owned(), json!(hex::encode(digest)));
 	}
 	let identity = describe();
 	let mut manifest = json!({

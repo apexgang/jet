@@ -26,6 +26,7 @@ uuid.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 jet-craft-sdk.workspace = true
+hex.workspace = true
 sha2.workspace = true
 ed25519-dalek.workspace = true
 pretty_assertions.workspace = true

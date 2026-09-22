@@ -194,7 +194,7 @@ async fn daemon_dispatches_an_accepted_craft_and_retains_the_attributed_result()
         let selected = invoke(&craft, root, "--utility-model", &Value::Null).await;
         let model: CraftUtilityModel = serde_json::from_slice(&selected.stdout).unwrap();
         let specification = jet_craft_sdk::parse_specification(include_str!("../../jet-craft-codex/.jet/craft-spec.toml")).unwrap();
-        let installation = json!({"executable":craft,"sha256":format!("{:x}",Sha256::digest(std::fs::read(&craft).unwrap())),"specification":specification});
+        let installation = json!({"executable":craft,"sha256":hex::encode(Sha256::digest(std::fs::read(&craft).unwrap())),"specification":specification});
         std::fs::write(home.join("crafts/codex.json"), installation.to_string()).unwrap();
         let response = json!({"model":model.model,"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"inactive_days\":90}"}]}]});
         std::fs::write(root.join("response"), response.to_string()).unwrap();

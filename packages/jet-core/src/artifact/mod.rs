@@ -128,7 +128,7 @@ impl ArtifactDownload {
 	/// Returns an integrity error on truncation, incomplete reads, or corruption.
 	pub fn finish(self) -> Result<(), CoreError> {
 		if self.received != self.descriptor.size
-			|| format!("{:x}", self.hash.finalize()) != self.descriptor.sha256
+			|| hex::encode(self.hash.finalize()) != self.descriptor.sha256
 		{
 			return Err(files::corrupt());
 		}
@@ -233,7 +233,7 @@ impl Core {
 				"the upload did not reach its declared size",
 			));
 		}
-		if format!("{:x}", upload.hash.finalize()) != upload.descriptor.sha256 {
+		if hex::encode(upload.hash.finalize()) != upload.descriptor.sha256 {
 			return Err(invalid(
 				"artifact.hash_mismatch",
 				"the upload did not match its declared SHA-256",

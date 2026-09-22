@@ -748,10 +748,9 @@ pub(crate) mod tests {
 						Path::new("/bin/cat").canonicalize().unwrap();
 					Ok(PinnedCraft {
 						id: "fake".into(),
-						sha256: format!(
-							"{:x}",
-							Sha256::digest(std::fs::read(&executable).unwrap())
-						),
+						sha256: hex::encode(Sha256::digest(
+							std::fs::read(&executable).unwrap(),
+						)),
 						executable,
 						adapter_state: "pinned-model".into(),
 					})

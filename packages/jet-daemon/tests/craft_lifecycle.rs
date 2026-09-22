@@ -22,7 +22,7 @@ fn stage(home: &Path, version: &str) -> String {
 	let script = std::fs::read_to_string(crafts.join("fake-craft"))
 		.unwrap()
 		.replace(manifest.to_str().unwrap(), frozen.to_str().unwrap());
-	let digest = format!("{:x}", Sha256::digest(script.as_bytes()));
+	let digest = hex::encode(Sha256::digest(script.as_bytes()));
 	let mut declaration: Value =
 		serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
 	declaration["executable"] = json!(program);

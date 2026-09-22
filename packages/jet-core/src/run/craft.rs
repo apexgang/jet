@@ -31,7 +31,7 @@ impl PinnedCraft {
 			let bytes = bounded_read(&craft.executable, 64 * 1024 * 1024)
 				.map_err(|_| unavailable())?;
 			if !craft.executable.is_absolute()
-				|| format!("{:x}", Sha256::digest(bytes)) != craft.sha256
+				|| hex::encode(Sha256::digest(bytes)) != craft.sha256
 			{
 				return Err(unavailable());
 			}
