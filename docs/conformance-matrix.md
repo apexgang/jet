@@ -11,7 +11,7 @@ outside the matrix; they behave the same whichever Harness a Run uses.
 
 | Harness | Tested release | Craft protocol | Where the pin lives |
 | --- | --- | --- | --- |
-| Codex | Codex CLI 0.153.4, exact | Craft 1.8 | `jet-craft-codex/src/execution/harness.rs` |
+| Codex | Codex CLI 0.153.4, exact | Craft 1.10 | `jet-craft-codex/src/execution/harness.rs` |
 | Claude Code | Claude Code 2.1.x, by minor line | Craft 1.10 | `jet-craft-claude/src/execution/harness.rs` |
 
 A unit test in each Craft reads this file and fails when the pin it
@@ -54,9 +54,9 @@ release never silently widens a row below.
 | Stop Run | Jet-equivalent | Jet-equivalent | Signal escalation through `jetfueld` (ADR-0083) |
 | Approval requests | Native | Native | Server requests answered only through Jet; the `--permission-prompt-tool` MCP tool Jet serves |
 | Automatic review | Jet-equivalent | Jet-equivalent | Neither release exposes a separate native reviewer that satisfies ADR-0012, so the Provider's low-effort reviewer answers and is recorded ([automatic-review.md](automatic-review.md)) |
-| Resume a native Conversation across Craft or daemon restart | Craft gap (#154) | Native | Claude Code resumes with `--resume` and the pinned `--session-id`; Codex exposes `thread/resume`, but the Craft declares no `resume` feature, so a lost Run continues as a new Run with a new thread |
-| Auto-continue after a rate limit | Jet-equivalent, live connection only | Jet-equivalent | The Codex Craft retries only on its matching live connection; the Claude Craft also opens a new Run through native resume with the observed Model ([auto-continue.md](auto-continue.md)) |
-| Model selection and Model-pinned resume | Craft gap (#154) | Native | Craft 1.10 explicit native Model selection is implemented by the Claude Craft only; Codex accepts a `model` the Craft does not pass, so Codex Runs use the Harness's configured Model |
+| Resume a native Conversation across Craft or daemon restart | Native | Native | Live helpers reconnect through `Recover`; a new Run reopens the native identity with Codex `thread/resume` or Claude Code `--resume`. [Uncertain Codex input](codex-craft.md#recovery-and-model-selection) is never replayed |
+| Auto-continue after a rate limit | Jet-equivalent | Jet-equivalent | Both Crafts can open a new Run through native resume with the observed Model ([auto-continue.md](auto-continue.md)) |
+| Model selection and Model-pinned resume | Native | Native | Craft 1.10 reports the resolved Model and enforces it on resume; Codex passes `model` on `thread/resume` and subsequent `turn/start` requests |
 | Fork a Conversation from a checkpoint | Jet-equivalent | Jet-equivalent | Neither Craft declares `fork`; the new Run starts a native Conversation with the provenance-marked history prefix ([conversation-forks.md](conversation-forks.md)) |
 | Handoff to another Harness | Jet-equivalent | Jet-equivalent | Jet composes the Handoff summary; no Harness exports one ([handoffs.md](handoffs.md)) |
 | Import an external native Conversation | Jet-equivalent | Jet-equivalent | Identities are discovered and recorded as metadata; a managed Resume makes a Conversation in a registered Project and starts a new Run |
@@ -68,7 +68,7 @@ release never silently widens a row below.
 | Skills, MCP servers, and hooks | Native | Native | Native configuration files edited in their own formats ([harness-extensions.md](harness-extensions.md)) |
 | Plugins and marketplaces | Native | Native | Codex plugin RPCs on the app-server; Claude marketplaces and plugin refresh |
 | Visa Runs on a destination Plane | Native | Native | Both Provider mappings are supported ([visa-runs.md](visa-runs.md)) |
-| No-Visa remote tools | Craft gap (#154) | Jet-equivalent | Claude Code reaches `mcp__jet__remote` through its native MCP bridge; Codex loads MCP servers but the bundled Craft serves no tool bridge, so a Codex Conversation runs in Visa mode ([no-visa-execution.md](no-visa-execution.md)) |
+| No-Visa remote tools | Jet-equivalent | Jet-equivalent | Both Crafts serve `mcp__jet__remote` through native MCP; Codex uses a per-Run stdio bridge, and jetd authorizes and brokers each destination call ([no-visa-execution.md](no-visa-execution.md)) |
 | Utility work: names, commit and pull-request text | Jet-equivalent | Jet-equivalent | Both declare `utility`; the Home Plane's Utility binding selects the Model ([utility-work.md](utility-work.md)) |
 | Completion notifications | Native | Native | Native completion events reach the GUI's platform notifications |
 | Oversized native output | Jet-equivalent | Jet-equivalent | Immutable Artifact publication and binary transfer ([artifacts.md](artifacts.md)) |
