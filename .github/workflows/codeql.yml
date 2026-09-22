@@ -8,7 +8,9 @@
 # CodeQL uploads from a workflow while default setup is enabled. The Swift
 # job compiles the Xcode GUI and the Swift wire models itself under the
 # CodeQL tracer; `.github/tests/test_automation.py` keeps that build step
-# covering every Swift source root.
+# covering every Swift source root. Unlike the test workflows, nothing here
+# is gated on the `changes` job: a scan of the whole tree is the point, and
+# no analysis is a required check.
 name: CodeQL
 
 on:
@@ -65,7 +67,6 @@ jobs:
         run: >
           xcodebuild build -project apps/jet/jet.xcodeproj -target jet
           -configuration Debug -sdk macosx
-          -derivedDataPath "$RUNNER_TEMP/DerivedData"
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
           DEVELOPMENT_TEAM="" ONLY_ACTIVE_ARCH=YES
       - name: Compile the Swift wire models under the CodeQL tracer
