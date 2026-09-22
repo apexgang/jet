@@ -301,15 +301,20 @@ async fn only_signed_revocations_stop_a_digest_and_the_barrier_survives_restart(
     }).await.unwrap();
 }
 
+// Every wait is a named step under its own deadline (`assertions::STEP_BUDGET`), so
+// a stall says which step it was, and the daemon, living outside the guard,
+// still reports its stderr and Diagnostic log when a step fails. The guard
+// only bounds a hang in what is not a step (connecting, starting a Run):
+// longer than the thirteen steps' budgets combined, it never fires first.
 #[tokio::test]
 async fn active_digests_multiplex_runs_and_restart_without_switching_versions()
 {
-	tokio::time::timeout(Duration::from_secs(30), async {
-		let dir = tempfile::tempdir_in("/tmp").unwrap();
-		let home = dir.path().join("jet");
-		fixture::install(&home);
-		stage(&home, "v1");
-		let daemon = start_jetd(&home).await;
+	let dir = tempfile::tempdir_in("/tmp").unwrap();
+	let home = dir.path().join("jet");
+	fixture::install(&home);
+	stage(&home, "v1");
+	let daemon = start_jetd(&home).await;
+	tokio::time::timeout(assertions::STEP_BUDGET * 14, async {
 		let client_id = Uuid::new_v4();
 		let client = connect(&daemon, client_id).await;
 		let mut wire = connect_raw(&daemon, client_id).await;
@@ -357,5 +362,5 @@ async fn active_digests_multiplex_runs_and_restart_without_switching_versions()
 		}
 	})
 	.await
-	.unwrap();
+	.expect("the scenario hung somewhere no step covers");
 }

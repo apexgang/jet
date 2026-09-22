@@ -17,10 +17,12 @@ use jet_protocol::{
 	SnapshotReason, StreamId, VersionRange, decode_control, encode_control,
 };
 use pretty_assertions::assert_eq;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::process::{Child, Command};
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 pub struct Daemon {
@@ -28,6 +30,103 @@ pub struct Daemon {
 	pub socket: PathBuf,
 	/// The line `jetd` prints once it can serve, parsed.
 	pub ready: serde_json::Value,
+	/// The Jet home the daemon serves, as an absolute path.
+	home: PathBuf,
+	stderr: StderrCapture,
+}
+
+/// How many of the daemon's last Diagnostic records a failing test shows.
+const DIAGNOSTIC_TAIL: usize = 40;
+
+/// Everything `jetd` writes to stderr, drained as it arrives so a long
+/// scenario never fills the pipe and a failure can show what the daemon
+/// said (ADR-0061).
+struct StderrCapture {
+	captured: Arc<Mutex<Vec<u8>>>,
+	drain: Option<JoinHandle<()>>,
+}
+
+impl StderrCapture {
+	fn start(pipe: tokio::process::ChildStderr) -> Self {
+		let captured = Arc::new(Mutex::new(Vec::new()));
+		let sink = Arc::clone(&captured);
+		let drain = tokio::spawn(async move {
+			let mut pipe = pipe;
+			let mut chunk = [0; 4096];
+			while let Ok(read) = pipe.read(&mut chunk).await {
+				if read == 0 {
+					break;
+				}
+				sink.lock().unwrap().extend_from_slice(&chunk[..read]);
+			}
+		});
+		Self {
+			captured,
+			drain: Some(drain),
+		}
+	}
+
+	fn so_far(&self) -> String {
+		String::from_utf8_lossy(&self.captured.lock().unwrap()).into_owned()
+	}
+
+	/// Waits for the pipe to close, which the process's exit brings about,
+	/// and returns everything written to it.
+	async fn drained(&mut self) -> String {
+		if let Some(drain) = self.drain.take() {
+			drain.await.unwrap();
+		}
+		self.so_far()
+	}
+}
+
+impl Daemon {
+	/// Everything `jetd` wrote to stderr; waits for the pipe to close, so
+	/// call it once the process has exited.
+	pub async fn stderr(&mut self) -> String {
+		self.stderr.drained().await
+	}
+}
+
+impl Drop for Daemon {
+	/// A failing test shows the daemon's side of the story beside its own
+	/// panic: its stderr, then the tail of its Diagnostic log (ADR-0061).
+	/// `kill_on_drop` then stops the process.
+	fn drop(&mut self) {
+		if !std::thread::panicking() {
+			return;
+		}
+		let stderr = self.stderr.so_far();
+		if stderr.is_empty() {
+			eprintln!(
+				"jetd at {} wrote nothing to stderr",
+				self.socket.display()
+			);
+		} else {
+			eprintln!("jetd at {} stderr:\n{stderr}", self.socket.display());
+		}
+		let log = self.home.join("diagnostics").join("jetd.log");
+		match std::fs::read_to_string(&log) {
+			Ok(records) => {
+				let lines: Vec<&str> = records.lines().collect();
+				let shown = lines.len().min(DIAGNOSTIC_TAIL);
+				eprintln!(
+					"jetd Diagnostic log {} (last {shown} of {} records):",
+					log.display(),
+					lines.len()
+				);
+				for line in &lines[lines.len() - shown..] {
+					eprintln!("{line}");
+				}
+			}
+			Err(error) => {
+				eprintln!(
+					"jetd Diagnostic log {} cannot be read: {error}",
+					log.display()
+				);
+			}
+		}
+	}
 }
 
 pub fn jetd(home: &Path) -> Command {
@@ -71,25 +170,39 @@ pub async fn start_jetd_with_credential_store(home: &Path) -> Daemon {
 	start_jetd(home).await
 }
 
+/// The `--home` a [`jetd`] command was given, made absolute against the
+/// directory the command runs in.
+fn home_of(command: &Command) -> PathBuf {
+	let command = command.as_std();
+	let mut args = command.get_args();
+	let home = loop {
+		match args.next() {
+			Some(flag) if flag == "--home" => {
+				break PathBuf::from(args.next().expect("a home after --home"));
+			}
+			Some(_) => {}
+			None => panic!("jetd command has no --home"),
+		}
+	};
+	if home.is_absolute() {
+		return home;
+	}
+	match command.get_current_dir() {
+		Some(directory) => directory.join(home),
+		None => std::env::current_dir().unwrap().join(home),
+	}
+}
+
 /// Spawns one `jetd` and waits for the line that says it can serve.
 pub async fn start_jetd_process(command: &mut Command) -> Daemon {
+	let home = home_of(command);
 	let mut child = command.spawn().unwrap();
+	let mut stderr = StderrCapture::start(child.stderr.take().unwrap());
 	let stdout = child.stdout.take().unwrap();
 	let mut lines = BufReader::new(stdout).lines();
 	let ready = match lines.next_line().await.unwrap() {
 		Some(ready) => ready,
-		None => {
-			use tokio::io::AsyncReadExt;
-			let mut detail = String::new();
-			child
-				.stderr
-				.take()
-				.unwrap()
-				.read_to_string(&mut detail)
-				.await
-				.unwrap();
-			panic!("jetd exited early: {detail}");
-		}
+		None => panic!("jetd exited early: {}", stderr.drained().await),
 	};
 	let ready: serde_json::Value = serde_json::from_str(&ready).unwrap();
 	assert_eq!(ready["status"], "ready");
@@ -97,6 +210,8 @@ pub async fn start_jetd_process(command: &mut Command) -> Daemon {
 		child,
 		socket: PathBuf::from(ready["socket"].as_str().unwrap()),
 		ready,
+		home,
+		stderr,
 	}
 }
 

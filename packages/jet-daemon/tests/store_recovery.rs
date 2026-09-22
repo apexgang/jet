@@ -244,13 +244,9 @@ fn damage_journal_page(home: &Path) {
 }
 
 async fn stop_cleanly(mut daemon: Daemon) {
-	use tokio::io::AsyncReadExt as _;
 	send_sigterm(&daemon);
 	let status = daemon.child.wait().await.unwrap();
-	let mut stderr = String::new();
-	if let Some(mut pipe) = daemon.child.stderr.take() {
-		pipe.read_to_string(&mut stderr).await.unwrap();
-	}
+	let stderr = daemon.stderr().await;
 	assert!(status.success(), "jetd exited with {status}: {stderr}");
 }
 
