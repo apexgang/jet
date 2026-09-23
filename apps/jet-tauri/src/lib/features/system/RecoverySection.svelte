@@ -26,6 +26,8 @@
   const view = $derived(withIssues(system.health, []));
   const dialog = $derived(system.recovery);
   const preparing = $derived(dialog.kind === "preparing" ? dialog.action : null);
+  /** The snapshot row whose restore is being checked. */
+  const checkingSnapshot = $derived(dialog.kind === "preparing" ? dialog.snapshotId : null);
   const sending = $derived(dialog.kind === "sending");
   const shownReview = $derived<RecoveryReview | null>(
     dialog.kind === "review" || dialog.kind === "sending" || dialog.kind === "unconfirmed" ? dialog.review : null,
@@ -86,13 +88,15 @@
                   <span class="quiet">{snapshotReasonLabel(snapshot.reason)} · {bytesText(snapshot.bytes)}</span>
                 </span>
                 {#if restoring}
+                  {@const checking = checkingSnapshot === snapshot.snapshotId}
                   <button
                     class="secondary-button"
                     disabled={blockedRestore !== null || preparing !== null || sending}
-                    aria-label={`Restore the snapshot from ${snapshotWhen(snapshot.takenAtUnixMs)}`}
+                    aria-label={`${checking ? "Checking" : "Restore"} the snapshot from ${snapshotWhen(snapshot.takenAtUnixMs)}`}
+                    aria-busy={checking}
                     onclick={() => void system.prepareRecovery({ kind: "restore_snapshot", snapshot_id: snapshot.snapshotId })}
                   >
-                    {preparing === "restore_snapshot" ? "Checking…" : "Restore…"}
+                    {checking ? "Checking…" : "Restore…"}
                   </button>
                 {/if}
               </li>
@@ -134,6 +138,7 @@
     lead={shownReview ? `On ${shownReview.planeLabel}` : undefined}
     focus={dialog.kind === "review" ? "cancel" : "primary"}
     {returnFocus}
+    focusKey={dialog.kind}
     oncancel={() => system.closeRecovery()}
   >
     {#if (dialog.kind === "review" || dialog.kind === "sending") && dialog.review.kind === "restore_snapshot"}

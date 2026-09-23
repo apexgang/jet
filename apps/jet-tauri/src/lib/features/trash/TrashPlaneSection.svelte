@@ -127,13 +127,14 @@
             {#if entry.restorable}
               <button
                 class="secondary-button"
+                aria-describedby={rowId}
                 disabled={!current || action.kind === "restoring" || action.kind === "restored"}
                 onclick={() => void trash.restore(planeId, entry.conversationId)}
               >
                 {action.kind === "uncertain" ? "Try again" : action.kind === "restoring" ? "Restoring…" : "Restore"}
               </button>
             {:else}
-              <button class="secondary-button" disabled aria-describedby={`${rowId}-tombstone`}>Restore</button>
+              <button class="secondary-button" disabled aria-describedby={`${rowId} ${rowId}-tombstone`}>Restore</button>
             {/if}
           </article>
         </li>

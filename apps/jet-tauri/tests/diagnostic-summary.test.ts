@@ -36,6 +36,7 @@ function health(overrides: Partial<SystemHealth> = {}): SystemHealth {
     security: { kind: "degraded", breach: "record_altered", breachSequence: "41", epoch: "2", exported: false },
     storage: { disposableMiB: 2048 },
     retention: { graceDays: 30 },
+    pendingEpoch: false,
     issues: [],
     ...overrides,
   };

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { tick } from "svelte";
+
   import type { SettingsSection } from "$lib/jet/settings-window";
   import type { AutodeleteRule, AutodeleteRules } from "$lib/jet/retention";
   import SectionState from "$lib/features/settings/SectionState.svelte";
@@ -70,6 +72,34 @@
 
   function ruleText(rule: AutodeleteRule): string {
     return rule.prompt === "" ? "Rule text unavailable" : rule.prompt;
+  }
+
+  /**
+   * Keeps keyboard focus in place when an inline editor opens or closes:
+   * opening focuses its field, closing (Save, Cancel, Escape) returns to the
+   * button that opened it, or to the rule's heading while that button is
+   * disabled or gone.
+   */
+  let editing: { kind: "wording" | "days"; ruleId: string } | null = null;
+  $effect(() => {
+    const current = editor.kind === "wording" || editor.kind === "days" ? { kind: editor.kind, ruleId: editor.ruleId } : null;
+    const previous = editing;
+    editing = current;
+    if (current && (current.kind !== previous?.kind || current.ruleId !== previous.ruleId)) {
+      void tick().then(() => document.getElementById(`${id}-${current.ruleId}-${current.kind}`)?.focus());
+    } else if (!current && previous) {
+      void tick().then(() => {
+        const opener = document.getElementById(`${id}-${previous.ruleId}-${previous.kind}-open`);
+        if (opener instanceof HTMLButtonElement && !opener.disabled) opener.focus();
+        else document.getElementById(`${id}-${previous.ruleId}`)?.focus();
+      });
+    }
+  });
+
+  function cancelOnEscape(event: KeyboardEvent): void {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    autodelete.cancelEdit();
   }
 
   function nameOf(conversationId: string): string {
@@ -172,7 +202,7 @@
             {@const locked = !autodelete.canChange(rule.ruleId)}
             <li>
               <article class="rule" aria-labelledby={`${id}-${rule.ruleId}`}>
-                <h5 id={`${id}-${rule.ruleId}`} class="prompt">{ruleText(rule)}</h5>
+                <h5 id={`${id}-${rule.ruleId}`} class="prompt" tabindex="-1">{ruleText(rule)}</h5>
 
                 {#if rule.state.kind === "compiling"}
                   <p role="status">{COMPILING_TEXT}</p>
@@ -193,13 +223,14 @@
                 {/if}
 
                 {#if editor.kind === "wording" && editor.ruleId === rule.ruleId}
-                  <div class="edit">
+                  <div class="edit" role="group" aria-label="Edit wording">
                     <label for={`${id}-${rule.ruleId}-wording`}>Rule</label>
                     <textarea
                       id={`${id}-${rule.ruleId}-wording`}
                       rows="3"
                       aria-describedby={`${id}-${rule.ruleId}-bytes`}
                       value={editor.prompt}
+                      onkeydown={cancelOnEscape}
                       oninput={(event) => autodelete.setEditorText(event.currentTarget.value)}
                     ></textarea>
                     <span id={`${id}-${rule.ruleId}-bytes`} class="quiet">{byteCounter(editor.prompt)}</span>
@@ -215,7 +246,7 @@
                     </div>
                   </div>
                 {:else if editor.kind === "days" && editor.ruleId === rule.ruleId}
-                  <div class="edit">
+                  <div class="edit" role="group" aria-label="Change days">
                     <label for={`${id}-${rule.ruleId}-days`}>Days with no activity</label>
                     <input
                       id={`${id}-${rule.ruleId}-days`}
@@ -224,6 +255,7 @@
                       min="1"
                       max="36500"
                       value={editor.days}
+                      onkeydown={cancelOnEscape}
                       oninput={(event) => autodelete.setEditorText(event.currentTarget.value)}
                     />
                     <p class="quiet">
@@ -252,6 +284,7 @@
                     {#if rule.state.kind !== "compiling"}
                       <button
                         type="button"
+                        id={`${id}-${rule.ruleId}-days-open`}
                         class="secondary-button"
                         disabled={locked}
                         onclick={() => autodelete.editDays(rule.ruleId)}>Change days</button
@@ -260,6 +293,7 @@
                     {#if rule.state.kind === "refused" && rule.prompt !== ""}
                       <button
                         type="button"
+                        id={`${id}-${rule.ruleId}-wording-open`}
                         class="secondary-button"
                         disabled={locked}
                         onclick={() => autodelete.editWording(rule.ruleId)}>Edit wording</button

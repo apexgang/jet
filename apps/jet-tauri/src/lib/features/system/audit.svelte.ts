@@ -80,6 +80,8 @@ export class AuditSession {
   private disposed = false;
   /** Bumped on a Plane switch, a new Jet service start and a reveal change. */
   private generation = 0;
+  /** Bumped only on a Plane switch and a new Jet service start: a reload keeps an export going. */
+  private exportGeneration = 0;
   private request = 0;
   private dialogRequest = 0;
   /** Uncertain epoch sends, kept per Plane across dialog closes. */
@@ -92,6 +94,7 @@ export class AuditSession {
   select(planeId: PlaneId): void {
     this.planeId = planeId;
     this.generation++;
+    this.exportGeneration++;
     this.dialogRequest++;
     this.loaded = false;
     this.reveal = false;
@@ -103,6 +106,7 @@ export class AuditSession {
   dispose(): void {
     this.disposed = true;
     this.generation++;
+    this.exportGeneration++;
     this.dialogRequest++;
   }
 
@@ -119,9 +123,17 @@ export class AuditSession {
     await this.refresh();
   }
 
-  /** Jet on the Plane started again, possibly from an older store: nothing shown is kept. */
+  /**
+   * Jet on the Plane started again, possibly from an older store: nothing
+   * shown is kept, and an uncertain new period of the old store is not
+   * offered again (the shell dropped it if the store was restored; if not,
+   * it still reports it as pending).
+   */
   async restarted(): Promise<void> {
     this.generation++;
+    this.exportGeneration++;
+    this.retained.delete(this.planeId);
+    if (this.exporting.kind === "saving") this.exporting = { kind: "idle" };
     this.state = { kind: "idle" };
     if (this.epoch.kind === "review" || this.epoch.kind === "preparing") {
       this.dialogRequest++;
@@ -210,11 +222,16 @@ export class AuditSession {
   /** "Save audit evidence…": the shell asks where, then writes the file. */
   async exportEvidence(): Promise<void> {
     if (this.exporting.kind === "saving") return;
-    const { planeId, generation } = this;
+    const { planeId } = this;
+    // A reload of the list (Refresh, Show identifiers, the watcher resuming)
+    // never drops an export; only a Plane switch or a new service start does,
+    // and each of those resets `exporting` itself.
+    const generation = this.exportGeneration;
+    const current = () => !this.disposed && generation === this.exportGeneration && planeId === this.planeId;
     this.exporting = { kind: "saving" };
     try {
       const result = await exportSecurityAudit(planeId);
-      if (this.disposed || generation !== this.generation) return;
+      if (!current()) return;
       if (result.kind === "canceled") {
         this.exporting = { kind: "idle" };
         return;
@@ -222,7 +239,7 @@ export class AuditSession {
       this.exporting = { kind: "saved", records: result.records, fileName: result.fileName };
       this.hooks.onExported();
     } catch (thrown: unknown) {
-      if (this.disposed || generation !== this.generation) return;
+      if (!current()) return;
       const error = publicError(thrown);
       this.hooks.observe(error);
       this.exporting = { kind: "failed", error };
@@ -248,6 +265,14 @@ export class AuditSession {
       if (review.kind !== "begin_audit_epoch") {
         // The shell reviewed something else: never offer it here.
         this.epoch = { kind: "refused", error: publicError(new Error("unexpected review")) };
+        return;
+      }
+      if (review.unconfirmed) {
+        // An earlier send (perhaps before this window was reopened) is
+        // still unconfirmed: only resending it can settle it.
+        const error = unconfirmedEpochError(planeId);
+        this.retained.set(planeId, { review, error });
+        this.epoch = { kind: "retry_epoch", review, error };
         return;
       }
       this.epoch = { kind: "review", review };
@@ -316,4 +341,14 @@ export class AuditSession {
   private current(request: number, planeId: PlaneId): boolean {
     return !this.disposed && request === this.dialogRequest && planeId === this.planeId;
   }
+}
+
+/** The shell's own "still confirming" condition, for a pending review it returned. */
+function unconfirmedEpochError(planeId: PlaneId): PublicError {
+  return publicError({
+    category: "conflict",
+    code: "recovery.request_unresolved",
+    message: "Jet is still confirming an earlier request.",
+    planeId,
+  });
 }

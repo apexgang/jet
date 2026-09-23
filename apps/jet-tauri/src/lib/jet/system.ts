@@ -100,6 +100,12 @@ export type SystemHealth = {
   degraded: Array<{ kind: DegradedKind; label: string; target: SettingsLink | null }>;
   recovery: RecoveryView;
   security: SecurityView;
+  /**
+   * A new-audit-period request of this app was sent and its outcome is still
+   * unknown: "Start new audit period…" reopens it for "Try again", whatever
+   * `security` shows.
+   */
+  pendingEpoch: boolean;
   storage: { disposableMiB: number | null };
   retention: { graceDays: number | null };
   issues: Array<{ section: HealthIssueSection; error: PublicError }>;
@@ -147,6 +153,11 @@ export type RecoveryReview =
       breach: AuditBreachKind;
       /** The audit position the saved evidence reaches. */
       exportedThrough: string;
+      /**
+       * Sent already, outcome unknown: "Try again" resends it with the same
+       * Command ID. Returned even after the Settings window was reopened.
+       */
+      unconfirmed: boolean;
     };
 
 /**

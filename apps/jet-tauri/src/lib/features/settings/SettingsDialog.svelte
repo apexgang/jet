@@ -8,6 +8,7 @@
     lead,
     focus = "primary",
     returnFocus = [],
+    focusKey,
     oncancel,
     children,
     footer,
@@ -27,6 +28,12 @@
      * prepare): element IDs, tried in order once they can take focus.
      */
     returnFocus?: readonly string[];
+    /**
+     * The step the dialog shows. A dialog that stays open from review through
+     * sending to a result swaps its buttons; each new step moves focus again
+     * (per `focus`), so it never falls out of the modal.
+     */
+    focusKey?: unknown;
     /** Escape and Cancel both go through this. */
     oncancel: () => void;
     children: Snippet;
@@ -36,14 +43,36 @@
   let dialog = $state<HTMLDialogElement>();
   const titleId = $props.id();
 
+  /** The preferred button, else any enabled one, else the dialog itself (while every button is disabled). */
+  function moveFocus(): void {
+    if (!dialog) return;
+    const selector = focus === "cancel" ? "[data-dialog-cancel]" : "[data-dialog-primary]";
+    const enabled = (element: HTMLElement | null) =>
+      element && !(element instanceof HTMLButtonElement && element.disabled) ? element : null;
+    const target =
+      enabled(dialog.querySelector<HTMLElement>(selector)) ??
+      dialog.querySelector<HTMLElement>("button:not(:disabled)") ??
+      dialog;
+    target.focus();
+  }
+
+  let shownKey: unknown;
+  let mounted = false;
+  $effect(() => {
+    const key = focusKey;
+    if (!mounted || Object.is(key, shownKey)) return;
+    shownKey = key;
+    void tick().then(moveFocus);
+  });
+
   onMount(() => {
     const trigger = focusedElement();
     const fallbacks = [...returnFocus];
+    shownKey = focusKey;
+    mounted = true;
     void tick().then(() => {
       dialog?.showModal();
-      const selector = focus === "cancel" ? "[data-dialog-cancel]" : "[data-dialog-primary]";
-      const target = dialog?.querySelector<HTMLElement>(selector) ?? dialog?.querySelector<HTMLElement>("button");
-      target?.focus();
+      moveFocus();
     });
     return () => {
       if (dialog?.open) dialog.close();
@@ -56,6 +85,7 @@
   bind:this={dialog}
   class="removal-dialog settings-dialog"
   aria-labelledby={titleId}
+  tabindex="-1"
   oncancel={(event) => {
     event.preventDefault();
     oncancel();

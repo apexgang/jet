@@ -46,6 +46,9 @@
 
   const security = $derived<SecurityView | null>(sectionData(system.health)?.security ?? null);
   const degraded = $derived(security?.kind === "degraded" ? security : null);
+  /** An earlier request is still unconfirmed: offer it for "Try again" whatever the audit shows. */
+  const pendingEpoch = $derived(sectionData(system.health)?.pendingEpoch === true);
+  const epochReady = $derived(pendingEpoch || degraded?.exported === true);
   const state = $derived(audit.state);
   const entries = $derived<AuditEntry[]>(
     state.kind === "loading" || state.kind === "ready" || state.kind === "offline" || state.kind === "failed"
@@ -96,19 +99,21 @@
     >
       {exporting.kind === "saving" ? "Saving…" : "Save audit evidence…"}
     </button>
-    {#if degraded}
+    {#if degraded || pendingEpoch}
       <button
         type="button"
         class="danger-button"
-        disabled={!degraded.exported || dialog.kind === "preparing" || sending}
-        aria-describedby={degraded.exported ? undefined : "audit-epoch-hint"}
+        disabled={!epochReady || dialog.kind === "preparing" || sending}
+        aria-describedby={epochReady ? undefined : "audit-epoch-hint"}
         onclick={() => void audit.prepareEpoch()}
       >
         {dialog.kind === "preparing" ? "Checking…" : "Start new audit period…"}
       </button>
     {/if}
   </div>
-  {#if degraded && !degraded.exported}
+  {#if pendingEpoch}
+    <p class="quiet" role="status">Jet is still confirming a request to start a new audit period. Open it to try again.</p>
+  {:else if degraded && !degraded.exported}
     <p id="audit-epoch-hint" class="quiet">Save the evidence of this audit period first.</p>
   {/if}
   {#if exporting.kind === "saved"}
@@ -212,6 +217,7 @@
       : undefined}
     focus={dialog.kind === "review" || dialog.kind === "retry_epoch" ? "cancel" : "primary"}
     {returnFocus}
+    focusKey={dialog.kind}
     oncancel={() => audit.closeEpoch()}
   >
     {#if dialog.kind === "review" || dialog.kind === "sending" || dialog.kind === "retry_epoch"}

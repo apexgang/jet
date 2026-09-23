@@ -561,11 +561,92 @@ async fn a_lost_reply_is_unconfirmed_and_never_resent() {
     assert_eq!(fake.execute(&id).await.unwrap(), outcome);
     fake.assert_untouched().await;
 
+    // The restore may have run: the old store's tokens are gone, and the
+    // next health read issues new ones.
+    let daily = Uuid::parse_str(&tokens[0]).unwrap();
+    assert_eq!(
+        fake.state().name(fake.plane, IDENTITY, daily).unwrap(),
+        None
+    );
+    let tokens = fake.tokens(&listed());
     // The recorded outcome resolved the review: a new one can be prepared.
     assert!(fake
         .prepare(restore_of(&tokens[0]), read_only())
         .await
         .is_ok());
+}
+
+#[tokio::test]
+async fn an_unconfirmed_restore_drops_every_cache_of_the_old_store() {
+    let fake = fake_plane();
+    let binding = PlaneBinding {
+        plane: fake.plane,
+        identity: Some(IDENTITY),
+    };
+    fake.exported(Some(2));
+    // An uncertain epoch send and an uncertain Move to Trash from the old store.
+    let epoch = fake
+        .state()
+        .actions
+        .issue(
+            binding,
+            EPOCH_SCOPE,
+            RecoveryReview::Epoch {
+                epoch: 2,
+                breach: "record_altered",
+                through: 50,
+            },
+        )
+        .unwrap();
+    fake.state()
+        .actions
+        .attempt(epoch, fake.plane, |_| Ok(()))
+        .unwrap();
+    let trash = fake.bridge().retention.issue_uncertain_for_test(binding);
+    assert!(fake
+        .bridge()
+        .retention
+        .review_held_for_test(fake.plane, trash));
+    let tokens = fake.tokens(&listed());
+    let id = review_id(
+        &fake
+            .prepare(restore_of(&tokens[0]), read_only())
+            .await
+            .unwrap(),
+    );
+
+    // The restore reaches the Plane and the reply is lost.
+    let (outcome, ()) = tokio::join!(fake.execute(&id), async {
+        let (mut reader, _writer) = accept(&fake.listener, CLIENT).await;
+        expect_restore(&mut reader, Uuid::parse_str(&id).unwrap()).await;
+    });
+    assert!(matches!(
+        outcome.unwrap(),
+        RecoveryOutcome::Unconfirmed { .. }
+    ));
+    let daily = Uuid::parse_str(&tokens[0]).unwrap();
+    assert_eq!(
+        fake.state().name(fake.plane, IDENTITY, daily).unwrap(),
+        None
+    );
+    assert_eq!(
+        fake.bridge().audit.mark(fake.plane, IDENTITY).unwrap(),
+        None
+    );
+    assert!(!fake.state().epoch_pending(fake.plane).unwrap());
+    assert!(!fake
+        .bridge()
+        .retention
+        .review_held_for_test(fake.plane, trash));
+    // The epoch review can no longer be resent against the older store.
+    let retried = fake.execute(&epoch.to_string()).await.unwrap();
+    assert_eq!(refused_code(&retried), "recovery.review_expired");
+    fake.assert_untouched().await;
+    // The restore review itself keeps its outcome.
+    assert!(matches!(
+        fake.execute(&id).await.unwrap(),
+        RecoveryOutcome::Unconfirmed { .. }
+    ));
 }
 
 #[tokio::test]
@@ -625,6 +706,11 @@ async fn a_daemon_refusal_is_recorded_and_another_snapshot_is_unconfirmed() {
         outcome.unwrap(),
         RecoveryOutcome::Unconfirmed { ref error } if error.code == "client.state_unavailable"
     ));
+    // The store may have been replaced all the same.
+    assert_eq!(
+        fake.state().name(fake.plane, IDENTITY, daily).unwrap(),
+        None
+    );
 }
 
 #[tokio::test]
@@ -969,6 +1055,7 @@ async fn a_new_epoch_needs_a_degraded_audit_whose_evidence_was_saved() {
             "degradedEpoch": "2",
             "breach": "record_altered",
             "exportedThrough": "50",
+            "unconfirmed": false,
         })
     );
 }
@@ -982,15 +1069,19 @@ async fn an_uncertain_epoch_is_resent_with_the_same_command_id_then_replayed() {
 
     // The Command reaches the Plane and the connection drops: uncertain.
     let (uncertain, ()) = tokio::join!(fake.execute(&id), async {
-        let (mut reader, _writer) = accept(&fake.listener, CLIENT).await;
+        let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+        // A first send checks the reviewed epoch again.
+        serve_status(&mut reader, &mut writer, degraded(2)).await;
         expect_epoch(&mut reader, command_id).await;
     });
     let uncertain = uncertain.unwrap_err();
     assert_eq!(uncertain.category, "offline");
     assert_eq!(uncertain.plane_id.as_deref(), Some(fake.plane_id.as_str()));
-    // While it is unresolved no other epoch review can be prepared.
-    let blocked = fake.prepare(epoch_action(), degraded(2)).await;
-    assert_eq!(code(blocked).0, "recovery.request_unresolved");
+    assert!(fake.state().epoch_pending(fake.plane).unwrap());
+    // While it is unresolved, preparing again returns that same review.
+    let pending = fake.prepare(epoch_action(), degraded(2)).await.unwrap();
+    assert_eq!(review_id(&pending), id);
+    assert_eq!(serde_json::to_value(&pending).unwrap()["unconfirmed"], true);
 
     // Try again resends the same Command ID; the receipt answers.
     let (outcome, ()) = tokio::join!(fake.execute(&id), async {
@@ -1023,6 +1114,126 @@ async fn an_uncertain_epoch_is_resent_with_the_same_command_id_then_replayed() {
     // A lost reply is answered from the record without the Plane.
     assert_eq!(fake.execute(&id).await.unwrap(), outcome);
     fake.assert_untouched().await;
+    assert!(!fake.state().epoch_pending(fake.plane).unwrap());
+}
+
+#[tokio::test]
+async fn an_uncertain_epoch_can_be_resent_after_the_settings_window_reopens() {
+    let fake = fake_plane();
+    fake.exported(Some(2));
+    let id = review_id(&fake.prepare(epoch_action(), degraded(2)).await.unwrap());
+    let command_id = Uuid::parse_str(&id).unwrap();
+    let (uncertain, ()) = tokio::join!(fake.execute(&id), async {
+        let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+        serve_status(&mut reader, &mut writer, degraded(2)).await;
+        expect_epoch(&mut reader, command_id).await;
+    });
+    assert!(uncertain.is_err());
+
+    // A reopened window knows nothing of the review. The send applied, so
+    // the audit is trusted again, yet the pending review is still offered
+    // natively, never refused as unresolved.
+    assert!(fake.state().epoch_pending(fake.plane).unwrap());
+    let reopened = fake.prepare(epoch_action(), serving()).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(&reopened).unwrap(),
+        json!({
+            "kind": "begin_audit_epoch",
+            "reviewId": id,
+            "planeLabel": "Build box",
+            "degradedEpoch": "2",
+            "breach": "record_altered",
+            "exportedThrough": "50",
+            "unconfirmed": true,
+        })
+    );
+    // Try again resends the same Command ID with no gate; the receipt answers.
+    let reopened_id = review_id(&reopened);
+    let (outcome, ()) = tokio::join!(fake.execute(&reopened_id), async {
+        let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+        let (stream, message) = expect_epoch(&mut reader, command_id).await;
+        command_result(
+            &mut writer,
+            stream,
+            &message,
+            CommandResponse::AuditEpochBegun { epoch: 3 },
+        )
+        .await;
+        serve_status(&mut reader, &mut writer, serving()).await;
+    });
+    assert!(matches!(
+        outcome.unwrap(),
+        RecoveryOutcome::EpochBegun { .. }
+    ));
+    assert!(!fake.state().epoch_pending(fake.plane).unwrap());
+    // Later audit periods are no longer blocked.
+    fake.exported(Some(3));
+    let next = fake.prepare(epoch_action(), degraded(3)).await.unwrap();
+    assert_ne!(review_id(&next), id);
+}
+
+#[tokio::test]
+async fn a_first_epoch_send_is_refused_when_the_reviewed_epoch_no_longer_holds() {
+    let fake = fake_plane();
+    fake.exported(Some(2));
+    // Another client began an epoch and the audit degraded again.
+    let id = review_id(&fake.prepare(epoch_action(), degraded(2)).await.unwrap());
+    let (moved_on, ()) = tokio::join!(fake.execute(&id), async {
+        let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+        serve_status(&mut reader, &mut writer, degraded(3)).await;
+        assert_closed(&mut reader).await;
+    });
+    let moved_on = moved_on.unwrap();
+    assert_eq!(refused_code(&moved_on), "audit.review_stale");
+    assert_eq!(fake.execute(&id).await.unwrap(), moved_on);
+    fake.assert_untouched().await;
+
+    // The evidence mark is gone (as after a restore).
+    let id = review_id(&fake.prepare(epoch_action(), degraded(2)).await.unwrap());
+    fake.bridge().audit.clear(fake.plane);
+    let (unsaved, ()) = tokio::join!(fake.execute(&id), async {
+        let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+        serve_status(&mut reader, &mut writer, degraded(2)).await;
+        assert_closed(&mut reader).await;
+    });
+    assert_eq!(refused_code(&unsaved.unwrap()), "audit.review_stale");
+}
+
+#[tokio::test]
+async fn a_restore_drops_an_epoch_review_of_the_old_store() {
+    let fake = fake_plane();
+    fake.exported(Some(2));
+    let epoch = review_id(&fake.prepare(epoch_action(), degraded(2)).await.unwrap());
+    let tokens = fake.tokens(&listed());
+    let id = review_id(
+        &fake
+            .prepare(restore_of(&tokens[0]), read_only())
+            .await
+            .unwrap(),
+    );
+    let (outcome, ()) = tokio::join!(fake.execute(&id), async {
+        let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+        let (stream, message) = expect_restore(&mut reader, Uuid::parse_str(&id).unwrap()).await;
+        command_result(
+            &mut writer,
+            stream,
+            &message,
+            CommandResponse::RecoverySnapshotRestored {
+                snapshot: DAILY.into(),
+                replaced: "plane.sqlite3.damaged-1".into(),
+            },
+        )
+        .await;
+    });
+    assert!(matches!(outcome.unwrap(), RecoveryOutcome::Restored { .. }));
+    let stale = fake.execute(&epoch).await.unwrap();
+    assert_eq!(refused_code(&stale), "recovery.review_expired");
+    fake.assert_untouched().await;
+}
+
+/// The connection closes without another request.
+async fn assert_closed(reader: &mut Reader) {
+    assert!(reader.read().await.is_err(), "no further request expected");
 }
 
 #[tokio::test]
@@ -1032,6 +1243,7 @@ async fn a_definite_epoch_refusal_is_recorded() {
     let id = review_id(&fake.prepare(epoch_action(), degraded(2)).await.unwrap());
     let (outcome, ()) = tokio::join!(fake.execute(&id), async {
         let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+        serve_status(&mut reader, &mut writer, degraded(2)).await;
         let (stream, message) = expect_epoch(&mut reader, Uuid::parse_str(&id).unwrap()).await;
         refuse(
             &mut writer,

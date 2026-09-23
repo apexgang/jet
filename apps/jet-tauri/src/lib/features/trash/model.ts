@@ -205,6 +205,19 @@ export function moveRefusalText(error: Pick<PublicError, "code" | "message">): s
   }
 }
 
+/** Move to Trash refusals that a fresh review can get past: the dialog offers "Review again". */
+const REVIEW_AGAIN_REFUSALS: ReadonlySet<string> = new Set([
+  "retention.review_expired",
+  "retention.review_stale",
+  "client.review_used",
+  "client.review_plane_mismatch",
+  "plane.review_moved",
+]);
+
+export function moveRefusalReviewsAgain(error: Pick<PublicError, "code">): boolean {
+  return REVIEW_AGAIN_REFUSALS.has(error.code);
+}
+
 export function modeName(mode: TrashMode): string {
   return mode === "forget" ? "Forget in Jet" : "Delete everywhere";
 }
@@ -268,6 +281,10 @@ export function refusalLinkLabel(section: string | null | undefined, paneTitle: 
       return "Open Security audit";
     case "storage":
       return "Open Storage";
+    case "recovery":
+      return "Open Recovery";
+    case "diagnostics":
+      return "Open Diagnostics";
     default:
       return `Open ${paneTitle} settings`;
   }

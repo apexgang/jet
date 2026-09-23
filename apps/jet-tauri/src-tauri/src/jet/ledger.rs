@@ -249,6 +249,40 @@ impl<T: Clone, R: Clone> Ledger<T, R> {
         }
     }
 
+    /// Drops every review of a Plane except `keep`, for example the review
+    /// that replaced the Plane's store and has yet to record its outcome.
+    pub(crate) fn clear_plane_except(&self, plane: PlaneId, keep: Uuid) {
+        if let Ok(mut book) = self.inner.lock() {
+            book.entries
+                .retain(|id, entry| *id == keep || entry.binding.plane != plane);
+        }
+    }
+
+    /// The attempted, unresolved review of `scope` on a Plane, if any: its
+    /// ID, the binding it was issued against and its value.
+    pub(crate) fn unresolved(
+        &self,
+        plane: PlaneId,
+        scope: Uuid,
+    ) -> Result<Option<(Uuid, PlaneBinding, T)>, PublicError> {
+        let book = self.inner.lock().map_err(|_| PublicError::internal())?;
+        Ok(book
+            .entries
+            .iter()
+            .find(|(_, entry)| {
+                entry.binding.plane == plane && entry.scope == scope && entry.unresolved()
+            })
+            .map(|(id, entry)| (*id, entry.binding, entry.value.clone())))
+    }
+
+    /// Drops one review, for example an unresolved one whose Plane is now a
+    /// different Plane and so can never be resent.
+    pub(crate) fn forget(&self, id: Uuid) {
+        if let Ok(mut book) = self.inner.lock() {
+            book.entries.remove(&id);
+        }
+    }
+
     fn expired_error(&self) -> PublicError {
         PublicError::invalid_input(
             self.codes.review_expired,
@@ -516,6 +550,47 @@ mod tests {
             "retention.review_expired"
         );
         assert!(ledger.attempt(remote_review, remote().plane, pass).is_ok());
+    }
+
+    #[test]
+    fn clearing_a_plane_can_keep_one_review() {
+        let (ledger, _) = ledger(8);
+        let kept = ledger.issue(local(), scope(1), "kept").unwrap();
+        let other = ledger.issue(local(), scope(2), "other").unwrap();
+        ledger.attempt(other, PlaneId::Local, pass).unwrap();
+        let remote_review = ledger.issue(remote(), scope(2), "b").unwrap();
+        ledger.clear_plane_except(PlaneId::Local, kept);
+        assert!(ledger.attempt(kept, PlaneId::Local, pass).is_ok());
+        assert_eq!(
+            code(ledger.attempt(other, PlaneId::Local, pass)),
+            "retention.review_expired"
+        );
+        // The dropped unresolved review no longer blocks its scope.
+        assert!(ledger.issue(local(), scope(2), "again").is_ok());
+        assert!(ledger.attempt(remote_review, remote().plane, pass).is_ok());
+    }
+
+    #[test]
+    fn an_unresolved_review_is_found_by_plane_and_scope_until_it_resolves() {
+        let (ledger, _) = ledger(8);
+        let id = ledger.issue(remote(), scope(1), "epoch").unwrap();
+        // Unattempted is not unresolved.
+        assert_eq!(ledger.unresolved(remote().plane, scope(1)).unwrap(), None);
+        ledger.attempt(id, remote().plane, pass).unwrap();
+        assert_eq!(
+            ledger.unresolved(remote().plane, scope(1)).unwrap(),
+            Some((id, remote(), "epoch"))
+        );
+        assert_eq!(ledger.unresolved(remote().plane, scope(2)).unwrap(), None);
+        assert_eq!(ledger.unresolved(PlaneId::Local, scope(1)).unwrap(), None);
+        ledger.record(id, 1);
+        assert_eq!(ledger.unresolved(remote().plane, scope(1)).unwrap(), None);
+
+        let stuck = ledger.issue(remote(), scope(1), "stuck").unwrap();
+        ledger.attempt(stuck, remote().plane, pass).unwrap();
+        ledger.forget(stuck);
+        assert_eq!(ledger.unresolved(remote().plane, scope(1)).unwrap(), None);
+        assert!(ledger.issue(remote(), scope(1), "fresh").is_ok());
     }
 
     #[test]

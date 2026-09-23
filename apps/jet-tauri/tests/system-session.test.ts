@@ -62,6 +62,7 @@ function health(planeId: string, daemonStarts = "3", issues: SystemHealth["issue
     security: { kind: "trusted" },
     storage: { disposableMiB: 2048 },
     retention: { graceDays: 30 },
+    pendingEpoch: false,
     issues,
   };
 }
@@ -510,7 +511,7 @@ describe("system session recovery", () => {
 
     const late = system.prepareRecovery({ kind: "purge_snapshots" });
     await settle();
-    expect(system.recovery).toEqual({ kind: "preparing", action: "purge_snapshots" });
+    expect(system.recovery).toEqual({ kind: "preparing", action: "purge_snapshots", snapshotId: null });
     // A second click while preparing sends nothing.
     await system.prepareRecovery({ kind: "purge_snapshots" });
     expect(fake.count("prepare_recovery_action")).toBe(1);
@@ -521,9 +522,16 @@ describe("system session recovery", () => {
 
     const other = system.prepareRecovery({ kind: "purge_snapshots" });
     await settle();
+    system.closeRecovery();
+    // A restore names the one snapshot row being checked.
+    const restore = system.prepareRecovery({ kind: "restore_snapshot", snapshot_id: TOKEN });
+    await settle();
+    expect(system.recovery).toEqual({ kind: "preparing", action: "restore_snapshot", snapshotId: TOKEN });
     system.select("local");
     fake.release("prepare_recovery_action");
+    fake.release("prepare_recovery_action");
     await other;
+    await restore;
     expect(system.recovery.kind).toBe("closed");
   });
 

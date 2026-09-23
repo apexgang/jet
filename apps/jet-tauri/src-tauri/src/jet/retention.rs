@@ -133,6 +133,39 @@ impl RetentionState {
         self.rules.plane_restored(plane);
     }
 
+    /// An attempted Forget review whose outcome is unknown, as after a lost
+    /// reply.
+    #[cfg(test)]
+    pub(crate) fn issue_uncertain_for_test(&self, binding: PlaneBinding) -> Uuid {
+        let id = self
+            .trash_reviews
+            .issue(
+                binding,
+                Uuid::from_u128(0x7e57),
+                TrashReview {
+                    conversation: Uuid::from_u128(0x7e57),
+                    recorded_active_run: false,
+                    recorded_pending_turn: false,
+                    workspace_unchecked: false,
+                    mode: Some(TrashMode::Forget),
+                },
+            )
+            .unwrap();
+        self.trash_reviews
+            .attempt(id, binding.plane, |_| Ok(()))
+            .unwrap();
+        id
+    }
+
+    /// Whether the unresolved Trash review `id` of a Plane is still held.
+    #[cfg(test)]
+    pub(crate) fn review_held_for_test(&self, plane: PlaneId, id: Uuid) -> bool {
+        self.trash_reviews
+            .unresolved(plane, Uuid::from_u128(0x7e57))
+            .unwrap()
+            .is_some_and(|(held, _, _)| held == id)
+    }
+
     /// Replaces a Plane's index with a full Trash list.
     fn replace_index(&self, plane: PlaneId, entries: &[TrashEntry]) -> Result<(), PublicError> {
         let index: HashMap<Uuid, i64> = entries
@@ -646,7 +679,11 @@ pub(super) async fn trash_conversation_for(
     // The review executes only on the Plane it was prepared against.
     let client = match bridge.bound(&binding) {
         Ok(client) => client,
-        Err(error) => return Ok(record(bridge, id, TrashOutcome::Refused { error })),
+        // Nothing of a first attempt was sent: a definite refusal.
+        Err(error) if fresh => return Ok(record(bridge, id, TrashOutcome::Refused { error })),
+        // A retry follows a send whose outcome is still unknown, so nothing
+        // is recorded: the review stays unresolved.
+        Err(error) => return Err(error.with_plane(plane.to_string())),
     };
     execute_trash(bridge, id, binding, &client, review, fresh)
         .await

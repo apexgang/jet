@@ -81,6 +81,10 @@ pub(crate) struct SystemHealthView {
     degraded: Vec<DegradedView>,
     recovery: RecoveryView,
     security: SecurityView,
+    /// A new-audit-epoch request of this app was sent and its outcome is
+    /// still unknown: "Start new audit period…" reopens it for "Try again",
+    /// whatever the Security state shows.
+    pending_epoch: bool,
     storage: StorageView,
     retention: RetentionView,
     issues: Vec<SectionIssue>,
@@ -290,6 +294,7 @@ pub(super) async fn load_health(
             .audit
             .mark(plane, status.plane_id)?
             .and_then(|mark| mark.epoch);
+        let pending_epoch = bridge.system.recovery.epoch_pending(plane)?;
         Ok(health_view(
             plane,
             bridge.planes.label(plane).unwrap_or_default(),
@@ -298,6 +303,7 @@ pub(super) async fn load_health(
             snapshots,
             capabilities.as_ref(),
             exported,
+            pending_epoch,
             disposable,
             grace,
             issues,
@@ -345,6 +351,7 @@ fn health_view(
     snapshots: Vec<recovery::SnapshotView>,
     capabilities: Option<&CapabilitySnapshot>,
     exported_epoch: Option<u64>,
+    pending_epoch: bool,
     disposable_mib: Option<u32>,
     grace_days: Option<u32>,
     issues: Vec<SectionIssue>,
@@ -408,6 +415,7 @@ fn health_view(
             .unwrap_or_default(),
         recovery: recovery_view(status.recovery.as_ref(), snapshots),
         security: security_view(status.security.as_ref(), exported_epoch),
+        pending_epoch,
         storage: StorageView { disposable_mib },
         retention: RetentionView { grace_days },
         issues,
@@ -858,6 +866,7 @@ mod tests {
             Vec::new(),
             Some(&snapshot),
             None,
+            true,
             Some(512),
             None,
             vec![SectionIssue {
@@ -901,6 +910,7 @@ mod tests {
         );
         assert_eq!(value["storage"], json!({"disposableMiB": 512}));
         assert_eq!(value["retention"], json!({"graceDays": null}));
+        assert_eq!(value["pendingEpoch"], true);
         assert_eq!(value["issues"][0]["section"], "retention");
 
         // Without capabilities the sections are empty, never invented.
@@ -912,6 +922,7 @@ mod tests {
             Vec::new(),
             None,
             None,
+            false,
             None,
             None,
             Vec::new(),
@@ -921,6 +932,7 @@ mod tests {
         assert_eq!(bare["credentialStore"], json!(null));
         assert_eq!(bare["tools"], json!([]));
         assert_eq!(bare["degraded"], json!([]));
+        assert_eq!(bare["pendingEpoch"], false);
     }
 
     async fn answer(

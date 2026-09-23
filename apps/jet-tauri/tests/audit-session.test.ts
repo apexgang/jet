@@ -52,7 +52,7 @@ function failure(
   };
 }
 
-function health(security: SecurityView, daemonStarts = "3"): SystemHealth {
+function health(security: SecurityView, daemonStarts = "3", pendingEpoch = false): SystemHealth {
   return {
     planeId: REMOTE,
     planeLabel: "Build box",
@@ -68,6 +68,7 @@ function health(security: SecurityView, daemonStarts = "3"): SystemHealth {
     security,
     storage: { disposableMiB: 2048 },
     retention: { graceDays: 30 },
+    pendingEpoch,
     issues: [],
   };
 }
@@ -93,7 +94,7 @@ function page(cursor: number, sequences: number[]): AuditPage {
   return { cursor: String(cursor), complete: sequences.length === 0 || sequences.at(-1) === cursor, entries: sequences.map(entry) };
 }
 
-function epochReview(reviewId = "review-1"): Extract<RecoveryReview, { kind: "begin_audit_epoch" }> {
+function epochReview(reviewId = "review-1", unconfirmed = false): Extract<RecoveryReview, { kind: "begin_audit_epoch" }> {
   return {
     kind: "begin_audit_epoch",
     reviewId,
@@ -101,6 +102,7 @@ function epochReview(reviewId = "review-1"): Extract<RecoveryReview, { kind: "be
     degradedEpoch: "2",
     breach: "head_not_in_store",
     exportedThrough: "40",
+    unconfirmed,
   };
 }
 
@@ -360,6 +362,106 @@ describe("evidence export and a new audit period", () => {
     expect(fake.of("prepare_recovery_action")).toHaveLength(2);
   });
 
+  it("an uncertain new period is offered for Try again after the Settings window reopens", async () => {
+    const fake = new Fake();
+    fake.install();
+    fake.answers.set("load_security_audit", () => page(0, []));
+    const first = await shown(fake, degraded(true));
+    fake.answers.set("prepare_recovery_action", () => epochReview());
+    await first.audit.prepareEpoch();
+    fake.answers.set("execute_recovery_action", () => {
+      throw failure("transport.offline", "offline", { retryable: true });
+    });
+    await first.audit.confirmEpoch();
+    expect(first.audit.epoch.kind).toBe("retry_epoch");
+    first.dispose();
+
+    // A new window knows nothing of it; the shell reports it as pending, even
+    // though the send applied and the audit is trusted again.
+    fake.answers.set("load_system_health", () => health({ kind: "trusted" }, "3", true));
+    const reopened = new SystemSession();
+    reopened.select(REMOTE);
+    await reopened.ensureLoaded();
+    expect(reopened.health.kind === "ready" && reopened.health.data.pendingEpoch).toBe(true);
+    fake.answers.set("prepare_recovery_action", () => epochReview("review-1", true));
+    await reopened.audit.prepareEpoch();
+    expect(reopened.audit.epoch).toMatchObject({
+      kind: "retry_epoch",
+      review: { reviewId: "review-1" },
+      error: { code: "recovery.request_unresolved" },
+    });
+    fake.answers.set("execute_recovery_action", () => ({ kind: "epoch_begun", epoch: "3" }));
+    await reopened.audit.confirmEpoch();
+    expect(fake.of("execute_recovery_action").map((call) => call.args.reviewId)).toEqual(["review-1", "review-1"]);
+    expect(reopened.audit.epoch.kind).toBe("done");
+  });
+
+  it("a new Jet service start forgets an uncertain new period; the shell decides whether it is still pending", async () => {
+    const fake = new Fake();
+    fake.install();
+    fake.answers.set("load_security_audit", () => page(0, []));
+    const system = await shown(fake, degraded(true));
+    fake.answers.set("prepare_recovery_action", () => epochReview());
+    await system.audit.prepareEpoch();
+    fake.answers.set("execute_recovery_action", () => {
+      throw failure("transport.offline", "offline", { retryable: true });
+    });
+    await system.audit.confirmEpoch();
+    system.audit.closeEpoch();
+
+    // A restore replaced the store: the shell dropped the old review.
+    fake.answers.set("load_system_health", () => health(degraded(false), "4"));
+    await system.load();
+    await settle();
+    fake.answers.set("prepare_recovery_action", () => {
+      throw failure("audit.export_required", "conflict");
+    });
+    await system.audit.prepareEpoch();
+    expect(fake.of("prepare_recovery_action")).toHaveLength(2);
+    expect(system.audit.epoch.kind).toBe("stale");
+  });
+
+  it("an export finishes and unlocks the review when the list reloads while it saves", async () => {
+    const fake = new Fake();
+    fake.install();
+    fake.answers.set("load_security_audit", () => page(40, [39, 40]));
+    const system = await shown(fake, degraded(false));
+    const { audit } = system;
+    let finish: (value: unknown) => void = () => {};
+    fake.answers.set("export_security_audit", () => new Promise((resolve) => (finish = resolve)));
+    const saving = audit.exportEvidence();
+    await settle();
+    expect(audit.exporting.kind).toBe("saving");
+    // Refresh, Show identifiers and a new audit period all reload the list.
+    await audit.refresh();
+    await audit.setReveal(true);
+    await audit.reloadIfLoaded();
+    fake.answers.set("load_system_health", () => health(degraded(true)));
+    finish({ kind: "saved", records: "40", fileName: "jet-audit-build-box.jsonl" });
+    await saving;
+    await settle();
+    expect(audit.exporting).toEqual({ kind: "saved", records: "40", fileName: "jet-audit-build-box.jsonl" });
+    expect(system.health.kind === "ready" && system.health.data.security).toEqual(degraded(true));
+  });
+
+  it("an export in flight when the Plane's Jet service starts again is dropped, never stuck", async () => {
+    const fake = new Fake();
+    fake.install();
+    fake.answers.set("load_security_audit", () => page(0, []));
+    const system = await shown(fake, degraded(false));
+    let finish: (value: unknown) => void = () => {};
+    fake.answers.set("export_security_audit", () => new Promise((resolve) => (finish = resolve)));
+    const saving = system.audit.exportEvidence();
+    await settle();
+    fake.answers.set("load_system_health", () => health(degraded(false), "4"));
+    await system.load();
+    await settle();
+    expect(system.audit.exporting.kind).toBe("idle");
+    finish({ kind: "saved", records: "0", fileName: "a.jsonl" });
+    await saving;
+    expect(system.audit.exporting.kind).toBe("idle");
+  });
+
   it("a local precondition is stale with Reload; other refusals are refused", async () => {
     const fake = new Fake();
     fake.install();
@@ -416,6 +518,8 @@ describe("audit copy", () => {
     for (const breach of breaches) expect(breachExplanation(breach)).toMatch(/^[a-z]/);
     expect(isStaleEpochError({ code: "audit.export_required" })).toBe(true);
     expect(isStaleEpochError({ code: "security.gap_unknown" })).toBe(false);
+    expect(isStaleEpochError({ code: "audit.review_stale" })).toBe(true);
+    expect(epochRefusalText(failure("audit.review_stale"), "Build box")).toContain("changed since you reviewed");
     expect(epochRefusalText(failure("security.gap_unknown"), "Build box")).toContain("diagnostic summary");
     expect(exportFailureText(failure("audit.export_busy", "conflict"), "Build box")).toBe(
       "Jet is already saving this Plane's audit evidence.",

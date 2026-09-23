@@ -686,6 +686,32 @@ async fn a_definite_refusal_frees_the_rule_and_an_unknown_one_is_refused_locally
     fake.assert_untouched().await;
 }
 
+#[tokio::test]
+async fn a_refusal_never_echoes_a_raw_plane_handle() {
+    let fake = fake_plane();
+    fake.known(&[&rule(AutodeleteRuleState::Compiling, 1)]);
+    let hostile = format!("{}\u{7}{}", "x".repeat(4096), "\n");
+    for handle in [hostile.as_str(), "../jetd.sock", "LOCAL"] {
+        // An invalid days value would be refused first if the handle were
+        // not parsed before anything else.
+        let outcome = change_rule_for(fake.bridge(), handle, set_days(0))
+            .await
+            .unwrap();
+        let RuleChangeOutcome::Refused { error } = outcome else {
+            panic!("expected a refusal");
+        };
+        assert_eq!(error.code, "plane.unknown");
+        assert_eq!(error.plane_id, None);
+    }
+    // A valid handle is echoed in its canonical form.
+    let invalid = fake.change(set_days(0)).await.unwrap();
+    let RuleChangeOutcome::Refused { error } = invalid else {
+        panic!("expected a refusal");
+    };
+    assert_eq!(error.plane_id.as_deref(), Some(fake.plane_id.as_str()));
+    fake.assert_untouched().await;
+}
+
 // ---------------------------------------------------------------------------
 // Reads: tokens, approval, drafting and attribution
 // ---------------------------------------------------------------------------

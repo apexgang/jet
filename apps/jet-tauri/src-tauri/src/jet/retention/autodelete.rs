@@ -929,9 +929,15 @@ pub(in crate::jet) async fn change_rule_for(
     plane_id: &str,
     change: AutodeleteChange,
 ) -> Result<RuleChangeOutcome, PublicError> {
+    // The handle is parsed (and bounded) before anything is echoed back: a
+    // refusal names only a canonical Plane handle, never raw webview input.
+    let plane = match PlaneId::parse(plane_id) {
+        Ok(plane) => plane,
+        Err(error) => return Ok(RuleChangeOutcome::Refused { error }),
+    };
     // Nothing is sent until the claim: every refusal before it is definite.
     let refused = |error: PublicError| RuleChangeOutcome::Refused {
-        error: error.with_plane(plane_id.to_owned()),
+        error: error.with_plane(plane.to_string()),
     };
     let parsed = match parse_change(change) {
         Ok(parsed) => parsed,

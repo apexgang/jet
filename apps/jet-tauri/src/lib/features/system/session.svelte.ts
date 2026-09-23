@@ -32,7 +32,8 @@ export type CollectState =
  */
 export type RecoveryDialog =
   | { kind: "closed" }
-  | { kind: "preparing"; action: SnapshotAction["kind"] }
+  /** `snapshotId`: the snapshot row being checked, for a restore. */
+  | { kind: "preparing"; action: SnapshotAction["kind"]; snapshotId: string | null }
   | { kind: "review"; review: SnapshotReview }
   | { kind: "sending"; review: SnapshotReview }
   | { kind: "done"; outcome: Extract<RecoveryOutcome, { kind: "restored" | "purged" }>; planeLabel: string }
@@ -226,7 +227,11 @@ export class SystemSession {
     if (this.recovery.kind === "preparing" || this.recovery.kind === "sending") return;
     const { planeId } = this;
     const request = ++this.dialogRequest;
-    this.recovery = { kind: "preparing", action: action.kind };
+    this.recovery = {
+      kind: "preparing",
+      action: action.kind,
+      snapshotId: action.kind === "restore_snapshot" ? action.snapshot_id : null,
+    };
     try {
       const review = await prepareRecoveryAction(planeId, action);
       if (!this.current(request, planeId)) return;

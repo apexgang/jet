@@ -188,6 +188,7 @@ export function exportFailureText(error: Pick<PublicError, "code" | "category" |
 const STALE_EPOCH_CODES: ReadonlySet<string> = new Set([
   "audit.export_required",
   "audit.not_degraded_local",
+  "audit.review_stale",
   "security.audit_trusted",
   "recovery.review_expired",
   "client.review_plane_mismatch",
@@ -206,6 +207,8 @@ export function epochRefusalText(error: Pick<PublicError, "code" | "message">, p
     case "audit.not_degraded_local":
     case "security.audit_trusted":
       return `The security audit on ${planeLabel} doesn't need a new period now. Reload to see its state.`;
+    case "audit.review_stale":
+      return `The security audit on ${planeLabel} changed since you reviewed this. Reload and review again.`;
     case "security.gap_unknown":
       return "Jet couldn't find where the audit stopped. Copy the diagnostic summary and contact support.";
     case "recovery.request_unresolved":

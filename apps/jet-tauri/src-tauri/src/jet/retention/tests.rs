@@ -646,6 +646,50 @@ async fn an_uncertain_forget_locks_its_mode_blocks_new_reviews_and_resends_one_c
 }
 
 #[tokio::test]
+async fn a_retry_whose_plane_moved_stays_uncertain() {
+    let fake = fake_plane();
+    let review_id = fake.issue(false, false);
+    let command_id = Uuid::parse_str(&review_id).unwrap();
+    let (first, ()) = tokio::join!(fake.trash(&review_id, TrashMode::Forget, false), async {
+        let (mut reader, _writer) = accept(&fake.listener, CLIENT).await;
+        expect_trash(&mut reader, command_id, TrashMode::Forget).await;
+    });
+    assert_eq!(first.unwrap_err().category, "offline");
+
+    // The Plane entry is gone: the first send may still have been applied,
+    // so the retry is not recorded as a refusal.
+    let PlaneId::Remote(id) = fake.plane else {
+        unreachable!()
+    };
+    fake.bridge().planes.remove_for_test(id);
+    let moved = fake
+        .trash(&review_id, TrashMode::Forget, false)
+        .await
+        .unwrap_err();
+    assert_eq!(moved.code, "plane.review_moved");
+    assert_eq!(moved.plane_id.as_deref(), Some(fake.plane_id.as_str()));
+    fake.assert_untouched().await;
+
+    // Once the Plane is back, Try again still resends the same Command ID.
+    fake.bridge().planes.insert_for_test(
+        id,
+        "Build box",
+        PlaneClient::new(
+            fake.setup.directory.path().join("trash-jetd.sock"),
+            CLIENT,
+            [Duration::from_millis(1)],
+            Duration::from_millis(1),
+        ),
+    );
+    let (retried, ()) = tokio::join!(fake.trash(&review_id, TrashMode::Forget, false), async {
+        let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+        let (stream, message) = expect_trash(&mut reader, command_id, TrashMode::Forget).await;
+        trashed(&mut writer, stream, &message, 71).await;
+    });
+    assert!(matches!(retried.unwrap(), TrashOutcome::Trashed { .. }));
+}
+
+#[tokio::test]
 async fn activity_started_after_the_review_makes_delete_everywhere_stale_without_a_command() {
     let fake = fake_plane();
     let review_id = fake.issue(false, false);

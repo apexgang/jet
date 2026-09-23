@@ -9,10 +9,12 @@ import {
   emptyText,
   formatDate,
   modeConsequence,
+  moveRefusalReviewsAgain,
   moveRefusalText,
   namesToResolve,
   protectionLine,
   reasonLabel,
+  refusalLinkLabel,
   restoreActionText,
   restoreRefusalReloads,
   restoreRefusalText,
@@ -162,6 +164,18 @@ describe("Jet Trash model", () => {
     );
     expect(moveRefusalText(error("retention.live_work"))).toContain("choose Delete everywhere");
     expect(moveRefusalText(error("retention.review_stale"))).toContain("Review again");
+    expect(moveRefusalReviewsAgain(error("retention.review_expired"))).toBe(true);
+    expect(moveRefusalReviewsAgain(error("plane.review_moved"))).toBe(true);
+    expect(moveRefusalReviewsAgain(error("retention.request_unresolved"))).toBe(false);
+    expect(moveRefusalReviewsAgain(error("retention.live_work"))).toBe(false);
+  });
+
+  it("labels a refusal's Settings link by its section", () => {
+    expect(refusalLinkLabel("recovery", "Safety and system")).toBe("Open Recovery");
+    expect(refusalLinkLabel("diagnostics", "Safety and system")).toBe("Open Diagnostics");
+    expect(refusalLinkLabel("audit", "Safety and system")).toBe("Open Security audit");
+    expect(refusalLinkLabel("storage", "Safety and system")).toBe("Open Storage");
+    expect(refusalLinkLabel(null, "Work")).toBe("Open Work settings");
   });
 
   it("describes each mode's consequence with an estimated date", () => {

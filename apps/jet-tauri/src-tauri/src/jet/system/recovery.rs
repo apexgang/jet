@@ -16,7 +16,16 @@
 //! A new audit epoch (ADR-0105) is reviewed here too, after this app saved
 //! the evidence of the degraded epoch. Unlike restore and purge it is
 //! receipt-deduplicated: its review ID is its Command ID, an uncertain send
-//! stays unresolved, and "Try again" resends the same ID.
+//! stays unresolved, and "Try again" resends the same ID. The review names
+//! the degraded epoch whose evidence was saved; a first send checks again
+//! that this epoch is still the degraded one and that its evidence mark still
+//! stands, because the Command itself closes whichever epoch is current. An
+//! unresolved epoch review is reported natively (`pendingEpoch`, and a
+//! prepare that returns it), so it can be resent after the Settings window
+//! was closed and reopened.
+//!
+//! A restore, confirmed or not, may have moved the store backwards, so every
+//! other review of that Plane is dropped with the rest of its caches.
 use std::{collections::HashMap, sync::Mutex};
 
 use jet_client::{Client, ClientError};
@@ -150,6 +159,12 @@ impl RecoveryState {
             .and_then(|held| held.names.get(&token).cloned()))
     }
 
+    /// Whether a new-audit-epoch review of this Plane was sent and its
+    /// outcome is still unknown.
+    pub(super) fn epoch_pending(&self, plane: PlaneId) -> Result<bool, PublicError> {
+        Ok(self.actions.unresolved(plane, EPOCH_SCOPE)?.is_some())
+    }
+
     /// Drops a Plane's tokens: its snapshots changed.
     fn clear(&self, plane: PlaneId) {
         if let Ok(mut all) = self.snapshot_tokens.lock() {
@@ -189,8 +204,14 @@ pub(crate) enum RecoveryReview {
         reason: SnapshotReason,
     },
     Purge,
-    /// Begin a new audit epoch; the Command takes no argument.
-    Epoch,
+    /// Begin a new audit epoch; the Command takes no argument. `epoch` is
+    /// the degraded epoch the review was prepared for, whose evidence this
+    /// app saved through record `through`.
+    Epoch {
+        epoch: u64,
+        breach: &'static str,
+        through: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -224,6 +245,9 @@ pub(crate) enum RecoveryReviewView {
         breach: &'static str,
         /// The audit position the saved evidence reaches.
         exported_through: String,
+        /// This review was sent already and its outcome is unknown: "Try
+        /// again" resends it with the same Command ID.
+        unconfirmed: bool,
     },
 }
 
@@ -291,6 +315,13 @@ fn export_required() -> PublicError {
     PublicError::conflict(
         "audit.export_required",
         "Save the audit evidence before starting a new audit period.",
+    )
+}
+
+fn epoch_review_stale() -> PublicError {
+    PublicError::conflict(
+        "audit.review_stale",
+        "The security audit changed since this review. Review it again.",
     )
 }
 
@@ -457,12 +488,36 @@ fn prepare_purge(
 
 /// A new audit epoch needs a degraded audit whose evidence this app saved
 /// for that same epoch and Plane identity (ADR-0105; a UI rule, not policy).
+/// An earlier epoch review whose send is still unconfirmed is returned
+/// instead, whatever the audit shows now: only its resend can settle it.
 fn prepare_epoch(
     bridge: &JetBridge,
     binding: PlaneBinding,
     status: &PlaneStatus,
     plane_label: String,
 ) -> Result<RecoveryReviewView, PublicError> {
+    let actions = &bridge.system.recovery.actions;
+    if let Some((id, held, review)) = actions.unresolved(binding.plane, EPOCH_SCOPE)? {
+        match review {
+            RecoveryReview::Epoch {
+                epoch,
+                breach,
+                through,
+            } if held.identity.is_none() || held.identity == binding.identity => {
+                return Ok(RecoveryReviewView::BeginAuditEpoch {
+                    review_id: id.to_string(),
+                    plane_label,
+                    degraded_epoch: epoch.to_string(),
+                    breach,
+                    exported_through: through.to_string(),
+                    unconfirmed: true,
+                });
+            }
+            // Sent to a Plane that is now another Plane: it can never be
+            // resent there, so it no longer blocks this one.
+            _ => actions.forget(id),
+        }
+    }
     let Some(SecurityState::Degraded { breach, epoch, .. }) = &status.security else {
         return Err(not_degraded());
     };
@@ -471,18 +526,23 @@ fn prepare_epoch(
         .mark(binding.plane, status.plane_id)?
         .filter(|mark| mark.epoch == Some(*epoch))
         .ok_or_else(export_required)?;
-    let review_id =
-        bridge
-            .system
-            .recovery
-            .actions
-            .issue(binding, EPOCH_SCOPE, RecoveryReview::Epoch)?;
+    let breach = super::breach_name(breach).0;
+    let review_id = actions.issue(
+        binding,
+        EPOCH_SCOPE,
+        RecoveryReview::Epoch {
+            epoch: *epoch,
+            breach,
+            through: mark.through,
+        },
+    )?;
     Ok(RecoveryReviewView::BeginAuditEpoch {
         review_id: review_id.to_string(),
         plane_label,
         degraded_epoch: epoch.to_string(),
-        breach: super::breach_name(breach).0,
+        breach,
         exported_through: mark.through.to_string(),
+        unconfirmed: false,
     })
 }
 
@@ -518,7 +578,7 @@ pub(in crate::jet) async fn execute(
     let (review, fresh) = match attempt {
         Attempt::Known(outcome) => return Ok(outcome),
         // The epoch Command is deduplicated by its receipt: resend its ID.
-        Attempt::Retry(RecoveryReview::Epoch) => (RecoveryReview::Epoch, false),
+        Attempt::Retry(review @ RecoveryReview::Epoch { .. }) => (review, false),
         // Sent once already and its outcome was never recorded. Neither
         // Command is replayed from a receipt, so it is never sent again.
         Attempt::Retry(_) => {
@@ -569,9 +629,56 @@ pub(in crate::jet) async fn execute(
             .await
         }
         RecoveryReview::Purge => purge(bridge, id, binding, &connection).await,
-        RecoveryReview::Epoch => return begin_epoch(bridge, id, binding, &connection).await,
+        RecoveryReview::Epoch { epoch, .. } => {
+            // A resend is never gated: its first send may have applied.
+            if fresh {
+                if let Err(error) = epoch_still_reviewed(bridge, binding, &connection, epoch).await
+                {
+                    // Nothing was sent: a definite refusal.
+                    let error = bridge.settle(&binding, error);
+                    return Ok(record(bridge, id, RecoveryOutcome::Refused { error }));
+                }
+            }
+            return begin_epoch(bridge, id, binding, &connection).await;
+        }
     };
     Ok(record(bridge, id, outcome))
+}
+
+/// The Command closes whichever epoch is current when it arrives, so before a
+/// first send the Plane must still be the reviewed one, its audit still
+/// degraded at the reviewed epoch, and this app's evidence of that epoch
+/// still recorded (a restore or another client may have changed any of them).
+async fn epoch_still_reviewed(
+    bridge: &JetBridge,
+    binding: PlaneBinding,
+    connection: &Client,
+    reviewed: u64,
+) -> Result<(), PublicError> {
+    let status = connection
+        .status()
+        .await
+        .map_err(|error| PublicError::from_client(&error))?;
+    bridge.planes.observe_status(binding.plane, &status);
+    if binding
+        .identity
+        .is_some_and(|identity| identity != status.plane_id)
+    {
+        return Err(epoch_review_stale());
+    }
+    let degraded = matches!(
+        status.security,
+        Some(SecurityState::Degraded { epoch, .. }) if epoch == reviewed
+    );
+    let exported = bridge
+        .audit
+        .mark(binding.plane, status.plane_id)?
+        .is_some_and(|mark| mark.epoch == Some(reviewed));
+    if degraded && exported {
+        Ok(())
+    } else {
+        Err(epoch_review_stale())
+    }
 }
 
 /// Sends the epoch Command under the review ID. A definite outcome is
@@ -632,7 +739,9 @@ async fn restore(
         Ok(restored) => {
             if restored.snapshot != snapshot {
                 // The Plane answered about another snapshot: what it did
-                // is unknown, so the webview re-reads it.
+                // is unknown, so the webview re-reads it. The store may
+                // have been replaced all the same.
+                store_replaced(bridge, binding.plane, id);
                 return RecoveryOutcome::Unconfirmed {
                     error: bridge.settle(&binding, PublicError::internal()),
                 };
@@ -640,7 +749,7 @@ async fn restore(
             bridge
                 .planes
                 .observe_success(binding.plane, STORE_RECOVERY_MINOR);
-            store_replaced(bridge, binding.plane);
+            store_replaced(bridge, binding.plane, id);
             // Best effort: the registry's health (read-only, audit) is
             // current before any other request of this app is gated on it.
             if let Ok(status) = connection.status().await {
@@ -652,7 +761,16 @@ async fn restore(
                 replaced_name: replaced_name(&restored.replaced),
             }
         }
-        Err(error) => unsettled(bridge, binding, &error),
+        Err(error) => {
+            let outcome = unsettled(bridge, binding, &error);
+            if matches!(outcome, RecoveryOutcome::Unconfirmed { .. }) {
+                // The restore may have run before the reply was lost: drop
+                // every cache that would replay against an older store.
+                // At worst a review has to be prepared again.
+                store_replaced(bridge, binding.plane, id);
+            }
+            outcome
+        }
     }
 }
 
@@ -689,10 +807,19 @@ fn unsettled(bridge: &JetBridge, binding: PlaneBinding, error: &ClientError) -> 
     }
 }
 
-/// The store was replaced by an older one: state moves backwards, so every
-/// native cache of that Plane's store is dropped (wave 3.3 §4.4).
-fn store_replaced(bridge: &JetBridge, plane: PlaneId) {
+/// The store was (or may have been) replaced by an older one: state moves
+/// backwards, so every native cache of that Plane's store is dropped (wave
+/// 3.3 §4.4), including every other Recovery review of the Plane (an epoch
+/// review would otherwise begin an epoch on an audit whose evidence was never
+/// saved). `restoring` is the restore review itself, whose outcome is
+/// recorded next.
+fn store_replaced(bridge: &JetBridge, plane: PlaneId, restoring: Uuid) {
     bridge.system.recovery.clear(plane);
+    bridge
+        .system
+        .recovery
+        .actions
+        .clear_plane_except(plane, restoring);
     bridge.audit.clear(plane);
     bridge.retention.plane_restored(plane);
 }

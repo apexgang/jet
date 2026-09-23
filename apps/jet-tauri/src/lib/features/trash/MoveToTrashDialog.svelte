@@ -13,6 +13,7 @@
     formatDate,
     modeConsequence,
     modeName,
+    moveRefusalReviewsAgain,
     moveRefusalText,
     protectionLine,
     refusalLinkLabel,
@@ -215,7 +216,7 @@
         >{dialog.kind === "uncertain" ? "Close" : "Cancel"}</button>
         {#if dialog.kind === "already"}
           <button class="primary-button" type="button" onclick={() => void trash.restoreFromDialog()}>Restore</button>
-        {:else if dialog.kind === "stale" || dialog.kind === "failed"}
+        {:else if dialog.kind === "stale" || dialog.kind === "failed" || (dialog.kind === "refused" && moveRefusalReviewsAgain(dialog.error))}
           <button class="primary-button" type="button" onclick={() => void trash.reviewAgain()}>Review again</button>
         {:else if reviewing}
           <button
