@@ -12,6 +12,8 @@ mod keystore;
 pub(crate) mod ledger;
 #[cfg(test)]
 mod live_e2e;
+#[cfg(test)]
+mod live_system;
 pub(crate) mod notifications;
 pub(crate) mod pairing;
 mod pairing_transcript;

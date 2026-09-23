@@ -221,7 +221,7 @@ pub(crate) async fn load_system_health(
     load_health(&bridge, &plane_id, fresh).await
 }
 
-async fn load_health(
+pub(super) async fn load_health(
     bridge: &JetBridge,
     plane_id: &str,
     fresh: bool,
@@ -584,7 +584,10 @@ pub(crate) async fn collect_disposable_storage(
     collect(&bridge, &plane_id).await
 }
 
-async fn collect(bridge: &JetBridge, plane_id: &str) -> Result<CollectView, PublicError> {
+pub(super) async fn collect(
+    bridge: &JetBridge,
+    plane_id: &str,
+) -> Result<CollectView, PublicError> {
     let (binding, client) = bridge.plane(Some(plane_id))?;
     let _flight = InFlight::enter(
         &bridge.system.collect_in_flight,

@@ -93,7 +93,7 @@
           Runs on {session.runsOnLabel}
         </p>
         {#if retention}
-          <p class="retention-line">{retention}</p>
+          <p class="retention-line" title={retention}>{retention}</p>
         {/if}
       </div>
       <span

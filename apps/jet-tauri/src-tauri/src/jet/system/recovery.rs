@@ -323,7 +323,7 @@ pub(crate) async fn execute_recovery_action(
     execute(&bridge, &plane_id, &review_id).await
 }
 
-pub(super) async fn prepare(
+pub(in crate::jet) async fn prepare(
     bridge: &JetBridge,
     plane_id: &str,
     action: RecoveryAction,
@@ -490,7 +490,7 @@ fn prepare_epoch(
 // Execution
 // ---------------------------------------------------------------------------
 
-pub(super) async fn execute(
+pub(in crate::jet) async fn execute(
     bridge: &JetBridge,
     plane_id: &str,
     review_id: &str,

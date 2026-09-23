@@ -60,7 +60,7 @@
     This summary has versions, states and error codes only. It never includes task content, file paths, names or
     identifiers.
   </p>
-  <pre bind:this={summaryElement} class="summary" aria-label="Diagnostic summary">{summary}</pre>
+  <pre bind:this={summaryElement} class="summary">{summary}</pre>
   <div class="actions">
     <button class="secondary-button" onclick={copySummary}>Copy summary</button>
     <span role="status">

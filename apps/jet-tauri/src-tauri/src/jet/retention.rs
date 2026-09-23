@@ -430,7 +430,10 @@ pub(crate) async fn restore_conversation(
     restore_conversation_for(&bridge, &plane_id, &conversation_id).await
 }
 
-async fn load_trash_for(bridge: &JetBridge, plane_id: &str) -> Result<TrashView, PublicError> {
+pub(super) async fn load_trash_for(
+    bridge: &JetBridge,
+    plane_id: &str,
+) -> Result<TrashView, PublicError> {
     let (binding, client) = bridge.plane(Some(plane_id))?;
     let plane = binding.plane;
     async {
@@ -452,7 +455,7 @@ async fn load_trash_for(bridge: &JetBridge, plane_id: &str) -> Result<TrashView,
     .map_err(|error| bridge.settle(&binding, error))
 }
 
-async fn load_trash_status_for(
+pub(super) async fn load_trash_status_for(
     bridge: &JetBridge,
     plane_id: &str,
     conversation_id: &str,
@@ -515,7 +518,7 @@ async fn resolve_names_for(
     .map_err(|error| bridge.settle(&binding, error))
 }
 
-async fn preview_trash_for(
+pub(super) async fn preview_trash_for(
     bridge: &JetBridge,
     plane_id: &str,
     conversation_id: &str,
@@ -610,7 +613,7 @@ async fn preview_trash_for(
     .map_err(|error| bridge.settle(&binding, error))
 }
 
-async fn trash_conversation_for(
+pub(super) async fn trash_conversation_for(
     bridge: &JetBridge,
     plane_id: &str,
     review_id: &str,
@@ -754,7 +757,7 @@ async fn restarted_work(connection: &Client, review: &TrashReview) -> Option<Pub
     }
 }
 
-async fn restore_conversation_for(
+pub(super) async fn restore_conversation_for(
     bridge: &JetBridge,
     plane_id: &str,
     conversation_id: &str,

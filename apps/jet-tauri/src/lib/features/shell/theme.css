@@ -694,15 +694,16 @@ textarea:focus-visible {
   border: 0;
 }
 
-.move-trash-mode {
+/* Two classes outrank `.removal-dialog label` without `!important`. */
+.removal-dialog .move-trash-mode {
   display: flex;
   align-items: start;
   gap: 9px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  color: var(--text) !important;
-  font-size: 12px !important;
+  color: var(--text);
+  font-size: 12px;
 }
 
 .removal-dialog .move-trash-mode input[type="radio"] {
@@ -710,7 +711,7 @@ textarea:focus-visible {
   margin: 2px 0 0;
 }
 
-.move-trash-mode:has(input:checked) {
+.removal-dialog .move-trash-mode:has(input:checked) {
   border-color: var(--accent);
   background: var(--selected);
 }
@@ -1165,6 +1166,15 @@ kbd {
   margin: 3px 0 0;
   color: var(--muted);
   font-size: 11px;
+}
+
+/* The retention disclosure stays on one line so the header keeps its
+   controls at the 900 px minimum; the full sentence is in its title. */
+.conversation-title .retention-line {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .icon-button {
@@ -2144,6 +2154,14 @@ kbd {
   .conversation-title p,
   .run-status {
     display: none;
+  }
+}
+
+/* Windows High Contrast and other forced palettes drop backgrounds, so the
+   chosen Move to Trash mode keeps a system-colored border. */
+@media (forced-colors: active) {
+  .removal-dialog .move-trash-mode:has(input:checked) {
+    border: 2px solid Highlight;
   }
 }
 

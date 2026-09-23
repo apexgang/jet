@@ -237,6 +237,8 @@
 
   .warning {
     padding: 10px 12px;
+    /* Transparent until a forced palette paints it, where the tint is lost. */
+    border: 1px solid transparent;
     border-radius: 8px;
     background: color-mix(in srgb, var(--warning) 12%, var(--raised));
     color: var(--text) !important;

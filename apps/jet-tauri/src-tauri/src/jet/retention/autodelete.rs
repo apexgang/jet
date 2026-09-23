@@ -792,7 +792,7 @@ pub(crate) async fn change_autodelete_rule(
     change_rule_for(&bridge, &plane_id, change).await
 }
 
-async fn load_rules_for(
+pub(in crate::jet) async fn load_rules_for(
     bridge: &JetBridge,
     plane_id: &str,
 ) -> Result<AutodeleteRulesView, PublicError> {
@@ -924,7 +924,7 @@ async fn attributions(
     Ok(found)
 }
 
-async fn change_rule_for(
+pub(in crate::jet) async fn change_rule_for(
     bridge: &JetBridge,
     plane_id: &str,
     change: AutodeleteChange,
