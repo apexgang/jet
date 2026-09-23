@@ -1,4 +1,5 @@
 pub(crate) mod agents;
+pub(crate) mod audit;
 mod channels;
 mod client;
 mod conversations;
@@ -55,6 +56,7 @@ pub(crate) struct JetBridge {
     preferences: preferences::PreferencesState,
     system: system::SystemState,
     retention: retention::RetentionState,
+    audit: audit::AuditState,
 }
 
 impl JetBridge {
@@ -106,6 +108,7 @@ impl JetBridge {
             preferences: preferences::PreferencesState::new(app_data_directory),
             system: system::SystemState::default(),
             retention: retention::RetentionState::default(),
+            audit: audit::AuditState::default(),
         }
     }
 
@@ -513,7 +516,7 @@ mod manifest_tests {
     ];
 
     /// Commands only the Settings window may call.
-    const SETTINGS_ONLY: [&str; 29] = [
+    const SETTINGS_ONLY: [&str; 31] = [
         "watch_settings_navigation",
         "remember_settings_pane",
         "close_settings",
@@ -543,6 +546,8 @@ mod manifest_tests {
         "change_autodelete_rule",
         "prepare_recovery_action",
         "execute_recovery_action",
+        "load_security_audit",
+        "export_security_audit",
     ];
 
     /// Wave 3.3 commands granted to the main window only.

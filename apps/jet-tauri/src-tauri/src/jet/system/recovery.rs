@@ -12,12 +12,18 @@
 //! Command ID and is sent at most once. An outcome the shell cannot confirm
 //! is recorded as `unconfirmed`; the webview then re-reads the Plane and
 //! offers a new review, never an automatic resend.
+//!
+//! A new audit epoch (ADR-0105) is reviewed here too, after this app saved
+//! the evidence of the degraded epoch. Unlike restore and purge it is
+//! receipt-deduplicated: its review ID is its Command ID, an uncertain send
+//! stays unresolved, and "Try again" resends the same ID.
 use std::{collections::HashMap, sync::Mutex};
 
 use jet_client::{Client, ClientError};
 use jet_protocol::{
     DeletionLedgerStatus, PlaneStatus, RecoverySnapshot, RecoveryState as StoreState,
-    SecurityState, SnapshotReason, DELETION_LEDGER_MINOR, STORE_RECOVERY_MINOR,
+    SecurityState, SnapshotReason, DELETION_LEDGER_MINOR, SECURITY_AUDIT_MINOR,
+    STORE_RECOVERY_MINOR,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -45,6 +51,8 @@ const MAX_REPLACED_NAME: usize = 96;
 const RESTORE_SCOPE: Uuid = Uuid::from_u128(0x7265_7374_6f72_6500_0000_0000_0000_0001);
 /// The ledger scope of every purge review of a Plane.
 const PURGE_SCOPE: Uuid = Uuid::from_u128(0x7075_7267_6500_0000_0000_0000_0000_0002);
+/// The ledger scope of every new-audit-epoch review of a Plane.
+const EPOCH_SCOPE: Uuid = Uuid::from_u128(0x6570_6f63_6800_0000_0000_0000_0000_0003);
 
 pub(crate) struct RecoveryState {
     actions: Ledger<RecoveryReview, RecoveryOutcome>,
@@ -167,8 +175,9 @@ pub(super) fn reason_name(reason: SnapshotReason) -> &'static str {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum RecoveryAction {
     RestoreSnapshot { snapshot_id: String },
-    // A struct variant, so `deny_unknown_fields` applies to it too.
+    // Struct variants, so `deny_unknown_fields` applies to them too.
     PurgeSnapshots {},
+    BeginAuditEpoch {},
 }
 
 /// The immutable native request a review stands for.
@@ -180,6 +189,8 @@ pub(crate) enum RecoveryReview {
         reason: SnapshotReason,
     },
     Purge,
+    /// Begin a new audit epoch; the Command takes no argument.
+    Epoch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -205,6 +216,15 @@ pub(crate) enum RecoveryReviewView {
         /// A rollback copy for the previous release may be removed too.
         includes_rollback: bool,
     },
+    BeginAuditEpoch {
+        review_id: String,
+        plane_label: String,
+        /// The epoch that failed to validate.
+        degraded_epoch: String,
+        breach: &'static str,
+        /// The audit position the saved evidence reaches.
+        exported_through: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -224,6 +244,8 @@ pub(crate) enum RecoveryOutcome {
     },
     /// A new snapshot was taken and this many older ones were removed.
     Purged { removed_count: usize },
+    /// The audit now records under this new epoch.
+    EpochBegun { epoch: String },
     /// The Plane or this app refused it; nothing changed.
     Refused { error: PublicError },
     /// The request may or may not have run. Re-read the Plane.
@@ -258,6 +280,20 @@ fn purge_unavailable() -> PublicError {
     )
 }
 
+fn not_degraded() -> PublicError {
+    PublicError::conflict(
+        "audit.not_degraded_local",
+        "This Plane's security audit isn't degraded. Reload the audit.",
+    )
+}
+
+fn export_required() -> PublicError {
+    PublicError::conflict(
+        "audit.export_required",
+        "Save the audit evidence before starting a new audit period.",
+    )
+}
+
 fn review_expired() -> PublicError {
     PublicError::invalid_input(
         RECOVERY_CODES.review_expired,
@@ -265,7 +301,8 @@ fn review_expired() -> PublicError {
     )
 }
 
-/// Reviews a restore or a purge on one Plane after a fresh status read.
+/// Reviews a restore, a purge or a new audit epoch on one Plane after a
+/// fresh status read.
 #[tauri::command]
 pub(crate) async fn prepare_recovery_action(
     bridge: State<'_, JetBridge>,
@@ -275,7 +312,8 @@ pub(crate) async fn prepare_recovery_action(
     prepare(&bridge, &plane_id, action).await
 }
 
-/// Sends a reviewed restore or purge at most once.
+/// Sends a reviewed restore or purge at most once, or a reviewed audit
+/// epoch until its outcome is known.
 #[tauri::command]
 pub(crate) async fn execute_recovery_action(
     bridge: State<'_, JetBridge>,
@@ -295,7 +333,7 @@ pub(super) async fn prepare(
         RecoveryAction::RestoreSnapshot { snapshot_id } => {
             Some(Uuid::parse_str(snapshot_id).map_err(|_| snapshot_gone())?)
         }
-        RecoveryAction::PurgeSnapshots {} => None,
+        RecoveryAction::PurgeSnapshots {} | RecoveryAction::BeginAuditEpoch {} => None,
     };
     let (binding, client) = plane_client(bridge, plane_id)?;
     let plane = binding.plane;
@@ -316,9 +354,17 @@ pub(super) async fn prepare(
         };
         bridge.bound(&reviewed)?;
         let plane_label = bridge.planes.label(plane).unwrap_or_default();
-        match token {
-            Some(token) => prepare_restore(bridge, reviewed, &status, token, plane_label),
-            None => prepare_purge(bridge, reviewed, &status, plane_label),
+        match action {
+            RecoveryAction::RestoreSnapshot { .. } => {
+                let token = token.ok_or_else(snapshot_gone)?;
+                prepare_restore(bridge, reviewed, &status, token, plane_label)
+            }
+            RecoveryAction::PurgeSnapshots {} => {
+                prepare_purge(bridge, reviewed, &status, plane_label)
+            }
+            RecoveryAction::BeginAuditEpoch {} => {
+                prepare_epoch(bridge, reviewed, &status, plane_label)
+            }
         }
     }
     .await
@@ -409,6 +455,37 @@ fn prepare_purge(
     })
 }
 
+/// A new audit epoch needs a degraded audit whose evidence this app saved
+/// for that same epoch and Plane identity (ADR-0105; a UI rule, not policy).
+fn prepare_epoch(
+    bridge: &JetBridge,
+    binding: PlaneBinding,
+    status: &PlaneStatus,
+    plane_label: String,
+) -> Result<RecoveryReviewView, PublicError> {
+    let Some(SecurityState::Degraded { breach, epoch, .. }) = &status.security else {
+        return Err(not_degraded());
+    };
+    let mark = bridge
+        .audit
+        .mark(binding.plane, status.plane_id)?
+        .filter(|mark| mark.epoch == Some(*epoch))
+        .ok_or_else(export_required)?;
+    let review_id =
+        bridge
+            .system
+            .recovery
+            .actions
+            .issue(binding, EPOCH_SCOPE, RecoveryReview::Epoch)?;
+    Ok(RecoveryReviewView::BeginAuditEpoch {
+        review_id: review_id.to_string(),
+        plane_label,
+        degraded_epoch: epoch.to_string(),
+        breach: super::breach_name(breach).0,
+        exported_through: mark.through.to_string(),
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Execution
 // ---------------------------------------------------------------------------
@@ -438,8 +515,10 @@ pub(super) async fn execute(
         // Refused before anything was sent; the review is unchanged.
         Err(error) => return Ok(refused(error)),
     };
-    let review = match attempt {
+    let (review, fresh) = match attempt {
         Attempt::Known(outcome) => return Ok(outcome),
+        // The epoch Command is deduplicated by its receipt: resend its ID.
+        Attempt::Retry(RecoveryReview::Epoch) => (RecoveryReview::Epoch, false),
         // Sent once already and its outcome was never recorded. Neither
         // Command is replayed from a receipt, so it is never sent again.
         Attempt::Retry(_) => {
@@ -452,17 +531,23 @@ pub(super) async fn execute(
                 )),
             ))
         }
-        Attempt::Fresh(review) => review,
+        Attempt::Fresh(review) => (review, true),
     };
     let client = match bridge.bound(&binding) {
         Ok(client) => client,
-        Err(error) => return Ok(record(bridge, id, refused(error))),
+        Err(error) if fresh => return Ok(record(bridge, id, refused(error))),
+        // An epoch resend whose Plane moved: the first send's outcome is
+        // still unknown, so nothing is recorded.
+        Err(error) => return Err(error.with_plane(plane.to_string())),
     };
     let connection = match client.connect().await {
         Ok(connection) => connection,
-        // Nothing was sent: a definite refusal, and a new review is safe.
         Err(error) => {
             let error = bridge.settle(&binding, PublicError::from_client(&error));
+            if !fresh {
+                return Err(error);
+            }
+            // Nothing was sent: a definite refusal, and a new review is safe.
             return Ok(record(bridge, id, RecoveryOutcome::Refused { error }));
         }
     };
@@ -484,8 +569,51 @@ pub(super) async fn execute(
             .await
         }
         RecoveryReview::Purge => purge(bridge, id, binding, &connection).await,
+        RecoveryReview::Epoch => return begin_epoch(bridge, id, binding, &connection).await,
     };
     Ok(record(bridge, id, outcome))
+}
+
+/// Sends the epoch Command under the review ID. A definite outcome is
+/// recorded; an uncertain one is returned as `Err` and leaves the review
+/// attempted, so "Try again" resends the same Command ID.
+async fn begin_epoch(
+    bridge: &JetBridge,
+    id: Uuid,
+    binding: PlaneBinding,
+    connection: &Client,
+) -> Result<RecoveryOutcome, PublicError> {
+    match connection.begin_audit_epoch(id).await {
+        Ok(epoch) => {
+            bridge
+                .planes
+                .observe_success(binding.plane, SECURITY_AUDIT_MINOR);
+            // The saved evidence belonged to the epoch that just ended.
+            bridge.audit.clear(binding.plane);
+            // Best effort: the registry's Security state is current before
+            // anything this app gates on it runs.
+            if let Ok(status) = connection.status().await {
+                bridge.planes.observe_status(binding.plane, &status);
+            }
+            Ok(record(
+                bridge,
+                id,
+                RecoveryOutcome::EpochBegun {
+                    epoch: epoch.to_string(),
+                },
+            ))
+        }
+        Err(error) => {
+            let public = PublicError::from_client(&error);
+            let definite = definite(&error, &public);
+            let error = bridge.settle(&binding, public);
+            if definite {
+                Ok(record(bridge, id, RecoveryOutcome::Refused { error }))
+            } else {
+                Err(error)
+            }
+        }
+    }
 }
 
 async fn restore(
@@ -565,6 +693,7 @@ fn unsettled(bridge: &JetBridge, binding: PlaneBinding, error: &ClientError) -> 
 /// native cache of that Plane's store is dropped (wave 3.3 §4.4).
 fn store_replaced(bridge: &JetBridge, plane: PlaneId) {
     bridge.system.recovery.clear(plane);
+    bridge.audit.clear(plane);
     bridge.retention.plane_restored(plane);
 }
 

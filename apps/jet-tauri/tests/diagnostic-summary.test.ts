@@ -33,7 +33,7 @@ function health(overrides: Partial<SystemHealth> = {}): SystemHealth {
       snapshots: [{ snapshotId: SNAPSHOT_TOKEN, takenAtUnixMs: "1700000000000", reason: "daily", bytes: "4096" }],
       ledger: { kind: "verified", deletions: "12" },
     },
-    security: { kind: "degraded", breach: "record_altered", breachSequence: "41", epoch: "2" },
+    security: { kind: "degraded", breach: "record_altered", breachSequence: "41", epoch: "2", exported: false },
     storage: { disposableMiB: 2048 },
     retention: { graceDays: 30 },
     issues: [],

@@ -187,6 +187,9 @@ enum SecurityView {
         /// Where validation first disagreed, for the two breaches that name it.
         breach_sequence: Option<String>,
         epoch: String,
+        /// This app saved the evidence of this epoch (Save audit evidence),
+        /// so a new audit period may be reviewed.
+        exported: bool,
     },
     /// Not reported: an older minor, or read-only Recovery whose audit could
     /// not be validated.
@@ -283,6 +286,10 @@ async fn load_health(
             }
         };
 
+        let exported = bridge
+            .audit
+            .mark(plane, status.plane_id)?
+            .and_then(|mark| mark.epoch);
         Ok(health_view(
             plane,
             bridge.planes.label(plane).unwrap_or_default(),
@@ -290,6 +297,7 @@ async fn load_health(
             &status,
             snapshots,
             capabilities.as_ref(),
+            exported,
             disposable,
             grace,
             issues,
@@ -336,6 +344,7 @@ fn health_view(
     status: &PlaneStatus,
     snapshots: Vec<recovery::SnapshotView>,
     capabilities: Option<&CapabilitySnapshot>,
+    exported_epoch: Option<u64>,
     disposable_mib: Option<u32>,
     grace_days: Option<u32>,
     issues: Vec<SectionIssue>,
@@ -398,7 +407,7 @@ fn health_view(
             .map(|capabilities| capabilities.degraded.iter().map(degraded_view).collect())
             .unwrap_or_default(),
         recovery: recovery_view(status.recovery.as_ref(), snapshots),
-        security: security_view(status.security.as_ref()),
+        security: security_view(status.security.as_ref(), exported_epoch),
         storage: StorageView { disposable_mib },
         retention: RetentionView { grace_days },
         issues,
@@ -502,24 +511,32 @@ fn recovery_view(
     }
 }
 
-fn security_view(security: Option<&SecurityState>) -> SecurityView {
+/// The Security state. `exported_epoch` is the degraded epoch of this
+/// app's last completed evidence export of the same Plane identity.
+fn security_view(security: Option<&SecurityState>, exported_epoch: Option<u64>) -> SecurityView {
     match security {
         None => SecurityView::Absent,
         Some(SecurityState::Trusted) => SecurityView::Trusted,
         Some(SecurityState::Degraded { breach, epoch, .. }) => {
-            let (breach, sequence) = match breach {
-                AuditBreach::HeadMissing => ("head_missing", None),
-                AuditBreach::HeadNotInStore => ("head_not_in_store", None),
-                AuditBreach::HeadDiverged => ("head_diverged", None),
-                AuditBreach::RecordAltered { sequence } => ("record_altered", Some(*sequence)),
-                AuditBreach::TargetAltered { sequence } => ("target_altered", Some(*sequence)),
-            };
+            let (breach, sequence) = breach_name(breach);
             SecurityView::Degraded {
                 breach,
                 breach_sequence: sequence.map(|sequence| sequence.to_string()),
                 epoch: epoch.to_string(),
+                exported: exported_epoch == Some(*epoch),
             }
         }
+    }
+}
+
+/// A breach's stable name, and the position it names, if any.
+pub(crate) fn breach_name(breach: &AuditBreach) -> (&'static str, Option<u64>) {
+    match breach {
+        AuditBreach::HeadMissing => ("head_missing", None),
+        AuditBreach::HeadNotInStore => ("head_not_in_store", None),
+        AuditBreach::HeadDiverged => ("head_diverged", None),
+        AuditBreach::RecordAltered { sequence } => ("record_altered", Some(*sequence)),
+        AuditBreach::TargetAltered { sequence } => ("target_altered", Some(*sequence)),
     }
 }
 
@@ -529,13 +546,13 @@ fn security_view(security: Option<&SecurityState>) -> SecurityView {
 
 /// Holds one Plane's slot in an in-flight set and releases it on every exit
 /// path, including a dropped IPC future.
-struct InFlight<'a> {
+pub(crate) struct InFlight<'a> {
     set: &'a Mutex<HashSet<PlaneId>>,
     plane: PlaneId,
 }
 
 impl<'a> InFlight<'a> {
-    fn enter(
+    pub(crate) fn enter(
         set: &'a Mutex<HashSet<PlaneId>>,
         plane: PlaneId,
         busy: PublicError,
@@ -788,11 +805,11 @@ mod tests {
         );
 
         assert_eq!(
-            serde_json::to_value(security_view(None)).unwrap(),
+            serde_json::to_value(security_view(None, None)).unwrap(),
             json!({"kind": "absent"})
         );
         assert_eq!(
-            serde_json::to_value(security_view(Some(&SecurityState::Trusted))).unwrap(),
+            serde_json::to_value(security_view(Some(&SecurityState::Trusted), None)).unwrap(),
             json!({"kind": "trusted"})
         );
         let degraded = SecurityState::Degraded {
@@ -802,8 +819,17 @@ mod tests {
             store_sequence: 50,
         };
         assert_eq!(
-            serde_json::to_value(security_view(Some(&degraded))).unwrap(),
-            json!({"kind": "degraded", "breach": "record_altered", "breachSequence": "41", "epoch": "2"})
+            serde_json::to_value(security_view(Some(&degraded), None)).unwrap(),
+            json!({"kind": "degraded", "breach": "record_altered", "breachSequence": "41", "epoch": "2", "exported": false})
+        );
+        // Evidence saved under another epoch does not count for this one.
+        assert_eq!(
+            serde_json::to_value(security_view(Some(&degraded), Some(1))).unwrap()["exported"],
+            json!(false)
+        );
+        assert_eq!(
+            serde_json::to_value(security_view(Some(&degraded), Some(2))).unwrap()["exported"],
+            json!(true)
         );
         let missing = SecurityState::Degraded {
             breach: AuditBreach::HeadMissing,
@@ -812,7 +838,7 @@ mod tests {
             store_sequence: 3,
         };
         assert_eq!(
-            serde_json::to_value(security_view(Some(&missing))).unwrap()["breachSequence"],
+            serde_json::to_value(security_view(Some(&missing), None)).unwrap()["breachSequence"],
             json!(null)
         );
     }
@@ -828,6 +854,7 @@ mod tests {
             &status(None, Some(SecurityState::Trusted)),
             Vec::new(),
             Some(&snapshot),
+            None,
             Some(512),
             None,
             vec![SectionIssue {
@@ -880,6 +907,7 @@ mod tests {
             ProtocolKnowledge::default().view(),
             &status(None, None),
             Vec::new(),
+            None,
             None,
             None,
             None,

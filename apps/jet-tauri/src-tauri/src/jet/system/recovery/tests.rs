@@ -189,7 +189,7 @@ fn reasons_map_and_only_plain_replaced_names_are_shown() {
 }
 
 #[test]
-fn actions_accept_only_their_two_shapes() {
+fn actions_accept_only_their_three_shapes() {
     let restore: RecoveryAction =
         serde_json::from_value(json!({"kind": "restore_snapshot", "snapshot_id": "x"})).unwrap();
     assert_eq!(
@@ -200,11 +200,15 @@ fn actions_accept_only_their_two_shapes() {
     );
     let purge: RecoveryAction = serde_json::from_value(json!({"kind": "purge_snapshots"})).unwrap();
     assert_eq!(purge, RecoveryAction::PurgeSnapshots {});
+    let epoch: RecoveryAction =
+        serde_json::from_value(json!({"kind": "begin_audit_epoch"})).unwrap();
+    assert_eq!(epoch, RecoveryAction::BeginAuditEpoch {});
     for rejected in [
         json!({"kind": "restore_snapshot", "snapshot_id": "x", "name": DAILY}),
         json!({"kind": "restore_snapshot", "snapshot": DAILY}),
         json!({"kind": "purge_snapshots", "all": true}),
-        json!({"kind": "begin_audit_epoch"}),
+        json!({"kind": "begin_audit_epoch", "epoch": "2"}),
+        json!({"kind": "begin_audit_epoch", "command_id": "x"}),
     ] {
         assert!(
             serde_json::from_value::<RecoveryAction>(rejected.clone()).is_err(),
@@ -386,7 +390,8 @@ async fn expect_purge(reader: &mut Reader, command_id: Uuid) -> (StreamId, Clien
 fn review_id(view: &RecoveryReviewView) -> String {
     match view {
         RecoveryReviewView::RestoreSnapshot { review_id, .. }
-        | RecoveryReviewView::PurgeSnapshots { review_id, .. } => review_id.clone(),
+        | RecoveryReviewView::PurgeSnapshots { review_id, .. }
+        | RecoveryReviewView::BeginAuditEpoch { review_id, .. } => review_id.clone(),
     }
 }
 
@@ -884,4 +889,200 @@ async fn a_restore_stands_when_the_status_re_read_fails_and_hides_a_path() {
             ..
         }
     ));
+}
+
+// ---------------------------------------------------------------------------
+// New audit epoch
+// ---------------------------------------------------------------------------
+
+fn degraded(epoch: u64) -> PlaneStatus {
+    let mut plane = serving();
+    plane.security = Some(SecurityState::Degraded {
+        breach: AuditBreach::RecordAltered { sequence: 41 },
+        epoch,
+        head: None,
+        store_sequence: 50,
+    });
+    plane
+}
+
+impl Fake {
+    /// As if this app had saved the audit evidence of `epoch`.
+    fn exported(&self, epoch: Option<u64>) {
+        self.bridge()
+            .audit
+            .record_for_test(
+                self.plane,
+                crate::jet::audit::ExportMark {
+                    identity: IDENTITY,
+                    epoch,
+                    through: 50,
+                },
+            )
+            .unwrap();
+    }
+}
+
+async fn expect_epoch(reader: &mut Reader, command_id: Uuid) -> (StreamId, ClientMessage) {
+    let (stream, message) = next_message(reader).await;
+    match &message {
+        ClientMessage::Command {
+            command_id: sent,
+            command: CommandRequest::BeginAuditEpoch,
+            ..
+        } if *sent == command_id => {}
+        other => panic!("unexpected request {other:?}"),
+    }
+    (stream, message)
+}
+
+fn epoch_action() -> RecoveryAction {
+    RecoveryAction::BeginAuditEpoch {}
+}
+
+#[tokio::test]
+async fn a_new_epoch_needs_a_degraded_audit_whose_evidence_was_saved() {
+    let fake = fake_plane();
+    let trusted = fake.prepare(epoch_action(), serving()).await;
+    assert_eq!(
+        code(trusted),
+        ("audit.not_degraded_local".into(), "conflict")
+    );
+    let unsaved = fake.prepare(epoch_action(), degraded(2)).await;
+    assert_eq!(code(unsaved), ("audit.export_required".into(), "conflict"));
+    // Evidence of a trusted audit, or of another epoch, does not count.
+    fake.exported(None);
+    let trusted_export = fake.prepare(epoch_action(), degraded(2)).await;
+    assert_eq!(code(trusted_export).0, "audit.export_required");
+    fake.exported(Some(1));
+    let older = fake.prepare(epoch_action(), degraded(2)).await;
+    assert_eq!(code(older).0, "audit.export_required");
+
+    fake.exported(Some(2));
+    let view = fake.prepare(epoch_action(), degraded(2)).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(&view).unwrap(),
+        json!({
+            "kind": "begin_audit_epoch",
+            "reviewId": review_id(&view),
+            "planeLabel": "Build box",
+            "degradedEpoch": "2",
+            "breach": "record_altered",
+            "exportedThrough": "50",
+        })
+    );
+}
+
+#[tokio::test]
+async fn an_uncertain_epoch_is_resent_with_the_same_command_id_then_replayed() {
+    let fake = fake_plane();
+    fake.exported(Some(2));
+    let id = review_id(&fake.prepare(epoch_action(), degraded(2)).await.unwrap());
+    let command_id = Uuid::parse_str(&id).unwrap();
+
+    // The Command reaches the Plane and the connection drops: uncertain.
+    let (uncertain, ()) = tokio::join!(fake.execute(&id), async {
+        let (mut reader, _writer) = accept(&fake.listener, CLIENT).await;
+        expect_epoch(&mut reader, command_id).await;
+    });
+    let uncertain = uncertain.unwrap_err();
+    assert_eq!(uncertain.category, "offline");
+    assert_eq!(uncertain.plane_id.as_deref(), Some(fake.plane_id.as_str()));
+    // While it is unresolved no other epoch review can be prepared.
+    let blocked = fake.prepare(epoch_action(), degraded(2)).await;
+    assert_eq!(code(blocked).0, "recovery.request_unresolved");
+
+    // Try again resends the same Command ID; the receipt answers.
+    let (outcome, ()) = tokio::join!(fake.execute(&id), async {
+        let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+        let (stream, message) = expect_epoch(&mut reader, command_id).await;
+        command_result(
+            &mut writer,
+            stream,
+            &message,
+            CommandResponse::AuditEpochBegun { epoch: 3 },
+        )
+        .await;
+        serve_status(&mut reader, &mut writer, serving()).await;
+    });
+    let outcome = outcome.unwrap();
+    assert_eq!(
+        serde_json::to_value(&outcome).unwrap(),
+        json!({"kind": "epoch_begun", "epoch": "3"})
+    );
+    // The saved evidence belonged to the ended epoch.
+    assert_eq!(
+        fake.bridge().audit.mark(fake.plane, IDENTITY).unwrap(),
+        None
+    );
+    assert_eq!(
+        fake.bridge().planes.health(fake.plane),
+        crate::jet::planes::PlaneHealth::from_status(&serving())
+    );
+
+    // A lost reply is answered from the record without the Plane.
+    assert_eq!(fake.execute(&id).await.unwrap(), outcome);
+    fake.assert_untouched().await;
+}
+
+#[tokio::test]
+async fn a_definite_epoch_refusal_is_recorded() {
+    let fake = fake_plane();
+    fake.exported(Some(2));
+    let id = review_id(&fake.prepare(epoch_action(), degraded(2)).await.unwrap());
+    let (outcome, ()) = tokio::join!(fake.execute(&id), async {
+        let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+        let (stream, message) = expect_epoch(&mut reader, Uuid::parse_str(&id).unwrap()).await;
+        refuse(
+            &mut writer,
+            stream,
+            &message,
+            ErrorCategory::Conflict,
+            "security.audit_trusted",
+        )
+        .await;
+    });
+    let outcome = outcome.unwrap();
+    assert_eq!(refused_code(&outcome), "security.audit_trusted");
+    assert_eq!(fake.execute(&id).await.unwrap(), outcome);
+    fake.assert_untouched().await;
+    // A refusal keeps the evidence mark.
+    assert!(fake
+        .bridge()
+        .audit
+        .mark(fake.plane, IDENTITY)
+        .unwrap()
+        .is_some());
+}
+
+#[tokio::test]
+async fn a_restore_forgets_the_saved_audit_evidence() {
+    let fake = fake_plane();
+    fake.exported(Some(2));
+    let tokens = fake.tokens(&listed());
+    let id = review_id(
+        &fake
+            .prepare(restore_of(&tokens[0]), read_only())
+            .await
+            .unwrap(),
+    );
+    let (outcome, ()) = tokio::join!(fake.execute(&id), async {
+        let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+        let (stream, message) = expect_restore(&mut reader, Uuid::parse_str(&id).unwrap()).await;
+        command_result(
+            &mut writer,
+            stream,
+            &message,
+            CommandResponse::RecoverySnapshotRestored {
+                snapshot: DAILY.into(),
+                replaced: "plane.sqlite3.damaged-1".into(),
+            },
+        )
+        .await;
+    });
+    assert!(matches!(outcome.unwrap(), RecoveryOutcome::Restored { .. }));
+    assert_eq!(
+        fake.bridge().audit.mark(fake.plane, IDENTITY).unwrap(),
+        None
+    );
 }

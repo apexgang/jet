@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-export-security-audit"
+description = "Enables the export_security_audit command without any pre-configured scope."
+commands.allow = ["export_security_audit"]
+
+[[permission]]
+identifier = "deny-export-security-audit"
+description = "Denies the export_security_audit command without any pre-configured scope."
+commands.deny = ["export_security_audit"]

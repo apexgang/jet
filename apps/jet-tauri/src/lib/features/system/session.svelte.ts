@@ -12,7 +12,12 @@ import {
   type SystemHealth,
 } from "$lib/jet/system";
 import { sectionData, sectionStateFor, withFreshness, type SectionState } from "$lib/features/settings/model";
+import { AuditSession } from "./audit.svelte";
 import { isStaleRecoveryError, withRecentCode, type UnconfirmedCheck } from "./model";
+
+/** What the Recovery section reviews: a snapshot restore or a purge. */
+export type SnapshotAction = Exclude<RecoveryAction, { kind: "begin_audit_epoch" }>;
+export type SnapshotReview = Exclude<RecoveryReview, { kind: "begin_audit_epoch" }>;
 
 /** "Free disposable space" in Settings › Safety › Storage. */
 export type CollectState =
@@ -27,11 +32,11 @@ export type CollectState =
  */
 export type RecoveryDialog =
   | { kind: "closed" }
-  | { kind: "preparing"; action: RecoveryAction["kind"] }
-  | { kind: "review"; review: RecoveryReview }
-  | { kind: "sending"; review: RecoveryReview }
+  | { kind: "preparing"; action: SnapshotAction["kind"] }
+  | { kind: "review"; review: SnapshotReview }
+  | { kind: "sending"; review: SnapshotReview }
   | { kind: "done"; outcome: Extract<RecoveryOutcome, { kind: "restored" | "purged" }>; planeLabel: string }
-  | { kind: "unconfirmed"; review: RecoveryReview; error: PublicError; check: UnconfirmedCheck }
+  | { kind: "unconfirmed"; review: SnapshotReview; error: PublicError; check: UnconfirmedCheck }
   | { kind: "stale"; error: PublicError }
   | { kind: "refused"; error: PublicError }
   /** Jet on the Plane started again while a review was open; review again. */
@@ -59,6 +64,12 @@ export class SystemSession {
   selection = $state(0);
   /** Restore or purge review in Settings › Safety › Recovery. */
   recovery = $state<RecoveryDialog>({ kind: "closed" });
+  /** Settings › Safety › Audit: records, evidence export and a new audit period. */
+  readonly audit: AuditSession = new AuditSession({
+    observe: (error) => this.observe(error),
+    onExported: () => void this.load(),
+    securityChanged: () => void this.auditEpochBegun(),
+  });
 
   private started = false;
   private loaded = false;
@@ -99,6 +110,7 @@ export class SystemSession {
     this.daemonStarts = null;
     this.dialogRequest++;
     this.recovery = { kind: "closed" };
+    this.audit.select(planeId);
     this.selection++;
   }
 
@@ -107,6 +119,15 @@ export class SystemSession {
     this.disposed = true;
     this.generation++;
     this.dialogRequest++;
+    this.audit.dispose();
+  }
+
+  /**
+   * The Plane's audit began a new period (`audit.epoch_begun`, or this
+   * window's own request): the Security state and the records changed.
+   */
+  async auditEpochBegun(): Promise<void> {
+    await Promise.all([this.reloadIfLoaded(), this.audit.reloadIfLoaded()]);
   }
 
   /** The Settings change watcher is reconnecting or stopped. */
@@ -201,7 +222,7 @@ export class SystemSession {
    * The shell re-reads the Plane first; a local precondition that no longer
    * holds comes back as `stale`.
    */
-  async prepareRecovery(action: RecoveryAction): Promise<void> {
+  async prepareRecovery(action: SnapshotAction): Promise<void> {
     if (this.recovery.kind === "preparing" || this.recovery.kind === "sending") return;
     const { planeId } = this;
     const request = ++this.dialogRequest;
@@ -209,6 +230,11 @@ export class SystemSession {
     try {
       const review = await prepareRecoveryAction(planeId, action);
       if (!this.current(request, planeId)) return;
+      if (review.kind === "begin_audit_epoch") {
+        // Not a snapshot review: never offered from Recovery.
+        this.recovery = { kind: "closed" };
+        return;
+      }
       this.recovery = { kind: "review", review };
     } catch (thrown: unknown) {
       if (!this.current(request, planeId)) return;
@@ -246,6 +272,11 @@ export class SystemSession {
       case "purged":
         this.recovery = { kind: "done", outcome, planeLabel: review.planeLabel };
         await this.load();
+        return;
+      case "epoch_begun":
+        // Only the Audit section sends a new audit period.
+        this.recovery = { kind: "closed" };
+        await this.auditEpochBegun();
         return;
       case "refused":
         this.observe(outcome.error);
@@ -306,6 +337,7 @@ export class SystemSession {
       this.dialogRequest++;
       this.recovery = { kind: "restarted" };
     }
+    void this.audit.restarted();
     this.onRestart();
     return this.generation;
   }

@@ -212,8 +212,6 @@ impl PublicError {
     /// A local facility of this app failed in a way a retry may fix, such
     /// as writing an exported file (`audit.export_failed`). Unlike
     /// `internal()`, the code names what failed.
-    // Wave 3.3's audit export (a later slice) is the first caller.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn local_internal(code: &'static str, message: &'static str) -> Self {
         Self::new("internal", code, message, true)
     }

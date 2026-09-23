@@ -218,6 +218,7 @@ export class SettingsSession {
       this.agents.reloadIfLoaded(),
       this.extensions.reloadLoaded(),
       this.system.reloadIfLoaded(),
+      this.system.audit.reloadIfLoaded(),
       this.autodelete.reloadIfLoaded(),
     ]);
     if (generation !== this.generation) return;
@@ -684,7 +685,7 @@ export class SettingsSession {
       case "audit.epoch_begun":
         // A new audit epoch may clear the degraded banner.
         void this.loadPlane();
-        void this.system.reloadIfLoaded();
+        void this.system.auditEpochBegun();
         return;
       case "schedule.created":
       case "schedule.canceled":

@@ -91,6 +91,8 @@ fn main() {
             "change_autodelete_rule",
             "prepare_recovery_action",
             "execute_recovery_action",
+            "load_security_audit",
+            "export_security_audit",
         ]),
     ))
     .expect("failed to build the Tauri command manifest");

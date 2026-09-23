@@ -114,6 +114,8 @@ pub fn run() {
             jet::retention::autodelete::change_autodelete_rule,
             jet::system::recovery::prepare_recovery_action,
             jet::system::recovery::execute_recovery_action,
+            jet::audit::load_security_audit,
+            jet::audit::export_security_audit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Jet desktop application");

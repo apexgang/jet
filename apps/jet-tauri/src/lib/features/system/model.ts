@@ -392,6 +392,7 @@ export function restoreReviewLines(review: Extract<RecoveryReview, { kind: "rest
     `Changes made on ${review.planeLabel} after ${when} are replaced.`,
     "Jet keeps the damaged data beside the store as a file. It isn't deleted.",
     "Tasks and accounts deleted after the snapshot stay deleted.",
+    "If the snapshot is older than the newest security record, Jet will ask you to review the security audit afterwards.",
   ];
 }
 

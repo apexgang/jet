@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings-window",
-  "description": "Device preferences, navigation, read-only Plane summaries, and reviewed Plane setting, Account binding, Auto-continue, Craft and Harness extension changes for the Settings window, plus read-only Plane health, one bounded disposable-storage collection, auto-delete rules with task names for their candidates, and reviewed Recovery snapshot restore and purge; approvals and snapshots name only native tokens. Local Craft files are chosen in a native dialog opened by the shell. It never receives Plane feeds or agent content, and grants no pairing, Plane, dialog, or window-core permission.",
+  "description": "Device preferences, navigation, read-only Plane summaries, and reviewed Plane setting, Account binding, Auto-continue, Craft and Harness extension changes for the Settings window, plus read-only Plane health, one bounded disposable-storage collection, auto-delete rules with task names for their candidates, reviewed Recovery snapshot restore and purge, the redacted Security audit, and a reviewed new audit epoch; approvals and snapshots name only native tokens. Local Craft files and the audit evidence file are chosen in native dialogs opened by the shell, and no path crosses to the webview. It never receives Plane feeds or agent content, and grants no pairing, Plane, dialog, or window-core permission.",
   "windows": [
     "settings"
   ],
@@ -43,6 +43,8 @@
     "allow-load-autodelete-rules",
     "allow-change-autodelete-rule",
     "allow-prepare-recovery-action",
-    "allow-execute-recovery-action"
+    "allow-execute-recovery-action",
+    "allow-load-security-audit",
+    "allow-export-security-audit"
   ]
 }

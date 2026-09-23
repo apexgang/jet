@@ -66,7 +66,14 @@ export type AuditBreachKind = "head_missing" | "head_not_in_store" | "head_diver
 /** `absent`: an older minor, or read-only Recovery whose audit could not be validated. */
 export type SecurityView =
   | { kind: "trusted" }
-  | { kind: "degraded"; breach: AuditBreachKind; breachSequence: string | null; epoch: string }
+  | {
+      kind: "degraded";
+      breach: AuditBreachKind;
+      breachSequence: string | null;
+      epoch: string;
+      /** This app saved the evidence of this epoch, so a new audit period may be reviewed. */
+      exported: boolean;
+    }
   | { kind: "absent" };
 
 export type HealthIssueSection = "capabilities" | "storage" | "retention";
@@ -106,7 +113,10 @@ export const loadSystemHealth = (planeId: PlaneId, fresh = false) =>
   invoke<SystemHealth>("load_system_health", { planeId, fresh });
 
 /** What the Recovery section asks the shell to review. Snake_case inner fields, as the shell reads them. */
-export type RecoveryAction = { kind: "restore_snapshot"; snapshot_id: string } | { kind: "purge_snapshots" };
+export type RecoveryAction =
+  | { kind: "restore_snapshot"; snapshot_id: string }
+  | { kind: "purge_snapshots" }
+  | { kind: "begin_audit_epoch" };
 
 /** A native review of a restore or purge, valid for 10 minutes and usable once. */
 export type RecoveryReview =
@@ -127,6 +137,16 @@ export type RecoveryReview =
       deletionsRecorded: string;
       /** A rollback copy for the previous Jet release may be removed too. */
       includesRollback: boolean;
+    }
+  | {
+      kind: "begin_audit_epoch";
+      reviewId: string;
+      planeLabel: string;
+      /** The epoch that failed to validate. */
+      degradedEpoch: string;
+      breach: AuditBreachKind;
+      /** The audit position the saved evidence reaches. */
+      exportedThrough: string;
     };
 
 /**
@@ -136,6 +156,7 @@ export type RecoveryReview =
 export type RecoveryOutcome =
   | { kind: "restored"; takenAtUnixMs: string; reason: SnapshotReason; replacedName: string | null }
   | { kind: "purged"; removedCount: number }
+  | { kind: "epoch_begun"; epoch: string }
   | { kind: "refused"; error: PublicError }
   | { kind: "unconfirmed"; error: PublicError };
 
@@ -143,6 +164,52 @@ export type RecoveryOutcome =
 export const prepareRecoveryAction = (planeId: PlaneId, action: RecoveryAction) =>
   invoke<RecoveryReview>("prepare_recovery_action", { planeId, action });
 
-/** Sends a reviewed restore or purge at most once. */
+/**
+ * Sends a reviewed restore or purge at most once. A new audit epoch is
+ * receipt-deduplicated instead: an uncertain send rejects with a
+ * `PublicError`, and executing the same review again resends it.
+ */
 export const executeRecoveryAction = (planeId: PlaneId, reviewId: string) =>
   invoke<RecoveryOutcome>("execute_recovery_action", { planeId, reviewId });
+
+// Security audit ------------------------------------------------------------
+
+export type AuditActorKind = "this_device" | "other_client" | "craft_revocation" | "retention";
+export type AuditRisk = "routine" | "elevated" | "destructive";
+export type AuditOutcome = "succeeded" | "denied" | "failed";
+
+/**
+ * One Security-audit record, redacted natively. `clientId`, `identity` and
+ * `reference` are null unless identifiers were requested; `kind` and
+ * `decision` are stable codes, or "unknown".
+ */
+export type AuditEntry = {
+  sequence: string;
+  epoch: string;
+  recordedAtUnixMs: string;
+  actor: { kind: AuditActorKind; clientId: string | null };
+  target: { kind: string; identity: string | null; reference: string | null };
+  decision: string;
+  risk: AuditRisk;
+  outcome: AuditOutcome;
+};
+
+/** One page, oldest first. `complete`: no newer record exists beyond it. */
+export type AuditPage = { cursor: string; complete: boolean; entries: AuditEntry[] };
+
+/** Only the chosen file's name comes back; its path stays in the shell. */
+export type AuditExport = { kind: "saved"; records: string; fileName: string } | { kind: "canceled" };
+
+/**
+ * Reads one page of a Plane's owner-only Security audit strictly after
+ * `after` (null: from the oldest retained record).
+ */
+export const loadSecurityAudit = (planeId: PlaneId, after: string | null, reveal: boolean) =>
+  invoke<AuditPage>("load_security_audit", { planeId, after, reveal });
+
+/**
+ * Saves the whole audit as JSON Lines to a file chosen in a native save
+ * dialog. Refused with `audit.export_busy` while an export of that Plane runs.
+ */
+export const exportSecurityAudit = (planeId: PlaneId) =>
+  invoke<AuditExport>("export_security_audit", { planeId });

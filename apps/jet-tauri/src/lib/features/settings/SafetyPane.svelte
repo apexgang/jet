@@ -3,6 +3,7 @@
 
   import type { SettingsSnapshot } from "$lib/jet/settings";
   import type { SettingsSection } from "$lib/jet/settings-window";
+  import AuditViewer from "$lib/features/system/AuditViewer.svelte";
   import DiagnosticsSection from "$lib/features/system/DiagnosticsSection.svelte";
   import RecoverySection from "$lib/features/system/RecoverySection.svelte";
   import StorageHealth from "$lib/features/system/StorageHealth.svelte";
@@ -50,7 +51,7 @@
       case "trusted":
         return "Audit is healthy.";
       case "degraded":
-        return "Audit needs repair. This app can't repair the audit yet.";
+        return "Audit needs repair. Save the evidence below, then start a new audit period.";
       default:
         return "Audit state isn't reported by this Plane.";
     }
@@ -102,6 +103,7 @@
       </div>
     {/snippet}
   </SectionState>
+  <AuditViewer system={session.system} planeLabel={session.planeLabel} {onopen} />
 </section>
 
 <VersionsSection system={session.system} planeLabel={session.planeLabel} {onopen} />
