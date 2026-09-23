@@ -6,7 +6,13 @@ import {
   PANES,
   SETTING_KEYS,
   SETTING_PLACEMENT,
+  CONSENT_FOR,
+  consentState,
+  emptyBindingLabel,
+  isBindingKey,
+  isConsentKey,
   isSensitive,
+  landedTarget,
   planeRows,
   projectRows,
   sameSetting,
@@ -71,15 +77,17 @@ describe("settings targets", () => {
   });
 
   it("shows only panes with a landed section", () => {
-    expect(landedPanes().map((pane) => pane.id)).toEqual(["general", "work", "connections", "safety"]);
+    expect(landedPanes().map((pane) => pane.id)).toEqual(["general", "agents", "work", "connections", "safety"]);
     for (const section of LANDED_SECTIONS) expect(landedPanes().some((pane) => pane.id === paneOf(section))).toBe(true);
   });
 
   it("resolves targets to what exists in this build", () => {
     expect(resolveTarget({ pane: "connections", section: "planes" })).toEqual({ pane: "connections", section: "planes" });
     expect(resolveTarget({ pane: "general" })).toEqual({ pane: "general", section: null });
-    expect(resolveTarget({ pane: "agents", section: "accounts" })).toEqual({ pane: "general", section: null });
-    expect(resolveTarget({ pane: "work", section: "reviews" })).toEqual({ pane: "work", section: null });
+    expect(resolveTarget({ pane: "agents", section: "accounts" })).toEqual({ pane: "agents", section: "accounts" });
+    expect(resolveTarget({ pane: "work", section: "reviews" })).toEqual({ pane: "work", section: "reviews" });
+    // Extensions land in slice 4: the pane opens at its top.
+    expect(resolveTarget({ pane: "agents", section: "extensions" })).toEqual({ pane: "agents", section: null });
     expect(resolveTarget({ pane: "safety", section: "audit", plane_id: REMOTE })).toEqual({ pane: "safety", section: "audit" });
     expect(resolveTarget({ pane: "general", section: "planes" })).toEqual({ pane: "general", section: null });
     expect(sectionHeadingId("local_service")).toBe("section-local-service");
@@ -112,16 +120,37 @@ describe("settings targets", () => {
     }
   });
 
+  it("maps slice 3 codes to Agents and Reviews, carrying the failing Plane", () => {
+    const cases: Array<[string, string, string]> = [
+      ["account.not_found", "agents", "accounts"],
+      ["account.provider_unsupported", "agents", "accounts"],
+      ["account.provider_unavailable", "agents", "accounts"],
+      ["auto_continue.invalid_policy", "agents", "accounts"],
+      ["review.credential_unavailable", "agents", "accounts"],
+      ["utility.credential_unavailable", "agents", "accounts"],
+      ["craft.disabled", "agents", "harnesses"],
+      ["craft.revoked", "agents", "harnesses"],
+      ["craft.update_pending", "agents", "harnesses"],
+      ["craft.installation_stale", "agents", "harnesses"],
+      ["craft.installation_failed", "agents", "harnesses"],
+      ["utility.consent_required", "agents", "utility"],
+      ["utility.disabled", "agents", "utility"],
+      ["utility.binding_unavailable", "agents", "utility"],
+      ["review.consent_required", "work", "reviews"],
+      ["review.binding_unavailable", "work", "reviews"],
+    ];
+    for (const [code, pane, section] of cases) {
+      expect(settingsTargetForError(error(code)), code).toEqual({ pane, section });
+      expect(settingsTargetForError(error(code, "conflict", false, REMOTE)), code).toEqual({ pane, section, plane_id: REMOTE });
+    }
+    expect(landedTarget("accounts", "local")).toEqual({ pane: "agents", section: "accounts", plane_id: "local" });
+    expect(landedTarget("reviews")).toEqual({ pane: "work", section: "reviews" });
+    expect(landedTarget("extensions", "local")).toBeNull();
+  });
+
   it("returns null for unknown codes and for sections that have not landed", () => {
     expect(settingsTargetForError(error("conversation.not_found"))).toBeNull();
-    for (const code of [
-      "account.not_found",
-      "craft.disabled",
-      "utility.consent_required",
-      "review.consent_required",
-      "extension.refused",
-      "recovery.read_only",
-    ]) {
+    for (const code of ["extension.refused", "extension.change_pending", "recovery.read_only"]) {
       expect(settingsTargetForError(error(code)), code).toBeNull();
     }
   });
@@ -262,6 +291,44 @@ describe("setting placement", () => {
     expect(textFits("git.message_instructions", "a\n\tb")).toBe(true);
     expect(textFits("git.message_instructions", "a\u001bb")).toBe(false);
     expect(textFits("git.branch_prefix", "")).toBe(true);
+  });
+
+  it("describes consent by the exact binding it names", () => {
+    const binding = "00000000-0000-4000-8000-0000000000b1";
+    const other = "00000000-0000-4000-8000-0000000000b2";
+    expect(consentState("", "")).toBe("none");
+    expect(consentState("", binding)).toBe("none");
+    expect(consentState(binding, binding)).toBe("granted");
+    expect(consentState(binding, "")).toBe("missing");
+    expect(consentState(binding, other)).toBe("mismatch");
+    expect(CONSENT_FOR["review.account_binding"]).toBe("review.cross_provider_consent");
+    expect(CONSENT_FOR["utility.account_binding"]).toBe("utility.content_consent");
+    for (const key of SETTING_KEYS) {
+      expect(isBindingKey(key) || isConsentKey(key), key).toBe(key in CONSENT_FOR || Object.values(CONSENT_FOR).includes(key as never));
+    }
+  });
+
+  it("shows binding and consent values by account label, never by UUID", () => {
+    const binding = "00000000-0000-4000-8000-0000000000b1";
+    const bindings = [{ id: binding, label: "Codex login" }];
+    expect(valueText("review.account_binding", { type: "text", value: "" }, bindings)).toBe("Each run's own account");
+    expect(valueText("utility.account_binding", { type: "text", value: "" }, bindings)).toBe("No account");
+    expect(valueText("review.account_binding", { type: "text", value: binding }, bindings)).toBe("Codex login");
+    expect(valueText("review.account_binding", { type: "text", value: binding }, [])).toBe(
+      "An account that's no longer connected",
+    );
+    expect(valueText("review.cross_provider_consent", { type: "text", value: binding }, bindings)).toBe(
+      "Allowed for Codex login",
+    );
+    expect(valueText("utility.content_consent", { type: "text", value: "" }, bindings)).toBe("Not allowed");
+    expect(emptyBindingLabel("review.account_binding")).toBe("Each run's own account");
+    expect(planeRows("reviews")).toEqual(["review.automatic", "review.account_binding", "review.cross_provider_consent"]);
+    expect([...planeRows("utility")].sort()).toEqual([
+      "utility.account_binding",
+      "utility.autodelete_compilation",
+      "utility.automatic_naming",
+      "utility.content_consent",
+    ]);
   });
 
   it("describes values in plain words", () => {

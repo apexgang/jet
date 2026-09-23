@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 
+import type { AutoContinuePolicyView, CraftPreview, CredentialSourceKind } from "./agents";
 import type { PublicError } from "./bridge";
 import type { PlaneId } from "./planes";
 
@@ -73,20 +74,38 @@ export type SettingsSnapshot = {
 
 export type SettingChange = { kind: "set"; value: WritableSettingValue } | { kind: "clear" };
 
+/** What a review will do, as exact facts. Only the review ID is ever sent back. */
+export type ReviewSubject =
+  | { kind: "setting"; key: SettingKeyId; scope: SettingsScopeView }
+  | { kind: "bind"; provider: string; harness: string }
+  | { kind: "auto_continue"; bindingId: string; before: AutoContinuePolicyView; after: AutoContinuePolicyView }
+  | { kind: "unbind"; bindingId: string; label: string; provider: string; credentialSource: CredentialSourceKind }
+  | { kind: "disable_craft"; craftId: string; harnessNames: string[]; mode: "wait" | "force" }
+  | { kind: "install_craft"; preview: CraftPreview };
+
 export type SettingsReview = {
   reviewId: string;
-  subject: { kind: "setting"; key: SettingKeyId; scope: SettingsScopeView };
+  subject: ReviewSubject;
+  /** Setting reviews only. */
   before: ResolvedSetting | null;
-  /** `null` clears the scope's own value, so the inherited value applies. */
+  /** Setting reviews only. `null` clears the scope's own value, so the inherited value applies. */
   after: SettingValue | null;
 };
+
+export type AppliedDetail =
+  | { kind: "setting"; key: SettingKeyId; value: SettingValue | null }
+  | { kind: "account_bound"; bindingId: string }
+  | { kind: "auto_continue" }
+  | { kind: "account_unbound"; cleanup: "none" | "keyring_item_remains" | "helper" | "session" }
+  | { kind: "craft_disabled" }
+  | { kind: "craft_install_queued"; craftId: string; version: string };
 
 export type SettingChangePreparation =
   | { kind: "review"; review: SettingsReview }
   | { kind: "changed"; current: ResolvedSetting };
 
 export type SettingsReceipt =
-  | { kind: "applied"; detail: { kind: "setting"; key: SettingKeyId; value: SettingValue | null } }
+  | { kind: "applied"; detail: AppliedDetail }
   | { kind: "refused"; error: PublicError }
   | { kind: "changed"; current: ResolvedSetting };
 

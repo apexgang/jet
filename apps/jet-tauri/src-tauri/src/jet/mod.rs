@@ -1,3 +1,4 @@
+pub(crate) mod agents;
 mod channels;
 mod client;
 mod conversations;
@@ -45,6 +46,7 @@ pub(crate) struct JetBridge {
     work_panel: work_panel::WorkPanelState,
     settings_window: settings_window::SettingsWindowState,
     settings: settings::SettingsState,
+    agents: agents::AgentsState,
     preferences: preferences::PreferencesState,
 }
 
@@ -90,6 +92,7 @@ impl JetBridge {
             work_panel: work_panel::WorkPanelState::default(),
             settings_window: settings_window::SettingsWindowState::new(app_data_directory),
             settings: settings::SettingsState::default(),
+            agents: agents::AgentsState::default(),
             preferences: preferences::PreferencesState::new(app_data_directory),
         }
     }
@@ -493,7 +496,7 @@ mod manifest_tests {
     ];
 
     /// Commands only the Settings window may call.
-    const SETTINGS_ONLY: [&str; 11] = [
+    const SETTINGS_ONLY: [&str; 20] = [
         "watch_settings_navigation",
         "remember_settings_pane",
         "close_settings",
@@ -505,6 +508,15 @@ mod manifest_tests {
         "apply_settings_change",
         "load_work_context",
         "watch_settings_changes",
+        "load_agents",
+        "prepare_account_bind",
+        "load_account_detail",
+        "load_usage_history",
+        "prepare_auto_continue",
+        "prepare_account_unbind",
+        "prepare_craft_disable",
+        "pick_local_craft_source",
+        "discover_craft",
     ];
 
     /// `generate_handler!` names, the `build.rs` manifest and the union of

@@ -15,7 +15,7 @@ use serde::Serialize;
 use tauri::State;
 use uuid::Uuid;
 
-use super::{errors::PublicError, JetBridge};
+use super::{agents::KnownHarness, errors::PublicError, JetBridge};
 
 const PREVIEW_LIFETIME: Duration = Duration::from_secs(10 * 60);
 
@@ -87,10 +87,10 @@ struct CraftView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AuthProviderView {
-    provider: &'static str,
-    harness: &'static str,
-    label: &'static str,
+pub(crate) struct AuthProviderView {
+    pub(crate) provider: &'static str,
+    pub(crate) harness: &'static str,
+    pub(crate) label: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -620,36 +620,24 @@ fn registrability_view(registrability: &Registrability) -> (&'static str, String
     }
 }
 
-fn auth_provider_options(harnesses: &[String]) -> Vec<AuthProviderView> {
+/// Harness-native sign-in options for the Plane's first-party Harnesses,
+/// one per provider.
+pub(crate) fn auth_provider_options(harnesses: &[String]) -> Vec<AuthProviderView> {
     let mut providers = Vec::new();
     let mut seen = HashSet::new();
-    for harness in harnesses {
-        let normalized = harness.to_ascii_lowercase();
-        let option = if normalized.contains("codex") {
-            Some(AuthProviderView {
-                provider: "openai",
-                harness: "Codex",
-                label: "Codex login",
-            })
-        } else if normalized.contains("claude") {
-            Some(AuthProviderView {
-                provider: "anthropic",
-                harness: "Claude Code",
-                label: "Claude Code login",
-            })
-        } else {
-            None
-        };
-        if let Some(option) = option {
-            if seen.insert(option.provider) {
-                providers.push(option);
-            }
+    for harness in harnesses.iter().filter_map(|id| KnownHarness::of(id)) {
+        if seen.insert(harness.provider()) {
+            providers.push(AuthProviderView {
+                provider: harness.provider(),
+                harness: harness.name(),
+                label: harness.login_label(),
+            });
         }
     }
     providers
 }
 
-fn credential_state(state: &CredentialState) -> (&'static str, &'static str) {
+pub(crate) fn credential_state(state: &CredentialState) -> (&'static str, &'static str) {
     match state {
         CredentialState::Resolvable => ("ready", "Ready"),
         CredentialState::ResolvedAtUse => ("resolved_at_use", "Checked when used"),
@@ -659,7 +647,7 @@ fn credential_state(state: &CredentialState) -> (&'static str, &'static str) {
     }
 }
 
-fn degraded_label(condition: &DegradedCondition) -> String {
+pub(crate) fn degraded_label(condition: &DegradedCondition) -> String {
     match condition {
         DegradedCondition::MissingExternalTool { tool } => match tool {
             ExternalTool::Git => "Git is not available".into(),

@@ -4,6 +4,8 @@
     MAX_SETTING_TEXT_BYTES,
     SETTING_PLACEMENT,
     clearLabel,
+    emptyBindingLabel,
+    isBindingKey,
     refusalText,
     sectionData,
     sourceLabel,
@@ -37,6 +39,7 @@
   const row = $derived(session.row(settingKey, scope));
   const block = $derived(session.mutationBlock(scope));
   const projects = $derived(sectionData(session.work)?.projects ?? []);
+  const bindings = $derived(sectionData(session.work)?.bindings ?? []);
   const sectionReady = $derived(session.sectionFor(scope)?.kind === "ready");
   const inFlight = $derived(
     row.kind === "checking" || row.kind === "confirm" || row.kind === "applying" || row.kind === "uncertain",
@@ -84,6 +87,11 @@
     if (shown.type === "count" && !countValid) return;
     if (shown.type === "text" && !textValid) return;
     void session.change(settingKey, scope, { kind: "set", value: shown });
+  }
+
+  /** A binding key's `<select>` applies the chosen Account binding at once. */
+  function chooseBinding(value: string): void {
+    void session.change(settingKey, scope, { kind: "set", value: { type: "text", value } });
   }
 
   function useInherited(): void {
@@ -140,6 +148,22 @@
         {#if editing && !countValid}
           <p class="field-error" role="alert">Enter a whole number from 0 to 4,294,967,295.</p>
         {/if}
+      {:else if isBindingKey(settingKey)}
+        <select
+          id={`${id}-control`}
+          aria-describedby={`${id}-help`}
+          value={draftText}
+          disabled={locked || shown?.type !== "text"}
+          onchange={(event) => chooseBinding(event.currentTarget.value)}
+        >
+          <option value="">{emptyBindingLabel(settingKey)}</option>
+          {#each bindings as binding (binding.id)}
+            <option value={binding.id}>{binding.label} · {binding.provider}</option>
+          {/each}
+          {#if draftText !== "" && !bindings.some((binding) => binding.id === draftText)}
+            <option value={draftText}>An account that's no longer connected</option>
+          {/if}
+        </select>
       {:else if settingKey === "git.message_instructions"}
         <textarea
           id={`${id}-control`}
@@ -215,7 +239,7 @@
     {:else if row.kind === "changed_elsewhere"}
       <div class="row-notice">
         <p>
-          This was changed on {session.planeLabel} to {valueText(settingKey, row.current.value)}. Your edit wasn't saved.
+          This was changed on {session.planeLabel} to {valueText(settingKey, row.current.value, bindings)}. Your edit wasn't saved.
         </p>
         <div class="actions">
           <button class="text-button" onclick={() => session.dismiss(settingKey, scope)}>Use current</button>
@@ -246,6 +270,7 @@
     {scopeLabel}
     planeLabel={session.planeLabel}
     {projects}
+    {bindings}
     onconfirm={() => void session.confirm(settingKey, scope)}
     oncancel={() => session.dismiss(settingKey, scope)}
   />
@@ -291,6 +316,7 @@
 
   input[type="number"],
   input[type="text"],
+  select,
   textarea {
     min-width: 0;
     padding: 7px 10px;
@@ -316,6 +342,7 @@
   }
 
   input:disabled,
+  select:disabled,
   textarea:disabled {
     opacity: 0.6;
   }

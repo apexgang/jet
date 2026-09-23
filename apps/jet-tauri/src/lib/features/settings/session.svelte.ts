@@ -16,6 +16,7 @@ import {
   type SettingValue,
   type WorkContext,
 } from "$lib/jet/settings";
+import { AgentsSession } from "./agents-session.svelte";
 import {
   isSensitive,
   sameSetting,
@@ -105,6 +106,13 @@ export class SettingsSession {
   usageNewer = $state(false);
   /** A `schedule.*` event arrived; there is no list to reload. */
   schedulesChanged = $state(false);
+  /** The Agents pane of the same Plane. */
+  readonly agents = new AgentsSession({
+    planeStateChanged: (state) => {
+      this.planeState = state;
+    },
+    planeStateStale: () => void this.loadPlane(),
+  });
 
   private started = false;
   /** Bumped on every Plane switch; every completion checks it. */
@@ -134,6 +142,7 @@ export class SettingsSession {
     this.watchError = null;
     this.usageNewer = false;
     this.schedulesChanged = false;
+    this.agents.select(planeId);
     void this.reload();
   }
 
@@ -142,6 +151,7 @@ export class SettingsSession {
     this.generation++;
     this.watchGeneration++;
     this.watch = "idle";
+    this.agents.dispose();
   }
 
   /** Reloads every section, then watches from the lowest section cursor. */
@@ -249,6 +259,18 @@ export class SettingsSession {
     if (this.watch === "stale" || this.watch === "failed") return "stale";
     const state = this.sectionFor(scope);
     if (!state || state.kind !== "ready" || state.freshness === "stale") return "stale";
+    return null;
+  }
+
+  /**
+   * Whether Agents changes may start. Like setting rows: read-only
+   * Recovery and a stale view pause them; the Agents data must be live.
+   */
+  agentsBlock(): MutationBlock {
+    if (this.planeState?.recovery === "read_only") return "read_only";
+    if (this.watch === "stale" || this.watch === "failed") return "stale";
+    const view = this.agents.view;
+    if (view.kind !== "ready" || view.freshness === "stale") return "stale";
     return null;
   }
 
@@ -509,10 +531,13 @@ export class SettingsSession {
       case "setting.cleared":
         await this.settingChanged(change.sequence, change.settingKey, change.settingScope, change.projectId);
         return;
-      case "project.registered":
-      case "project.removed":
       case "account.bound":
       case "account.unbound":
+        this.agents.noteChange(change.kind, change.sequence);
+        if (newer(change.sequence, this.cursor("work"))) this.work = withFreshness(this.work, "changed");
+        return;
+      case "project.registered":
+      case "project.removed":
         if (newer(change.sequence, this.cursor("work"))) this.work = withFreshness(this.work, "changed");
         return;
       case "usage.recorded":
@@ -529,7 +554,7 @@ export class SettingsSession {
         return;
       case "auto_continue.changed":
       case "auto_continue.configured":
-        // Shown by the Agents pane, which reloads its own section.
+        this.agents.noteChange(change.kind, change.sequence);
         return;
     }
   }

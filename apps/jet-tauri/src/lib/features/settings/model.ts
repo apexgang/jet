@@ -68,10 +68,15 @@ export const LANDED_SECTIONS: ReadonlySet<SettingsSection> = new Set<SettingsSec
   "appearance",
   "notifications",
   "restoration",
+  "harnesses",
+  "accounts",
+  "usage",
+  "utility",
   "local_service",
   "planes",
   "projects",
   "delivery",
+  "reviews",
   "schedules",
   "retention",
   "execution",
@@ -155,6 +160,16 @@ const EXACT_TARGETS: ReadonlyArray<[readonly string[], SettingsPane, SettingsSec
 const PREFIX_TARGETS: ReadonlyArray<[string, SettingsPane, SettingsSection]> = [
   ["extension.", "agents", "extensions"],
 ];
+
+/**
+ * A deep link to one section, or null while that section has not landed.
+ * A Plane pane's link carries the Plane it is about.
+ */
+export function landedTarget(section: SettingsSection, planeId: string | null = null): SettingsTarget | null {
+  if (!LANDED_SECTIONS.has(section)) return null;
+  const pane = paneOf(section);
+  return PLANE_PANES.has(pane) && planeId ? { pane, section, plane_id: planeId } : { pane, section };
+}
 
 /** Panes whose settings belong to one Plane; a link carries that Plane. */
 export const PLANE_PANES: ReadonlySet<SettingsPane> = new Set<SettingsPane>(["agents", "work", "safety"]);
@@ -510,9 +525,63 @@ export function textFits(key: SettingKeyId, text: string): boolean {
   return true;
 }
 
+/** An Account binding a binding or consent key can name. */
+export type BindingOption = { id: string; label: string; provider?: string };
+
+/** Each binding key and the consent key that authorizes exactly its value. */
+export const CONSENT_FOR = {
+  "review.account_binding": "review.cross_provider_consent",
+  "utility.account_binding": "utility.content_consent",
+} as const satisfies Partial<Record<SettingKeyId, SettingKeyId>>;
+
+export type BindingKey = keyof typeof CONSENT_FOR;
+export type ConsentKey = (typeof CONSENT_FOR)[BindingKey];
+
+export function isBindingKey(key: SettingKeyId): key is BindingKey {
+  return key in CONSENT_FOR;
+}
+
+export function isConsentKey(key: SettingKeyId): key is ConsentKey {
+  return Object.values(CONSENT_FOR).includes(key as ConsentKey);
+}
+
+/** What an empty binding means for each binding key. */
+export function emptyBindingLabel(key: BindingKey): string {
+  return key === "review.account_binding" ? "Each run's own account" : "No account";
+}
+
+/**
+ * Consent authorizes one exact binding UUID (docs/automatic-review.md,
+ * docs/utility-work.md). Changing the binding never moves consent, so a
+ * stored consent can name another account: that is `mismatch`, shown as is.
+ */
+export type ConsentState = "none" | "granted" | "missing" | "mismatch";
+
+export function consentState(binding: string, consent: string): ConsentState {
+  if (binding === "") return "none";
+  if (consent === binding) return "granted";
+  if (consent === "") return "missing";
+  return "mismatch";
+}
+
+/** A binding or consent value in words: the account's label, never its UUID. */
+function bindingValueText(key: SettingKeyId, id: string, bindings: ReadonlyArray<BindingOption>): string {
+  const consent = isConsentKey(key);
+  if (id === "") return consent ? "Not allowed" : emptyBindingLabel(key as BindingKey);
+  const name = bindings.find((binding) => binding.id === id)?.label ?? "an account that's no longer connected";
+  return consent ? `Allowed for ${name}` : name.charAt(0).toUpperCase() + name.slice(1);
+}
+
 /** Plain-language value for reviews and "changed elsewhere" copy. */
-export function valueText(key: SettingKeyId, value: SettingValue | null): string {
+export function valueText(
+  key: SettingKeyId,
+  value: SettingValue | null,
+  bindings: ReadonlyArray<BindingOption> = [],
+): string {
   if (value === null) return "The inherited value";
+  if (value.type === "text" && (isBindingKey(key) || isConsentKey(key))) {
+    return bindingValueText(key, value.value, bindings);
+  }
   switch (value.type) {
     case "flag":
       return value.value ? "On" : "Off";

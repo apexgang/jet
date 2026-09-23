@@ -1,6 +1,7 @@
 <script lang="ts">
   import SchedulesDestination from "$lib/features/schedules/SchedulesDestination.svelte";
   import type { SettingsSnapshot, WorkContext } from "$lib/jet/settings";
+  import ConsentRow from "./ConsentRow.svelte";
   import SectionState from "./SectionState.svelte";
   import SettingRow from "./SettingRow.svelte";
   import { planeRows, projectRows, sectionData, withIssues } from "./model";
@@ -11,6 +12,10 @@
   const projects = $derived(sectionData(session.work)?.projects ?? []);
   const projectsState = $derived(withIssues(session.work, ["projects"]));
   const autodeleteState = $derived(withIssues(session.work, ["autodelete"]));
+  const accountsIssue = $derived(
+    session.work.kind === "ready" ? session.work.issues.find((issue) => issue.section === "accounts") : undefined,
+  );
+  const PLANE = { type: "plane" } as const;
   const projectScope = $derived(
     session.projectId ? { type: "project" as const, projectId: session.projectId } : null,
   );
@@ -85,6 +90,39 @@
   </SectionState>
 </section>
 
+<section class="settings-section" aria-labelledby="section-reviews">
+  <h2 id="section-reviews" tabindex="-1">Reviews</h2>
+  <p>Jet can decide eligible approval requests for you on this Plane. Requests it can't decide wait for you.</p>
+  <SectionState
+    state={session.plane}
+    title="Reviews"
+    planeLabel={session.planeLabel}
+    onretry={() => void session.showCurrent(PLANE)}
+  >
+    {#snippet children(_snapshot: SettingsSnapshot)}
+      {#if accountsIssue}
+        <p class="notice" role="status">
+          Jet couldn't list this Plane's accounts, so reviewer accounts show without names.
+          <code>{accountsIssue.error.code}</code>
+        </p>
+      {/if}
+      <div class="setting-rows">
+        <SettingRow {session} settingKey="review.automatic" scope={PLANE} />
+        <SettingRow {session} settingKey="review.account_binding" scope={PLANE} />
+        <ConsentRow
+          {session}
+          bindingKey="review.account_binding"
+          missingText={(label) => `Without this, reviews by ${label} wait for you.`}
+        />
+      </div>
+      <p class="note">
+        The reviewer account and permission to send it task content are saved as two separate changes. If one of them
+        isn't saved, this page shows exactly what was.
+      </p>
+    {/snippet}
+  </SectionState>
+</section>
+
 <section class="settings-section" aria-labelledby="section-schedules">
   <h2 id="section-schedules" tabindex="-1">Schedules</h2>
   <SchedulesDestination changed={session.schedulesChanged} />
@@ -153,5 +191,15 @@
 
   .setting-rows {
     display: grid;
+  }
+
+  .note,
+  .notice {
+    font-size: 12px;
+  }
+
+  code {
+    color: var(--quiet);
+    font-size: 11px;
   }
 </style>

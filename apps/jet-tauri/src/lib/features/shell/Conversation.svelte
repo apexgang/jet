@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { paneTitle, settingsTargetForError } from "$lib/features/settings/model";
+  import { landedTarget, paneTitle, settingsTargetForError } from "$lib/features/settings/model";
   import PlanesPanel from "$lib/features/planes/PlanesPanel.svelte";
   import SchedulesDestination from "$lib/features/schedules/SchedulesDestination.svelte";
   import type { DesktopSession } from "./session.svelte";
@@ -80,6 +80,12 @@
       >
         {status}
       </span>
+      {#if status === "Sign-in needed" || status === "Quota paused"}
+        {@const target = landedTarget("accounts", session.selectedPlaneId)}
+        {#if target}
+          <button class="text-button" onclick={() => void session.openSettings(target)}>Open Agents settings</button>
+        {/if}
+      {/if}
       <button
         class="icon-button"
         aria-label={session.workPanelPresented ? "Hide work panel" : "Show work panel"}

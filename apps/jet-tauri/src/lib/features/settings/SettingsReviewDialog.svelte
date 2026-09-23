@@ -2,7 +2,15 @@
   import { onMount, tick } from "svelte";
 
   import type { SettingKeyId, SettingsReview } from "$lib/jet/settings";
-  import { LAST_WRITER_WINS, SETTING_PLACEMENT, sourceLabel, valueText } from "./model";
+  import {
+    LAST_WRITER_WINS,
+    SETTING_PLACEMENT,
+    isBindingKey,
+    isConsentKey,
+    sourceLabel,
+    valueText,
+    type BindingOption,
+  } from "./model";
 
   let {
     review,
@@ -10,6 +18,7 @@
     scopeLabel,
     planeLabel,
     projects,
+    bindings = [],
     onconfirm,
     oncancel,
   }: {
@@ -19,6 +28,8 @@
     scopeLabel: string;
     planeLabel: string;
     projects: ReadonlyArray<{ id: string; name: string }>;
+    /** Account bindings, so binding and consent values show labels, not UUIDs. */
+    bindings?: ReadonlyArray<BindingOption>;
     onconfirm: () => void;
     oncancel: () => void;
   } = $props();
@@ -28,6 +39,12 @@
   let returnFocus: HTMLElement | null = null;
   const titleId = $props.id();
   const placement = $derived(SETTING_PLACEMENT[settingKey]);
+  /** Binding and consent keys are Plane-only: clearing restores the empty built-in. */
+  const clearedText = $derived(
+    isBindingKey(settingKey) || isConsentKey(settingKey)
+      ? valueText(settingKey, { type: "text", value: "" }, bindings)
+      : "The inherited value",
+  );
 
   function close(): void {
     if (dialog?.open) dialog.close();
@@ -78,12 +95,12 @@
       {#if review.before}
         <div>
           <dt>Now</dt>
-          <dd>{valueText(settingKey, review.before.value)} ({sourceLabel(review.before.source, projects)})</dd>
+          <dd>{valueText(settingKey, review.before.value, bindings)} ({sourceLabel(review.before.source, projects)})</dd>
         </div>
       {/if}
       <div>
         <dt>After</dt>
-        <dd>{review.after === null ? "The inherited value" : valueText(settingKey, review.after)}</dd>
+        <dd>{review.after === null ? clearedText : valueText(settingKey, review.after, bindings)}</dd>
       </div>
     </dl>
 

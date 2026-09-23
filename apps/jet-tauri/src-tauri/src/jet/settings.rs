@@ -18,8 +18,9 @@ use std::{
 
 use jet_client::{Client, ClientError};
 use jet_protocol::{
-    CapabilityObservation, PlaneStatus, RecoveryState, ResolvedSetting, SecurityState, SettingKey,
-    SettingScope, SettingSelection, SettingSource, SettingValue,
+    AutoContinuePolicy, AutoContinueTarget, CapabilityObservation, CraftDisableMode,
+    CraftInstallationConfirmation, CredentialSource, PlaneStatus, RecoveryState, ResolvedSetting,
+    SecurityState, SettingKey, SettingScope, SettingSelection, SettingSource, SettingValue,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, State};
@@ -27,6 +28,7 @@ use tokio::task::AbortHandle;
 use uuid::Uuid;
 
 use super::{
+    agents::{self, AutoContinuePolicyView, CraftPreviewView},
     channels::parse_resume_cursor,
     client::{NativeUpdate, PlaneClient},
     errors::PublicError,
@@ -263,7 +265,7 @@ pub(crate) struct PlaneStateView {
     recovery: &'static str,
 }
 
-fn plane_state(status: &PlaneStatus) -> PlaneStateView {
+pub(crate) fn plane_state(status: &PlaneStatus) -> PlaneStateView {
     PlaneStateView {
         security: match status.security {
             Some(SecurityState::Trusted) => "trusted",
@@ -294,7 +296,7 @@ pub(crate) struct SettingsSnapshotView {
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
-enum ScopeView {
+pub(crate) enum ScopeView {
     Plane,
     Project { project_id: String },
     Conversation { conversation_id: String },
@@ -383,7 +385,7 @@ fn resolved_view(setting: &ResolvedSetting) -> ResolvedSettingView {
 )]
 pub(crate) enum SettingChangePreparation {
     /// Nothing changed since the snapshot: this exact change may be applied.
-    Review { review: SettingsReviewView },
+    Review { review: Box<SettingsReviewView> },
     /// The Plane's value is no longer the one the row showed.
     Changed { current: ResolvedSettingView },
 }
@@ -393,19 +395,62 @@ pub(crate) enum SettingChangePreparation {
 pub(crate) struct SettingsReviewView {
     review_id: String,
     subject: ReviewSubject,
+    /// Setting reviews only.
     before: Option<ResolvedSettingView>,
-    /// `None` clears the scope's value, so the inherited value applies.
+    /// Setting reviews only. `None` clears the scope's value, so the
+    /// inherited value applies.
     after: Option<ValueView>,
 }
 
+impl SettingsReviewView {
+    /// A review of an action that is not one Setting: its exact values are
+    /// in the subject.
+    pub(crate) fn action(review_id: Uuid, subject: ReviewSubject) -> Self {
+        Self {
+            review_id: review_id.to_string(),
+            subject,
+            before: None,
+            after: None,
+        }
+    }
+}
+
+/// What a review will do, as exact labeled facts. Nothing in it is ever
+/// sent back: apply takes only the review ID.
 #[derive(Debug, Serialize)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
-enum ReviewSubject {
-    Setting { key: &'static str, scope: ScopeView },
+pub(crate) enum ReviewSubject {
+    Setting {
+        key: &'static str,
+        scope: ScopeView,
+    },
+    Bind {
+        provider: &'static str,
+        harness: &'static str,
+    },
+    AutoContinue {
+        binding_id: String,
+        before: AutoContinuePolicyView,
+        after: AutoContinuePolicyView,
+    },
+    Unbind {
+        binding_id: String,
+        label: String,
+        provider: String,
+        credential_source: &'static str,
+    },
+    DisableCraft {
+        craft_id: String,
+        harness_names: Vec<String>,
+        mode: &'static str,
+    },
+    InstallCraft {
+        preview: CraftPreviewView,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -439,6 +484,20 @@ pub(crate) enum AppliedDetail {
     Setting {
         key: &'static str,
         value: Option<ValueView>,
+    },
+    AccountBound {
+        binding_id: String,
+    },
+    AutoContinue,
+    /// What is left for the user to clean up: `none`,
+    /// `keyring_item_remains`, `helper` or `session`.
+    AccountUnbound {
+        cleanup: &'static str,
+    },
+    CraftDisabled,
+    CraftInstallQueued {
+        craft_id: String,
+        version: String,
     },
 }
 
@@ -504,8 +563,10 @@ struct SnapshotLookup {
     values: Vec<ResolvedSetting>,
 }
 
+/// The exact typed request a review sends. It is stored natively and sent
+/// byte-equal on every attempt, under the review ID as its command ID.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum SettingsAction {
+pub(crate) enum SettingsAction {
     Set {
         key: SettingKey,
         scope: SettingScope,
@@ -515,34 +576,60 @@ enum SettingsAction {
         key: SettingKey,
         scope: SettingScope,
     },
+    /// A Harness-native binding: never a credential.
+    Bind {
+        provider: &'static str,
+        label: &'static str,
+    },
+    AutoContinue {
+        binding_id: Uuid,
+        policy: AutoContinuePolicy,
+    },
+    Unbind {
+        binding_id: Uuid,
+    },
+    DisableCraft {
+        craft_id: String,
+        mode: CraftDisableMode,
+    },
+    /// The confirmation stays native; the webview only saw its facts.
+    InstallCraft {
+        confirmation: CraftInstallationConfirmation,
+    },
 }
 
 impl SettingsAction {
-    fn slot(&self) -> Slot {
+    pub(crate) fn slot(&self) -> Slot {
         match self {
             Self::Set { key, scope, .. } | Self::Clear { key, scope } => {
                 Slot::Setting(*scope, *key)
             }
+            Self::Bind { provider, .. } => Slot::Bind(provider),
+            Self::AutoContinue { binding_id, .. } => Slot::AutoContinue(*binding_id),
+            Self::Unbind { binding_id } => Slot::Account(*binding_id),
+            Self::DisableCraft { craft_id, .. } => Slot::Craft(craft_id.clone()),
+            Self::InstallCraft { .. } => Slot::CraftInstall,
         }
     }
 
-    fn key(&self) -> SettingKey {
+    /// The Setting a Set or Clear changes, which the fresh-read guard reads.
+    fn setting(&self) -> Option<(SettingKey, SettingScope)> {
         match self {
-            Self::Set { key, .. } | Self::Clear { key, .. } => *key,
-        }
-    }
-
-    fn scope(&self) -> SettingScope {
-        match self {
-            Self::Set { scope, .. } | Self::Clear { scope, .. } => *scope,
+            Self::Set { key, scope, .. } | Self::Clear { key, scope } => Some((*key, *scope)),
+            _ => None,
         }
     }
 }
 
 /// One attempted, unresolved change is allowed per slot on each Plane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Slot {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Slot {
     Setting(SettingScope, SettingKey),
+    Bind(&'static str),
+    AutoContinue(Uuid),
+    Account(Uuid),
+    Craft(String),
+    CraftInstall,
 }
 
 /// The value the user saw when the review was admitted. Checked again on
@@ -567,8 +654,8 @@ impl SettingsReview {
         self.attempted && self.result.is_none()
     }
 
-    fn occupies(&self, plane: PlaneId, slot: Slot) -> bool {
-        self.plane.plane == plane && self.action.slot() == slot && self.unresolved()
+    fn occupies(&self, plane: PlaneId, slot: &Slot) -> bool {
+        self.plane.plane == plane && self.action.slot() == *slot && self.unresolved()
     }
 }
 
@@ -643,9 +730,9 @@ impl SettingsState {
         })
     }
 
-    fn ensure_slot_free(&self, plane: PlaneId, slot: Slot) -> Result<(), PublicError> {
+    pub(crate) fn ensure_slot_free(&self, plane: PlaneId, slot: Slot) -> Result<(), PublicError> {
         let reviews = self.reviews.lock().map_err(|_| PublicError::internal())?;
-        if reviews.values().any(|review| review.occupies(plane, slot)) {
+        if reviews.values().any(|review| review.occupies(plane, &slot)) {
             return Err(request_unresolved());
         }
         Ok(())
@@ -653,7 +740,7 @@ impl SettingsState {
 
     /// Admits one immutable review. Overlapping unattempted reviews of the
     /// same slot stay valid; only an attempted, unresolved one blocks.
-    fn admit(
+    pub(crate) fn admit(
         &self,
         plane: PlaneKey,
         action: SettingsAction,
@@ -664,7 +751,7 @@ impl SettingsState {
         let slot = action.slot();
         if reviews
             .values()
-            .any(|review| review.occupies(plane.plane, slot))
+            .any(|review| review.occupies(plane.plane, &slot))
         {
             return Err(request_unresolved());
         }
@@ -717,7 +804,7 @@ impl SettingsState {
         let slot = review.action.slot();
         if reviews
             .iter()
-            .any(|(other, candidate)| *other != id && candidate.occupies(plane, slot))
+            .any(|(other, candidate)| *other != id && candidate.occupies(plane, &slot))
         {
             return Err(request_unresolved());
         }
@@ -913,14 +1000,14 @@ async fn prepare_setting_change_for(
         }
         let after = match &action {
             SettingsAction::Set { value, .. } => Some(value_view(key, value)),
-            SettingsAction::Clear { .. } => None,
+            _ => None,
         };
         let review_id =
             bridge
                 .settings
                 .admit(binding, action, Some(fresh.clone()), Instant::now())?;
         Ok(SettingChangePreparation::Review {
-            review: SettingsReviewView {
+            review: Box::new(SettingsReviewView {
                 review_id: review_id.to_string(),
                 subject: ReviewSubject::Setting {
                     key: key_spelling(key),
@@ -928,7 +1015,7 @@ async fn prepare_setting_change_for(
                 },
                 before: Some(resolved_view(&fresh)),
                 after,
-            },
+            }),
         })
     }
     .await
@@ -987,12 +1074,11 @@ async fn send_reviewed(
     action: SettingsAction,
     guard: Option<ResolvedSetting>,
 ) -> Result<SettingsReceipt, PublicError> {
-    let (key, scope) = (action.key(), action.scope());
     let connection = client
         .connect()
         .await
         .map_err(|e| PublicError::from_client(&e))?;
-    if let Some(seen) = guard {
+    if let (Some(seen), Some((key, scope))) = (guard, action.setting()) {
         // Fresh-read guard (apply), first attempt only: closes the window
         // between the review and the confirm.
         match read_one(&connection, key, scope).await {
@@ -1015,46 +1101,13 @@ async fn send_reviewed(
         }
     }
     bridge.settings.mark_attempted(id)?;
-    // ADR-0093: the review UUID is the command ID, and the body is the
-    // exact stored request on every attempt.
-    let result = match &action {
-        SettingsAction::Set { value, .. } => connection
-            .set_setting(id, key, scope, value.clone())
-            .await
-            .map(Some),
-        SettingsAction::Clear { .. } => connection
-            .clear_setting(id, key, scope)
-            .await
-            .map(|()| None),
-    };
-    let receipt = match result {
-        Ok(stored) => {
-            let requested = match &action {
-                SettingsAction::Set { value, .. } => Some(value),
-                SettingsAction::Clear { .. } => None,
-            };
-            let matches = match (requested, &stored) {
-                (None, None) => true,
-                (Some(requested), Some(stored)) => {
-                    std::mem::discriminant(requested) == std::mem::discriminant(stored)
-                }
-                _ => false,
-            };
-            if matches {
-                SettingsReceipt::Applied {
-                    detail: AppliedDetail::Setting {
-                        key: key_spelling(key),
-                        value: stored.as_ref().map(|value| value_view(key, value)),
-                    },
-                }
-            } else {
-                // The daemon answered, but not with what was asked: a
-                // definite outcome the shell refuses to trust.
-                SettingsReceipt::Refused {
-                    error: PublicError::internal(),
-                }
-            }
-        }
+    let receipt = match send_action(&connection, id, &action).await {
+        Ok(Some(detail)) => SettingsReceipt::Applied { detail },
+        // The daemon answered, but not with what was asked: a definite
+        // outcome the shell refuses to trust.
+        Ok(None) => SettingsReceipt::Refused {
+            error: PublicError::internal(),
+        },
         Err(error) => {
             let public = bridge.settle(&binding, PublicError::from_client(&error));
             if !definite(&error, &public) {
@@ -1066,6 +1119,90 @@ async fn send_reviewed(
     };
     bridge.settings.record(id, &receipt);
     Ok(receipt)
+}
+
+/// Sends one reviewed action. ADR-0093: the review UUID is the command ID,
+/// and the body is the exact stored request on every attempt. `Ok(None)`
+/// is an answer that does not match the request.
+async fn send_action(
+    connection: &Client,
+    id: Uuid,
+    action: &SettingsAction,
+) -> Result<Option<AppliedDetail>, Box<ClientError>> {
+    Ok(match action {
+        SettingsAction::Set { key, scope, value } => {
+            let stored = connection
+                .set_setting(id, *key, *scope, value.clone())
+                .await
+                .map_err(Box::new)?;
+            (std::mem::discriminant(value) == std::mem::discriminant(&stored)).then(|| {
+                AppliedDetail::Setting {
+                    key: key_spelling(*key),
+                    value: Some(value_view(*key, &stored)),
+                }
+            })
+        }
+        SettingsAction::Clear { key, scope } => {
+            connection
+                .clear_setting(id, *key, *scope)
+                .await
+                .map_err(Box::new)?;
+            Some(AppliedDetail::Setting {
+                key: key_spelling(*key),
+                value: None,
+            })
+        }
+        SettingsAction::Bind { provider, label } => {
+            // ASVS 13.3.1: Harness-native only; no credential crosses.
+            let bound = connection
+                .bind_account(id, provider, label, None, CredentialSource::HarnessNative)
+                .await
+                .map_err(Box::new)?;
+            (bound.provider == *provider).then(|| AppliedDetail::AccountBound {
+                binding_id: bound.binding_id.to_string(),
+            })
+        }
+        SettingsAction::AutoContinue { binding_id, policy } => {
+            connection
+                .set_auto_continue(
+                    id,
+                    AutoContinueTarget::AccountBinding(*binding_id),
+                    policy.clone(),
+                )
+                .await
+                .map_err(Box::new)?;
+            Some(AppliedDetail::AutoContinue)
+        }
+        SettingsAction::Unbind { binding_id } => {
+            let reference = connection
+                .unbind_account(id, *binding_id)
+                .await
+                .map_err(Box::new)?;
+            Some(AppliedDetail::AccountUnbound {
+                cleanup: agents::cleanup_after_unbind(&reference),
+            })
+        }
+        SettingsAction::DisableCraft { craft_id, mode } => {
+            connection
+                .disable_craft(id, craft_id.clone(), *mode)
+                .await
+                .map_err(Box::new)?;
+            Some(AppliedDetail::CraftDisabled)
+        }
+        SettingsAction::InstallCraft { confirmation } => {
+            let queued = connection
+                .install_craft(id, confirmation.clone())
+                .await
+                .map_err(Box::new)?;
+            // The queued Artifact must be the one the user reviewed.
+            (queued.artifact_sha256 == confirmation.artifact_sha256).then(|| {
+                AppliedDetail::CraftInstallQueued {
+                    craft_id: agents::bounded_label(&queued.craft_id, 128, "Craft"),
+                    version: agents::bounded_label(&queued.version, 64, "Unknown"),
+                }
+            })
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------

@@ -1249,6 +1249,104 @@ async fn work_context_names_projects_without_their_roots_and_reports_partial_fai
     );
 }
 
+#[tokio::test]
+async fn case_8_an_account_bind_is_reviewed_then_sent_harness_native_under_the_review_id() {
+    let fake = fake_plane();
+    let (review, ()) = tokio::join!(
+        crate::jet::agents::prepare_account_bind_for(&fake.setup.bridge, &fake.plane_id, "openai"),
+        async {
+            let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+            let (stream, message) = next_message(&mut reader).await;
+            assert!(matches!(
+                message,
+                ClientMessage::Query {
+                    query: QueryRequest::Capabilities {
+                        observation: jet_protocol::CapabilityObservation::LastObserved
+                    },
+                    ..
+                }
+            ));
+            answer(
+                &mut writer,
+                stream,
+                &message,
+                QueryResponse::Capabilities(crate::jet::agents::tests::capabilities(&["codex"])),
+            )
+            .await;
+            // Preparing sends no Command.
+            assert_closed(&mut reader).await;
+        }
+    );
+    let review = serde_json::to_value(review.unwrap()).unwrap();
+    assert_eq!(
+        review["subject"],
+        json!({"kind": "bind", "provider": "openai", "harness": "Codex"})
+    );
+    let id = review["reviewId"].as_str().unwrap().to_owned();
+    let command_id = Uuid::parse_str(&id).unwrap();
+    let binding = Uuid::from_u128(0xb1);
+
+    let (receipt, ()) = tokio::join!(apply(&fake, &id), async {
+        let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+        // No guard read: a bind is not a Setting.
+        let (stream, message) = next_message(&mut reader).await;
+        match &message {
+            ClientMessage::Command {
+                command_id: sent,
+                command:
+                    CommandRequest::BindAccount {
+                        provider,
+                        label,
+                        provider_account: None,
+                        credential_source: jet_protocol::CredentialSource::HarnessNative,
+                    },
+                ..
+            } if *sent == command_id && provider == "openai" && label == "Codex login" => {}
+            other => panic!("unexpected request {other:?}"),
+        }
+        reply(
+            &mut writer,
+            stream,
+            ServerMessage::CommandResult {
+                id: request_id(&message),
+                result: CommandResponse::AccountBound(jet_protocol::AccountBinding {
+                    binding_id: binding,
+                    provider: "openai".into(),
+                    label: "Codex login".into(),
+                    provider_account: None,
+                    credential_reference: jet_protocol::CredentialReference::HarnessNative,
+                    created_at_unix_ms: 1,
+                }),
+            },
+        )
+        .await;
+    });
+    assert_eq!(
+        receipt.unwrap(),
+        json!({"kind": "applied", "detail": {"kind": "account_bound", "bindingId": binding.to_string()}})
+    );
+    // A provider the Plane's Harnesses don't offer is refused before any review.
+    let (refused, ()) = tokio::join!(
+        crate::jet::agents::prepare_account_bind_for(
+            &fake.setup.bridge,
+            &fake.plane_id,
+            "anthropic"
+        ),
+        async {
+            let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+            let (stream, message) = next_message(&mut reader).await;
+            answer(
+                &mut writer,
+                stream,
+                &message,
+                QueryResponse::Capabilities(crate::jet::agents::tests::capabilities(&["codex"])),
+            )
+            .await;
+        }
+    );
+    assert_eq!(refused.unwrap_err().code, "account.provider_unavailable");
+}
+
 // ---------------------------------------------------------------------------
 // Change watcher (§4.5)
 // ---------------------------------------------------------------------------

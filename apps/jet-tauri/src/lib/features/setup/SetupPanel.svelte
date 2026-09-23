@@ -2,6 +2,8 @@
   import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
   import { tick } from "svelte";
   import type { DesktopSession } from "$lib/features/shell/session.svelte";
+  import { landedTarget } from "$lib/features/settings/model";
+  import { LOCAL_PLANE } from "$lib/jet/planes";
 
   let { session }: { session: DesktopSession } = $props();
   let removalName = $state("");
@@ -10,6 +12,9 @@
   let removalNameInput = $state<HTMLInputElement>();
   let removalCancelButton = $state<HTMLButtonElement>();
   let removalReturnFocus: HTMLElement | null = null;
+
+  /** Setup is this computer's Plane; its accounts are managed in Settings. */
+  const accountsTarget = landedTarget("accounts", LOCAL_PLANE);
 
   const removalReady = $derived(
     session.removalPreview !== null &&
@@ -233,6 +238,11 @@
               {setup.capabilities.credentialStoreLabel}
             </span>
           </div>
+          {#if accountsTarget && (accountsIssue || setup.capabilities.credentialStore !== "available")}
+            <button class="text-button" onclick={() => void session.openSettings(accountsTarget)}>
+              Open Agents settings
+            </button>
+          {/if}
 
           {#if setup.accounts.length > 0}
             <div class="account-list">

@@ -10,6 +10,7 @@
     type SettingsSection,
   } from "$lib/jet/settings-window";
   import type { PlaneId } from "$lib/jet/planes";
+  import AgentsPane from "./AgentsPane.svelte";
   import ConnectionsPane from "./ConnectionsPane.svelte";
   import GeneralPane from "./GeneralPane.svelte";
   import PlaneBanners from "./PlaneBanners.svelte";
@@ -147,7 +148,7 @@
         <GeneralPane />
       {:else if pane === "connections"}
         <ConnectionsPane />
-      {:else if pane === "work" || pane === "safety"}
+      {:else if pane === "agents" || pane === "work" || pane === "safety"}
         <div class="plane-context">
           <PlanePicker
             planeId={session.planeId}
@@ -158,7 +159,9 @@
           />
           <PlaneBanners {session} onopenaudit={() => void go("safety", "audit")} />
         </div>
-        {#if pane === "work"}
+        {#if pane === "agents"}
+          <AgentsPane {session} onopenpermissions={() => void go("safety", "permissions")} />
+        {:else if pane === "work"}
           <WorkPane {session} />
         {:else}
           <SafetyPane {session} />
