@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-load-run-supervision"
+description = "Enables the load_run_supervision command without any pre-configured scope."
+commands.allow = ["load_run_supervision"]
+
+[[permission]]
+identifier = "deny-load-run-supervision"
+description = "Denies the load_run_supervision command without any pre-configured scope."
+commands.deny = ["load_run_supervision"]

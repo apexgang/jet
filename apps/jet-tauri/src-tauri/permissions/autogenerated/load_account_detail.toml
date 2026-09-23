@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-load-account-detail"
+description = "Enables the load_account_detail command without any pre-configured scope."
+commands.allow = ["load_account_detail"]
+
+[[permission]]
+identifier = "deny-load-account-detail"
+description = "Denies the load_account_detail command without any pre-configured scope."
+commands.deny = ["load_account_detail"]

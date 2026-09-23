@@ -1,0 +1,2235 @@
+import { publicError } from "$lib/jet/errors";
+import { DeliverySession } from "$lib/features/delivery/session.svelte";
+import {
+  authorizeApprovalRetry,
+  bindHarnessAccount,
+  attachWorkspaceTerminal,
+  closeWorkspaceTerminal,
+  createConversation,
+  detachWorkspaceTerminal,
+  interruptTurn,
+  loadConversation,
+  loadRunSupervision,
+  loadSetup,
+  loadMoreChanges,
+  loadPatchChunk,
+  loadWorkFile,
+  loadWorkPanel,
+  openWorkspaceTerminal,
+  previewProject,
+  previewProjectRemoval,
+  registerProject,
+  removeProject,
+  resizeWorkspaceTerminal,
+  saveWorkFile,
+  sendTerminalInput,
+  startRun,
+  stopRun,
+  submitFileReview,
+  submitTurn,
+  withdrawTurn,
+  type ApprovalPresentation,
+  type ConversationDetail,
+  type ConversationRow,
+  type ConnectionSnapshot,
+  type EditableFile,
+  type PlaneUpdate,
+  type ProjectPreview,
+  type ProjectRemovalPreview,
+  type PublicError,
+  type PublicRecoveryAction,
+  type WorkCheckpoint,
+  type RunSupervision,
+  type SetupSnapshot,
+  type TerminalUpdate,
+  type TurnQueueItem,
+  type WorkPanelSnapshot,
+} from "$lib/jet/bridge";
+import { LOCAL_PLANE, type PlaneId, type PlaneSelection } from "$lib/jet/planes";
+import { loadDesktopPreferences } from "$lib/jet/preferences";
+import {
+  DEFAULT_PRESENTATION,
+  closeMainWindow,
+  loadShellPresentation,
+  presentationErrorCopy,
+  quitJet,
+  saveShellPresentation,
+  toRestorable,
+  toggleMainWindowFullscreen,
+  type PresentationIssue,
+  type ShellPresentation,
+  type WorkPanelTab,
+} from "$lib/jet/presentation";
+import { openSettings, type SettingsTarget } from "$lib/jet/settings-window";
+import { PlaneCatalog } from "$lib/features/planes/catalog.svelte";
+import { PlaneHealth } from "$lib/features/system/health.svelte";
+import { TrashSession } from "$lib/features/trash/session.svelte";
+import type { PlaneNotice } from "$lib/features/system/model";
+import { needsPairing } from "$lib/features/planes/model";
+import { PlanesSession, type FeedHandler, type PlanesFocus } from "$lib/features/planes/session.svelte";
+import { TerminalTranscriptDecoder } from "$lib/jet/terminal-text";
+import { shouldLoadNextWorkPage } from "$lib/jet/work-continuity";
+import {
+  INITIAL_PANEL,
+  SIDEBAR_WIDTH,
+  WORK_PANEL_WIDTH,
+  clampWidth,
+  reducePanel,
+  type LayoutMode,
+  type PanelIntent,
+  type PanelOrigin,
+  type PanelState,
+} from "./layout";
+import {
+  resolveShortcut,
+  type KeyInput,
+  type ShellIntent,
+  type ShortcutContext,
+} from "./shortcuts";
+import {
+  fixtureForState,
+  type DesktopFixtureScenario,
+  type FixtureState,
+} from "$lib/jet/fixture";
+
+export type SidebarDestination =
+  | "new-task"
+  | "search"
+  | "attention"
+  | "project"
+  | "conversation"
+  | "schedules"
+  | "trash"
+  | "planes";
+
+export type { WorkPanelTab } from "$lib/jet/presentation";
+
+/**
+ * The saved window layout at startup. `defaulted` means the native read
+ * itself failed: the defaults stay in memory and saving is still tried.
+ */
+export type PresentationLoad =
+  | { kind: "loading" }
+  | { kind: "ready"; value: ShellPresentation; issue: PresentationIssue | null }
+  | { kind: "defaulted"; error: PublicError };
+export type ConnectionViewState = "connecting" | "online" | "reconnecting" | "failed";
+export type SetupViewState =
+  | { kind: "loading" }
+  | { kind: "ready"; snapshot: SetupSnapshot }
+  | { kind: "failed"; error: PublicError };
+
+export type ConversationFreshness = "loading" | "live" | "cached" | "failed";
+export type LiveTimelineEntry = {
+  id: string;
+  kind: "user" | "agent" | "activity" | "approval" | "result";
+  text: string;
+  sequence: string | null;
+  rawCount: number;
+  approval: ApprovalPresentation | null;
+};
+
+export type RunControlChoice = "interrupt_turn" | "stop_run";
+
+/**
+ * One-shot focus moves a view performs once its target is rendered:
+ * `work-panel` is the selected tab of a just-opened overlay, and
+ * `work-panel-return` is the control that opened a just-closed overlay.
+ */
+export type FocusRequest = "search" | "project-folder" | "run-control" | "work-panel" | "work-panel-return";
+
+/** Something focus can return to; a detached element is skipped. */
+export type FocusTarget = { focus(): void; isConnected?: boolean };
+
+/** A key press the shell may claim; `preventDefault` is called when it does. */
+export type ShortcutEvent = KeyInput &
+  Pick<KeyboardEvent, "defaultPrevented" | "preventDefault"> & { target?: EventTarget | null };
+
+/** The focused element a key press came from; the page body is no control. */
+function focusTarget(value: unknown): FocusTarget | null {
+  if (typeof value !== "object" || value === null || typeof (value as FocusTarget).focus !== "function") return null;
+  if (typeof document !== "undefined" && (value === document.body || value === document.documentElement)) return null;
+  return value as FocusTarget;
+}
+
+/** How long Ctrl+W and Ctrl+Q wait for a pending layout save before closing. */
+export const FLUSH_BEFORE_CLOSE_MS = 500;
+
+export class DesktopSession implements FeedHandler {
+  /** Per-Plane health conditions; the notice shows only the selected task's Plane. */
+  health = new PlaneHealth();
+  delivery = new DeliverySession((planeId, error) => this.observeOutcome(planeId, error));
+  /** Native Plane registry mirror and one feed per Plane. Labels come only from here. */
+  planes = new PlanesSession(this);
+  /** Per-Plane Recent chains and Search, merged for display. */
+  catalog = new PlaneCatalog(this.planes);
+  /** Jet Trash: per-Plane sections, the selected task's banner, Move to Trash. */
+  trash = new TrashSession({
+    planeIds: () => this.planes.planes.map((plane) => plane.planeId),
+    knownTitle: (planeId, conversationId) => this.catalog.find(planeId, conversationId)?.title ?? null,
+    observe: (planeId, error) => this.observeOutcome(planeId, error),
+  });
+  scenario = $state<DesktopFixtureScenario>(fixtureForState("active"));
+  sidebarSelection = $state<SidebarDestination>("conversation");
+  /** Written only through `applySidebar`. */
+  sidebarPresented = $state(true);
+  /** Work panel column preference and presentation; written only through `applyPanel`. */
+  panel = $state<PanelState>(INITIAL_PANEL);
+  /** Requested column widths in CSS pixels. The layout may narrow them to fit. */
+  sidebarWidth = $state<number>(SIDEBAR_WIDTH.ideal);
+  workPanelWidth = $state<number>(WORK_PANEL_WIDTH.ideal);
+  selectedWorkPanel = $state<WorkPanelTab>("run");
+  draft = $state("");
+  actionNotice = $state<string | null>(null);
+  /** The saved window layout; nothing is saved while it is loading. */
+  presentation = $state<PresentationLoad>({ kind: "loading" });
+  /**
+   * Bumped by startup and by every user navigation or layout change. A
+   * startup step whose generation is stale leaves the user's choice alone.
+   */
+  presentationGeneration = 0;
+  /** Shell-level status for screen readers: full screen, layout save failures. */
+  shellStatus = $state("");
+  /**
+   * The task view's status for screen readers ("Approval needed: Shell",
+   * "Run completed"); written by the task view, spoken by AppShell. Empty
+   * outside the task view.
+   */
+  taskStatus = $state("");
+  composerFocusRequest = $state(0);
+  /** Bumped when Search should take keyboard focus (Ctrl+K). */
+  searchFocusRequest = $state(0);
+  /** Bumped when Setup's "Choose Folder…" should take focus (Ctrl+Shift+O). */
+  projectFolderFocusRequest = $state(0);
+  /** Bumped when a Run-control confirmation opens; its Cancel takes focus. */
+  runControlFocusRequest = $state(0);
+  /**
+   * Bumped when the work panel's selected tab should take focus: the overlay
+   * opened, or a Run-control confirmation closed inside the panel.
+   */
+  workPanelFocusRequest = $state(0);
+  /** Bumped when the user closes the overlay; focus returns to what opened it. */
+  workPanelReturnRequest = $state(0);
+  connectionState = $state<ConnectionViewState>("connecting");
+  connection = $state<ConnectionSnapshot | null>(null);
+  failure = $state<PublicError | null>(null);
+  setup = $state<SetupViewState>({ kind: "loading" });
+  selectedProjectId = $state<string | null>(null);
+  projectPath = $state("");
+  projectPreview = $state<ProjectPreview | null>(null);
+  removalPreview = $state<ProjectRemovalPreview | null>(null);
+  permanentRemovalAllowed = $state(false);
+  setupBusy = $state<string | null>(null);
+  setupNotice = $state<string | null>(null);
+  remotePairingSkipped = $state(false);
+  /** The Plane of the selected Conversation; every scoped call passes it. */
+  selectedPlaneId = $state<PlaneId>(LOCAL_PLANE);
+  selectedConversationId = $state<string | null>(null);
+  conversationDetail = $state<ConversationDetail | null>(null);
+  conversationFreshness = $state<ConversationFreshness>("loading");
+  conversationBusy = $state(false);
+  supervision = $state<RunSupervision | null>(null);
+  supervisionBusy = $state(false);
+  controlBusy = $state<string | null>(null);
+  runControlConfirmation = $state<RunControlChoice | null>(null);
+  timeline = $state<LiveTimelineEntry[]>([]);
+  workPanel = $state<WorkPanelSnapshot | null>(null);
+  workPanelBusy = $state(false);
+  workPanelError = $state<PublicError | null>(null);
+  workPanelNotice = $state<string | null>(null);
+  selectedWorkFileId = $state<string | null>(null);
+  editableFile = $state<EditableFile | null>(null);
+  fileDraft = $state("");
+  reviewLine = $state(1);
+  reviewComment = $state("");
+  selectedTerminalId = $state<string | null>(null);
+  attachedTerminalId = $state<string | null>(null);
+  terminalInput = $state("");
+  terminalOutput = $state<Record<string, string>>({});
+  checkpointKind = $state<WorkCheckpoint["kind"]>("current");
+  checkpointTurn = $state(1);
+  checkpointFromTurn = $state(0);
+  checkpointToTurn = $state(1);
+  terminalRows = $state(24);
+  terminalColumns = $state(80);
+  workPanelNoticeError = $state<PublicError | null>(null);
+
+  /** The last focus request of each kind a view has carried out. */
+  private handledFocus: Record<FocusRequest, number> = {
+    search: 0,
+    "project-folder": 0,
+    "run-control": 0,
+    "work-panel": 0,
+    "work-panel-return": 0,
+  };
+  /** The control that opened the Run-control confirmation; focus returns to it. */
+  private runControlReturnFocus: FocusTarget | null = null;
+  /** The control that opened the work panel overlay; focus returns to it on close. */
+  private workPanelReturnFocus: FocusTarget | null = null;
+  /**
+   * "Reopen the last task" (Settings › General). Off means no task is
+   * selected at launch; Jet starts on New task. Read once in `connect()`.
+   */
+  private reopenLastTask = true;
+  /** True while startup applies the saved layout; those changes are not the user's. */
+  private restoringPresentation = false;
+  /** A column width the user set before the saved layout arrived. */
+  private widthsChangedByUser = false;
+  /** The layout on disk (as loaded or last saved); an equal layout is not saved again. */
+  private savedPresentationKey: string | null = null;
+  /** A layout whose save failed; it is not retried until the layout changes. */
+  private failedPresentationKey: string | null = null;
+  private presentationSaveFailing = false;
+  private presentationSaveRequest = 0;
+  private setupRequest = 0;
+  private restoreRequest = 0;
+  private workRequest = 0;
+  private workFileRequest = 0;
+  private detailRefresh: ReturnType<typeof setTimeout> | null = null;
+  private patchDecoder: TextDecoder | null = null;
+  private terminalDecoders = new Map<string, TerminalTranscriptDecoder>();
+  private lastTerminalSize: { terminalId: string; rows: number; columns: number } | null = null;
+
+  get canSubmitDraft(): boolean {
+    return (
+      this.draft.trim().length > 0 &&
+      this.draftBytes <= this.maximumPromptBytes &&
+      !this.queueIsFull
+    );
+  }
+
+  get draftBytes(): number {
+    return new TextEncoder().encode(this.draft).byteLength;
+  }
+
+  get maximumPromptBytes(): number {
+    return this.supervision?.maximumPromptBytes ?? 65_536;
+  }
+
+  get queueIsFull(): boolean {
+    return (
+      this.supervision !== null &&
+      this.supervision.turns.length >= this.supervision.maximumEntries
+    );
+  }
+
+  /** Approval requests in the timeline that wait for the user. */
+  private get requestAttentionCount(): number {
+    return this.timeline.filter(
+      (entry) =>
+        entry.approval?.state === "requested" ||
+        entry.approval?.state === "unavailable" ||
+        (entry.approval?.state === "denied" && entry.approval.canAuthorizeRetry),
+    ).length;
+  }
+
+  /**
+   * Needs attention: waiting requests, plus one for a health condition on
+   * the selected task's Plane and one for activity that needs recovery.
+   */
+  get attentionCount(): number {
+    return (
+      this.requestAttentionCount +
+      (this.planeHealthNotice ? 1 : 0) +
+      (this.supervision?.execution?.needsAttention ? 1 : 0)
+    );
+  }
+
+  /** The one Plane-health notice for the selected task's Plane, or null. */
+  get planeHealthNotice(): PlaneNotice | null {
+    return this.health.notice(this.selectedPlaneId);
+  }
+
+  get connectionLabel(): string {
+    switch (this.connectionState) {
+      case "online":
+        return "Connected";
+      case "connecting":
+        return "Connecting";
+      case "reconnecting":
+        return "Reconnecting";
+      case "failed":
+        return "Unavailable";
+    }
+  }
+
+  /** Live label of this computer's Plane, never fixture text. */
+  get localPlaneLabel(): string {
+    return this.planes.label(LOCAL_PLANE);
+  }
+
+  /** Label of the selected Conversation's Plane. */
+  get selectedPlaneLabel(): string {
+    return this.planes.label(this.selectedPlaneId);
+  }
+
+  /** The selected Conversation as `{planeId, conversationId}`. */
+  get selection(): PlaneSelection | null {
+    return this.selectedConversationId
+      ? { planeId: this.selectedPlaneId, conversationId: this.selectedConversationId }
+      : null;
+  }
+
+  /** The selected Plane's feed fence, shown in Run details. */
+  get selectedPlaneCursor(): string | null {
+    return this.catalog.cursor(this.selectedPlaneId);
+  }
+
+  /**
+   * Whether the selected Conversation's own Plane is online. The local
+   * Plane follows this window's feed; a remote Plane follows the native
+   * registry. Sending, Delivery and the composer gate on this, never on
+   * this computer's state for a remote task.
+   */
+  get selectedPlaneOnline(): boolean {
+    if (this.selectedPlaneId === LOCAL_PLANE) return this.connectionState === "online";
+    return this.planes.plane(this.selectedPlaneId)?.connection.state === "online";
+  }
+
+  /** Why the selected task's Plane is not usable, if it reported why. */
+  get selectedPlaneError(): PublicError | null {
+    const connection = this.planes.plane(this.selectedPlaneId)?.connection;
+    if (connection && "error" in connection) return connection.error;
+    const state = this.catalog.section(this.selectedPlaneId)?.state;
+    return state && "error" in state ? state.error : null;
+  }
+
+  /**
+   * The remote Plane an error can be fixed on by pairing again, or null.
+   * The error names its Plane; `fallback` is used when it does not.
+   */
+  pairAgainTarget(error: PublicError | null, fallback: PlaneId | null = this.selectedPlaneId): PlaneId | null {
+    if (!needsPairing(error)) return null;
+    const planeId = error?.planeId ?? fallback;
+    return planeId && this.planes.plane(planeId)?.kind === "remote" ? planeId : null;
+  }
+
+  /** "Pair again": opens Planes straight into the repair flow. */
+  pairAgain(planeId: PlaneId): void {
+    this.openPlanes({ planeId, focus: "repair" });
+  }
+
+  /**
+   * The selected task's Plane cannot be reached and nothing of the task is
+   * loaded yet; no fixture content stands in for it.
+   */
+  get selectionUnavailable(): boolean {
+    if (!this.selectedConversationId || this.conversationDetail) return false;
+    const plane = this.planes.plane(this.selectedPlaneId);
+    const state = this.catalog.section(this.selectedPlaneId)?.state.kind;
+    return (
+      plane?.connection.state === "failed" ||
+      state === "offline" ||
+      state === "failed" ||
+      state === "denied" ||
+      state === "unsupported"
+    );
+  }
+
+  /**
+   * "Runs on": the owning Plane of the selected Conversation. New tasks run
+   * on this computer in Wave 3.1.
+   */
+  get runsOnLabel(): string {
+    return this.selectedConversationId
+      ? this.selectedPlaneLabel
+      : this.localPlaneLabel;
+  }
+
+  isSelected(planeId: PlaneId, conversationId: string): boolean {
+    return this.selectedConversationId === conversationId && this.selectedPlaneId === planeId;
+  }
+
+  get setupSnapshot(): SetupSnapshot | null {
+    return this.setup.kind === "ready" ? this.setup.snapshot : null;
+  }
+
+  setupIssue(section: SetupSnapshot["issues"][number]["section"]) {
+    return this.setupSnapshot?.issues.find((issue) => issue.section === section) ?? null;
+  }
+
+  get selectedProject() {
+    return this.setupSnapshot?.projects.find((project) => project.id === this.selectedProjectId) ?? null;
+  }
+
+  get selectedProjectName(): string {
+    if (this.selectedConversationId) {
+      if (!this.selectedConversation) return "Project unavailable";
+      if (!this.selectedConversation.projectId) return "No Project";
+      return (
+        this.setupSnapshot?.projects.find(
+          (project) => project.id === this.selectedConversation?.projectId,
+        )?.name ?? "Project unavailable"
+      );
+    }
+    return this.selectedProject?.name ?? "Choose a Project";
+  }
+
+  get selectedHarnessName(): string {
+    return (
+      this.setupSnapshot?.accounts[0]?.label ??
+      this.setupSnapshot?.capabilities.authProviders[0]?.harness ??
+      "Choose an Agent"
+    );
+  }
+
+  get selectedCraftId(): string | null {
+    return this.setupSnapshot?.capabilities.crafts[0]?.id ?? null;
+  }
+
+  get selectedConversation(): ConversationRow | null {
+    const id = this.selectedConversationId;
+    if (!id) return null;
+    const detail = this.conversationDetail?.conversation;
+    if (detail && detail.id === id && detail.planeId === this.selectedPlaneId) return detail;
+    return this.catalog.find(this.selectedPlaneId, id);
+  }
+
+  get selectedConversationTitle(): string {
+    if (!this.selectedConversationId) return "New task";
+    return this.selectedConversation?.title ?? "Task";
+  }
+
+  get selectedRun() {
+    return this.supervision?.execution?.run ?? this.conversationDetail?.runs.at(-1) ?? null;
+  }
+
+  get hasLiveRun(): boolean {
+    return ["created", "starting", "active", "stopping"].includes(
+      this.selectedRun?.lifecycle ?? "",
+    );
+  }
+
+  get canInterruptTurn(): boolean {
+    return (
+      this.supervision?.execution?.run.lifecycle === "active" &&
+      this.supervision.turns.some(
+        (turn) => turn.state === "active" && turn.runId === this.selectedRun?.id,
+      )
+    );
+  }
+
+  get canStopRun(): boolean {
+    return this.supervision?.execution?.run.lifecycle === "active";
+  }
+
+  connect(): void {
+    void this.startup();
+  }
+
+  /**
+   * Startup in the Swift order (`DesktopShellView.swift:48-59`): the saved
+   * layout and "Reopen the last task" first, then Setup, whose redirect to
+   * an incomplete setup wins, then Recent and the restored task. Anything
+   * the user does meanwhile wins over every step.
+   */
+  private async startup(): Promise<void> {
+    const generation = ++this.presentationGeneration;
+    const [presentation, reopenLastTask] = await Promise.all([
+      this.loadPresentation(),
+      this.loadReopenLastTask(),
+      this.planes.refresh(),
+    ]);
+    this.reopenLastTask = reopenLastTask;
+    this.applyStartupPresentation(presentation, reopenLastTask, generation);
+    await this.refreshSetup(true, generation);
+    await this.connectPlanes(reopenLastTask);
+  }
+
+  /** The saved layout, or the defaults when the native read fails. */
+  private async loadPresentation(): Promise<PresentationLoad> {
+    try {
+      const view = await loadShellPresentation();
+      return { kind: "ready", value: view.presentation, issue: view.issue };
+    } catch (error: unknown) {
+      return { kind: "defaulted", error: publicError(error) };
+    }
+  }
+
+  /**
+   * Applies the saved layout. With "Reopen the last task" on, the
+   * destination, tab and work panel come back; with it off Jet starts on New
+   * task (Swift `beginNewTask()`). The sidebar and widths come back either
+   * way. When the user acted before the layout arrived, only widths they
+   * have not touched are applied.
+   */
+  private applyStartupPresentation(load: PresentationLoad, reopenLastTask: boolean, generation: number): void {
+    const saved = load.kind === "ready" ? load.value : DEFAULT_PRESENTATION;
+    this.savedPresentationKey = JSON.stringify(saved);
+    this.restoringPresentation = true;
+    try {
+      if (!this.widthsChangedByUser) {
+        this.sidebarWidth = clampWidth(saved.sidebarWidth, SIDEBAR_WIDTH);
+        this.workPanelWidth = clampWidth(saved.workPanelWidth, WORK_PANEL_WIDTH);
+      }
+      if (generation !== this.presentationGeneration) return;
+      this.applySidebar(saved.sidebarPresented);
+      if (reopenLastTask) {
+        if (saved.destination !== "conversation") this.select(saved.destination);
+        this.selectedWorkPanel = saved.workPanelTab;
+        this.applyPanel({ kind: "restore", presented: saved.workPanelPresented });
+      } else {
+        this.select("new-task");
+      }
+    } finally {
+      this.restoringPresentation = false;
+      this.presentation = load;
+    }
+  }
+
+  /** A navigation or layout change by the user supersedes startup restoration. */
+  private userActed(): void {
+    if (!this.restoringPresentation) this.presentationGeneration += 1;
+  }
+
+  /** What the saved window layout would be now. Search and the overlay are never saved. */
+  get presentationSnapshot(): ShellPresentation {
+    return {
+      version: 1,
+      destination: toRestorable(this.sidebarSelection),
+      sidebarPresented: this.sidebarPresented,
+      workPanelPresented: this.panel.columnPreference,
+      workPanelTab: this.selectedWorkPanel,
+      sidebarWidth: clampWidth(this.sidebarWidth, SIDEBAR_WIDTH),
+      workPanelWidth: clampWidth(this.workPanelWidth, WORK_PANEL_WIDTH),
+    };
+  }
+
+  /**
+   * The saved-layout value the page's persist effect follows, or null while
+   * the saved layout is still loading (nothing may be written then).
+   */
+  get presentationKey(): string | null {
+    return this.presentation.kind === "loading" ? null : JSON.stringify(this.presentationSnapshot);
+  }
+
+  /**
+   * Saves the window layout natively when it changed. A failed save is not
+   * retried until the layout changes again, and only the first failure of a
+   * streak is announced; Settings shows the lasting state.
+   */
+  async persistPresentation(): Promise<void> {
+    const key = this.presentationKey;
+    if (key === null || key === this.savedPresentationKey || key === this.failedPresentationKey) return;
+    const request = ++this.presentationSaveRequest;
+    try {
+      const view = await saveShellPresentation(this.presentationSnapshot);
+      if (request !== this.presentationSaveRequest) return;
+      this.savedPresentationKey = key;
+      this.failedPresentationKey = null;
+      this.presentationSaveFailing = false;
+      this.presentation = { kind: "ready", value: view.presentation, issue: view.issue };
+    } catch (error: unknown) {
+      if (request !== this.presentationSaveRequest) return;
+      this.failedPresentationKey = key;
+      if (this.presentationSaveFailing) return;
+      this.presentationSaveFailing = true;
+      this.announce(presentationErrorCopy(publicError(error).code));
+    }
+  }
+
+  /** Saves a pending layout change, waiting at most `FLUSH_BEFORE_CLOSE_MS`. */
+  private async flushPresentation(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => (timer = setTimeout(resolve, FLUSH_BEFORE_CLOSE_MS)));
+    try {
+      await Promise.race([this.persistPresentation().catch(() => undefined), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Announces a shell-level status change in the visually hidden region. */
+  private announce(message: string): void {
+    this.shellStatus = message;
+  }
+
+  /** F11: the result is only announced; the page keeps no full-screen flag. */
+  async toggleFullscreen(): Promise<void> {
+    try {
+      const mode = await toggleMainWindowFullscreen();
+      this.announce(mode.fullscreen ? "Full screen on" : "Full screen off");
+    } catch (error: unknown) {
+      this.actionNotice = presentationErrorCopy(publicError(error).code);
+    }
+  }
+
+  /**
+   * Ctrl+W and Ctrl+Q. Runs keep going on their Planes either way. The page
+   * saves the layout only after it settles, so a change made just before
+   * closing is written first; a slow or failed save never blocks the close.
+   */
+  private async windowAction(action: () => Promise<void>): Promise<void> {
+    await this.flushPresentation();
+    try {
+      await action();
+    } catch (error: unknown) {
+      this.actionNotice = presentationErrorCopy(publicError(error).code);
+    }
+  }
+
+  /**
+   * Walks every Plane's Recent chain (each Plane opens its feed after its
+   * first page) and restores the last selection once its Plane has loaded,
+   * but only while the task view is showing.
+   */
+  private async connectPlanes(reopenLastTask: boolean): Promise<void> {
+    if (!this.planes.snapshot) {
+      this.failure = this.planes.error;
+      this.connectionState = "failed";
+      return;
+    }
+    this.catalog.sync();
+    const restored =
+      reopenLastTask && this.sidebarSelection === "conversation" ? this.planes.snapshot.restoredSelection : null;
+    await this.restoreSelection(restored);
+  }
+
+  /** The preference, or its default (on, as in Swift) when it can't be read. */
+  private async loadReopenLastTask(): Promise<boolean> {
+    try {
+      return (await loadDesktopPreferences()).reopenLastTask !== false;
+    } catch {
+      return true;
+    }
+  }
+
+  /** Reads the native registry snapshot and follows it in Recent. */
+  async refreshPlanes(): Promise<void> {
+    await this.planes.refresh();
+    this.catalog.sync();
+  }
+
+  /** Stops every Plane feed natively, for example when the window closes. */
+  disconnect(): void {
+    this.planes.closeAll();
+    this.catalog.dispose();
+  }
+
+  /**
+   * Opens the Planes destination: selects a Plane and moves focus to the
+   * requested section. Used by Recent and Search status rows, recovery
+   * actions and Setup.
+   */
+  openPlanes(target: { planeId?: PlaneId; focus?: PlanesFocus } = {}): void {
+    this.select("planes");
+    this.planes.select(target.planeId ?? this.planes.selectedPlaneId, target.focus ?? null);
+  }
+
+  /** Setup's "Add a Plane": remote Planes are paired from the Planes destination. */
+  openAddPlane(): void {
+    this.openPlanes({ focus: "add" });
+  }
+
+  /**
+   * The user's Retry for one Plane: reopens its feed with `reset` and
+   * re-walks its Recent chain when that is not current.
+   */
+  async retryPlane(planeId: PlaneId): Promise<void> {
+    const walk = this.catalog.section(planeId)?.state.kind === "ready"
+      ? null
+      : this.catalog.load(planeId);
+    await this.planes.openFeed(planeId, this.catalog.cursor(planeId), true);
+    await walk;
+    if (planeId === this.selectedPlaneId && this.selectedConversationId && !this.conversationDetail) {
+      await this.loadSelectedConversation(true);
+    }
+  }
+
+  /**
+   * Restores the saved selection once its Plane's chain has settled; any
+   * selection the user makes meanwhile wins. Without a restorable task the
+   * newest task is selected, but only while "Reopen the last task" is on and
+   * the task view is showing: New task, Search, Setup and every other
+   * destination keep nothing selected (D17), so the next Send creates a task
+   * instead of posting into one the user never chose.
+   */
+  private async restoreSelection(restored: PlaneSelection | null): Promise<void> {
+    const request = ++this.restoreRequest;
+    const superseded = () =>
+      request !== this.restoreRequest || this.sidebarSelection !== "conversation";
+    if (restored && this.planes.has(restored.planeId)) {
+      await this.catalog.settled(restored.planeId);
+      if (superseded()) return;
+      const state = this.catalog.section(restored.planeId)?.state.kind;
+      if (state !== "ready" && state !== "stale") {
+        // Its Plane is unavailable: keep the selection; it loads on reconnect.
+        this.selectedConversationId = restored.conversationId;
+        this.selectedPlaneId = restored.planeId;
+        return;
+      }
+      await this.openConversation(restored.conversationId, false, restored.planeId);
+      if (!this.isSelected(restored.planeId, restored.conversationId)) return;
+      if (this.conversationDetail || this.catalog.find(restored.planeId, restored.conversationId)) {
+        return;
+      }
+      // The saved task is gone from a reachable Plane: fall back to the newest.
+      this.selectedConversationId = null;
+      this.conversationFreshness = "loading";
+      this.actionNotice = null;
+    }
+    const fallback = ++this.restoreRequest;
+    await this.catalog.settled(LOCAL_PLANE);
+    if (
+      fallback !== this.restoreRequest ||
+      this.selectedConversationId ||
+      !this.reopenLastTask ||
+      this.sidebarSelection !== "conversation"
+    ) {
+      return;
+    }
+    const newest = this.catalog.rows[0];
+    if (newest) await this.openConversation(newest.id, false, newest.planeId);
+  }
+
+  /** FeedHandler: a Plane was paired, or paired again in place. */
+  async planePaired(planeId: PlaneId, repaired: boolean): Promise<void> {
+    this.catalog.sync();
+    // Pair again keeps the Plane handle, selection and Recent section; the
+    // feed reopens with the sticky failure cleared.
+    if (repaired) await this.retryPlane(planeId);
+  }
+
+  /** FeedHandler: a Plane was forgotten here; its tasks leave Recent. */
+  planeForgotten(planeId: PlaneId): void {
+    this.catalog.sync();
+    this.trash.forget(planeId);
+    if (this.selectedPlaneId !== planeId) return;
+    this.selectedConversationId = null;
+    this.selectedPlaneId = LOCAL_PLANE;
+    this.conversationDetail = null;
+    this.timeline = [];
+    this.supervision = null;
+    this.resetWorkPanel();
+  }
+
+  /** FeedHandler: a Plane's feed opened. */
+  opened(planeId: PlaneId, snapshot: ConnectionSnapshot): void {
+    this.applyConnection(planeId, snapshot);
+    if (planeId !== LOCAL_PLANE) return;
+    this.connection = snapshot.state === "online" ? snapshot : null;
+    this.connectionState = snapshot.state;
+  }
+
+  /** FeedHandler: a Plane's feed could not be opened. */
+  openFailed(planeId: PlaneId, failure: PublicError): void {
+    this.catalog.markUnavailable(planeId, failure);
+    if (planeId !== LOCAL_PLANE) return;
+    this.failure = failure;
+    this.connectionState = failure.retryable ? "reconnecting" : "failed";
+  }
+
+  /**
+   * Reads Setup. With `openWhenIncomplete`, an incomplete setup opens the
+   * Project destination, unless the user has navigated since `generation`
+   * (the startup that asked for it).
+   */
+  async refreshSetup(openWhenIncomplete = false, generation: number | null = null): Promise<void> {
+    const request = ++this.setupRequest;
+    if (this.setup.kind !== "ready") this.setup = { kind: "loading" };
+    try {
+      const snapshot = await loadSetup();
+      if (request !== this.setupRequest) return;
+      this.setup = { kind: "ready", snapshot };
+      this.failure = null;
+      const projectsAvailable = !snapshot.issues.some((issue) => issue.section === "projects");
+      const accountsAvailable = !snapshot.issues.some((issue) => issue.section === "accounts");
+      if (
+        projectsAvailable &&
+        !snapshot.projects.some((project) => project.id === this.selectedProjectId)
+      ) {
+        this.selectedProjectId = snapshot.projects[0]?.id ?? null;
+      }
+      if (
+        openWhenIncomplete &&
+        (generation === null || generation === this.presentationGeneration) &&
+        ((projectsAvailable && snapshot.projects.length === 0) ||
+          (accountsAvailable && snapshot.accounts.length === 0))
+      ) {
+        this.sidebarSelection = "project";
+        this.applyPanel({ kind: "auto-close" });
+      }
+    } catch (error: unknown) {
+      if (request !== this.setupRequest) return;
+      this.setup = { kind: "failed", error: publicError(error) };
+    }
+  }
+
+  selectProject(projectId: string): void {
+    if (!this.setupSnapshot?.projects.some((project) => project.id === projectId)) return;
+    this.userActed();
+    this.selectedProjectId = projectId;
+    this.sidebarSelection = "project";
+    this.applyPanel({ kind: "auto-close" });
+    this.setupNotice = null;
+  }
+
+  async previewProjectPath(): Promise<void> {
+    if (!this.projectPath.trim() || this.setupBusy) return;
+    this.setupBusy = "preview-project";
+    this.setupNotice = null;
+    this.projectPreview = null;
+    try {
+      this.projectPreview = await previewProject(this.projectPath.trim());
+    } catch (error: unknown) {
+      this.setupNotice = publicError(error).message;
+    } finally {
+      this.setupBusy = null;
+    }
+  }
+
+  async registerPreviewedProject(): Promise<void> {
+    const previewId = this.projectPreview?.previewId;
+    if (!previewId || this.setupBusy) return;
+    this.setupBusy = "register-project";
+    this.setupNotice = null;
+    try {
+      const project = await registerProject(previewId);
+      this.projectPath = "";
+      this.projectPreview = null;
+      this.setupNotice = `${project.name} is ready.`;
+      await this.refreshSetup();
+      this.selectedProjectId = project.id;
+    } catch (error: unknown) {
+      this.setupNotice = publicError(error).message;
+    } finally {
+      this.setupBusy = null;
+    }
+  }
+
+  async prepareProjectRemoval(projectId: string): Promise<void> {
+    if (this.setupBusy) return;
+    this.setupBusy = `remove-${projectId}`;
+    this.setupNotice = null;
+    this.permanentRemovalAllowed = false;
+    try {
+      this.removalPreview = await previewProjectRemoval(projectId);
+    } catch (error: unknown) {
+      this.setupNotice = publicError(error).message;
+    } finally {
+      this.setupBusy = null;
+    }
+  }
+
+  cancelProjectRemoval(): void {
+    this.removalPreview = null;
+    this.permanentRemovalAllowed = false;
+  }
+
+  async confirmProjectRemoval(typedName: string, permanent: boolean): Promise<void> {
+    if (!this.removalPreview || this.setupBusy) return;
+    this.setupBusy = "confirm-removal";
+    this.setupNotice = null;
+    try {
+      const removed = await removeProject(
+        this.removalPreview.previewId,
+        typedName,
+        permanent,
+      );
+      this.removalPreview = null;
+      this.permanentRemovalAllowed = false;
+      this.setupNotice = permanent
+        ? `${removed.name} was deleted.`
+        : `${removed.name} was moved to Trash.`;
+      await this.refreshSetup();
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      // Project setup runs on this computer's Plane.
+      this.observeOutcome(failure.planeId ?? LOCAL_PLANE, failure);
+      this.permanentRemovalAllowed = failure.code === "project.trash_unavailable";
+      this.setupNotice = failure.message;
+    } finally {
+      this.setupBusy = null;
+    }
+  }
+
+  async connectHarness(provider: string): Promise<void> {
+    if (this.setupBusy) return;
+    this.setupBusy = `account-${provider}`;
+    this.setupNotice = null;
+    try {
+      const binding = await bindHarnessAccount(provider);
+      this.setupNotice = `${binding.name} is connected.`;
+      await this.refreshSetup();
+    } catch (error: unknown) {
+      this.setupNotice = publicError(error).message;
+    } finally {
+      this.setupBusy = null;
+    }
+  }
+
+  skipRemotePairing(): void {
+    this.remotePairingSkipped = true;
+    this.setupNotice = "Remote pairing was skipped. You can return here at any time.";
+  }
+
+  async openConversation(
+    conversationId: string,
+    show = true,
+    planeId: PlaneId = LOCAL_PLANE,
+  ): Promise<void> {
+    this.restoreRequest += 1;
+    if (!this.isSelected(planeId, conversationId)) {
+      this.trash.clearBanner();
+      this.detachCurrentTerminal();
+      this.timeline = [];
+      this.conversationDetail = null;
+      this.supervision = null;
+      this.resetWorkPanel();
+    }
+    this.selectedConversationId = conversationId;
+    this.selectedPlaneId = planeId;
+    if (show) {
+      this.userActed();
+      this.sidebarSelection = "conversation";
+      this.applyPanel({ kind: "auto-open" });
+    }
+    await this.loadSelectedConversation(true);
+  }
+
+  /** Search hits carry their Plane, so they open directly. */
+  async openSearchHit(conversationId: string, planeId: PlaneId): Promise<void> {
+    await this.openConversation(conversationId, true, planeId);
+  }
+
+  private async loadSelectedConversation(showLoading: boolean): Promise<void> {
+    const id = this.selectedConversationId;
+    const planeId = this.selectedPlaneId;
+    if (!id) return;
+    if (showLoading) this.conversationBusy = true;
+    try {
+      const detail = await loadConversation(id, planeId);
+      if (!this.isSelected(planeId, id)) return;
+      this.conversationDetail = detail;
+      this.conversationFreshness = "live";
+      this.catalog.upsert(detail.conversation);
+      if (this.trash.banner?.planeId !== planeId || this.trash.banner.conversationId !== id) {
+        void this.trash.loadBanner(planeId, id);
+      }
+      await this.refreshSupervision(id, detail.runs.at(-1)?.id ?? null);
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      if (this.conversationDetail) {
+        this.conversationFreshness = "cached";
+      } else {
+        this.conversationFreshness = "failed";
+      }
+      this.actionNotice = failure.message;
+    } finally {
+      this.conversationBusy = false;
+    }
+  }
+
+  private async refreshSupervision(
+    conversationId: string,
+    runId: string | null,
+  ): Promise<void> {
+    const planeId = this.selectedPlaneId;
+    this.supervisionBusy = true;
+    try {
+      const supervision = await loadRunSupervision(conversationId, runId, planeId);
+      if (!this.isSelected(planeId, conversationId)) return;
+      this.supervision = supervision;
+      const selectedRunId = supervision.execution?.run.id ?? runId;
+      if (selectedRunId) await this.refreshWorkPanel(conversationId, selectedRunId);
+    } catch (error: unknown) {
+      if (!this.isSelected(planeId, conversationId)) return;
+      this.actionNotice = publicError(error).message;
+    } finally {
+      this.supervisionBusy = false;
+    }
+  }
+
+  /**
+   * True once per new focus request of `kind`. A view calls it from an
+   * effect after its target element exists, then moves focus there.
+   */
+  takeFocusRequest(kind: FocusRequest): boolean {
+    const request = this.focusRequest(kind);
+    if (request === this.handledFocus[kind]) return false;
+    this.handledFocus[kind] = request;
+    return true;
+  }
+
+  private focusRequest(kind: FocusRequest): number {
+    switch (kind) {
+      case "search":
+        return this.searchFocusRequest;
+      case "project-folder":
+        return this.projectFolderFocusRequest;
+      case "run-control":
+        return this.runControlFocusRequest;
+      case "work-panel":
+        return this.workPanelFocusRequest;
+      case "work-panel-return":
+        return this.workPanelReturnRequest;
+    }
+  }
+
+  select(destination: SidebarDestination): void {
+    this.userActed();
+    // Leaving a destination drops its pending focus request.
+    if (destination !== "search") this.handledFocus.search = this.searchFocusRequest;
+    if (destination !== "project") this.handledFocus["project-folder"] = this.projectFolderFocusRequest;
+    this.sidebarSelection = destination;
+    this.actionNotice = null;
+    if (destination !== "trash") this.trash.hide();
+
+    switch (destination) {
+      case "new-task":
+        this.trash.clearBanner();
+        this.selectedConversationId = null;
+        this.selectedPlaneId = LOCAL_PLANE;
+        this.conversationDetail = null;
+        this.timeline = [];
+        this.supervision = null;
+        this.applyPanel({ kind: "auto-close" });
+        this.composerFocusRequest += 1;
+        break;
+      case "search":
+        this.applyPanel({ kind: "auto-close" });
+        break;
+      case "attention": {
+        // A user request: in a narrow window the overlay shows the Run
+        // controls the notice points to.
+        this.selectedWorkPanel = "run";
+        this.openWorkPanel("attention", null);
+        const planeCondition = this.planeHealthNotice !== null;
+        if (planeCondition) this.health.focusNotice();
+        this.actionNotice =
+          this.requestAttentionCount > 0 || this.supervision?.execution?.needsAttention
+            ? "Review the highlighted request and the current Run controls."
+            : planeCondition
+              ? null
+              : "No current task needs your attention.";
+        break;
+      }
+      case "project":
+        this.applyPanel({ kind: "auto-close" });
+        break;
+      case "conversation":
+        this.applyPanel({ kind: "auto-open" });
+        break;
+      case "schedules":
+        // The destination states the backend dependency itself.
+        this.applyPanel({ kind: "auto-close" });
+        break;
+      case "trash":
+        this.applyPanel({ kind: "auto-close" });
+        this.trash.show();
+        break;
+      case "planes":
+        this.applyPanel({ kind: "auto-close" });
+        void this.refreshPlanes();
+        break;
+    }
+  }
+
+  /** Whether the selected task can be moved to Jet Trash from its header. */
+  get canMoveToTrash(): boolean {
+    return this.selectedConversationId !== null && this.selectedPlaneOnline;
+  }
+
+  /** "Move to Trash…": opens the reviewed dialog for the selected task. */
+  async openMoveToTrash(): Promise<void> {
+    const conversationId = this.selectedConversationId;
+    if (!conversationId || !this.canMoveToTrash) return;
+    await this.trash.openMove(this.selectedPlaneId, conversationId);
+  }
+
+  /**
+   * Opens the separate Settings window, optionally at a typed deep link.
+   * The main window never shows preference controls itself.
+   */
+  async openSettings(target: SettingsTarget | null = null): Promise<void> {
+    try {
+      await openSettings(target);
+    } catch (error: unknown) {
+      this.actionNotice = publicError(error).message;
+    }
+  }
+
+  async submitDraft(): Promise<void> {
+    if (!this.canSubmitDraft || this.conversationBusy) return;
+    if (!this.selectedPlaneOnline) {
+      this.actionNotice = "Reconnect to the Plane before sending. Your draft was kept.";
+      return;
+    }
+    const prompt = this.draft;
+    const craft = this.selectedCraftId;
+    if (!craft) {
+      this.actionNotice = "Install an available Craft before starting work.";
+      return;
+    }
+    this.conversationBusy = true;
+    this.actionNotice = null;
+    try {
+      // New task always creates a task, whatever is still selected (D17).
+      const creating = this.sidebarSelection === "new-task" || !this.selectedConversationId;
+      let conversationId = creating ? null : this.selectedConversationId;
+      if (!conversationId) {
+        if (!this.selectedProjectId) {
+          this.actionNotice = "Choose a Project before starting a task.";
+          return;
+        }
+        if (this.selectedConversationId) this.clearSelectedConversation();
+        // New tasks run on this computer in Wave 3.1.
+        this.selectedPlaneId = LOCAL_PLANE;
+        const conversation = await createConversation(this.selectedProjectId);
+        this.catalog.upsert(conversation);
+        conversationId = conversation.id;
+        this.selectedConversationId = conversation.id;
+        this.sidebarSelection = "conversation";
+        this.applyPanel({ kind: "auto-open" });
+        this.conversationDetail = await loadConversation(conversation.id, conversation.planeId);
+      }
+
+      const planeId = this.selectedPlaneId;
+      if (this.hasLiveRun) {
+        await submitTurn(conversationId, prompt, planeId);
+      } else {
+        await startRun(conversationId, craft, prompt, planeId);
+      }
+      this.health.succeeded(planeId);
+      this.draft = "";
+      this.actionNotice = "Sent to the Plane.";
+      await this.loadSelectedConversation(false);
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      this.observeOutcome(failure.planeId ?? this.selectedPlaneId, failure);
+      this.actionNotice = failure.message;
+      // A task may have been created before the failure; re-read its Plane.
+      await this.catalog.load(this.selectedPlaneId);
+    } finally {
+      this.conversationBusy = false;
+    }
+  }
+
+  async withdrawQueuedTurn(turn: TurnQueueItem): Promise<void> {
+    const conversationId = this.selectedConversationId;
+    if (!conversationId || !turn.withdrawable || this.controlBusy) return;
+    this.controlBusy = `withdraw-${turn.id}`;
+    this.actionNotice = null;
+    try {
+      await withdrawTurn(conversationId, turn.id, this.selectedPlaneId);
+      this.health.succeeded(this.selectedPlaneId);
+      this.actionNotice = "The queued Turn was withdrawn.";
+      await this.refreshSupervision(conversationId, this.selectedRun?.id ?? null);
+    } catch (error: unknown) {
+      this.actionNotice = publicError(error).message;
+    } finally {
+      this.controlBusy = null;
+    }
+  }
+
+  /**
+   * Opens the Interrupt Turn / Stop Run confirmation. It lives in the Run
+   * tab, so the work panel opens on Run and the confirmation's Cancel takes
+   * focus; cancelling returns focus to `invoker`.
+   */
+  requestRunControl(control: RunControlChoice, invoker: FocusTarget | null = null): void {
+    if (control === "interrupt_turn" && !this.canInterruptTurn) return;
+    if (control === "stop_run" && !this.canStopRun) return;
+    this.runControlReturnFocus = invoker;
+    this.selectedWorkPanel = "run";
+    this.openWorkPanel("run-control", invoker);
+    this.runControlConfirmation = control;
+    this.runControlFocusRequest += 1;
+  }
+
+  /**
+   * Closes the confirmation and returns focus to the control that opened
+   * it. In the overlay that control sits behind the inert page, so focus
+   * stays in the panel on its selected tab and returns when the overlay
+   * closes.
+   */
+  cancelRunControl(): void {
+    this.runControlConfirmation = null;
+    const invoker = this.runControlReturnFocus;
+    this.runControlReturnFocus = null;
+    if (this.workPanelOverlay) {
+      this.workPanelFocusRequest += 1;
+      return;
+    }
+    if (invoker && invoker.isConnected !== false) invoker.focus();
+  }
+
+  /** Whether Escape has something to close. */
+  get dismissible(): boolean {
+    return this.workPanelOverlay || this.runControlConfirmation !== null;
+  }
+
+  /**
+   * Escape: closes the work panel overlay first, then the Run-control
+   * confirmation. A confirmation left open in a closed overlay is kept,
+   * like the rest of the panel's state, and shows again when it reopens.
+   */
+  dismiss(): void {
+    if (this.workPanelOverlay) {
+      this.hideWorkPanel();
+      return;
+    }
+    if (this.runControlConfirmation) this.cancelRunControl();
+  }
+
+  async confirmRunControl(): Promise<void> {
+    const control = this.runControlConfirmation;
+    const runId = this.selectedRun?.id;
+    if (!control || !runId || this.controlBusy) return;
+    this.runControlConfirmation = null;
+    this.runControlReturnFocus = null;
+    // The confirm button leaves the page, and the Run tab's Interrupt Turn…
+    // and Stop Run… stay disabled while the control runs, so focus goes to
+    // the selected (Run) tab rather than falling to the page body.
+    this.workPanelFocusRequest += 1;
+    this.controlBusy = control;
+    this.actionNotice = null;
+    try {
+      const planeId = this.selectedPlaneId;
+      const accepted =
+        control === "interrupt_turn"
+          ? await interruptTurn(runId, planeId)
+          : await stopRun(runId, planeId);
+      this.health.succeeded(planeId);
+      this.actionNotice = accepted.message;
+      const conversationId = this.selectedConversationId;
+      if (conversationId) await this.refreshSupervision(conversationId, runId);
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      this.observeOutcome(failure.planeId ?? this.selectedPlaneId, failure);
+      this.actionNotice = failure.message;
+    } finally {
+      this.controlBusy = null;
+    }
+  }
+
+  async retryApproval(approval: ApprovalPresentation): Promise<void> {
+    if (
+      !approval.canAuthorizeRetry ||
+      !approval.reviewId ||
+      !approval.runId ||
+      this.controlBusy
+    ) {
+      return;
+    }
+    this.controlBusy = `approval-${approval.reviewId}`;
+    this.actionNotice = null;
+    try {
+      const accepted = await authorizeApprovalRetry(
+        approval.runId,
+        approval.reviewId,
+        this.selectedPlaneId,
+      );
+      this.health.succeeded(this.selectedPlaneId);
+      this.actionNotice = accepted.message;
+      this.timeline = this.timeline.map((entry) =>
+        entry.approval?.reviewId === approval.reviewId
+          ? {
+              ...entry,
+              approval: { ...entry.approval, canAuthorizeRetry: false },
+            }
+          : entry,
+      );
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      this.observeOutcome(failure.planeId ?? this.selectedPlaneId, failure);
+      this.actionNotice = failure.message;
+    } finally {
+      this.controlBusy = null;
+    }
+  }
+
+  /**
+   * Shows a work panel tab. `origin` says who asked: the tablist and
+   * shortcuts are user requests (an overlay in a narrow window); without
+   * one it is a code path, which never covers the conversation.
+   */
+  showPanel(tab: WorkPanelTab, origin: PanelOrigin | null = null, invoker: FocusTarget | null = null): void {
+    if (origin !== null) this.userActed();
+    this.selectedWorkPanel = tab;
+    if (origin === null) {
+      this.applyPanel({ kind: "auto-open" });
+    } else if (!(origin === "tab" && this.workPanelOverlay)) {
+      this.openWorkPanel(origin, invoker);
+    }
+    const conversationId = this.selectedConversationId;
+    const runId = this.selectedRun?.id;
+    if (conversationId && runId && this.workPanel?.runId !== runId) {
+      void this.refreshWorkPanel(conversationId, runId);
+    }
+  }
+
+  get workCheckpoint(): WorkCheckpoint {
+    switch (this.checkpointKind) {
+      case "final":
+        return { kind: "final" };
+      case "turn":
+        return { kind: "turn", turn: Math.max(1, Math.trunc(this.checkpointTurn)) };
+      case "historical":
+        return {
+          kind: "historical",
+          fromTurn: Math.max(0, Math.trunc(this.checkpointFromTurn)),
+          toTurn: Math.max(1, Math.trunc(this.checkpointToTurn)),
+        };
+      default:
+        return { kind: "current" };
+    }
+  }
+
+  get canApplyWorkCheckpoint(): boolean {
+    if (this.workPanelBusy) return false;
+    const latestTurn = this.workPanel?.latestTurn ?? 0;
+    switch (this.checkpointKind) {
+      case "final":
+        return this.selectedRun?.lifecycle !== "active" &&
+          this.selectedRun?.lifecycle !== "starting" &&
+          this.selectedRun?.lifecycle !== "stopping";
+      case "turn":
+        return Number.isInteger(this.checkpointTurn) &&
+          this.checkpointTurn > 0 &&
+          this.checkpointTurn <= latestTurn;
+      case "historical":
+        return Number.isInteger(this.checkpointFromTurn) &&
+          Number.isInteger(this.checkpointToTurn) &&
+          this.checkpointFromTurn >= 0 &&
+          this.checkpointFromTurn <= this.checkpointToTurn &&
+          this.checkpointToTurn <= latestTurn;
+      default:
+        return true;
+    }
+  }
+
+  async applyWorkCheckpoint(): Promise<void> {
+    if (!this.canApplyWorkCheckpoint) return;
+    this.selectedWorkFileId = null;
+    this.editableFile = null;
+    this.fileDraft = "";
+    await this.refreshWorkPanel(undefined, undefined, false);
+  }
+
+  async refreshWorkPanel(
+    conversationId = this.selectedConversationId,
+    runId = this.selectedRun?.id ?? null,
+    preserveContinuity = true,
+  ): Promise<void> {
+    if (!conversationId || !runId) {
+      this.resetWorkPanel();
+      return;
+    }
+    const request = ++this.workRequest;
+    const planeId = this.selectedPlaneId;
+    this.workPanelBusy = true;
+    this.workPanelError = null;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    const previous = this.workPanel;
+    const preservePrevious = preserveContinuity && previous?.runId === runId;
+    const previousSelectedFileId = preservePrevious ? this.selectedWorkFileId : null;
+    const targetFileCount = preservePrevious
+      ? previous.files.length
+      : 0;
+    if (previous?.runId !== runId) {
+      this.checkpointKind = this.selectedRun?.lifecycle === "completed" ||
+        this.selectedRun?.lifecycle === "failed" ||
+        this.selectedRun?.lifecycle === "canceled" ||
+        this.selectedRun?.lifecycle === "lost"
+        ? "final"
+        : "current";
+    }
+    try {
+      const snapshot = await loadWorkPanel(conversationId, runId, this.workCheckpoint, planeId);
+      while (shouldLoadNextWorkPage(
+        new Set(snapshot.files.map((file) => file.id)),
+        targetFileCount,
+        previousSelectedFileId,
+        snapshot.nextPage !== null,
+      ) && snapshot.nextPage) {
+        const page = await loadMoreChanges(snapshot.nextPage);
+        const known = new Set(snapshot.files.map((file) => file.id));
+        snapshot.files.push(...page.files.filter((file) => !known.has(file.id)));
+        snapshot.nextPage = page.nextPage;
+      }
+      if (
+        request !== this.workRequest ||
+        !this.isSelected(planeId, conversationId) ||
+        this.selectedRun?.id !== runId
+      ) {
+        return;
+      }
+      this.workPanel = snapshot;
+      this.patchDecoder = new TextDecoder("utf-8", { fatal: true });
+      this.workPanelNotice = snapshot.terminalIssue
+        ? `Changes loaded, but terminals are unavailable: ${snapshot.terminalIssue.message}`
+        : null;
+      const selectedFileStillExists = snapshot.files.some(
+        (file) => file.id === this.selectedWorkFileId,
+      );
+      if (!selectedFileStillExists) {
+        this.selectedWorkFileId = snapshot.files[0]?.id ?? null;
+        this.editableFile = null;
+        this.fileDraft = "";
+      }
+      const selectedTerminalStillExists = snapshot.terminals.some(
+        (terminal) => terminal.id === this.selectedTerminalId,
+      );
+      if (!selectedTerminalStillExists) {
+        this.selectedTerminalId =
+          snapshot.terminals.find((terminal) => terminal.state === "open")?.id ??
+          snapshot.terminals[0]?.id ??
+          null;
+      }
+    } catch (error: unknown) {
+      if (request === this.workRequest) {
+        this.workPanelError = publicError(error);
+        this.applyRevisionConflict(this.workPanelError);
+      }
+    } finally {
+      if (request === this.workRequest) this.workPanelBusy = false;
+    }
+  }
+
+  /**
+   * Applies a recovery action to the Plane whose command failed (`planeId`
+   * from the error; a missing value means this computer). Selection-scoped
+   * actions do nothing when the selection is on another Plane.
+   */
+  async applyWorkRecovery(
+    action: PublicRecoveryAction,
+    planeId: PlaneId | null = null,
+  ): Promise<void> {
+    const plane = planeId ?? LOCAL_PLANE;
+    this.workPanelNoticeError = null;
+    switch (action.type) {
+      case "refresh_file":
+        if (plane === this.selectedPlaneId && this.selectedWorkFileId) {
+          await this.selectWorkFile(this.selectedWorkFileId);
+        }
+        return;
+      case "refresh_conversation":
+        if (plane === this.selectedPlaneId) await this.loadSelectedConversation(false);
+        return;
+      case "refresh_run":
+        if (plane === this.selectedPlaneId && this.selectedConversationId) {
+          await this.refreshSupervision(
+            this.selectedConversationId,
+            this.selectedRun?.id ?? null,
+          );
+        }
+        return;
+      case "resume_events":
+        await this.planes.openFeed(plane, action.after);
+        this.workPanelNotice = "Activity reconnected from the requested checkpoint.";
+        return;
+    }
+  }
+
+  async loadMoreWorkFiles(): Promise<void> {
+    const pageId = this.workPanel?.nextPage;
+    if (!pageId || this.workPanelBusy || !this.workPanel) return;
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      const page = await loadMoreChanges(pageId);
+      const known = new Set(this.workPanel.files.map((file) => file.id));
+      this.workPanel.files = [
+        ...this.workPanel.files,
+        ...page.files.filter((file) => !known.has(file.id)),
+      ];
+      this.workPanel.nextPage = page.nextPage;
+      this.workPanel = { ...this.workPanel };
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      this.workPanelNotice = failure.message;
+      this.workPanelNoticeError = failure;
+      this.applyRevisionConflict(failure);
+      if (failure.restart?.reason === "pagination_stale") {
+        await this.refreshWorkPanel();
+      }
+    } finally {
+      this.workPanelBusy = false;
+    }
+  }
+
+  async loadMorePatch(): Promise<void> {
+    const readId = this.workPanel?.artifactReadId;
+    if (!readId || this.workPanelBusy || !this.workPanel) return;
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      const chunk = await loadPatchChunk(readId);
+      const decoder = this.patchDecoder ?? new TextDecoder("utf-8", { fatal: true });
+      this.patchDecoder = decoder;
+      this.workPanel.patch += decoder.decode(new Uint8Array(chunk.bytes), {
+        stream: !chunk.complete,
+      });
+      if (chunk.complete) {
+        this.workPanel.artifactReadId = null;
+        this.workPanel.patchTruncated = false;
+      }
+      this.workPanel = { ...this.workPanel };
+      if (chunk.complete && chunk.verified) {
+        this.workPanelNotice = "The complete patch was verified.";
+      }
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      this.workPanelNotice = failure.message;
+      this.workPanelNoticeError = failure;
+      this.applyRevisionConflict(failure);
+    } finally {
+      this.workPanelBusy = false;
+    }
+  }
+
+  async selectWorkFile(fileId: string): Promise<void> {
+    if (!this.workPanel?.files.some((file) => file.id === fileId)) return;
+    const request = ++this.workFileRequest;
+    this.selectedWorkFileId = fileId;
+    this.selectedWorkPanel = "files";
+    this.editableFile = null;
+    this.fileDraft = "";
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      const file = await loadWorkFile(fileId);
+      if (request !== this.workFileRequest || this.selectedWorkFileId !== fileId) return;
+      this.editableFile = file;
+      this.fileDraft = file.content ?? "";
+    } catch (error: unknown) {
+      if (request === this.workFileRequest) this.recordWorkFailure(error);
+    } finally {
+      if (request === this.workFileRequest) this.workPanelBusy = false;
+    }
+  }
+
+  async saveSelectedFile(): Promise<void> {
+    const fileId = this.selectedWorkFileId;
+    if (!fileId || !this.editableFile || this.workPanelBusy) return;
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      const saved = await saveWorkFile(fileId, this.fileDraft);
+      this.editableFile.revision = saved.revision;
+      this.editableFile.content = this.fileDraft;
+      this.editableFile.contentBytes = new TextEncoder().encode(this.fileDraft).byteLength;
+      this.editableFile = { ...this.editableFile };
+      this.workPanelNotice = saved.message;
+    } catch (error: unknown) {
+      this.recordWorkFailure(error);
+    } finally {
+      this.workPanelBusy = false;
+    }
+  }
+
+  async submitSelectedFileReview(): Promise<void> {
+    const fileId = this.selectedWorkFileId;
+    const comment = this.reviewComment.trim();
+    if (!fileId || !comment || this.reviewLine < 1 || this.workPanelBusy) return;
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      const submitted = await submitFileReview(fileId, this.reviewLine, comment);
+      this.reviewComment = "";
+      this.workPanelNotice = submitted.message;
+      const conversationId = this.selectedConversationId;
+      if (conversationId) await this.refreshSupervision(conversationId, this.selectedRun?.id ?? null);
+    } catch (error: unknown) {
+      this.recordWorkFailure(error);
+    } finally {
+      this.workPanelBusy = false;
+    }
+  }
+
+  async createTerminal(): Promise<void> {
+    const conversationId = this.selectedConversationId;
+    if (!conversationId || this.workPanelBusy) return;
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      const terminal = await openWorkspaceTerminal(
+        conversationId,
+        this.terminalRows,
+        this.terminalColumns,
+        this.selectedPlaneId,
+      );
+      if (this.workPanel) {
+        this.workPanel.terminals = [
+          ...this.workPanel.terminals.filter((item) => item.id !== terminal.id),
+          terminal,
+        ];
+        this.workPanel = { ...this.workPanel };
+      }
+      this.selectedTerminalId = terminal.id;
+      await this.attachTerminal(terminal.id);
+    } catch (error: unknown) {
+      this.recordWorkFailure(error);
+    } finally {
+      this.workPanelBusy = false;
+    }
+  }
+
+  selectTerminal(terminalId: string): void {
+    if (!this.workPanel?.terminals.some((terminal) => terminal.id === terminalId)) return;
+    this.selectedTerminalId = terminalId;
+  }
+
+  async attachSelectedTerminal(): Promise<void> {
+    if (this.selectedTerminalId) await this.attachTerminal(this.selectedTerminalId);
+  }
+
+  async detachSelectedTerminal(): Promise<void> {
+    const terminalId = this.attachedTerminalId;
+    if (!terminalId) return;
+    this.attachedTerminalId = null;
+    try {
+      await detachWorkspaceTerminal(terminalId);
+    } catch (error: unknown) {
+      this.recordWorkFailure(error);
+    }
+  }
+
+  async closeSelectedTerminal(): Promise<void> {
+    const terminalId = this.selectedTerminalId;
+    if (!terminalId || this.workPanelBusy) return;
+    this.workPanelBusy = true;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    try {
+      if (this.attachedTerminalId === terminalId) await this.detachSelectedTerminal();
+      const terminal = await closeWorkspaceTerminal(terminalId);
+      if (this.workPanel) {
+        this.workPanel.terminals = this.workPanel.terminals.map((item) =>
+          item.id === terminal.id ? terminal : item,
+        );
+        this.workPanel = { ...this.workPanel };
+      }
+      this.workPanelNotice = "The Workspace terminal was closed.";
+    } catch (error: unknown) {
+      this.recordWorkFailure(error);
+    } finally {
+      this.workPanelBusy = false;
+    }
+  }
+
+  async sendTerminalLine(): Promise<void> {
+    const terminalId = this.attachedTerminalId;
+    if (!terminalId || !this.terminalInput) return;
+    const input = `${this.terminalInput}\n`;
+    this.terminalInput = "";
+    try {
+      await sendTerminalInput(terminalId, input);
+    } catch (error: unknown) {
+      this.terminalInput = input.slice(0, -1);
+      this.recordWorkFailure(error);
+    }
+  }
+
+  setTerminalGeometry(rows: number, columns: number): void {
+    const boundedRows = Math.min(1000, Math.max(1, Math.trunc(rows)));
+    const boundedColumns = Math.min(1000, Math.max(1, Math.trunc(columns)));
+    if (boundedRows === this.terminalRows && boundedColumns === this.terminalColumns) return;
+    this.terminalRows = boundedRows;
+    this.terminalColumns = boundedColumns;
+    void this.resizeAttachedTerminal();
+  }
+
+  private async resizeAttachedTerminal(): Promise<void> {
+    const terminalId = this.attachedTerminalId;
+    if (!terminalId) return;
+    if (
+      this.lastTerminalSize?.terminalId === terminalId &&
+      this.lastTerminalSize.rows === this.terminalRows &&
+      this.lastTerminalSize.columns === this.terminalColumns
+    ) return;
+    try {
+      await resizeWorkspaceTerminal(terminalId, this.terminalRows, this.terminalColumns);
+      this.lastTerminalSize = {
+        terminalId,
+        rows: this.terminalRows,
+        columns: this.terminalColumns,
+      };
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      this.workPanelNotice = failure.message;
+      this.workPanelNoticeError = failure;
+    }
+  }
+
+  private async attachTerminal(terminalId: string): Promise<void> {
+    if (this.attachedTerminalId === terminalId) return;
+    this.detachCurrentTerminal();
+    this.attachedTerminalId = terminalId;
+    try {
+      await attachWorkspaceTerminal(terminalId, (update) => this.receiveTerminal(update));
+      await this.resizeAttachedTerminal();
+    } catch (error: unknown) {
+      if (this.attachedTerminalId === terminalId) this.attachedTerminalId = null;
+      this.recordWorkFailure(error);
+    }
+  }
+
+  private receiveTerminal(update: TerminalUpdate): void {
+    if (update.terminalId !== this.attachedTerminalId) return;
+    if (update.type === "output") {
+      const previous = this.terminalOutput[update.terminalId] ?? "";
+      const decoder = this.terminalDecoders.get(update.terminalId) ?? new TerminalTranscriptDecoder();
+      this.terminalDecoders.set(update.terminalId, decoder);
+      this.terminalOutput[update.terminalId] = `${previous}${decoder.push(update.bytes)}`.slice(-1_048_576);
+      this.terminalOutput = { ...this.terminalOutput };
+    } else if (update.type === "gap") {
+      this.terminalDecoders.set(update.terminalId, new TerminalTranscriptDecoder());
+      const previous = this.terminalOutput[update.terminalId] ?? "";
+      this.terminalOutput[update.terminalId] = `${previous}\n[${update.missingBytes} earlier bytes unavailable]\n`.slice(-1_048_576);
+      this.terminalOutput = { ...this.terminalOutput };
+    } else if (update.type === "finished") {
+      const tail = this.terminalDecoders.get(update.terminalId)?.finish() ?? "";
+      if (tail) {
+        this.terminalOutput[update.terminalId] = `${this.terminalOutput[update.terminalId] ?? ""}${tail}`.slice(-1_048_576);
+        this.terminalOutput = { ...this.terminalOutput };
+      }
+      this.attachedTerminalId = null;
+      this.workPanelNotice = "The terminal session finished.";
+    } else if (update.type === "failed") {
+      this.attachedTerminalId = null;
+      this.workPanelNotice = update.error.message;
+      this.workPanelNoticeError = update.error;
+    }
+  }
+
+  private detachCurrentTerminal(): void {
+    const terminalId = this.attachedTerminalId;
+    this.attachedTerminalId = null;
+    if (terminalId) void detachWorkspaceTerminal(terminalId);
+  }
+
+  /** Drops the selected task and everything loaded for it. */
+  private clearSelectedConversation(): void {
+    this.trash.clearBanner();
+    this.selectedConversationId = null;
+    this.conversationDetail = null;
+    this.timeline = [];
+    this.supervision = null;
+    this.runControlConfirmation = null;
+    this.runControlReturnFocus = null;
+    this.resetWorkPanel();
+  }
+
+  private resetWorkPanel(): void {
+    this.workRequest += 1;
+    this.workFileRequest += 1;
+    this.workPanel = null;
+    this.workPanelBusy = false;
+    this.workPanelError = null;
+    this.workPanelNotice = null;
+    this.workPanelNoticeError = null;
+    this.selectedWorkFileId = null;
+    this.editableFile = null;
+    this.fileDraft = "";
+    this.patchDecoder = null;
+    this.selectedTerminalId = null;
+    this.terminalDecoders.clear();
+    this.lastTerminalSize = null;
+    this.detachCurrentTerminal();
+  }
+
+  private applyRevisionConflict(error: PublicError): void {
+    const safeState = error.revisionConflict?.safeState;
+    if (!safeState) return;
+    if (safeState.type === "conversation") {
+      const planeId = error.planeId ?? this.selectedPlaneId;
+      const row = this.catalog.find(planeId, safeState.conversationId);
+      if (row) this.catalog.upsert({ ...row, revision: safeState.revision });
+      if (this.conversationDetail?.conversation.id === safeState.conversationId) {
+        this.conversationDetail.conversation = {
+          ...this.conversationDetail.conversation,
+          revision: safeState.revision,
+        };
+        this.conversationDetail = { ...this.conversationDetail };
+      }
+      return;
+    }
+    if (this.conversationDetail) {
+      this.conversationDetail.runs = this.conversationDetail.runs.map((run) =>
+        run.id === safeState.runId
+          ? { ...run, revision: safeState.revision, lifecycle: safeState.lifecycle }
+          : run,
+      );
+      this.conversationDetail = { ...this.conversationDetail };
+    }
+    if (this.supervision?.execution?.run.id === safeState.runId) {
+      this.supervision.execution.run = {
+        ...this.supervision.execution.run,
+        revision: safeState.revision,
+        lifecycle: safeState.lifecycle,
+      };
+      this.supervision = { ...this.supervision };
+    }
+  }
+
+  private recordWorkFailure(error: unknown): PublicError {
+    const failure = publicError(error);
+    this.observeOutcome(failure.planeId ?? this.selectedPlaneId, failure);
+    this.workPanelNotice = failure.message;
+    this.workPanelNoticeError = failure;
+    this.applyRevisionConflict(failure);
+    return failure;
+  }
+
+  /**
+   * The main window's global key handler. The pure shortcut model decides
+   * what a press means; a press it does not claim is left alone.
+   */
+  handleShortcut(event: ShortcutEvent, context: Omit<ShortcutContext, "dismissible">): void {
+    if (event.defaultPrevented) return;
+    const intent = resolveShortcut(event, { ...context, dismissible: this.dismissible });
+    if (!intent) return;
+    event.preventDefault();
+    this.perform(intent, focusTarget(event.target));
+  }
+
+  /**
+   * Carries out one shell intent from the keyboard. `invoker` is where the
+   * key was pressed; closing an overlay the shortcut opened returns there.
+   */
+  perform(intent: ShellIntent, invoker: FocusTarget | null = null): void {
+    switch (intent.kind) {
+      case "new-task":
+        this.select("new-task");
+        return;
+      case "search":
+        this.select("search");
+        this.searchFocusRequest += 1;
+        return;
+      case "add-project":
+        this.select("project");
+        this.projectFolderFocusRequest += 1;
+        return;
+      case "settings":
+        void this.openSettings();
+        return;
+      case "toggle-sidebar":
+        this.toggleSidebar();
+        return;
+      case "toggle-work-panel":
+        this.toggleWorkPanel("shortcut", invoker);
+        return;
+      case "work-panel-tab":
+        this.showPanel(intent.tab, "shortcut", invoker);
+        return;
+      case "dismiss":
+        this.dismiss();
+        return;
+      case "toggle-fullscreen":
+        void this.toggleFullscreen();
+        return;
+      case "close-window":
+        void this.windowAction(closeMainWindow);
+        return;
+      case "quit":
+        void this.windowAction(quitJet);
+        return;
+    }
+  }
+
+  /** Whether the work panel is visible, as a column or as the overlay. */
+  get workPanelPresented(): boolean {
+    return this.panel.presentation.kind !== "hidden";
+  }
+
+  /** Whether the work panel is the compact overlay over the conversation. */
+  get workPanelOverlay(): boolean {
+    return this.panel.presentation.kind === "overlay";
+  }
+
+  get layoutMode(): LayoutMode {
+    return this.panel.mode;
+  }
+
+  /** The single write path for the work panel's presentation. */
+  applyPanel(intent: PanelIntent): void {
+    const next = reducePanel(this.panel, intent);
+    if (next === this.panel) return;
+    const wasOverlay = this.panel.presentation.kind === "overlay";
+    this.panel = next;
+    if (wasOverlay && next.presentation.kind !== "overlay") this.workPanelReturnFocus = null;
+  }
+
+  /** The single write path for the sidebar's presentation. */
+  applySidebar(presented: boolean): void {
+    this.sidebarPresented = presented;
+  }
+
+  /** The window crossed the overlay breakpoint. */
+  setLayoutMode(mode: LayoutMode): void {
+    this.applyPanel({ kind: "mode", mode });
+  }
+
+  toggleSidebar(): void {
+    this.userActed();
+    this.applySidebar(!this.sidebarPresented);
+  }
+
+  /** The header button and Ctrl+Alt+0: open or close the work panel. */
+  toggleWorkPanel(origin: PanelOrigin, invoker: FocusTarget | null = null): void {
+    this.userActed();
+    if (this.workPanelPresented) {
+      this.hideWorkPanel();
+    } else {
+      this.openWorkPanel(origin, invoker);
+    }
+  }
+
+  /**
+   * The user closed the work panel (Hide, Escape, the scrim, a toggle).
+   * Closing the overlay asks for focus to go back to what opened it.
+   */
+  hideWorkPanel(): void {
+    this.userActed();
+    const overlay = this.workPanelOverlay;
+    const invoker = this.workPanelReturnFocus;
+    this.applyPanel({ kind: "user-close" });
+    if (overlay) {
+      this.workPanelReturnFocus = invoker;
+      this.workPanelReturnRequest += 1;
+    }
+  }
+
+  /**
+   * Moves focus back to the control that opened the overlay, once the page
+   * behind it is interactive again. False when there is none (or it left the
+   * page), so the caller can fall back to the header's Work panel button.
+   */
+  returnWorkPanelFocus(): boolean {
+    const invoker = this.workPanelReturnFocus;
+    this.workPanelReturnFocus = null;
+    if (!invoker || invoker.isConnected === false) return false;
+    invoker.focus();
+    return true;
+  }
+
+  /** Sets a column's requested width, clamped to its range. */
+  setColumnWidth(column: "sidebar" | "work-panel", width: number): void {
+    if (!this.restoringPresentation) this.widthsChangedByUser = true;
+    if (column === "sidebar") {
+      this.sidebarWidth = clampWidth(width, SIDEBAR_WIDTH);
+    } else {
+      this.workPanelWidth = clampWidth(width, WORK_PANEL_WIDTH);
+    }
+  }
+
+  private openWorkPanel(origin: PanelOrigin, invoker: FocusTarget | null): void {
+    this.userActed();
+    const wasOverlay = this.workPanelOverlay;
+    this.applyPanel({ kind: "user-open", origin });
+    if (!this.workPanelOverlay) return;
+    if (!wasOverlay) this.workPanelReturnFocus = invoker;
+    if (origin !== "run-control") this.workPanelFocusRequest += 1;
+  }
+
+  showFixture(state: FixtureState): void {
+    this.actionNotice = null;
+    this.scenario = fixtureForState(state);
+  }
+
+  /**
+   * FeedHandler: one Plane's feed update. Sequences and Conversation IDs are
+   * Plane-local, so the timeline only takes events from the selected
+   * Conversation's Plane, and Recent refreshes only the Plane that changed.
+   * The connection summary follows this computer's feed.
+   */
+  receive(planeId: PlaneId, update: PlaneUpdate): void {
+    const local = planeId === LOCAL_PLANE;
+    const selectedPlane = planeId === this.selectedPlaneId;
+    switch (update.type) {
+      case "connected":
+        this.applyConnection(planeId, update.connection);
+        void this.planes.refresh();
+        this.catalog.reconnected(planeId);
+        this.trash.reconnected(planeId);
+        if (selectedPlane && this.selectedConversationId) {
+          void this.trash.loadBanner(planeId, this.selectedConversationId);
+        }
+        if (selectedPlane && this.selectedConversationId && this.conversationFreshness !== "live") {
+          void this.loadSelectedConversation(false);
+        }
+        if (!local) break;
+        this.connection = update.connection;
+        this.connectionState = "online";
+        this.failure = null;
+        break;
+      case "resumed":
+        void this.catalog.load(planeId);
+        if (!local) break;
+        this.connectionState = "online";
+        this.failure = null;
+        break;
+      case "event":
+        if (local) {
+          this.connectionState = "online";
+          this.failure = null;
+        }
+        if (update.conversation_id !== null && this.isSelected(planeId, update.conversation_id)) {
+          this.receiveTimeline(update);
+          this.scheduleDetailRefresh();
+        }
+        this.catalog.receiveEvent(planeId, update.kind);
+        if (update.kind.startsWith("pairing.")) this.planes.pairing.pairingEvent(planeId);
+        if (update.kind === "audit.epoch_begun") this.health.clearSecurity(planeId);
+        this.receiveTrashEvent(planeId, update.kind, update.conversation_id);
+        break;
+      case "reconnecting":
+        this.health.offline(planeId);
+        this.trash.offline(planeId);
+        void this.planes.refresh();
+        this.catalog.markUnavailable(planeId, update.error);
+        if (local) {
+          this.connectionState = "reconnecting";
+          this.failure = update.error;
+        }
+        if (selectedPlane && this.conversationDetail) this.conversationFreshness = "cached";
+        break;
+      case "failed":
+        if (
+          update.error.restart?.reason === "cursor_expired" ||
+          update.error.restart?.reason === "cursor_ahead"
+        ) {
+          void this.recoverSnapshot(planeId);
+          break;
+        }
+        this.health.offline(planeId);
+        this.trash.offline(planeId);
+        void this.planes.refresh();
+        this.catalog.markUnavailable(planeId, update.error);
+        if (local) {
+          this.connectionState = "failed";
+          this.failure = update.error;
+        }
+        if (selectedPlane && this.conversationDetail) this.conversationFreshness = "cached";
+        break;
+    }
+  }
+
+  /**
+   * A fresh status read of one Plane (a feed opened or reconnected). The
+   * health summary is applied from here only; `resumed` carries none. When
+   * the daemon started again its store may be older than what is shown.
+   */
+  private applyConnection(planeId: PlaneId, connection: ConnectionSnapshot): void {
+    if (this.health.applyConnection(planeId, connection)) this.planeRestarted(planeId);
+  }
+
+  /**
+   * The Plane's daemon started again (a restart, or a restored snapshot):
+   * state can move backwards, so what is shown for it is read again, and
+   * Wave 3.3 views drop their per-Plane caches.
+   */
+  private planeRestarted(planeId: PlaneId): void {
+    this.trash.reset(planeId);
+    if (planeId === this.selectedPlaneId && this.selectedConversationId) {
+      void this.loadSelectedConversation(false);
+    }
+  }
+
+  /**
+   * Jet Trash follows its Events per Plane: a trash or restore (D4: restore
+   * now refreshes too), a Transfer tombstone, and setting changes that may
+   * move the grace days.
+   */
+  private receiveTrashEvent(planeId: PlaneId, kind: string, conversationId: string | null): void {
+    switch (kind) {
+      case "conversation.trashed":
+      case "conversation.restored":
+        this.trash.markStale(planeId);
+        if (planeId === this.selectedPlaneId) this.trash.refreshBanner(planeId, conversationId);
+        break;
+      case "conversation.transfer_relinquished":
+        this.trash.markStale(planeId);
+        break;
+      case "setting.changed":
+      case "setting.cleared":
+        this.trash.markGraceStale(planeId);
+        break;
+    }
+  }
+
+  /**
+   * Records the outcome of a request on a Plane: a refusal may prove a
+   * Plane-wide condition; an admitted request ends a disk-pressure refusal.
+   */
+  private observeOutcome(planeId: PlaneId, error: PublicError | null): void {
+    if (error) this.health.observe(planeId, error);
+    else this.health.succeeded(planeId);
+  }
+
+  private receiveTimeline(update: Extract<PlaneUpdate, { type: "event" }>): void {
+    if (update.timeline.length === 0) {
+      const last = this.timeline.at(-1);
+      if (last && last.rawCount > 0) {
+        last.rawCount += 1;
+        last.sequence = update.sequence;
+        last.text = `${last.rawCount} background updates`;
+        this.timeline = [...this.timeline];
+      } else {
+        this.timeline = [
+          ...this.timeline,
+          {
+            id: `raw-${update.sequence}`,
+            kind: "activity",
+            text: "1 background update",
+            sequence: update.sequence,
+            rawCount: 1,
+            approval: null,
+          },
+        ];
+      }
+      return;
+    }
+
+    for (const [index, item] of update.timeline.entries()) {
+      const id = item.itemId ?? `${update.sequence}-${index}`;
+      const existing = this.timeline.find((entry) => entry.id === id);
+      if (existing && (item.kind === "user" || item.kind === "approval")) {
+        if (item.kind === "user") existing.text += item.text;
+        else {
+          existing.text = item.text;
+          existing.approval = item.approval;
+        }
+        existing.sequence = update.sequence;
+        this.timeline = [...this.timeline];
+      } else {
+        this.timeline = [
+          ...this.timeline,
+          {
+            id,
+            kind: item.kind,
+            text: item.text,
+            sequence: update.sequence,
+            rawCount: 0,
+            approval: item.approval,
+          },
+        ].slice(-256);
+      }
+    }
+  }
+
+  private scheduleDetailRefresh(): void {
+    if (this.detailRefresh) clearTimeout(this.detailRefresh);
+    this.detailRefresh = setTimeout(() => {
+      this.detailRefresh = null;
+      void this.loadSelectedConversation(false);
+    }, 200);
+  }
+
+  /** Rebuilds only that Plane's section, then resumes its feed at the new fence. */
+  private async recoverSnapshot(planeId: PlaneId): Promise<void> {
+    if (planeId === this.selectedPlaneId) this.timeline = [];
+    this.actionNotice = "The activity cursor expired. Jet refreshed the full Conversation snapshot.";
+    await this.catalog.load(planeId);
+    await this.planes.openFeed(planeId, this.catalog.cursor(planeId));
+    if (planeId === this.selectedPlaneId) await this.loadSelectedConversation(false);
+  }
+}

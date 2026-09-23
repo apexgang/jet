@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-execute-delivery"
+description = "Enables the execute_delivery command without any pre-configured scope."
+commands.allow = ["execute_delivery"]
+
+[[permission]]
+identifier = "deny-execute-delivery"
+description = "Denies the execute_delivery command without any pre-configured scope."
+commands.deny = ["execute_delivery"]

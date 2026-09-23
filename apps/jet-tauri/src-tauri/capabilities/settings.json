@@ -1,0 +1,52 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings-window",
+  "description": "Device preferences, navigation, read-only Plane summaries, and reviewed Plane setting, Account binding, Auto-continue, Craft and Harness extension changes for the Settings window, plus read-only Plane health, one bounded disposable-storage collection, auto-delete rules with task names for their candidates, reviewed Recovery snapshot restore and purge, the redacted Security audit, and a reviewed new audit epoch, the saved window layout's status (read-only) and Quit (Ctrl+Q); approvals and snapshots name only native tokens. Local Craft files and the audit evidence file are chosen in native dialogs opened by the shell, and no path crosses to the webview. It never receives Plane feeds or agent content, and grants no pairing, Plane, dialog, or window-core permission.",
+  "windows": [
+    "settings"
+  ],
+  "platforms": [
+    "linux",
+    "macOS"
+  ],
+  "permissions": [
+    "allow-watch-settings-navigation",
+    "allow-remember-settings-pane",
+    "allow-close-settings",
+    "allow-load-desktop-preferences",
+    "allow-set-desktop-preferences",
+    "allow-load-notification-settings",
+    "allow-set-notification-settings",
+    "allow-load-settings",
+    "allow-prepare-setting-change",
+    "allow-apply-settings-change",
+    "allow-load-work-context",
+    "allow-watch-settings-changes",
+    "allow-load-agents",
+    "allow-prepare-account-bind",
+    "allow-load-account-detail",
+    "allow-load-usage-history",
+    "allow-prepare-auto-continue",
+    "allow-prepare-account-unbind",
+    "allow-prepare-craft-disable",
+    "allow-pick-local-craft-source",
+    "allow-discover-craft",
+    "allow-load-extension-catalog",
+    "allow-inspect-extension",
+    "allow-prepare-extension-change",
+    "allow-load-extension-change",
+    "allow-list-planes",
+    "allow-load-plane-detail",
+    "allow-load-system-health",
+    "allow-collect-disposable-storage",
+    "allow-resolve-conversation-names",
+    "allow-load-autodelete-rules",
+    "allow-change-autodelete-rule",
+    "allow-prepare-recovery-action",
+    "allow-execute-recovery-action",
+    "allow-load-security-audit",
+    "allow-export-security-audit",
+    "allow-load-shell-presentation",
+    "allow-quit-jet"
+  ]
+}

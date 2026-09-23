@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-close-main-window"
+description = "Enables the close_main_window command without any pre-configured scope."
+commands.allow = ["close_main_window"]
+
+[[permission]]
+identifier = "deny-close-main-window"
+description = "Denies the close_main_window command without any pre-configured scope."
+commands.deny = ["close_main_window"]

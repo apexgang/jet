@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-submit-turn"
+description = "Enables the submit_turn command without any pre-configured scope."
+commands.allow = ["submit_turn"]
+
+[[permission]]
+identifier = "deny-submit-turn"
+description = "Denies the submit_turn command without any pre-configured scope."
+commands.deny = ["submit_turn"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-remember-settings-pane"
+description = "Enables the remember_settings_pane command without any pre-configured scope."
+commands.allow = ["remember_settings_pane"]
+
+[[permission]]
+identifier = "deny-remember-settings-pane"
+description = "Denies the remember_settings_pane command without any pre-configured scope."
+commands.deny = ["remember_settings_pane"]

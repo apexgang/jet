@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-register-project"
+description = "Enables the register_project command without any pre-configured scope."
+commands.allow = ["register_project"]
+
+[[permission]]
+identifier = "deny-register-project"
+description = "Denies the register_project command without any pre-configured scope."
+commands.deny = ["register_project"]

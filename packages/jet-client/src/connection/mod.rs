@@ -31,6 +31,9 @@ use uuid::Uuid;
 
 #[path = "artifact_client.rs"]
 mod artifact_client;
+#[path = "terminal_client.rs"]
+mod terminal_client;
+pub use terminal_client::{TerminalAttachment, TerminalEvent};
 
 /// Keeps one client from allocating an unbounded pending-reply registry.
 const MAX_IN_FLIGHT_REQUESTS: usize = 256;
@@ -39,6 +42,7 @@ const MAX_IN_FLIGHT_REQUESTS: usize = 256;
 #[derive(Debug)]
 pub struct Client {
 	transfers: artifact_client::Transfers,
+	terminals: terminal_client::Terminals,
 	data_limit: usize,
 	pub(crate) ssh: Option<tokio::process::Child>,
 	outbound: mpsc::Sender<WriteRequest>,
@@ -162,16 +166,19 @@ impl Client {
 				}
 				let pending = PendingReplies::default();
 				let transfers = artifact_client::Transfers::default();
+				let terminals = terminal_client::Terminals::default();
 				let data_limit = writer.limits().data;
 				let (outbound, writes) = mpsc::channel(MAX_IN_FLIGHT_REQUESTS);
 				let reader_task = tokio::spawn(read_replies(
 					reader,
 					Arc::clone(&pending),
 					Arc::clone(&transfers),
+					Arc::clone(&terminals),
 				));
 				let writer_task = tokio::spawn(write_frames(writer, writes));
 				Ok(Self {
 					transfers,
+					terminals,
 					data_limit,
 					ssh: None,
 					outbound,
@@ -390,12 +397,18 @@ async fn read_replies<R: AsyncRead + Unpin>(
 	mut reader: FrameReader<R>,
 	pending: PendingReplies,
 	transfers: artifact_client::Transfers,
+	terminals: terminal_client::Terminals,
 ) {
 	loop {
 		let frame = match reader.read().await {
 			Ok(frame) => frame,
 			Err(_) => break,
 		};
+		match terminal_client::route(&terminals, &frame) {
+			Ok(true) => continue,
+			Ok(false) => {}
+			Err(()) => break,
+		}
 		match artifact_client::route(&transfers, &frame) {
 			Ok(true) => continue,
 			Ok(false) => {}
@@ -435,6 +448,7 @@ async fn read_replies<R: AsyncRead + Unpin>(
 		.expect("the pending-reply registry must not be poisoned")
 		.clear();
 	transfers.lock().expect("Artifact replies").clear();
+	terminals.lock().expect("Terminal replies").clear();
 }
 
 async fn write_frames<W: AsyncWrite + Unpin>(

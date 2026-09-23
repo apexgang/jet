@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pick-local-craft-source"
+description = "Enables the pick_local_craft_source command without any pre-configured scope."
+commands.allow = ["pick_local_craft_source"]
+
+[[permission]]
+identifier = "deny-pick-local-craft-source"
+description = "Denies the pick_local_craft_source command without any pre-configured scope."
+commands.deny = ["pick_local_craft_source"]

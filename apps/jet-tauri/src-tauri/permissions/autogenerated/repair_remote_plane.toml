@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-repair-remote-plane"
+description = "Enables the repair_remote_plane command without any pre-configured scope."
+commands.allow = ["repair_remote_plane"]
+
+[[permission]]
+identifier = "deny-repair-remote-plane"
+description = "Denies the repair_remote_plane command without any pre-configured scope."
+commands.deny = ["repair_remote_plane"]

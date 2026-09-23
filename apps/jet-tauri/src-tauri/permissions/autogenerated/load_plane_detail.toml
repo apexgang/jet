@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-load-plane-detail"
+description = "Enables the load_plane_detail command without any pre-configured scope."
+commands.allow = ["load_plane_detail"]
+
+[[permission]]
+identifier = "deny-load-plane-detail"
+description = "Denies the load_plane_detail command without any pre-configured scope."
+commands.deny = ["load_plane_detail"]

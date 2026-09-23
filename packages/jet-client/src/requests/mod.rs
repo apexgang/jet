@@ -29,6 +29,7 @@ pub(crate) mod project;
 pub(crate) mod promotion;
 pub(crate) mod review;
 pub(crate) mod search;
+pub(crate) mod terminal;
 pub(crate) mod turn;
 pub(crate) mod usage;
 pub(crate) mod user_input;

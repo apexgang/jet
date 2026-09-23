@@ -1,8 +1,7 @@
 [package]
 name = "jet-tauri"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Jet desktop client for Linux"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -19,7 +18,31 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
+jet-client = { path = "../../../packages/jet-client" }
+jet-protocol = { path = "../../../packages/jet-protocol" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# This computer's Ed25519 client identity for remote Planes (ADR-0017). The
+# seed stays native: in Secret Service, or in memory for session-only pairing.
+ed25519-dalek = { version = "3", default-features = false, features = ["fast", "zeroize"] }
+# Seed and probe-secret generation without rand_core.
+getrandom = "0.3"
+# Authentication strings and key fingerprints (SHA-256 over public bytes and
+# the pairing transcript only; raw digest bytes, never hex `Display`).
+sha2 = "0.11"
+# Wipes seeds, retained claim codes and secret-store buffers.
+zeroize = "1"
+# `process` spawns the system ssh for remote Planes.
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+uuid = { version = "1", features = ["v4"] }
+tauri-plugin-dialog = "2.7.3"
+tauri-plugin-notification = "2"
 
+# Freedesktop Secret Service for the pairing key (ADR-0076). The async-io
+# runtime feature adds no zbus feature beyond what notify-rust already
+# enables, so desktop notifications keep the same zbus runtime.
+[target.'cfg(target_os = "linux")'.dependencies]
+secret-service = { version = "5.2", default-features = false, features = ["rt-async-io-crypto-rust"] }
+
+[dev-dependencies]
+tempfile = "3"
