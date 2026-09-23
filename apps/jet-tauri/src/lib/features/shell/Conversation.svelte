@@ -66,7 +66,7 @@
         <p>
           {session.selectedProjectName}
           <span aria-hidden="true">·</span>
-          Runs on {session.scenario.plane.name}
+          Runs on {session.runsOnLabel}
         </p>
       </div>
       <span
@@ -191,7 +191,7 @@
         <div class="context-row" aria-label="Task context">
           <span><small>Project</small>{session.selectedProjectName}</span>
           <span><small>Agent</small>{session.selectedHarnessName}</span>
-          <span><small>Runs on</small>{session.scenario.plane.name}</span>
+          <span><small>Runs on</small>{session.runsOnLabel}</span>
           <span class:over-limit={session.draftBytes > session.maximumPromptBytes} class="draft-limit">
             <small>Message</small>{session.draftBytes.toLocaleString()} / {session.maximumPromptBytes.toLocaleString()} bytes
           </span>

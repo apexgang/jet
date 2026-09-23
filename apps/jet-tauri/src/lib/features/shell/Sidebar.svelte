@@ -42,7 +42,7 @@
         {#if session.searchResult}
           <div class="search-results" aria-live="polite">
             {#each session.searchResult.hits as hit (`${hit.conversationId}-${hit.sequence}`)}
-              <button onclick={() => session.openSearchHit(hit.conversationId)}>
+              <button onclick={() => session.openSearchHit(hit.conversationId, session.searchResult?.planeId)}>
                 <span>{hit.excerpt}</span>
                 <small>{hit.field}</small>
               </button>
@@ -79,12 +79,12 @@
 
     <div class="nav-group">
       <p class="nav-heading">Recent</p>
-      {#each session.conversations as conversation (conversation.id)}
+      {#each session.conversations as conversation (`${conversation.planeId}:${conversation.id}`)}
         <button
-          class:active={selected("conversation") && session.selectedConversationId === conversation.id}
+          class:active={selected("conversation") && session.isSelected(conversation.planeId, conversation.id)}
           class="conversation-link"
-          aria-current={session.selectedConversationId === conversation.id ? "page" : undefined}
-          onclick={() => session.openConversation(conversation.id)}
+          aria-current={session.isSelected(conversation.planeId, conversation.id) ? "page" : undefined}
+          onclick={() => session.openConversation(conversation.id, true, conversation.planeId)}
         >
           {conversation.title}
         </button>
@@ -116,7 +116,7 @@
   <div class="plane-status" aria-live="polite">
     <span class:online={session.connectionState === "online"} class="status-dot"></span>
     <span>
-      <strong>{session.scenario.plane.name}</strong>
+      <strong>{session.localPlaneLabel}</strong>
       <small>{session.connectionLabel}</small>
     </span>
   </div>

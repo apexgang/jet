@@ -1,4 +1,5 @@
 import type { PublicError } from "./bridge";
+import type { PlaneId } from "./planes";
 import { invoke } from "@tauri-apps/api/core";
 
 export type DeliveryOperation =
@@ -22,17 +23,25 @@ export type Delivery = {
 };
 export type DeliveryReview = {
   reviewId: string;
+  planeId: PlaneId;
   conversationId: string;
   workingTree: string;
   operation: DeliveryOperation;
   checkpointFiles: number | null;
   contentComplete: boolean | null;
 };
-export const loadDeliveries = (conversationId: string) =>
-  invoke<Delivery[]>("load_deliveries", { conversationId });
-export const prepareDelivery = (conversationId: string, operation: DeliveryOperation) =>
-  invoke<DeliveryReview>("prepare_delivery", { conversationId, operation });
+export const loadDeliveries = (conversationId: string, planeId: PlaneId | null = null) =>
+  invoke<Delivery[]>("load_deliveries", { conversationId, planeId });
+export const prepareDelivery = (
+  conversationId: string,
+  operation: DeliveryOperation,
+  planeId: PlaneId | null = null,
+) => invoke<DeliveryReview>("prepare_delivery", { conversationId, operation, planeId });
+/** Executes on the Plane the review was prepared against, never another. */
 export const executeDelivery = (reviewId: string) =>
   invoke<{ kind: "accepted"; deliveryId: string } | { kind: "refused"; error: PublicError }>("execute_delivery", { reviewId });
-export const prepareDeliveryAcknowledgement = (conversationId: string, deliveryId: string) =>
-  invoke<string>("prepare_delivery_acknowledgement", { conversationId, deliveryId });
+export const prepareDeliveryAcknowledgement = (
+  conversationId: string,
+  deliveryId: string,
+  planeId: PlaneId | null = null,
+) => invoke<string>("prepare_delivery_acknowledgement", { conversationId, deliveryId, planeId });

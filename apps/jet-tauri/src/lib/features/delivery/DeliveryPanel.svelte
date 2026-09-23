@@ -16,11 +16,12 @@
   const runs = $derived(session.conversationDetail?.runs ?? []);
   $effect(() => {
     const id = session.selectedConversationId;
+    const planeId = session.selectedPlaneId;
     const online = session.connectionState === "online";
     const visible = session.workPanelPresented && session.selectedWorkPanel === "delivery";
     untrack(() => {
-      if (delivery.conversationId !== id) { runId = ""; turn = 1; branch = ""; remote = "origin"; base = ""; }
-      delivery.select(id);
+      if (delivery.conversationId !== id || delivery.planeId !== planeId) { runId = ""; turn = 1; branch = ""; remote = "origin"; base = ""; }
+      delivery.select(id, planeId);
       if (online && id && visible) void delivery.refresh();
       else if (!online) delivery.offline();
     });

@@ -93,7 +93,7 @@
         <p>{session.workPanelError.message}</p>
         <div class="recovery-actions">
           {#each session.workPanelError.recoveryActions as action}
-            <button onclick={() => session.applyWorkRecovery(action)}>{recoveryLabel(action)}</button>
+            <button onclick={() => session.applyWorkRecovery(action, session.workPanelError?.planeId ?? null)}>{recoveryLabel(action)}</button>
           {/each}
           {#if session.workPanelError.recoveryActions.length === 0 && session.workPanelError.retryable}
             <button onclick={() => session.refreshWorkPanel()}>Try Again</button>
@@ -286,7 +286,7 @@
           <dl>
             <div><dt>Lifecycle</dt><dd>{session.selectedRun?.lifecycle ?? "Not started"}</dd></div>
             <div><dt>Activity</dt><dd>{session.supervision?.execution?.activity?.replaceAll("_", " ") ?? (session.hasLiveRun ? "Starting" : "Idle")}</dd></div>
-            <div><dt>Runs on</dt><dd>{session.scenario.plane.name}</dd></div>
+            <div><dt>Runs on</dt><dd>{session.runsOnLabel}</dd></div>
             <div><dt>Checkpoint</dt><dd>{session.workPanel?.scope ?? "Unavailable"}</dd></div>
             <div><dt>Latest Turn</dt><dd>{session.workPanel?.latestTurn ?? "—"}</dd></div>
             <div><dt>Changed files</dt><dd>{session.workPanel?.totalFiles ?? 0}</dd></div>
@@ -338,7 +338,7 @@
     {#if session.workPanelNoticeError && session.workPanelNoticeError.recoveryActions.length > 0}
       <div class="recovery-actions panel-recovery" aria-label="Recovery actions">
         {#each session.workPanelNoticeError.recoveryActions as action}
-          <button onclick={() => session.applyWorkRecovery(action)}>{recoveryLabel(action)}</button>
+          <button onclick={() => session.applyWorkRecovery(action, session.workPanelNoticeError?.planeId ?? null)}>{recoveryLabel(action)}</button>
         {/each}
         {#if session.workPanelNoticeError.revisionConflict}
           <span>Current revision {session.workPanelNoticeError.revisionConflict.currentRevision}</span>

@@ -154,7 +154,7 @@ pub(crate) struct MutationResult {
 
 pub(crate) async fn load_setup(bridge: State<'_, JetBridge>) -> Result<SetupSnapshot, PublicError> {
     let client = bridge
-        .client
+        .local()
         .connect()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
@@ -162,6 +162,9 @@ pub(crate) async fn load_setup(bridge: State<'_, JetBridge>) -> Result<SetupSnap
         .status()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
+    bridge
+        .planes
+        .observe_status(super::planes::PlaneId::Local, &status);
     let mut issues = Vec::new();
     let capabilities = match client.capabilities(CapabilityObservation::Fresh).await {
         Ok(value) => Some(value),
@@ -211,7 +214,7 @@ pub(crate) async fn preview_project(
 ) -> Result<ProjectPreviewView, PublicError> {
     validate_absolute_path(&path)?;
     let client = bridge
-        .client
+        .local()
         .connect()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
@@ -269,7 +272,7 @@ pub(crate) async fn register_project(
     // ASVS 2.3.1 and 5.3.2: only a native-cached, Plane-canonical preview
     // can become a Path grant. The webview cannot replace the root.
     let project = bridge
-        .client
+        .local()
         .register_project(command_id, &root)
         .await
         .map_err(|error| PublicError::from_client(&error))?;
@@ -288,7 +291,7 @@ pub(crate) async fn preview_project_removal(
 ) -> Result<ProjectRemovalPreviewView, PublicError> {
     let project_id = parse_id(&project_id, "project.identifier_invalid")?;
     let client = bridge
-        .client
+        .local()
         .connect()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
@@ -354,7 +357,7 @@ pub(crate) async fn remove_project(
     // ASVS 2.3.1, 8.3.1, and 15.3.3: the trusted native layer supplies
     // the exact server-issued binding and accepts only the two intended fields.
     let removed = bridge
-        .client
+        .local()
         .remove_project(command_id, binding, &typed_name, disposal)
         .await
         .map_err(|error| PublicError::from_client(&error))?;
@@ -375,7 +378,7 @@ pub(crate) async fn bind_harness_account(
     provider: String,
 ) -> Result<MutationResult, PublicError> {
     let capabilities = bridge
-        .client
+        .local()
         .current_capabilities()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
@@ -402,7 +405,7 @@ pub(crate) async fn bind_harness_account(
     // ASVS 13.3.1 and 14.3.3: this command carries only non-secret
     // metadata. Authentication stays with the Harness environment.
     let binding = bridge
-        .client
+        .local()
         .bind_harness_account(command_id, option.provider, option.label)
         .await
         .map_err(|error| PublicError::from_client(&error))?;

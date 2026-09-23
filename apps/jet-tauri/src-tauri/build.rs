@@ -4,6 +4,9 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "open_plane_feed",
+            "close_plane_feed",
+            "list_planes",
+            "load_plane_detail",
             "load_deliveries",
             "prepare_delivery",
             "execute_delivery",
@@ -16,6 +19,12 @@ fn main() {
             "preview_project_removal",
             "remove_project",
             "bind_harness_account",
+            "load_conversations",
+            "search_conversations",
+            "load_conversation",
+            "create_conversation",
+            "start_run",
+            "submit_turn",
             "load_run_supervision",
             "withdraw_turn",
             "interrupt_turn",

@@ -1,9 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
 [[permission]]
 identifier = "allow-start-run"
-description = "Allows starting a managed Run with an installed Craft."
+description = "Enables the start_run command without any pre-configured scope."
 commands.allow = ["start_run"]
 
 [[permission]]
 identifier = "deny-start-run"
-description = "Denies starting managed Runs."
+description = "Denies the start_run command without any pre-configured scope."
 commands.deny = ["start_run"]

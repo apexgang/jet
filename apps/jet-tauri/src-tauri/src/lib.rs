@@ -19,6 +19,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             jet::open_plane_feed,
+            jet::close_plane_feed,
+            jet::planes::list_planes,
+            jet::planes::load_plane_detail,
             jet::delivery::load_deliveries,
             jet::delivery::prepare_delivery,
             jet::delivery::execute_delivery,

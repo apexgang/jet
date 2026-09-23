@@ -13,7 +13,10 @@
     session.connect();
     const handleShortcut = (event: KeyboardEvent) => session.handleShortcut(event);
     window.addEventListener("keydown", handleShortcut);
-    return () => window.removeEventListener("keydown", handleShortcut);
+    return () => {
+      window.removeEventListener("keydown", handleShortcut);
+      session.disconnect();
+    };
   });
 </script>
 

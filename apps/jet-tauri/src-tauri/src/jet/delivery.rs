@@ -3,13 +3,17 @@ use std::{collections::HashMap, sync::Mutex};
 
 use jet_protocol::{
     CommandRequest, CommandResponse, DiffScope, GitCheckpoint, GitDelivery, GitDeliveryOutcome,
-    GitOperation, WorkingTree,
+    GitOperation, WorkingTree, GIT_DELIVERY_MINOR,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use super::{errors::PublicError, JetBridge};
+use super::{
+    errors::PublicError,
+    planes::{PlaneBinding, PlaneId},
+    JetBridge,
+};
 
 #[derive(Default)]
 pub(crate) struct DeliveryState {
@@ -18,6 +22,9 @@ pub(crate) struct DeliveryState {
 
 struct Review {
     order: u64,
+    /// The Plane this exact request was reviewed against. Execution goes only
+    /// there, or is refused with `plane.review_moved`.
+    binding: PlaneBinding,
     conversation_id: Uuid,
     command: CommandRequest,
     attempted: bool,
@@ -76,6 +83,7 @@ pub(crate) struct DeliveryView {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DeliveryReview {
     review_id: String,
+    plane_id: String,
     conversation_id: String,
     working_tree: &'static str,
     operation: DeliveryOperation,
@@ -87,21 +95,28 @@ pub(crate) struct DeliveryReview {
 pub(crate) async fn load_deliveries(
     bridge: State<'_, JetBridge>,
     conversation_id: String,
+    plane_id: Option<String>,
 ) -> Result<Vec<DeliveryView>, PublicError> {
     let id = parse_id(&conversation_id)?;
-    let client = bridge
-        .client
-        .connect()
-        .await
-        .map_err(|e| PublicError::from_client(&e))?;
-    let deliveries = client
-        .git_deliveries(id)
-        .await
-        .map_err(|e| PublicError::from_client(&e))?;
-    if deliveries.len() > 100 || deliveries.iter().any(|d| d.conversation_id != id) {
-        return Err(PublicError::internal());
+    let (binding, client) = bridge.plane(plane_id.as_deref())?;
+    async {
+        let deliveries = client
+            .connect()
+            .await
+            .map_err(|e| PublicError::from_client(&e))?
+            .git_deliveries(id)
+            .await
+            .map_err(|e| PublicError::from_client(&e))?;
+        bridge
+            .planes
+            .observe_success(binding.plane, GIT_DELIVERY_MINOR);
+        if deliveries.len() > 100 || deliveries.iter().any(|d| d.conversation_id != id) {
+            return Err(PublicError::internal());
+        }
+        Ok(deliveries.into_iter().map(delivery_view).collect())
     }
-    Ok(deliveries.into_iter().map(delivery_view).collect())
+    .await
+    .map_err(|error| bridge.settle(&binding, error))
 }
 
 #[tauri::command]
@@ -109,79 +124,90 @@ pub(crate) async fn prepare_delivery(
     bridge: State<'_, JetBridge>,
     conversation_id: String,
     operation: DeliveryOperation,
+    plane_id: Option<String>,
 ) -> Result<DeliveryReview, PublicError> {
     let id = parse_id(&conversation_id)?;
     let (operation_wire, checkpoint) = operation_wire(&operation)?;
-    let client = bridge
-        .client
-        .connect()
-        .await
-        .map_err(|e| PublicError::from_client(&e))?;
-    // The typed read checks protocol support before admitting any mutation.
-    client
-        .git_deliveries(id)
-        .await
-        .map_err(|e| PublicError::from_client(&e))?;
-    let snapshot = client
-        .conversation(id)
-        .await
-        .map_err(|e| PublicError::from_client(&e))?;
-    let working_tree = match snapshot
-        .conversation
-        .working_tree
-        .unwrap_or(WorkingTree::NoProject)
-    {
-        WorkingTree::NoProject => {
-            return Err(invalid(
-                "delivery.no_project",
-                "Choose a Conversation with a Project.",
-            ))
-        }
-        WorkingTree::Workspace { .. } => "Managed Workspace",
-        WorkingTree::LocalCheckout { .. } => "Local checkout",
-    };
-    let (checkpoint_files, content_complete) = if let Some(checkpoint) = checkpoint {
-        if !snapshot.runs.iter().any(|r| r.run_id == checkpoint.run_id) {
-            return Err(invalid(
-                "delivery.checkpoint_owner",
-                "Choose a checkpoint from this Conversation.",
-            ));
-        }
-        let diff = client
-            .change_diff(
-                checkpoint.run_id,
-                DiffScope::Turn {
-                    turn: checkpoint.turn,
-                },
-            )
+    let (binding, client) = bridge.plane(plane_id.as_deref())?;
+    async {
+        let client = client
+            .connect()
             .await
             .map_err(|e| PublicError::from_client(&e))?;
-        (Some(diff.total_files), Some(diff.after.content_complete))
-    } else {
-        (None, None)
-    };
-    let command = CommandRequest::DeliverGit {
-        conversation_id: id,
-        checkpoint,
-        operation: operation_wire,
-    };
-    let review_id = bridge.delivery.prepare(id, command)?;
-    Ok(DeliveryReview {
-        review_id: review_id.to_string(),
-        conversation_id,
-        working_tree,
-        operation,
-        checkpoint_files,
-        content_complete,
-    })
+        // The typed read checks protocol support before admitting any mutation.
+        client
+            .git_deliveries(id)
+            .await
+            .map_err(|e| PublicError::from_client(&e))?;
+        let snapshot = client
+            .conversation(id)
+            .await
+            .map_err(|e| PublicError::from_client(&e))?;
+        let working_tree = match snapshot
+            .conversation
+            .working_tree
+            .unwrap_or(WorkingTree::NoProject)
+        {
+            WorkingTree::NoProject => {
+                return Err(invalid(
+                    "delivery.no_project",
+                    "Choose a Conversation with a Project.",
+                ))
+            }
+            WorkingTree::Workspace { .. } => "Managed Workspace",
+            WorkingTree::LocalCheckout { .. } => "Local checkout",
+        };
+        let (checkpoint_files, content_complete) = if let Some(checkpoint) = checkpoint {
+            if !snapshot.runs.iter().any(|r| r.run_id == checkpoint.run_id) {
+                return Err(invalid(
+                    "delivery.checkpoint_owner",
+                    "Choose a checkpoint from this Conversation.",
+                ));
+            }
+            let diff = client
+                .change_diff(
+                    checkpoint.run_id,
+                    DiffScope::Turn {
+                        turn: checkpoint.turn,
+                    },
+                )
+                .await
+                .map_err(|e| PublicError::from_client(&e))?;
+            (Some(diff.total_files), Some(diff.after.content_complete))
+        } else {
+            (None, None)
+        };
+        let command = CommandRequest::DeliverGit {
+            conversation_id: id,
+            checkpoint,
+            operation: operation_wire,
+        };
+        let review_id = bridge.delivery.prepare(binding, id, command)?;
+        Ok(DeliveryReview {
+            review_id: review_id.to_string(),
+            plane_id: binding.plane.to_string(),
+            conversation_id,
+            working_tree,
+            operation,
+            checkpoint_files,
+            content_complete,
+        })
+    }
+    .await
+    .map_err(|error| bridge.settle(&binding, error))
 }
 
 impl DeliveryState {
-    fn prepare(&self, conversation_id: Uuid, command: CommandRequest) -> Result<Uuid, PublicError> {
+    fn prepare(
+        &self,
+        binding: PlaneBinding,
+        conversation_id: Uuid,
+        command: CommandRequest,
+    ) -> Result<Uuid, PublicError> {
         let mut reviews = self.reviews.lock().map_err(|_| PublicError::internal())?;
         if reviews
             .values()
-            .any(|r| r.conversation_id == conversation_id && r.attempted && r.result.is_none())
+            .any(|r| r.scope() == (binding.plane, conversation_id) && r.unresolved())
         {
             return Err(invalid(
                 "delivery.request_unresolved",
@@ -217,6 +243,7 @@ impl DeliveryState {
             id,
             Review {
                 order,
+                binding,
                 conversation_id,
                 command,
                 attempted: false,
@@ -226,9 +253,9 @@ impl DeliveryState {
         Ok(id)
     }
 
-    fn attempt(&self, id: Uuid) -> Result<(CommandRequest, Option<DeliveryReceipt>), PublicError> {
+    fn attempt(&self, id: Uuid) -> Result<Attempt, PublicError> {
         let mut reviews = self.reviews.lock().map_err(|_| PublicError::internal())?;
-        let conversation_id = reviews
+        let scope = reviews
             .get(&id)
             .ok_or_else(|| {
                 invalid(
@@ -236,12 +263,9 @@ impl DeliveryState {
                     "Review this operation again before sending it.",
                 )
             })?
-            .conversation_id;
+            .scope();
         if reviews.iter().any(|(other_id, review)| {
-            *other_id != id
-                && review.conversation_id == conversation_id
-                && review.attempted
-                && review.result.is_none()
+            *other_id != id && review.scope() == scope && review.unresolved()
         }) {
             return Err(invalid(
                 "delivery.request_unresolved",
@@ -250,7 +274,42 @@ impl DeliveryState {
         }
         let review = reviews.get_mut(&id).ok_or_else(PublicError::internal)?;
         review.attempted = true;
-        Ok((review.command.clone(), review.result.clone()))
+        Ok(Attempt {
+            binding: review.binding,
+            command: review.command.clone(),
+            known: review.result.clone(),
+        })
+    }
+}
+
+impl DeliveryState {
+    fn record(&self, id: Uuid, receipt: DeliveryReceipt) -> Result<(), PublicError> {
+        if let Some(review) = self
+            .reviews
+            .lock()
+            .map_err(|_| PublicError::internal())?
+            .get_mut(&id)
+        {
+            review.result = Some(receipt);
+        }
+        Ok(())
+    }
+}
+
+struct Attempt {
+    binding: PlaneBinding,
+    command: CommandRequest,
+    known: Option<DeliveryReceipt>,
+}
+
+impl Review {
+    /// One unresolved request is allowed per Conversation on each Plane.
+    fn scope(&self) -> (PlaneId, Uuid) {
+        (self.binding.plane, self.conversation_id)
+    }
+
+    fn unresolved(&self) -> bool {
+        self.attempted && self.result.is_none()
     }
 }
 
@@ -260,21 +319,46 @@ pub(crate) async fn execute_delivery(
     review_id: String,
 ) -> Result<DeliveryReceipt, PublicError> {
     let id = parse_id(&review_id)?;
-    let (command, known) = match bridge.delivery.attempt(id) {
+    let Attempt {
+        binding,
+        command,
+        known,
+    } = match bridge.delivery.attempt(id) {
         Ok(attempt) => attempt,
         Err(error) => return Ok(DeliveryReceipt::Refused { error }),
     };
     if let Some(known) = known {
         return Ok(known);
     }
+    // The reviewed request executes only on the Plane it was reviewed
+    // against. A forgotten or replaced Plane receives nothing.
+    let client = match bridge.bound(&binding) {
+        Ok(client) => client,
+        Err(error) => {
+            let receipt = DeliveryReceipt::Refused { error };
+            bridge.delivery.record(id, receipt.clone())?;
+            return Ok(receipt);
+        }
+    };
+    execute_reviewed(&bridge, id, binding, client, command)
+        .await
+        .map_err(|error| bridge.settle(&binding, error))
+}
+
+async fn execute_reviewed(
+    bridge: &JetBridge,
+    id: Uuid,
+    binding: PlaneBinding,
+    client: super::client::PlaneClient,
+    command: CommandRequest,
+) -> Result<DeliveryReceipt, PublicError> {
     let expected_acknowledgement =
         if let CommandRequest::AcknowledgeGitDelivery { delivery_id } = &command {
             Some(*delivery_id)
         } else {
             None
         };
-    let result = bridge
-        .client
+    let result = client
         .connect()
         .await
         .map_err(|e| PublicError::from_client(&e))?
@@ -298,35 +382,19 @@ pub(crate) async fn execute_delivery(
             let value = DeliveryReceipt::Accepted {
                 delivery_id: delivery_id.to_string(),
             };
-            if let Some(review) = bridge
-                .delivery
-                .reviews
-                .lock()
-                .map_err(|_| PublicError::internal())?
-                .get_mut(&id)
-            {
-                review.result = Some(value.clone());
-            }
+            bridge.delivery.record(id, value.clone())?;
             Ok(value)
         }
         Ok(_) => Err(PublicError::internal()),
         Err(error) => {
-            let public = PublicError::from_client(&error);
+            let public = bridge.settle(&binding, PublicError::from_client(&error));
             // A definite daemon rejection ends admission. Transport/decoding
             // errors remain uncertain and must reuse this exact request.
             if matches!(error, jet_client::ClientError::Remote(_))
                 && public.category != "outcome_unknown"
             {
                 let receipt = DeliveryReceipt::Refused { error: public };
-                if let Some(review) = bridge
-                    .delivery
-                    .reviews
-                    .lock()
-                    .map_err(|_| PublicError::internal())?
-                    .get_mut(&id)
-                {
-                    review.result = Some(receipt.clone());
-                }
+                bridge.delivery.record(id, receipt.clone())?;
                 return Ok(receipt);
             }
             Err(public)
@@ -339,36 +407,42 @@ pub(crate) async fn prepare_delivery_acknowledgement(
     bridge: State<'_, JetBridge>,
     conversation_id: String,
     delivery_id: String,
+    plane_id: Option<String>,
 ) -> Result<String, PublicError> {
     let conversation_id = parse_id(&conversation_id)?;
     let delivery_id = parse_id(&delivery_id)?;
-    let client = bridge
-        .client
-        .connect()
-        .await
-        .map_err(|e| PublicError::from_client(&e))?;
-    let rows = client
-        .git_deliveries(conversation_id)
-        .await
-        .map_err(|e| PublicError::from_client(&e))?;
-    if !rows.iter().any(|d| {
-        d.delivery_id == delivery_id
-            && d.conversation_id == conversation_id
-            && d.acknowledged_by.is_none()
-            && matches!(d.outcome, GitDeliveryOutcome::OutcomeUnknown)
-    }) {
-        return Err(invalid(
-            "delivery.acknowledgement_invalid",
-            "Refresh delivery history and inspect the uncertain operation first.",
-        ));
+    let (binding, client) = bridge.plane(plane_id.as_deref())?;
+    async {
+        let client = client
+            .connect()
+            .await
+            .map_err(|e| PublicError::from_client(&e))?;
+        let rows = client
+            .git_deliveries(conversation_id)
+            .await
+            .map_err(|e| PublicError::from_client(&e))?;
+        if !rows.iter().any(|d| {
+            d.delivery_id == delivery_id
+                && d.conversation_id == conversation_id
+                && d.acknowledged_by.is_none()
+                && matches!(d.outcome, GitDeliveryOutcome::OutcomeUnknown)
+        }) {
+            return Err(invalid(
+                "delivery.acknowledgement_invalid",
+                "Refresh delivery history and inspect the uncertain operation first.",
+            ));
+        }
+        bridge
+            .delivery
+            .prepare(
+                binding,
+                conversation_id,
+                CommandRequest::AcknowledgeGitDelivery { delivery_id },
+            )
+            .map(|id| id.to_string())
     }
-    bridge
-        .delivery
-        .prepare(
-            conversation_id,
-            CommandRequest::AcknowledgeGitDelivery { delivery_id },
-        )
-        .map(|id| id.to_string())
+    .await
+    .map_err(|error| bridge.settle(&binding, error))
 }
 
 fn operation_wire(
@@ -521,6 +595,13 @@ fn safe_pr_url(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn local() -> PlaneBinding {
+        PlaneBinding {
+            plane: PlaneId::Local,
+            identity: None,
+        }
+    }
     #[test]
     fn retries_keep_the_exact_request_and_block_replacement() {
         let state = DeliveryState::default();
@@ -532,14 +613,16 @@ mod tests {
                 remote: "origin".into(),
             },
         };
-        let id = state.prepare(conversation_id, command.clone()).unwrap();
-        let (retried, known) = state.attempt(id).unwrap();
-        assert_eq!(retried, command);
-        assert!(known.is_none());
-        let (retried, known) = state.attempt(id).unwrap();
-        assert_eq!(retried, command);
-        assert!(known.is_none());
-        assert!(state.prepare(conversation_id, command).is_err());
+        let id = state
+            .prepare(local(), conversation_id, command.clone())
+            .unwrap();
+        let attempt = state.attempt(id).unwrap();
+        assert_eq!(attempt.command, command);
+        assert!(attempt.known.is_none());
+        let attempt = state.attempt(id).unwrap();
+        assert_eq!(attempt.command, command);
+        assert!(attempt.known.is_none());
+        assert!(state.prepare(local(), conversation_id, command).is_err());
     }
     #[test]
     fn overlapping_reviews_stay_valid_but_cannot_bypass_uncertainty() {
@@ -552,11 +635,15 @@ mod tests {
                 remote: "origin".into(),
             },
         };
-        let first = state.prepare(conversation_id, command.clone()).unwrap();
-        let second = state.prepare(conversation_id, command.clone()).unwrap();
-        assert_eq!(state.attempt(second).unwrap().0, command);
+        let first = state
+            .prepare(local(), conversation_id, command.clone())
+            .unwrap();
+        let second = state
+            .prepare(local(), conversation_id, command.clone())
+            .unwrap();
+        assert_eq!(state.attempt(second).unwrap().command, command);
         assert!(state.attempt(first).is_err());
-        assert_eq!(state.attempt(second).unwrap().0, command);
+        assert_eq!(state.attempt(second).unwrap().command, command);
     }
 
     #[test]
@@ -568,9 +655,13 @@ mod tests {
             checkpoint: None,
             operation: GitOperation::Commit,
         };
-        let unresolved = state.prepare(conversation_id, command.clone()).unwrap();
+        let unresolved = state
+            .prepare(local(), conversation_id, command.clone())
+            .unwrap();
         state.attempt(unresolved).unwrap();
-        let completed = state.prepare(Uuid::new_v4(), command.clone()).unwrap();
+        let completed = state
+            .prepare(local(), Uuid::new_v4(), command.clone())
+            .unwrap();
         state.attempt(completed).unwrap();
         state
             .reviews
@@ -582,15 +673,41 @@ mod tests {
             delivery_id: "accepted-before-ipc-loss".into(),
         });
         let other = Uuid::new_v4();
-        let oldest = state.prepare(other, command.clone()).unwrap();
+        let oldest = state.prepare(local(), other, command.clone()).unwrap();
         for _ in 0..300 {
-            state.prepare(other, command.clone()).unwrap();
+            state.prepare(local(), other, command.clone()).unwrap();
         }
         assert!(state.attempt(oldest).is_err());
-        assert_eq!(state.attempt(unresolved).unwrap().0, command);
-        assert!(matches!(state.attempt(completed).unwrap().1,
+        assert_eq!(state.attempt(unresolved).unwrap().command, command);
+        assert!(matches!(state.attempt(completed).unwrap().known,
             Some(DeliveryReceipt::Accepted { delivery_id }) if delivery_id == "accepted-before-ipc-loss"));
         assert_eq!(state.reviews.lock().unwrap().len(), 256);
+    }
+
+    #[test]
+    fn reviews_keep_their_plane_and_scope_uncertainty_per_plane() {
+        let state = DeliveryState::default();
+        let conversation_id = Uuid::new_v4();
+        let remote = PlaneBinding {
+            plane: PlaneId::Remote(Uuid::from_u128(2)),
+            identity: Some(Uuid::from_u128(20)),
+        };
+        let command = CommandRequest::DeliverGit {
+            conversation_id,
+            checkpoint: None,
+            operation: GitOperation::Commit,
+        };
+        let on_local = state
+            .prepare(local(), conversation_id, command.clone())
+            .unwrap();
+        assert_eq!(state.attempt(on_local).unwrap().binding, local());
+        // The same Conversation UUID on another Plane is another scope.
+        let on_remote = state
+            .prepare(remote, conversation_id, command.clone())
+            .unwrap();
+        let attempt = state.attempt(on_remote).unwrap();
+        assert_eq!(attempt.binding, remote);
+        assert!(state.prepare(remote, conversation_id, command).is_err());
     }
 
     #[test]

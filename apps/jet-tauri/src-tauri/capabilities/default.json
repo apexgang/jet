@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-plane-setup",
-  "description": "Plane status and preview-gated local setup operations for the main window",
+  "description": "Plane status, pairing, and preview-gated local setup operations for the main window",
   "windows": [
     "main"
   ],
@@ -11,6 +11,9 @@
   ],
   "permissions": [
     "allow-open-plane-feed",
+    "allow-close-plane-feed",
+    "allow-list-planes",
+    "allow-load-plane-detail",
     "allow-load-setup",
     "allow-preview-project",
     "allow-register-project",

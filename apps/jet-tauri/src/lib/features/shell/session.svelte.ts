@@ -4,6 +4,7 @@ import {
   authorizeApprovalRetry,
   bindHarnessAccount,
   attachWorkspaceTerminal,
+  closePlaneFeed,
   closeWorkspaceTerminal,
   createConversation,
   detachWorkspaceTerminal,
@@ -49,6 +50,13 @@ import {
   type TurnQueueItem,
   type WorkPanelSnapshot,
 } from "$lib/jet/bridge";
+import {
+  LOCAL_PLANE,
+  listPlanes,
+  planeLabel,
+  type PlaneId,
+  type PlanesSnapshot,
+} from "$lib/jet/planes";
 import { TerminalTranscriptDecoder } from "$lib/jet/terminal-text";
 import { shouldLoadNextWorkPage } from "$lib/jet/work-continuity";
 import {
@@ -108,6 +116,10 @@ export class DesktopSession {
   setupBusy = $state<string | null>(null);
   setupNotice = $state<string | null>(null);
   remotePairingSkipped = $state(false);
+  /** Native Plane registry snapshot. Plane labels come only from here. */
+  planes = $state<PlanesSnapshot | null>(null);
+  /** The Plane of the selected Conversation; every scoped call passes it. */
+  selectedPlaneId = $state<PlaneId>(LOCAL_PLANE);
   conversations = $state<ConversationRow[]>([]);
   conversationCursor = $state("0");
   nextConversationPage = $state<string | null>(null);
@@ -153,6 +165,8 @@ export class DesktopSession {
   private patchDecoder: TextDecoder | null = null;
   private terminalDecoders = new Map<string, TerminalTranscriptDecoder>();
   private lastTerminalSize: { terminalId: string; rows: number; columns: number } | null = null;
+  /** One feed per Plane: callbacks from an older feed of a Plane are ignored. */
+  private feeds = new Map<PlaneId, { generation: number; feedId: string | null }>();
   private feedGeneration = 0;
 
   get canSubmitDraft(): boolean {
@@ -200,6 +214,25 @@ export class DesktopSession {
     }
   }
 
+  /** Live label of this computer's Plane, never fixture text. */
+  get localPlaneLabel(): string {
+    return planeLabel(this.planes, LOCAL_PLANE);
+  }
+
+  /**
+   * "Runs on": the owning Plane of the selected Conversation. New tasks run
+   * on this computer in Wave 3.1.
+   */
+  get runsOnLabel(): string {
+    return this.selectedConversationId
+      ? planeLabel(this.planes, this.selectedPlaneId)
+      : this.localPlaneLabel;
+  }
+
+  isSelected(planeId: PlaneId, conversationId: string): boolean {
+    return this.selectedConversationId === conversationId && this.selectedPlaneId === planeId;
+  }
+
   get setupSnapshot(): SetupSnapshot | null {
     return this.setup.kind === "ready" ? this.setup.snapshot : null;
   }
@@ -238,7 +271,9 @@ export class DesktopSession {
   }
 
   get selectedConversation(): ConversationRow | null {
-    return this.conversations.find((item) => item.id === this.selectedConversationId) ?? null;
+    return (
+      this.conversations.find((item) => this.isSelected(item.planeId, item.id)) ?? null
+    );
   }
 
   get selectedConversationTitle(): string {
@@ -274,25 +309,55 @@ export class DesktopSession {
   }
 
   private async connectConversationFeed(): Promise<void> {
+    await this.refreshPlanes();
     await this.refreshConversations(true);
-    await this.restartConversationFeed(this.conversationCursor);
+    await this.restartPlaneFeed(LOCAL_PLANE, this.conversationCursor);
   }
 
-  private async restartConversationFeed(after: string): Promise<void> {
+  /** Reads the native registry snapshot. It never connects to a Plane. */
+  async refreshPlanes(): Promise<void> {
+    try {
+      this.planes = await listPlanes();
+    } catch (error: unknown) {
+      this.failure = publicError(error);
+    }
+  }
+
+  /** Stops every Plane feed natively, for example when the window closes. */
+  disconnect(): void {
+    for (const [planeId, feed] of this.feeds) {
+      this.feeds.set(planeId, { generation: ++this.feedGeneration, feedId: null });
+      if (feed.feedId) void closePlaneFeed(feed.feedId).catch(() => undefined);
+    }
+  }
+
+  /**
+   * (Re)opens one Plane's feed. Natively this replaces that Plane's previous
+   * feed task; here, callbacks from the replaced feed are ignored.
+   */
+  private async restartPlaneFeed(planeId: PlaneId, after: string | null): Promise<void> {
     const generation = ++this.feedGeneration;
+    this.feeds.set(planeId, { generation, feedId: null });
+    const current = () => this.feeds.get(planeId)?.generation === generation;
     await openPlaneFeed(
       (update) => {
-        if (generation === this.feedGeneration) this.receive(update);
+        if (current()) this.receive(update, planeId);
       },
       after,
+      planeId,
     )
       .then((snapshot) => {
-        if (generation !== this.feedGeneration) return;
+        if (!current()) {
+          void closePlaneFeed(snapshot.feedId).catch(() => undefined);
+          return;
+        }
+        this.feeds.set(planeId, { generation, feedId: snapshot.feedId });
+        if (planeId !== LOCAL_PLANE) return;
         this.connection = snapshot.state === "online" ? snapshot : null;
         this.connectionState = snapshot.state;
       })
       .catch((error: unknown) => {
-        if (generation !== this.feedGeneration) return;
+        if (!current() || planeId !== LOCAL_PLANE) return;
         const failure = publicError(error);
         this.failure = failure;
         this.connectionState = failure.retryable ? "reconnecting" : "failed";
@@ -438,38 +503,60 @@ export class DesktopSession {
     const request = ++this.conversationRequest;
     if (this.conversations.length === 0) this.conversationFreshness = "loading";
     try {
-      const previousSelection = this.selectedConversationId;
-      const page = await loadConversations();
+      const previousSelection = this.selectedConversationId
+        ? { planeId: this.selectedPlaneId, conversationId: this.selectedConversationId }
+        : null;
+      // Recent lists this computer's tasks until the multi-Plane catalog lands.
+      const page = await loadConversations(null, LOCAL_PLANE);
       if (request !== this.conversationRequest) return;
       this.conversations = page.conversations;
       this.conversationCursor = page.cursor;
       this.nextConversationPage = page.nextPage;
       this.conversationFreshness = "live";
-      const restored = restoreSelection ? page.restoredId : previousSelection;
+      const restored = restoreSelection
+        ? this.planes?.restoredSelection ?? null
+        : previousSelection;
+      const listed = (candidate: { planeId: PlaneId; conversationId: string } | null) =>
+        candidate !== null &&
+        page.conversations.some(
+          (item) => item.planeId === candidate.planeId && item.id === candidate.conversationId,
+        );
       let restoredDetail: ConversationDetail | null = null;
-      if (restored && !this.conversations.some((item) => item.id === restored)) {
+      if (restored && !listed(restored)) {
         try {
-          restoredDetail = await loadConversation(restored);
+          restoredDetail = await loadConversation(restored.conversationId, restored.planeId);
           this.conversations = [...this.conversations, restoredDetail.conversation];
         } catch {
           restoredDetail = null;
         }
         if (request !== this.conversationRequest) return;
       }
-      const selected = page.conversations.some((item) => item.id === restored)
+      const selected: { planeId: PlaneId; conversationId: string } | null = listed(restored)
         ? restored
-        : restoredDetail?.conversation.id ?? page.conversations[0]?.id ?? null;
+        : restoredDetail
+          ? {
+              planeId: restoredDetail.conversation.planeId,
+              conversationId: restoredDetail.conversation.id,
+            }
+          : page.conversations[0]
+            ? { planeId: page.conversations[0].planeId, conversationId: page.conversations[0].id }
+            : null;
       if (selected) {
-        if (restoredDetail?.conversation.id === selected) {
-          if (this.selectedConversationId !== selected) this.timeline = [];
-          this.selectedConversationId = selected;
+        if (
+          restoredDetail &&
+          restoredDetail.conversation.id === selected.conversationId &&
+          restoredDetail.conversation.planeId === selected.planeId
+        ) {
+          if (!this.isSelected(selected.planeId, selected.conversationId)) this.timeline = [];
+          this.selectedConversationId = selected.conversationId;
+          this.selectedPlaneId = selected.planeId;
           this.conversationDetail = restoredDetail;
           await this.refreshSupervision(
-            selected,
+            selected.conversationId,
             restoredDetail.runs.at(-1)?.id ?? null,
           );
         } else {
-          await this.openConversation(selected, false);
+          await this.openConversation(selected.conversationId, false, selected.planeId);
         }
       } else {
         this.selectedConversationId = null;
@@ -489,11 +576,11 @@ export class DesktopSession {
     this.conversationBusy = true;
     const pageCursor = this.nextConversationPage;
     try {
-      const page = await loadConversations(pageCursor);
-      const known = new Set(this.conversations.map((item) => item.id));
+      const page = await loadConversations(pageCursor, LOCAL_PLANE);
+      const known = new Set(this.conversations.map((item) => `${item.planeId}:${item.id}`));
       this.conversations = [
         ...this.conversations,
-        ...page.conversations.filter((item) => !known.has(item.id)),
+        ...page.conversations.filter((item) => !known.has(`${item.planeId}:${item.id}`)),
       ];
       this.nextConversationPage = page.nextPage;
       this.conversationFreshness = "live";
@@ -519,7 +606,7 @@ export class DesktopSession {
     }
     this.searchBusy = true;
     try {
-      const result = await searchConversations(text);
+      const result = await searchConversations(text, LOCAL_PLANE);
       if (request === this.searchRequest) this.searchResult = result;
     } catch (error: unknown) {
       if (request === this.searchRequest) this.actionNotice = publicError(error).message;
@@ -528,8 +615,12 @@ export class DesktopSession {
     }
   }
 
-  async openConversation(conversationId: string, show = true): Promise<void> {
-    if (this.selectedConversationId !== conversationId) {
+  async openConversation(
+    conversationId: string,
+    show = true,
+    planeId: PlaneId = LOCAL_PLANE,
+  ): Promise<void> {
+    if (!this.isSelected(planeId, conversationId)) {
       this.detachCurrentTerminal();
       this.timeline = [];
       this.conversationDetail = null;
@@ -537,6 +628,7 @@ export class DesktopSession {
       this.resetWorkPanel();
     }
     this.selectedConversationId = conversationId;
+    this.selectedPlaneId = planeId;
     if (show) {
       this.sidebarSelection = "conversation";
       this.workPanelPresented = true;
@@ -544,20 +636,21 @@ export class DesktopSession {
     await this.loadSelectedConversation(true);
   }
 
-  async openSearchHit(conversationId: string): Promise<void> {
-    if (!this.conversations.some((item) => item.id === conversationId)) {
+  async openSearchHit(conversationId: string, planeId: PlaneId = LOCAL_PLANE): Promise<void> {
+    if (!this.conversations.some((item) => item.planeId === planeId && item.id === conversationId)) {
       await this.refreshConversations();
     }
-    await this.openConversation(conversationId);
+    await this.openConversation(conversationId, true, planeId);
   }
 
   private async loadSelectedConversation(showLoading: boolean): Promise<void> {
     const id = this.selectedConversationId;
+    const planeId = this.selectedPlaneId;
     if (!id) return;
     if (showLoading) this.conversationBusy = true;
     try {
-      const detail = await loadConversation(id);
-      if (this.selectedConversationId !== id) return;
+      const detail = await loadConversation(id, planeId);
+      if (!this.isSelected(planeId, id)) return;
       this.conversationDetail = detail;
       this.conversationFreshness = "live";
       this.mergeConversation(detail.conversation);
@@ -576,7 +669,9 @@ export class DesktopSession {
   }
 
   private mergeConversation(conversation: ConversationRow): void {
-    const index = this.conversations.findIndex((item) => item.id === conversation.id);
+    const index = this.conversations.findIndex(
+      (item) => item.planeId === conversation.planeId && item.id === conversation.id,
+    );
     if (index === -1) {
       this.conversations = [conversation, ...this.conversations];
     } else {
@@ -589,15 +684,16 @@ export class DesktopSession {
     conversationId: string,
     runId: string | null,
   ): Promise<void> {
+    const planeId = this.selectedPlaneId;
     this.supervisionBusy = true;
     try {
-      const supervision = await loadRunSupervision(conversationId, runId);
-      if (this.selectedConversationId !== conversationId) return;
+      const supervision = await loadRunSupervision(conversationId, runId, planeId);
+      if (!this.isSelected(planeId, conversationId)) return;
       this.supervision = supervision;
       const selectedRunId = supervision.execution?.run.id ?? runId;
       if (selectedRunId) await this.refreshWorkPanel(conversationId, selectedRunId);
     } catch (error: unknown) {
-      if (this.selectedConversationId !== conversationId) return;
+      if (!this.isSelected(planeId, conversationId)) return;
       this.actionNotice = publicError(error).message;
     } finally {
       this.supervisionBusy = false;
@@ -611,6 +707,7 @@ export class DesktopSession {
     switch (destination) {
       case "new-task":
         this.selectedConversationId = null;
+        this.selectedPlaneId = LOCAL_PLANE;
         this.conversationDetail = null;
         this.timeline = [];
         this.supervision = null;
@@ -664,6 +761,8 @@ export class DesktopSession {
     try {
       let conversationId = this.selectedConversationId;
       if (!conversationId) {
+        // New tasks run on this computer in Wave 3.1.
+        this.selectedPlaneId = LOCAL_PLANE;
         if (!this.selectedProjectId) {
           this.actionNotice = "Choose a Project before starting a task.";
           return;
@@ -674,13 +773,14 @@ export class DesktopSession {
         this.selectedConversationId = conversation.id;
         this.sidebarSelection = "conversation";
         this.workPanelPresented = true;
-        this.conversationDetail = await loadConversation(conversation.id);
+        this.conversationDetail = await loadConversation(conversation.id, conversation.planeId);
       }
 
+      const planeId = this.selectedPlaneId;
       if (this.hasLiveRun) {
-        await submitTurn(conversationId, prompt);
+        await submitTurn(conversationId, prompt, planeId);
       } else {
-        await startRun(conversationId, craft, prompt);
+        await startRun(conversationId, craft, prompt, planeId);
       }
       this.draft = "";
       this.actionNotice = "Sent to the Plane.";
@@ -699,7 +799,7 @@ export class DesktopSession {
     this.controlBusy = `withdraw-${turn.id}`;
     this.actionNotice = null;
     try {
-      await withdrawTurn(conversationId, turn.id);
+      await withdrawTurn(conversationId, turn.id, this.selectedPlaneId);
       this.actionNotice = "The queued Turn was withdrawn.";
       await this.refreshSupervision(conversationId, this.selectedRun?.id ?? null);
     } catch (error: unknown) {
@@ -727,8 +827,11 @@ export class DesktopSession {
     this.controlBusy = control;
     this.actionNotice = null;
     try {
+      const planeId = this.selectedPlaneId;
       const accepted =
-        control === "interrupt_turn" ? await interruptTurn(runId) : await stopRun(runId);
+        control === "interrupt_turn"
+          ? await interruptTurn(runId, planeId)
+          : await stopRun(runId, planeId);
       this.actionNotice = accepted.message;
       const conversationId = this.selectedConversationId;
       if (conversationId) await this.refreshSupervision(conversationId, runId);
@@ -751,7 +854,11 @@ export class DesktopSession {
     this.controlBusy = `approval-${approval.reviewId}`;
     this.actionNotice = null;
     try {
-      const accepted = await authorizeApprovalRetry(approval.runId, approval.reviewId);
+      const accepted = await authorizeApprovalRetry(
+        approval.runId,
+        approval.reviewId,
+        this.selectedPlaneId,
+      );
       this.actionNotice = accepted.message;
       this.timeline = this.timeline.map((entry) =>
         entry.approval?.reviewId === approval.reviewId
@@ -836,6 +943,7 @@ export class DesktopSession {
       return;
     }
     const request = ++this.workRequest;
+    const planeId = this.selectedPlaneId;
     this.workPanelBusy = true;
     this.workPanelError = null;
     this.workPanelNotice = null;
@@ -855,7 +963,7 @@ export class DesktopSession {
         : "current";
     }
     try {
-      const snapshot = await loadWorkPanel(conversationId, runId, this.workCheckpoint);
+      const snapshot = await loadWorkPanel(conversationId, runId, this.workCheckpoint, planeId);
       while (shouldLoadNextWorkPage(
         new Set(snapshot.files.map((file) => file.id)),
         targetFileCount,
@@ -869,7 +977,7 @@ export class DesktopSession {
       }
       if (
         request !== this.workRequest ||
-        this.selectedConversationId !== conversationId ||
+        !this.isSelected(planeId, conversationId) ||
         this.selectedRun?.id !== runId
       ) {
         return;
@@ -906,17 +1014,28 @@ export class DesktopSession {
     }
   }
 
-  async applyWorkRecovery(action: PublicRecoveryAction): Promise<void> {
+  /**
+   * Applies a recovery action to the Plane whose command failed (`planeId`
+   * from the error; a missing value means this computer). Selection-scoped
+   * actions do nothing when the selection is on another Plane.
+   */
+  async applyWorkRecovery(
+    action: PublicRecoveryAction,
+    planeId: PlaneId | null = null,
+  ): Promise<void> {
+    const plane = planeId ?? LOCAL_PLANE;
     this.workPanelNoticeError = null;
     switch (action.type) {
       case "refresh_file":
-        if (this.selectedWorkFileId) await this.selectWorkFile(this.selectedWorkFileId);
+        if (plane === this.selectedPlaneId && this.selectedWorkFileId) {
+          await this.selectWorkFile(this.selectedWorkFileId);
+        }
         return;
       case "refresh_conversation":
-        await this.loadSelectedConversation(false);
+        if (plane === this.selectedPlaneId) await this.loadSelectedConversation(false);
         return;
       case "refresh_run":
-        if (this.selectedConversationId) {
+        if (plane === this.selectedPlaneId && this.selectedConversationId) {
           await this.refreshSupervision(
             this.selectedConversationId,
             this.selectedRun?.id ?? null,
@@ -924,7 +1043,7 @@ export class DesktopSession {
         }
         return;
       case "resume_events":
-        await this.restartConversationFeed(action.after);
+        await this.restartPlaneFeed(plane, action.after);
         this.workPanelNotice = "Activity reconnected from the requested checkpoint.";
         return;
     }
@@ -1062,6 +1181,7 @@ export class DesktopSession {
         conversationId,
         this.terminalRows,
         this.terminalColumns,
+        this.selectedPlaneId,
       );
       if (this.workPanel) {
         this.workPanel.terminals = [
@@ -1295,49 +1415,66 @@ export class DesktopSession {
     this.scenario = fixtureForState(state);
   }
 
-  private receive(update: PlaneUpdate): void {
+  /**
+   * Handles one Plane's feed. Sequences and Conversation IDs are Plane-local,
+   * so the timeline only takes events from the selected Conversation's Plane.
+   * The connection summary and Recent follow this computer's feed until the
+   * multi-Plane catalog lands.
+   */
+  private receive(update: PlaneUpdate, planeId: PlaneId): void {
+    const local = planeId === LOCAL_PLANE;
+    const selectedPlane = planeId === this.selectedPlaneId;
     switch (update.type) {
       case "connected":
+        if (!local) break;
         this.connection = update.connection;
         this.connectionState = "online";
         this.failure = null;
         break;
       case "resumed":
+        if (!local) break;
         this.connectionState = "online";
         this.failure = null;
         void this.refreshConversations();
         break;
       case "event":
-        this.connectionState = "online";
-        this.failure = null;
-        if (update.conversation_id === this.selectedConversationId) {
+        if (local) {
+          this.connectionState = "online";
+          this.failure = null;
+        }
+        if (update.conversation_id !== null && this.isSelected(planeId, update.conversation_id)) {
           this.receiveTimeline(update);
           this.scheduleDetailRefresh();
         }
         if (
-          update.kind === "conversation.created" ||
-          update.kind === "conversation.name_changed" ||
-          update.kind === "conversation.trashed"
+          local &&
+          (update.kind === "conversation.created" ||
+            update.kind === "conversation.name_changed" ||
+            update.kind === "conversation.trashed")
         ) {
           void this.refreshConversations();
         }
         break;
       case "reconnecting":
-        this.connectionState = "reconnecting";
-        this.failure = update.error;
-        if (this.conversationDetail) this.conversationFreshness = "cached";
+        if (local) {
+          this.connectionState = "reconnecting";
+          this.failure = update.error;
+        }
+        if (selectedPlane && this.conversationDetail) this.conversationFreshness = "cached";
         break;
       case "failed":
         if (
           update.error.restart?.reason === "cursor_expired" ||
           update.error.restart?.reason === "cursor_ahead"
         ) {
-          void this.recoverSnapshot();
+          void this.recoverSnapshot(planeId);
           break;
         }
-        this.connectionState = "failed";
-        this.failure = update.error;
-        if (this.conversationDetail) this.conversationFreshness = "cached";
+        if (local) {
+          this.connectionState = "failed";
+          this.failure = update.error;
+        }
+        if (selectedPlane && this.conversationDetail) this.conversationFreshness = "cached";
         break;
     }
   }
@@ -1401,12 +1538,17 @@ export class DesktopSession {
     }, 200);
   }
 
-  private async recoverSnapshot(): Promise<void> {
-    this.timeline = [];
+  private async recoverSnapshot(planeId: PlaneId): Promise<void> {
+    if (planeId === this.selectedPlaneId) this.timeline = [];
     this.actionNotice = "The activity cursor expired. Jet refreshed the full Conversation snapshot.";
     await this.refreshConversations();
     try {
-      await this.restartConversationFeed(this.conversationCursor);
+      // Only this computer's list cursor is known here; another Plane's feed
+      // restarts at its own current cursor.
+      await this.restartPlaneFeed(
+        planeId,
+        planeId === LOCAL_PLANE ? this.conversationCursor : null,
+      );
     } catch (error: unknown) {
       const failure = publicError(error);
       this.failure = failure;

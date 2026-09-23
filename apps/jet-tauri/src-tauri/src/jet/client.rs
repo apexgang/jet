@@ -39,6 +39,11 @@ impl PlaneClient {
         self.client_id
     }
 
+    #[cfg(test)]
+    pub(crate) fn socket_for_test(&self) -> &str {
+        self.socket.to_str().unwrap_or_default()
+    }
+
     pub(crate) async fn status(&self) -> Result<PlaneStatus, Box<ClientError>> {
         let mut attempt = 0;
         loop {

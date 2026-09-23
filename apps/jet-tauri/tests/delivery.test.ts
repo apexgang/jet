@@ -4,7 +4,7 @@ import { DeliverySession } from "../src/lib/features/delivery/session.svelte";
 import { deliverySummary } from "../src/lib/features/delivery/model";
 import type { Delivery, DeliveryReview } from "../src/lib/jet/delivery";
 
-const review: DeliveryReview = { reviewId: "native-review", conversationId: "a", workingTree: "Managed Workspace", operation: { kind: "push", remote: "origin" }, checkpointFiles: null, contentComplete: null };
+const review: DeliveryReview = { reviewId: "native-review", planeId: "local", conversationId: "a", workingTree: "Managed Workspace", operation: { kind: "push", remote: "origin" }, checkpointFiles: null, contentComplete: null };
 const failure = { category: "offline", code: "transport.offline", message: "Offline", retryable: true };
 const row: Delivery = { id: "d", operation: "push", destination: "origin", checkpoint: null, status: "completed", head: "abcdef", branch: "feature/a", pullRequest: null, code: null, acknowledged: false, title: null };
 
@@ -19,7 +19,7 @@ describe("delivery boundary and state", () => {
     const sent: unknown[] = [];
     ipc((command, args) => {
       if (command === "load_deliveries") return [];
-      if (command === "prepare_delivery") { expect(args).toEqual({ conversationId: "a", operation: { kind: "push", remote: "origin" } }); return review; }
+      if (command === "prepare_delivery") { expect(args).toEqual({ conversationId: "a", operation: { kind: "push", remote: "origin" }, planeId: "local" }); return review; }
       if (command === "execute_delivery") {
         sent.push(args);
         if (sent.length === 1) throw failure;
@@ -96,6 +96,27 @@ describe("delivery boundary and state", () => {
     await session.confirm();
     expect(session.review).toEqual({ kind: "acknowledged", deliveryId: "d" });
     expect(calls).not.toContain("prepare_delivery");
+  });
+
+  it("keeps a reviewed request per Plane, so the same Conversation UUID on another Plane is another scope", async () => {
+    const remote = "0000000a-0000-4000-8000-000000000002";
+    const prepared: unknown[] = [];
+    ipc((command, args) => {
+      if (command === "load_deliveries") return [];
+      if (command === "prepare_delivery") { prepared.push(args); return { ...review, planeId: (args as { planeId: string }).planeId }; }
+      if (command === "execute_delivery") throw failure;
+      throw new Error(command);
+    });
+    const session = new DeliverySession();
+    session.select("a", remote); await session.refresh();
+    await session.prepare({ kind: "push", remote: "origin" });
+    await session.confirm();
+    expect(session.review?.kind).toBe("uncertain");
+    session.select("a", "local");
+    expect(session.review).toBe(null);
+    session.select("a", remote);
+    expect(session.review?.kind).toBe("uncertain");
+    expect(prepared).toEqual([{ conversationId: "a", operation: { kind: "push", remote: "origin" }, planeId: remote }]);
   });
 
   it("preserves partial success and gives uncertainty precedence", () => {

@@ -19,6 +19,8 @@ describe("setup error normalization", () => {
       recoveryActions: [],
       restart: null,
       revisionConflict: null,
+      protocolLimit: null,
+      planeId: null,
     });
   });
 
@@ -44,6 +46,8 @@ describe("setup error normalization", () => {
       recoveryActions: [],
       restart: null,
       revisionConflict: null,
+      protocolLimit: null,
+      planeId: null,
     });
   });
 });

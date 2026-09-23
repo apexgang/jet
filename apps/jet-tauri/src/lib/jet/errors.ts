@@ -20,7 +20,28 @@ export function publicError(error: unknown): PublicError {
       candidate.revisionConflict && typeof candidate.revisionConflict === "object"
         ? candidate.revisionConflict
         : null,
+    protocolLimit: protocolLimit(candidate.protocolLimit),
+    planeId: planeId(candidate.planeId),
   };
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Only "local" or a canonical native UUID names a Plane. */
+function planeId(value: unknown): string | null {
+  return typeof value === "string" && (value === "local" || UUID.test(value)) ? value : null;
+}
+
+function protocolLimit(value: unknown): PublicError["protocolLimit"] {
+  if (!value || typeof value !== "object") return null;
+  const { requiredMinor, negotiatedMinor } = value as Record<string, unknown>;
+  return isMinor(requiredMinor) && isMinor(negotiatedMinor)
+    ? { requiredMinor, negotiatedMinor }
+    : null;
+}
+
+function isMinor(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 function isPublicRecoveryAction(value: unknown): value is PublicRecoveryAction {
