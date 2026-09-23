@@ -6,11 +6,12 @@ import ColumnResizer from "../src/lib/features/shell/ColumnResizer.svelte";
 
 afterEach(() => cleanup());
 
-function separator(edge: "start" | "end", value = 244, onchange = vi.fn()) {
+function separator(edge: "start" | "end", value = 244, onchange = vi.fn(), requested?: number) {
   const range = edge === "start" ? { min: 210, ideal: 244, max: 300 } : { min: 280, ideal: 340, max: 440 };
   const { container, rerender } = render(ColumnResizer, {
     label: edge === "start" ? "Resize sidebar" : "Resize work panel",
     value,
+    ...(requested === undefined ? {} : { requested }),
     edge,
     onchange,
     ...range,
@@ -79,6 +80,42 @@ describe("ColumnResizer", () => {
     expect(tab).toBe(true);
     expect(ctrl).toBe(true);
     expect(onchange).not.toHaveBeenCalled();
+  });
+
+  it("a narrowed column never lowers the requested width without narrowing on screen", async () => {
+    // Requested 440, narrowed to 381 so the conversation keeps its minimum.
+    const { element, onchange } = separator("end", 381, vi.fn(), 440);
+    expect(element.getAttribute("aria-valuenow")).toBe("381");
+    await fireEvent.keyDown(element, { key: "ArrowLeft" });
+    await fireEvent.keyDown(element, { key: "ArrowLeft", shiftKey: true });
+    await fireEvent.keyDown(element, { key: "End" });
+    // A click without movement leaves the preference alone too.
+    await fireEvent.pointerDown(element, { pointerId: 4, button: 0, clientX: 900 });
+    await fireEvent.pointerUp(element, { pointerId: 4, clientX: 900 });
+    await fireEvent.pointerDown(element, { pointerId: 5, button: 0, clientX: 900 });
+    await fireEvent.pointerUp(element, { pointerId: 5, clientX: 880 });
+    expect(onchange).not.toHaveBeenCalled();
+
+    // Narrowing starts from the width on screen, so it shows at once.
+    await fireEvent.keyDown(element, { key: "ArrowRight" });
+    await fireEvent.keyDown(element, { key: "Home" });
+    expect(onchange.mock.calls.map(([width]) => width)).toEqual([373, 280]);
+  });
+
+  it("double-click resets a narrowed column's requested width to the ideal", async () => {
+    const { element, onchange } = separator("start", 220, vi.fn(), 290);
+    await fireEvent.dblClick(element);
+    expect(onchange).toHaveBeenCalledWith(244);
+  });
+
+  it("a cancelled drag of a narrowed column restores the requested width", async () => {
+    const { element, onchange, rerender } = separator("end", 381, vi.fn(), 440);
+    await fireEvent.pointerDown(element, { pointerId: 6, button: 0, clientX: 900 });
+    await fireEvent.pointerMove(element, { pointerId: 6, clientX: 940 });
+    expect(onchange).toHaveBeenLastCalledWith(341);
+    await rerender({ value: 341, requested: 341 });
+    await fireEvent.pointerCancel(element, { pointerId: 6, clientX: 940 });
+    expect(onchange).toHaveBeenLastCalledWith(440);
   });
 
   it("double-click resets to the ideal width", async () => {

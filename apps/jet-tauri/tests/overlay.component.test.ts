@@ -91,6 +91,22 @@ describe("compact work panel overlay", () => {
     expect(document.activeElement).toBe(toggle());
   });
 
+  it("closing an overlay a shortcut opened outside the task view focuses the Sidebar button", async () => {
+    const { session } = renderShell();
+    session.select("planes");
+    await settle();
+    (document.activeElement as HTMLElement | null)?.blur();
+    await fireEvent.keyDown(document.body, { key: "0", code: "Digit0", ctrlKey: true, altKey: true });
+    await settle();
+    expect(session.workPanelOverlay).toBe(true);
+    expect(toggle()).toBeNull();
+
+    await fireEvent.keyDown(document.activeElement!, { key: "Escape", code: "Escape" });
+    await settle();
+    expect(session.workPanelOverlay).toBe(false);
+    expect(document.activeElement).toBe(main().querySelector(".sidebar-toggle"));
+  });
+
   it("the scrim and Hide close it too", async () => {
     renderShell();
     await fireEvent.click(toggle());
@@ -151,6 +167,52 @@ describe("compact work panel overlay", () => {
     expect(document.activeElement).toBe(interrupt);
   });
 
+  it("task status changes are still spoken while the overlay makes the page inert (D8)", async () => {
+    const session = new DesktopSession();
+    withActiveRun(session);
+    session.connectionState = "online";
+    session.conversationFreshness = "live";
+    const approval = (tool: string) => ({
+      id: `approval-${tool}`,
+      kind: "approval" as const,
+      text: "Run the tests",
+      sequence: "5",
+      rawCount: 0,
+      approval: {
+        requestId: `request-${tool}`,
+        reviewId: null,
+        runId: "run-1",
+        tool,
+        action: "bun test",
+        target: "Workspace",
+        scope: "Once",
+        consequence: "Runs a command",
+        rationale: null,
+        state: "requested" as const,
+        canAuthorizeRetry: false,
+      },
+    });
+    session.timeline = [approval("Shell")];
+    renderShell(session);
+    await fireEvent.click(toggle());
+    await settle();
+    expect(main().inert).toBe(true);
+
+    session.timeline = [approval("Shell"), approval("Git")];
+    await settle();
+    const regions = [...document.querySelectorAll<HTMLElement>('[role="status"]')].filter(
+      (region) => region.textContent === "Approval needed: Git",
+    );
+    expect(regions).toHaveLength(1);
+    expect(regions[0].closest("[inert]")).toBeNull();
+    expect(main().querySelector(".task-status")).toBeNull();
+
+    // Outside the task view the region is silent.
+    session.select("planes");
+    await settle();
+    expect(document.querySelector(".task-status")?.textContent).toBe("");
+  });
+
   it("never remounts the work panel: the same element before hide, after show, and in the overlay", async () => {
     viewport(1280);
     const { session } = renderShell();
@@ -195,6 +257,9 @@ describe("regular layout", () => {
     expect(shell.style.getPropertyValue("--work-panel-width")).toBe("340px");
     const separators = [...document.querySelectorAll<HTMLElement>('[role="separator"]')];
     expect(separators.map((item) => item.getAttribute("aria-label"))).toEqual(["Resize sidebar", "Resize work panel"]);
+    // Tab reaches each resizer next to its column, not after the whole work panel.
+    expect(sidebar().nextElementSibling).toBe(separators[0]);
+    expect(panel().previousElementSibling).toBe(separators[1]);
 
     await fireEvent.keyDown(separators[1], { key: "ArrowLeft", shiftKey: true });
     await settle();
@@ -205,6 +270,57 @@ describe("regular layout", () => {
     await settle();
     expect(shell.style.getPropertyValue("--sidebar-width")).toBe("0px");
     expect(document.querySelectorAll('[role="separator"]')).toHaveLength(1);
+  });
+
+  it("hiding the work panel column that has focus moves focus to the Work panel button", async () => {
+    viewport(1280);
+    const { session } = renderShell();
+    await settle();
+    expect(session.panel.presentation).toEqual({ kind: "column" });
+    const tab = document.querySelector<HTMLElement>("#work-tab-run")!;
+    tab.focus();
+    await fireEvent.keyDown(tab, { key: "0", code: "Digit0", ctrlKey: true, altKey: true });
+    await settle();
+    expect(session.workPanelPresented).toBe(false);
+    expect(document.activeElement).toBe(toggle());
+
+    // The panel's own Hide button does the same.
+    await fireEvent.click(toggle());
+    await settle();
+    const hide = panel().querySelector<HTMLButtonElement>(".panel-close")!;
+    hide.focus();
+    await fireEvent.click(hide);
+    await settle();
+    expect(document.activeElement).toBe(toggle());
+  });
+
+  it("F9 on a sidebar control moves focus to the header's Sidebar button", async () => {
+    viewport(1280);
+    const { session } = renderShell();
+    await settle();
+    const control = sidebar().querySelector<HTMLButtonElement>("button")!;
+    control.focus();
+    await fireEvent.keyDown(control, { key: "F9", code: "F9" });
+    await settle();
+    expect(session.sidebarPresented).toBe(false);
+    expect(document.activeElement).toBe(main().querySelector(".sidebar-toggle"));
+  });
+
+  it("an arrow on a narrowed work panel keeps the requested width", async () => {
+    viewport(1101);
+    const { session } = renderShell();
+    session.setColumnWidth("sidebar", 300);
+    session.setColumnWidth("work-panel", 440);
+    await settle();
+    const resizer = document.querySelector<HTMLElement>('[aria-label="Resize work panel"]')!;
+    expect(resizer.getAttribute("aria-valuenow")).toBe("381");
+    await fireEvent.keyDown(resizer, { key: "ArrowLeft" });
+    await settle();
+    expect(session.workPanelWidth).toBe(440);
+    await fireEvent.keyDown(resizer, { key: "ArrowRight" });
+    await settle();
+    expect(session.workPanelWidth).toBe(373);
+    expect(resizer.getAttribute("aria-valuenow")).toBe("373");
   });
 
   it("offers the sidebar toggle in every main-window destination", async () => {

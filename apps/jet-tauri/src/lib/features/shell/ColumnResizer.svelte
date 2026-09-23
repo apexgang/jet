@@ -4,6 +4,7 @@
   let {
     label,
     value,
+    requested = value,
     min,
     max,
     ideal,
@@ -11,8 +12,10 @@
     onchange,
   }: {
     label: string;
-    /** The column's current width in CSS pixels. */
+    /** The column's width on screen in CSS pixels; the layout may have narrowed it. */
     value: number;
+    /** The width the user asked for; `value` when the column is not narrowed. */
+    requested?: number;
     min: number;
     max: number;
     /** Double-click resets to this width. */
@@ -24,11 +27,26 @@
   } = $props();
 
   /** The pointer drag in progress. The column follows it live, clamped. */
-  let drag = $state<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+  let drag = $state<{ pointerId: number; startX: number; startWidth: number; startRequested: number } | null>(null);
 
+  const preference = $derived(clampWidth(requested, { min, max }));
+
+  /**
+   * Passes a new requested width. Steps and drags start from the width on
+   * screen, so a narrowed column narrows at once; but a width between the
+   * one on screen and the requested one would only lower the preference
+   * without widening anything, so it is dropped.
+   */
   function commit(width: number) {
     const next = clampWidth(width, { min, max });
-    if (next !== value) onchange(next);
+    if (next === preference || (next >= value && next < preference)) return;
+    onchange(next);
+  }
+
+  /** Sets the requested width exactly: double-click and a cancelled drag. */
+  function reset(width: number) {
+    const next = clampWidth(width, { min, max });
+    if (next !== preference) onchange(next);
   }
 
   function handleKey(event: KeyboardEvent) {
@@ -48,7 +66,7 @@
   function handlePointerDown(event: PointerEvent & { currentTarget: HTMLDivElement }) {
     if (event.button !== 0) return;
     event.preventDefault();
-    drag = { pointerId: event.pointerId, startX: event.clientX, startWidth: value };
+    drag = { pointerId: event.pointerId, startX: event.clientX, startWidth: value, startRequested: preference };
     event.currentTarget.setPointerCapture?.(event.pointerId);
     event.currentTarget.focus();
   }
@@ -70,7 +88,7 @@
     if (drag?.pointerId !== event.pointerId) return;
     const from = drag;
     drag = null;
-    commit(from.startWidth);
+    reset(from.startRequested);
   }
 </script>
 
@@ -93,5 +111,5 @@
   onpointermove={handlePointerMove}
   onpointerup={handlePointerUp}
   onpointercancel={handlePointerCancel}
-  ondblclick={() => commit(ideal)}
+  ondblclick={() => reset(ideal)}
 ></div>

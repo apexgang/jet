@@ -1,11 +1,16 @@
 # Desktop parity matrix
 
-Status: seeded in Wave 3.4 (Tauri/Linux). The Linux column is verified; the
+Status: seeded in Wave 3.4 (Tauri/Linux). The Linux column is verified by
+automated tests and the Chromium audit; native checks are pending. The
 macOS column is observed only. The platform exceptions and deferrals below
 are **Proposed** until the product owner approves or rejects each one.
 
-- Linux column verified on branch `design-wave-3-tauri` at the Wave 3.4 S5
-  commit (parent `d328cc6`) on 2026-09-23.
+- Linux column verified by automated tests and the Chromium audit on branch
+  `design-wave-3-tauri` at the Wave 3.4 S5 commit (parent `d328cc6`) on
+  2026-09-23. The manual native checklist in `apps/jet-tauri/docs/wave-3.4.md`
+  has not been run; a row whose acceptance needs one of its checks reads
+  `Pending manual check N` until the result is recorded here with its date and
+  desktop.
 - macOS column observed read-only at `79d450a` (the last commit that touched
   `apps/jet`, unchanged at `d328cc6`). The Swift owner confirms or corrects
   it. This change does not edit `apps/jet`.
@@ -30,6 +35,7 @@ allowed:
 | `Gap: <letters> <reason>` | Implemented with a difference in the named criteria. |
 | `Gap (both)` | The protocol supports it, and neither client shows it. |
 | `Pending <wave>` | Planned in a named wave for this platform, not built yet. |
+| `Pending manual check N` | Built and covered by automated tests, but acceptance needs item N of the Wave 3.4 manual native checklist, which has not been run. Becomes `Pass` or `Gap` once the result is recorded. |
 | `Exception PE-n` / `Deferral PD-n` | Covered by a platform exception or deferral in the table below. |
 | `Backend: <dependency>` | The protocol or `jet-client` lacks the surface. The UI stays disabled or absent and says why. |
 | `Absent (observed)` | Not present in the observed macOS build, with no plan recorded in this repository. |
@@ -39,10 +45,10 @@ Row IDs are stable. When a row changes, update its cells and keep the ID.
 
 ## Summary
 
-110 capability rows. Linux cells: 82 `Pass`, 1 `Gap` (W3-25), 10 `Gap (both)`
+110 capability rows. Linux cells: 77 `Pass`, 1 `Gap` (W3-25), 10 `Gap (both)`
 under PD-1, 6 `Exception` (PE-1, PE-6, PE-7 and 3.2's launch at login),
-7 `Backend`, 2 `Pending` (WS-17 manual check, W3-7 appearance override) and
-2 `n/a`. Several `Pass` cells also carry a backend note in their evidence.
+7 `Backend`, 7 `Pending` (six manual checks: WS-2, WS-3, WS-4, WS-13, WS-17
+and WS-19; and W3-7 appearance override) and 2 `n/a`. Several `Pass` cells also carry a backend note in their evidence.
 
 macOS cells: 61 `Pass`, 22 `Pending 3.x (Swift)`, 9 `Absent (observed)`
 (Linux is ahead: Deliver, notifications, deep links), 10 `Gap (both)`,
@@ -59,24 +65,24 @@ public `jet-client` request method maps to a row.
 | ID | Capability | Design ref | Protocol path | macOS | Linux | Notes and evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | WS-1 | Default 1280x800, minimum 900x600 | App and window model | None (client-local) | Pass | Pass | `tauri.conf.json` 1280x800, min 900x600; Swift `defaultSize(1280,800)` (`jetApp.swift`), minimum 900x600 (`DesktopShellView.swift:31`) |
-| WS-2 | Window geometry restoration | App and window model | None | Pass (scene restoration) | Pass | Linux `window-geometry.json` (logical size, maximized, monitor-clamped; position on X11 only, PE-5). Full screen is not restored (GNOME convention, spec Q5) |
-| WS-3 | Full screen | App and window model | None | Pass (system) | Pass | F11 (`toggle_main_window_fullscreen`); status "Full screen on/off"; failure copy `window.mode_unavailable`. Native check pending (checklist 5) |
-| WS-4 | Multiple displays | App and window model | None | Pass (system) | Pass | Geometry clamped to a connected monitor's work area. Mixed-DPI position is approximate; native check pending (checklist 4) |
+| WS-2 | Window geometry restoration | App and window model | None | Pass (scene restoration) | Pending manual check 3 | Linux `window-geometry.json` (logical size, maximized, monitor-clamped; position on X11 only, PE-5), covered by `cargo test`. Full screen is not restored (GNOME convention, spec Q5). Not yet observed on X11 or Wayland |
+| WS-3 | Full screen | App and window model | None | Pass (system) | Pending manual check 5 | F11 (`toggle_main_window_fullscreen`); status "Full screen on/off"; failure copy `window.mode_unavailable`, covered by `tests/shell-session.test.ts`. Not yet observed in a native window |
+| WS-4 | Multiple displays | App and window model | None | Pass (system) | Pending manual check 4 | Geometry clamped to a connected monitor's work area, covered by `cargo test`. Mixed-DPI position is approximate. Not yet observed with two monitors |
 | WS-5 | Sidebar collapse | Sidebar | None | Pass (toolbar, `SidebarCommands`) | Exception PE-1 | Toolbar toggle in every destination header plus F9; no View menu (PE-1) |
 | WS-6 | Work-panel collapse and compact overlay | Work panel | None | Pass (inspector) | Pass | Below 1101 px the panel is a focused overlay with scrim, `inert`, Escape and focus return; never open by default in compact. Swift: Hide/Show Work Panel ⌥⌘0 |
-| WS-7 | Column resizing | Work panel | None | Pass (split view) | Pass | Keyboard-operable separators; sidebar 210-300, work panel 280-440, the Swift ranges (`DesktopShellView.swift:17,29`) |
+| WS-7 | Column resizing | Work panel | None | Pass (split view) | Pass | Keyboard-operable separators; sidebar 210-300, work panel 280-440, the Swift ranges (`DesktopShellView.swift:17,29`). A narrowed column's keys and drags never lower its requested width. Widths go through CSSOM for the production CSP; the native CSP check (11) is still pending |
 | WS-8 | Last destination, tab, panel and widths restored | App and window model; Selection, continuity | None | Pass (`@SceneStorage`) | Pass | `shell-presentation.json`: UI layout only, no Jet identifiers (spec Q8 reads design-language l.88 as "no Jet content beyond the UUID"). Search and the overlay are never saved |
 | WS-9 | "Reopen the last task" and its ordering with setup | App and window model; Return and recovery | None | Pass | Pass | Swift order (`DesktopShellView.swift:48-59`): layout, then setup redirect wins, then the task. Off: New task, panel hidden |
 | WS-10 | Restore the last task across Planes | Return and recovery | Native selection file | Pending 3.1 (Swift) | Pass | Linux restores a Plane-qualified selection (3.1 `restoredSelection`). Swift has only the local Plane and restores its UUID (`@AppStorage`) |
 | WS-11 | Settings window and last pane | Settings | None | Pass | Pass | Separate Settings window, Ctrl+, in both windows, last pane restored (3.2) |
 | WS-12 | Command set and menus | Menus, commands, and input | None | Pass (`JetCommands.swift`) | Exception PE-1 | No GTK menubar. Per-command Linux path in PE-1 |
-| WS-13 | Close window and quit; Runs continue | App and window model | None | Pass | Pass | Ctrl+W closes the window, Ctrl+Q quits, in both windows. jetd keeps Runs going; notifications stop while the app is closed (`apps/jet-tauri/docs/wave-2.3.md`). An unsent draft is lost, as with the close button (spec Q14) |
+| WS-13 | Close window and quit; Runs continue | App and window model | None | Pass | Pending manual check 14 | Ctrl+W closes the window, Ctrl+Q quits, in both windows (the physical key decides on non-Latin layouts); with Ctrl+W and Ctrl+Q a pending layout change is saved first (the title-bar close button does not wait for it yet). Covered by `tests/shell-session.test.ts` and `tests/settings-keys.test.ts`; not yet observed in native windows. jetd keeps Runs going; notifications stop while the app is closed (`apps/jet-tauri/docs/wave-2.3.md`). An unsent draft is lost, as with the close button (spec Q14) |
 | WS-14 | Local find | Menus, commands, and input | None | Absent (observed) | Exception PE-7 | Neither client has find-in-task. `JetCommands.swift` has no Find item |
 | WS-15 | Help and diagnostics entry | Menus, commands, and input | `status`, `capabilities` | Absent (observed) | Exception PE-1 | Linux: Settings › Safety and system › Diagnostics (3.3), reachable by deep links; no Help menu |
 | WS-16 | Shortcut map | Menus, commands, and input | None | Pass | Pass | Ctrl+N, Ctrl+K, Ctrl+Shift+O, Ctrl+,, F9, Ctrl+Alt+0, Ctrl+Alt+1..5, Ctrl+Enter, F11, Ctrl+W, Ctrl+Q, Escape. Listed in Settings › General › Keyboard shortcuts. No firing while an IME composes or a modal is open; no bare-letter shortcuts |
 | WS-17 | GTK Emacs key theme | Menus, commands, and input | None | n/a | Pending manual check 12 | Ctrl+N, Ctrl+K and Ctrl+W are Emacs editing keys in GTK text fields. App shortcuts win in the webview by design (spec Q12); not yet recorded on a GNOME host |
 | WS-18 | Appearance: system light and dark | Visual language | None | Pass | Pass | Tokenized theme, WCAG table in `tests/theme-contract.test.ts`, audited in both schemes |
-| WS-19 | Keyboard-only use of critical actions | Menus, commands, and input | None | Pass (manual VoiceOver and keyboard checks per plan) | Pass | Spec §7.8 table. Audit Tab walk: every focus stop has a visible indicator and is not covered, in 26 configurations. Orca spot check pending (checklist 10) |
+| WS-19 | Keyboard-only use of critical actions | Menus, commands, and input | None | Pass (manual VoiceOver and keyboard checks per plan) | Pending manual check 10 | Spec §7.8 table. Audit Tab walk: every focus stop has a visible indicator and is not covered, in 26 configurations; focus return is covered by component tests. The keyboard-only run and Orca spot check are not yet recorded |
 
 ### Sidebar
 

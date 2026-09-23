@@ -1,9 +1,8 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
 
-  import { quitJet } from "$lib/jet/presentation";
+  import { currentPlatform } from "$lib/features/shell/shortcuts";
   import {
-    closeSettings,
     rememberSettingsPane,
     watchSettingsNavigation,
     type SettingsNavigation,
@@ -14,6 +13,7 @@
   import AgentsPane from "./AgentsPane.svelte";
   import ConnectionsPane from "./ConnectionsPane.svelte";
   import GeneralPane from "./GeneralPane.svelte";
+  import { handleSettingsKey } from "./keys";
   import PlaneBanners from "./PlaneBanners.svelte";
   import PlanePicker from "./PlanePicker.svelte";
   import SafetyPane from "./SafetyPane.svelte";
@@ -91,20 +91,10 @@
     (current ?? nav?.querySelector<HTMLButtonElement>("button"))?.focus();
   }
 
+  const platform = currentPlatform();
+
   function handleKey(event: KeyboardEvent) {
-    if (!event.ctrlKey || event.altKey || event.metaKey) return;
-    const key = event.key.toLowerCase();
-    if (key === "w") {
-      event.preventDefault();
-      closeSettings().catch(() => undefined);
-    } else if (key === "q" && !event.shiftKey && !event.repeat && !event.isComposing) {
-      // Ctrl+Q quits Jet from either window; Runs keep going on their Planes.
-      event.preventDefault();
-      quitJet().catch(() => undefined);
-    } else if (event.key === ",") {
-      event.preventDefault();
-      focusNavigation();
-    }
+    handleSettingsKey(event, platform, focusNavigation);
   }
 
   onMount(() => {

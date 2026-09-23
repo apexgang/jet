@@ -105,8 +105,10 @@ post into another task (D17). The cross-client parity matrix is in
 
 ## Parity
 
-The matrix has 110 rows. Linux: 82 Pass, 1 Gap, 10 Gap (both) under PD-1,
-6 Exception, 7 Backend, 2 Pending, 2 n/a. The macOS column was observed
+The matrix has 110 rows. Linux: 77 Pass, 1 Gap, 10 Gap (both) under PD-1,
+6 Exception, 7 Backend, 7 Pending, 2 n/a. Six of the Pending cells wait on
+the manual native checklist below (checks 3, 4, 5, 10, 12 and 14); the
+Linux column is verified by automated tests and the Chromium audit only. The macOS column was observed
 read-only at `79d450a`. The Swift client stops at Wave 2.2, so 22 of its
 cells read Pending.
 
@@ -248,6 +250,11 @@ macOS was not verified by this Tauri-only change.
 
 ## Latent defects left for later
 
+- Ctrl+W and Ctrl+Q save a layout change that is still inside the page's
+  300 ms debounce before they close (bounded at 500 ms). The title-bar close
+  button closes natively and does not wait, so a layout change made just
+  before clicking it can be lost; fixing that needs the close to go through
+  the page or the layout save to move native.
 - `src/app.html` wraps the body in `style="display: contents"`. The
   production CSP (`style-src 'self'`) ignores the attribute; harmless because
   `.app-shell` sizes itself.

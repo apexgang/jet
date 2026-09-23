@@ -12,7 +12,7 @@ import type {
 } from "../src/lib/jet/bridge";
 import type { Plane, PlanesSnapshot } from "../src/lib/jet/planes";
 import { DEFAULT_PRESENTATION, type ShellPresentation, type ShellPresentationView } from "../src/lib/jet/presentation";
-import { DesktopSession, type ShortcutEvent } from "../src/lib/features/shell/session.svelte";
+import { DesktopSession, FLUSH_BEFORE_CLOSE_MS, type ShortcutEvent } from "../src/lib/features/shell/session.svelte";
 import { ENABLED_SHORTCUTS } from "../src/lib/features/shell/shortcuts";
 import { withActiveRun } from "./support/session";
 
@@ -93,6 +93,8 @@ type Options = {
   holdPresentation?: boolean;
   /** Save results in order; `true` fails that save. */
   saveFails?: boolean[];
+  /** Layout saves never answer. */
+  saveHangs?: boolean;
   fullscreenFails?: boolean;
 };
 
@@ -146,6 +148,7 @@ function harness(options: Options = {}) {
         return view;
       }
       case "save_shell_presentation": {
+        if (options.saveHangs) await new Promise(() => undefined);
         if (saveFails.shift()) throw failure("internal", "presentation.write_failed");
         return { presentation: plain.presentation, issue: null };
       }
@@ -936,5 +939,39 @@ describe("window layout: persistence", () => {
     await session.persistPresentation();
     expect(saves(calls)).toHaveLength(3);
     expect(session.presentation).toMatchObject({ kind: "ready", value: { destination: "schedules" } });
+  });
+
+  it("Ctrl+Q and Ctrl+W save a layout change still waiting for the page's debounce first", async () => {
+    const { calls } = harness();
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    session.toggleSidebar();
+    session.handleShortcut(keyEvent({ key: "q", code: "KeyQ", ctrlKey: true }).event, linux);
+    await flush();
+    const commands = calls.map((call) => call.command).filter((command) => command === "save_shell_presentation" || command === "quit_jet");
+    expect(commands).toEqual(["save_shell_presentation", "quit_jet"]);
+    expect(saves(calls)).toEqual([{ ...DEFAULT_PRESENTATION, sidebarPresented: false }]);
+
+    // Nothing pending: Ctrl+W closes without another save.
+    session.handleShortcut(keyEvent({ key: "w", code: "KeyW", ctrlKey: true }).event, linux);
+    await flush();
+    expect(saves(calls)).toHaveLength(1);
+    expect(calls.some((call) => call.command === "close_main_window")).toBe(true);
+  });
+
+  it("a layout save that never answers does not block quitting", async () => {
+    const { calls } = harness({ saveHangs: true });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    vi.useFakeTimers();
+    session.select("planes");
+    session.handleShortcut(keyEvent({ key: "q", code: "KeyQ", ctrlKey: true }).event, linux);
+    await flush();
+    expect(calls.some((call) => call.command === "quit_jet")).toBe(false);
+    await vi.advanceTimersByTimeAsync(FLUSH_BEFORE_CLOSE_MS);
+    await flush();
+    expect(calls.some((call) => call.command === "quit_jet")).toBe(true);
   });
 });

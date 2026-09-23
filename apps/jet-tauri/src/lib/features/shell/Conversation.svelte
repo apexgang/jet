@@ -64,10 +64,19 @@
     if (status === "Completed") return "Run completed";
     return `Task status: ${status}`;
   });
-  let announcedStatus = $state("");
+  /** The task view is what the destinations below leave to the `{:else}` branch. */
+  const taskView = $derived(
+    session.sidebarSelection !== "project" &&
+      session.sidebarSelection !== "planes" &&
+      session.sidebarSelection !== "schedules" &&
+      session.sidebarSelection !== "trash",
+  );
 
+  // AppShell renders the region outside what the compact overlay makes
+  // inert, so status changes are still spoken while the overlay is open.
   $effect(() => {
-    if (liveStatus !== null) announcedStatus = liveStatus;
+    if (!taskView) session.taskStatus = "";
+    else if (liveStatus !== null) session.taskStatus = liveStatus;
   });
 
   $effect(() => {
@@ -151,8 +160,6 @@
         Work panel
       </button>
     </header>
-
-    <p class="visually-hidden" role="status">{announcedStatus}</p>
 
     <div class="timeline" aria-busy={session.conversationBusy}>
       <div class="timeline-inner">

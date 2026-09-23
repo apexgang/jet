@@ -62,9 +62,9 @@
     tabButtons[tab]?.focus();
   }
 
-  // The overlay opened: its selected tab takes focus.
+  // The overlay opened, or a Run-control confirmation closed: the selected tab takes focus.
   $effect(() => {
-    if (mode === "overlay" && session.takeFocusRequest("work-panel")) {
+    if (session.workPanelPresented && session.takeFocusRequest("work-panel")) {
       tabButtons[session.selectedWorkPanel]?.focus();
     }
   });

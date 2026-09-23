@@ -151,6 +151,9 @@ function focusTarget(value: unknown): FocusTarget | null {
   return value as FocusTarget;
 }
 
+/** How long Ctrl+W and Ctrl+Q wait for a pending layout save before closing. */
+export const FLUSH_BEFORE_CLOSE_MS = 500;
+
 export class DesktopSession implements FeedHandler {
   /** Per-Plane health conditions; the notice shows only the selected task's Plane. */
   health = new PlaneHealth();
@@ -186,6 +189,12 @@ export class DesktopSession implements FeedHandler {
   presentationGeneration = 0;
   /** Shell-level status for screen readers: full screen, layout save failures. */
   shellStatus = $state("");
+  /**
+   * The task view's status for screen readers ("Approval needed: Shell",
+   * "Run completed"); written by the task view, spoken by AppShell. Empty
+   * outside the task view.
+   */
+  taskStatus = $state("");
   composerFocusRequest = $state(0);
   /** Bumped when Search should take keyboard focus (Ctrl+K). */
   searchFocusRequest = $state(0);
@@ -193,7 +202,10 @@ export class DesktopSession implements FeedHandler {
   projectFolderFocusRequest = $state(0);
   /** Bumped when a Run-control confirmation opens; its Cancel takes focus. */
   runControlFocusRequest = $state(0);
-  /** Bumped when the work panel opens as an overlay; its selected tab takes focus. */
+  /**
+   * Bumped when the work panel's selected tab should take focus: the overlay
+   * opened, or a Run-control confirmation closed inside the panel.
+   */
   workPanelFocusRequest = $state(0);
   /** Bumped when the user closes the overlay; focus returns to what opened it. */
   workPanelReturnRequest = $state(0);
@@ -615,6 +627,17 @@ export class DesktopSession implements FeedHandler {
     }
   }
 
+  /** Saves a pending layout change, waiting at most `FLUSH_BEFORE_CLOSE_MS`. */
+  private async flushPresentation(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => (timer = setTimeout(resolve, FLUSH_BEFORE_CLOSE_MS)));
+    try {
+      await Promise.race([this.persistPresentation().catch(() => undefined), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** Announces a shell-level status change in the visually hidden region. */
   private announce(message: string): void {
     this.shellStatus = message;
@@ -630,8 +653,13 @@ export class DesktopSession implements FeedHandler {
     }
   }
 
-  /** Ctrl+W and Ctrl+Q. Runs keep going on their Planes either way. */
+  /**
+   * Ctrl+W and Ctrl+Q. Runs keep going on their Planes either way. The page
+   * saves the layout only after it settles, so a change made just before
+   * closing is written first; a slow or failed save never blocks the close.
+   */
   private async windowAction(action: () => Promise<void>): Promise<void> {
+    await this.flushPresentation();
     try {
       await action();
     } catch (error: unknown) {
@@ -1249,6 +1277,10 @@ export class DesktopSession implements FeedHandler {
     if (!control || !runId || this.controlBusy) return;
     this.runControlConfirmation = null;
     this.runControlReturnFocus = null;
+    // The confirm button leaves the page, and the Run tab's Interrupt Turn…
+    // and Stop Run… stay disabled while the control runs, so focus goes to
+    // the selected (Run) tab rather than falling to the page body.
+    this.workPanelFocusRequest += 1;
     this.controlBusy = control;
     this.actionNotice = null;
     try {
