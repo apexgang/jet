@@ -48,6 +48,8 @@ import {
 import { LOCAL_PLANE, type PlaneId, type PlaneSelection } from "$lib/jet/planes";
 import { openSettings, type SettingsTarget } from "$lib/jet/settings-window";
 import { PlaneCatalog } from "$lib/features/planes/catalog.svelte";
+import { PlaneHealth } from "$lib/features/system/health.svelte";
+import type { PlaneNotice } from "$lib/features/system/model";
 import { needsPairing } from "$lib/features/planes/model";
 import { PlanesSession, type FeedHandler, type PlanesFocus } from "$lib/features/planes/session.svelte";
 import { TerminalTranscriptDecoder } from "$lib/jet/terminal-text";
@@ -87,7 +89,9 @@ export type LiveTimelineEntry = {
 export type RunControlChoice = "interrupt_turn" | "stop_run";
 
 export class DesktopSession implements FeedHandler {
-  delivery = new DeliverySession();
+  /** Per-Plane health conditions; the notice shows only the selected task's Plane. */
+  health = new PlaneHealth();
+  delivery = new DeliverySession((planeId, error) => this.observeOutcome(planeId, error));
   /** Native Plane registry mirror and one feed per Plane. Labels come only from here. */
   planes = new PlanesSession(this);
   /** Per-Plane Recent chains and Search, merged for display. */
@@ -176,13 +180,31 @@ export class DesktopSession implements FeedHandler {
     );
   }
 
-  get attentionCount(): number {
+  /** Approval requests in the timeline that wait for the user. */
+  private get requestAttentionCount(): number {
     return this.timeline.filter(
       (entry) =>
         entry.approval?.state === "requested" ||
         entry.approval?.state === "unavailable" ||
         (entry.approval?.state === "denied" && entry.approval.canAuthorizeRetry),
     ).length;
+  }
+
+  /**
+   * Needs attention: waiting requests, plus one for a health condition on
+   * the selected task's Plane and one for activity that needs recovery.
+   */
+  get attentionCount(): number {
+    return (
+      this.requestAttentionCount +
+      (this.planeHealthNotice ? 1 : 0) +
+      (this.supervision?.execution?.needsAttention ? 1 : 0)
+    );
+  }
+
+  /** The one Plane-health notice for the selected task's Plane, or null. */
+  get planeHealthNotice(): PlaneNotice | null {
+    return this.health.notice(this.selectedPlaneId);
   }
 
   get connectionLabel(): string {
@@ -478,6 +500,7 @@ export class DesktopSession implements FeedHandler {
 
   /** FeedHandler: a Plane's feed opened. */
   opened(planeId: PlaneId, snapshot: ConnectionSnapshot): void {
+    this.applyConnection(planeId, snapshot);
     if (planeId !== LOCAL_PLANE) return;
     this.connection = snapshot.state === "online" ? snapshot : null;
     this.connectionState = snapshot.state;
@@ -599,6 +622,8 @@ export class DesktopSession implements FeedHandler {
       await this.refreshSetup();
     } catch (error: unknown) {
       const failure = publicError(error);
+      // Project setup runs on this computer's Plane.
+      this.observeOutcome(failure.planeId ?? LOCAL_PLANE, failure);
       this.permanentRemovalAllowed = failure.code === "project.trash_unavailable";
       this.setupNotice = failure.message;
     } finally {
@@ -715,14 +740,19 @@ export class DesktopSession implements FeedHandler {
       case "search":
         this.workPanelPresented = false;
         break;
-      case "attention":
+      case "attention": {
         this.workPanelPresented = true;
         this.selectedWorkPanel = "run";
+        const planeCondition = this.planeHealthNotice !== null;
+        if (planeCondition) this.health.focusNotice();
         this.actionNotice =
-          this.attentionCount > 0 || this.supervision?.execution?.needsAttention
+          this.requestAttentionCount > 0 || this.supervision?.execution?.needsAttention
             ? "Review the highlighted request and the current Run controls."
-            : "No current task needs your attention.";
+            : planeCondition
+              ? null
+              : "No current task needs your attention.";
         break;
+      }
       case "project":
         this.workPanelPresented = false;
         break;
@@ -790,11 +820,14 @@ export class DesktopSession implements FeedHandler {
       } else {
         await startRun(conversationId, craft, prompt, planeId);
       }
+      this.health.succeeded(planeId);
       this.draft = "";
       this.actionNotice = "Sent to the Plane.";
       await this.loadSelectedConversation(false);
     } catch (error: unknown) {
-      this.actionNotice = publicError(error).message;
+      const failure = publicError(error);
+      this.observeOutcome(failure.planeId ?? this.selectedPlaneId, failure);
+      this.actionNotice = failure.message;
       // A task may have been created before the failure; re-read its Plane.
       await this.catalog.load(this.selectedPlaneId);
     } finally {
@@ -809,6 +842,7 @@ export class DesktopSession implements FeedHandler {
     this.actionNotice = null;
     try {
       await withdrawTurn(conversationId, turn.id, this.selectedPlaneId);
+      this.health.succeeded(this.selectedPlaneId);
       this.actionNotice = "The queued Turn was withdrawn.";
       await this.refreshSupervision(conversationId, this.selectedRun?.id ?? null);
     } catch (error: unknown) {
@@ -841,11 +875,14 @@ export class DesktopSession implements FeedHandler {
         control === "interrupt_turn"
           ? await interruptTurn(runId, planeId)
           : await stopRun(runId, planeId);
+      this.health.succeeded(planeId);
       this.actionNotice = accepted.message;
       const conversationId = this.selectedConversationId;
       if (conversationId) await this.refreshSupervision(conversationId, runId);
     } catch (error: unknown) {
-      this.actionNotice = publicError(error).message;
+      const failure = publicError(error);
+      this.observeOutcome(failure.planeId ?? this.selectedPlaneId, failure);
+      this.actionNotice = failure.message;
     } finally {
       this.controlBusy = null;
     }
@@ -868,6 +905,7 @@ export class DesktopSession implements FeedHandler {
         approval.reviewId,
         this.selectedPlaneId,
       );
+      this.health.succeeded(this.selectedPlaneId);
       this.actionNotice = accepted.message;
       this.timeline = this.timeline.map((entry) =>
         entry.approval?.reviewId === approval.reviewId
@@ -878,7 +916,9 @@ export class DesktopSession implements FeedHandler {
           : entry,
       );
     } catch (error: unknown) {
-      this.actionNotice = publicError(error).message;
+      const failure = publicError(error);
+      this.observeOutcome(failure.planeId ?? this.selectedPlaneId, failure);
+      this.actionNotice = failure.message;
     } finally {
       this.controlBusy = null;
     }
@@ -1396,6 +1436,7 @@ export class DesktopSession implements FeedHandler {
 
   private recordWorkFailure(error: unknown): PublicError {
     const failure = publicError(error);
+    this.observeOutcome(failure.planeId ?? this.selectedPlaneId, failure);
     this.workPanelNotice = failure.message;
     this.workPanelNoticeError = failure;
     this.applyRevisionConflict(failure);
@@ -1436,6 +1477,7 @@ export class DesktopSession implements FeedHandler {
     const selectedPlane = planeId === this.selectedPlaneId;
     switch (update.type) {
       case "connected":
+        this.applyConnection(planeId, update.connection);
         void this.planes.refresh();
         this.catalog.reconnected(planeId);
         if (selectedPlane && this.selectedConversationId && this.conversationFreshness !== "live") {
@@ -1463,8 +1505,10 @@ export class DesktopSession implements FeedHandler {
         }
         this.catalog.receiveEvent(planeId, update.kind);
         if (update.kind.startsWith("pairing.")) this.planes.pairing.pairingEvent(planeId);
+        if (update.kind === "audit.epoch_begun") this.health.clearSecurity(planeId);
         break;
       case "reconnecting":
+        this.health.offline(planeId);
         void this.planes.refresh();
         this.catalog.markUnavailable(planeId, update.error);
         if (local) {
@@ -1481,6 +1525,7 @@ export class DesktopSession implements FeedHandler {
           void this.recoverSnapshot(planeId);
           break;
         }
+        this.health.offline(planeId);
         void this.planes.refresh();
         this.catalog.markUnavailable(planeId, update.error);
         if (local) {
@@ -1490,6 +1535,35 @@ export class DesktopSession implements FeedHandler {
         if (selectedPlane && this.conversationDetail) this.conversationFreshness = "cached";
         break;
     }
+  }
+
+  /**
+   * A fresh status read of one Plane (a feed opened or reconnected). The
+   * health summary is applied from here only; `resumed` carries none. When
+   * the daemon started again its store may be older than what is shown.
+   */
+  private applyConnection(planeId: PlaneId, connection: ConnectionSnapshot): void {
+    if (this.health.applyConnection(planeId, connection)) this.planeRestarted(planeId);
+  }
+
+  /**
+   * The Plane's daemon started again (a restart, or a restored snapshot):
+   * state can move backwards, so what is shown for it is read again. Later
+   * Wave 3.3 views drop their per-Plane caches here too.
+   */
+  private planeRestarted(planeId: PlaneId): void {
+    if (planeId === this.selectedPlaneId && this.selectedConversationId) {
+      void this.loadSelectedConversation(false);
+    }
+  }
+
+  /**
+   * Records the outcome of a request on a Plane: a refusal may prove a
+   * Plane-wide condition; an admitted request ends a disk-pressure refusal.
+   */
+  private observeOutcome(planeId: PlaneId, error: PublicError | null): void {
+    if (error) this.health.observe(planeId, error);
+    else this.health.succeeded(planeId);
   }
 
   private receiveTimeline(update: Extract<PlaneUpdate, { type: "event" }>): void {

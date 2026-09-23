@@ -4,9 +4,18 @@
   import SchedulesDestination from "$lib/features/schedules/SchedulesDestination.svelte";
   import type { DesktopSession } from "./session.svelte";
   import SetupPanel from "$lib/features/setup/SetupPanel.svelte";
+  import PlaneHealthNotice from "$lib/features/system/PlaneHealthNotice.svelte";
+  import { retentionLine } from "$lib/features/system/model";
 
   let { session }: { session: DesktopSession } = $props();
   let composer = $state<HTMLTextAreaElement>();
+
+  const retention = $derived(
+    session.selectedConversationId &&
+      session.conversationDetail?.conversation.id === session.selectedConversationId
+      ? retentionLine(session.conversationDetail.retention)
+      : null,
+  );
 
   const status = $derived.by(() => {
     if (session.conversationFreshness === "cached") return "Offline cache";
@@ -72,6 +81,9 @@
           <span aria-hidden="true">·</span>
           Runs on {session.runsOnLabel}
         </p>
+        {#if retention}
+          <p class="retention-line">{retention}</p>
+        {/if}
       </div>
       <span
         class:working={status === "Working"}
@@ -98,6 +110,12 @@
 
     <div class="timeline" aria-live="polite" aria-busy={session.conversationBusy}>
       <div class="timeline-inner">
+        <PlaneHealthNotice
+          health={session.health}
+          planeId={session.selectedPlaneId}
+          planeLabel={session.selectedPlaneLabel}
+          openSettings={(target) => void session.openSettings(target)}
+        />
         {#if session.selectionUnavailable}
           <div class="notice" role="status">
             <p>{session.selectedPlaneLabel} is unavailable. This task will load when it reconnects.</p>

@@ -79,6 +79,7 @@ fn main() {
             "send_terminal_input",
             "resize_workspace_terminal",
             "detach_workspace_terminal",
+            "collect_disposable_storage",
         ]),
     ))
     .expect("failed to build the Tauri command manifest");

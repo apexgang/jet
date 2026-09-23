@@ -11,6 +11,12 @@ export type ReviewState =
   | { kind: "queued"; deliveryId: string }
   | { kind: "acknowledged"; deliveryId: string };
 
+/**
+ * Told the outcome of every executed delivery: its Plane, and the refusal or
+ * uncertain failure (null when the Plane admitted it). Plane health uses it.
+ */
+export type DeliveryOutcomeObserver = (planeId: PlaneId, error: PublicError | null) => void;
+
 export class DeliverySession {
   conversationId = $state<string | null>(null);
   planeId = $state<PlaneId>(LOCAL_PLANE);
@@ -25,6 +31,11 @@ export class DeliverySession {
   private loadGeneration = 0;
   private retained = new Map<string, ReviewState>();
   private acknowledgements = new Set<string>();
+  private readonly onOutcome: DeliveryOutcomeObserver;
+
+  constructor(onOutcome: DeliveryOutcomeObserver = () => {}) {
+    this.onOutcome = onOutcome;
+  }
 
   /** Selects a Conversation on one Plane. The same UUID on another Plane is another scope. */
   select(id: string | null, planeId: PlaneId = LOCAL_PLANE): void {
@@ -117,15 +128,18 @@ export class DeliverySession {
     try {
       const receipt = await executeDelivery(reviewId);
       if (receipt.kind === "refused") {
+        this.onOutcome(planeId, receipt.error);
         this.remember(planeId, id, null);
         if (this.generation === generation) this.error = receipt.error;
         return;
       }
+      this.onOutcome(planeId, null);
       const deliveryId = receipt.deliveryId;
       this.remember(planeId, id, { kind: this.acknowledgements.has(reviewId) ? "acknowledged" : "queued", deliveryId });
       if (this.generation === generation) await this.refresh();
     } catch (error: unknown) {
       const failure = publicError(error);
+      this.onOutcome(planeId, failure);
       // Only a typed refusal proves the daemon rejected admission. An IPC,
       // transport or decoding failure keeps the exact native request token.
       this.remember(planeId, id, { kind: "uncertain", reviewId, error: failure });

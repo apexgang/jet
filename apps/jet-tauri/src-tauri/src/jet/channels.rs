@@ -535,8 +535,15 @@ mod tests {
 
     use uuid::Uuid;
 
-    use super::{bounded_text, named, parse_resume_cursor, FeedRegistry, PlaneUpdate};
-    use crate::jet::{errors::PublicError, planes::PlaneId};
+    use jet_protocol::{
+        AuditBreach, DeletionLedgerStatus, RecoveryReason, RecoveryState, RecoveryStatus,
+        SecurityState,
+    };
+
+    use super::{
+        bounded_text, named, parse_resume_cursor, ConnectionSnapshot, FeedRegistry, PlaneUpdate,
+    };
+    use crate::jet::{client::unit_tests::status, errors::PublicError, planes::PlaneId};
 
     fn pending_task() -> tokio::task::JoinHandle<()> {
         tokio::spawn(async { tokio::time::sleep(Duration::from_secs(3600)).await })
@@ -642,6 +649,80 @@ mod tests {
         feeds.attach(remote, feed, late.abort_handle());
         assert!(settled(&late).await);
         assert!(feeds.by_plane.lock().unwrap().is_empty());
+    }
+
+    /// Every combination of store, Deletion ledger and Security state maps
+    /// to the compact `health` summary a feed snapshot carries.
+    #[test]
+    fn a_connected_snapshot_summarizes_plane_health() {
+        let recoveries = [
+            (None, "unknown", "unknown"),
+            (
+                Some((RecoveryState::Serving, None)),
+                "serving",
+                "unsupported",
+            ),
+            (
+                Some((
+                    RecoveryState::Serving,
+                    Some(DeletionLedgerStatus::Verified { deletions: 2 }),
+                )),
+                "serving",
+                "verified",
+            ),
+            (
+                Some((RecoveryState::ReadOnly, Some(DeletionLedgerStatus::Corrupt))),
+                "read_only",
+                "corrupt",
+            ),
+            (
+                Some((
+                    RecoveryState::ReadOnly,
+                    Some(DeletionLedgerStatus::Verified { deletions: 0 }),
+                )),
+                "read_only",
+                "verified",
+            ),
+        ];
+        let securities = [
+            (None, "unknown"),
+            (Some(SecurityState::Trusted), "trusted"),
+            (
+                Some(SecurityState::Degraded {
+                    breach: AuditBreach::HeadMissing,
+                    epoch: 2,
+                    head: None,
+                    store_sequence: 9,
+                }),
+                "degraded",
+            ),
+        ];
+        for (recovery, store, ledger) in &recoveries {
+            for (security, trust) in &securities {
+                let mut plane_status = status(40);
+                plane_status.security = security.clone();
+                plane_status.recovery = recovery.map(|(state, deletion_ledger)| RecoveryStatus {
+                    state,
+                    reason: (state == RecoveryState::ReadOnly)
+                        .then_some(RecoveryReason::IntegrityCheckFailed),
+                    snapshots: Vec::new(),
+                    deletion_ledger,
+                });
+                let snapshot = ConnectionSnapshot::from_status(
+                    Uuid::from_u128(5),
+                    PlaneId::Local,
+                    plane_status,
+                );
+                let json = serde_json::to_value(&snapshot).unwrap();
+                assert_eq!(
+                    json["health"],
+                    serde_json::json!({ "security": trust, "store": store, "ledger": ledger }),
+                    "{recovery:?} {security:?}"
+                );
+                assert_eq!(json["state"], "online");
+                assert_eq!(json["daemonStarts"], "3");
+            }
+        }
     }
 
     #[test]

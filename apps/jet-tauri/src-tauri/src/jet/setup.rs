@@ -727,7 +727,7 @@ fn safe_path(value: &str) -> String {
     safe_text(value, 4096, "Path unavailable")
 }
 
-fn safe_text(value: &str, maximum_bytes: usize, fallback: &str) -> String {
+pub(super) fn safe_text(value: &str, maximum_bytes: usize, fallback: &str) -> String {
     if !value.is_empty()
         && value.len() <= maximum_bytes
         && value.chars().all(|character| !character.is_control())

@@ -8,6 +8,7 @@ mod errors;
 pub(crate) mod extensions;
 mod identity;
 mod keystore;
+pub(crate) mod ledger;
 #[cfg(test)]
 mod live_e2e;
 pub(crate) mod notifications;
@@ -19,6 +20,7 @@ mod run_control;
 pub(crate) mod settings;
 pub(crate) mod settings_window;
 mod setup;
+pub(crate) mod system;
 mod work_panel;
 
 use std::{io, path::Path, sync::Arc, time::Duration};
@@ -50,6 +52,7 @@ pub(crate) struct JetBridge {
     agents: agents::AgentsState,
     extensions: extensions::ExtensionsState,
     preferences: preferences::PreferencesState,
+    system: system::SystemState,
 }
 
 impl JetBridge {
@@ -99,6 +102,7 @@ impl JetBridge {
             agents: agents::AgentsState::default(),
             extensions: extensions::ExtensionsState::default(),
             preferences: preferences::PreferencesState::new(app_data_directory),
+            system: system::SystemState::default(),
         }
     }
 
@@ -528,6 +532,9 @@ mod manifest_tests {
         "load_extension_change",
     ];
 
+    /// Wave 3.3 commands granted to the main window only.
+    const WAVE_3_3_MAIN_ONLY: [&str; 1] = ["collect_disposable_storage"];
+
     /// `generate_handler!` names, the `build.rs` manifest and the union of
     /// the capability grants must be the same set, every command must have
     /// a generated permission file (tauri-conventions §3.1), and each command
@@ -581,6 +588,13 @@ mod manifest_tests {
                 .collect::<BTreeSet<_>>(),
             settings_only
         );
+        // Wave 3.3 commands and the windows that call them (wave 3.3 §5). A
+        // command reaches the Settings window only with its call site there.
+        for main_only in WAVE_3_3_MAIN_ONLY {
+            assert!(main.contains(main_only), "{main_only}");
+            assert!(!settings.contains(main_only), "{main_only}");
+            assert!(handlers.contains(main_only), "{main_only}");
+        }
         for main_only in ["open_settings", "open_plane_feed", "bind_harness_account"] {
             assert!(main.contains(main_only), "{main_only}");
             assert!(!settings.contains(main_only), "{main_only}");

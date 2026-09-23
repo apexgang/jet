@@ -61,6 +61,7 @@
     "allow-execute-delivery",
     "allow-prepare-delivery-acknowledgement",
     "allow-open-settings",
-    "allow-load-desktop-preferences"
+    "allow-load-desktop-preferences",
+    "allow-collect-disposable-storage"
   ]
 }

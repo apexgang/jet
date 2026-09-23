@@ -1780,6 +1780,10 @@ kbd {
   white-space: nowrap;
 }
 
+.lost-run {
+  margin-top: 14px;
+}
+
 .termination-result,
 .queue-limit {
   margin: 14px 0 0;

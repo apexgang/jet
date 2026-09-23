@@ -102,6 +102,7 @@ pub fn run() {
             jet::send_terminal_input,
             jet::resize_workspace_terminal,
             jet::detach_workspace_terminal,
+            jet::system::collect_disposable_storage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Jet desktop application");

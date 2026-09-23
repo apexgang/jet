@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-collect-disposable-storage"
+description = "Enables the collect_disposable_storage command without any pre-configured scope."
+commands.allow = ["collect_disposable_storage"]
+
+[[permission]]
+identifier = "deny-collect-disposable-storage"
+description = "Denies the collect_disposable_storage command without any pre-configured scope."
+commands.deny = ["collect_disposable_storage"]

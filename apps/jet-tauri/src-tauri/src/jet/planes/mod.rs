@@ -15,8 +15,8 @@ use std::{
 };
 
 use jet_protocol::{
-    CapabilityObservation, CapabilitySnapshot, DegradedCondition, ExternalTool, PlaneStatus,
-    RecoveryState, SecurityState, ToolAvailability, REMOTE_AUTH_MINOR,
+    CapabilityObservation, CapabilitySnapshot, DegradedCondition, DeletionLedgerStatus,
+    ExternalTool, PlaneStatus, RecoveryState, SecurityState, ToolAvailability, REMOTE_AUTH_MINOR,
     SETTINGS_AND_CAPABILITIES_MINOR,
 };
 use serde::Serialize;
@@ -114,11 +114,24 @@ pub(crate) enum Store {
     Unknown,
 }
 
+/// The Deletion ledger a restore or purge depends on (ADR-0102).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Ledger {
+    Verified,
+    Corrupt,
+    /// The status reported Recovery but its minor does not name the ledger.
+    Unsupported,
+    /// No status yet, or no Recovery section in it.
+    #[default]
+    Unknown,
+}
+
 /// What the Plane's latest status said about its own trustworthiness.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct PlaneHealth {
     security: Security,
     store: Store,
+    ledger: Ledger,
 }
 
 impl PlaneHealth {
@@ -134,12 +147,24 @@ impl PlaneHealth {
                 Some(RecoveryState::ReadOnly) => Store::ReadOnly,
                 None => Store::Unknown,
             },
+            ledger: match status.recovery.as_ref() {
+                None => Ledger::Unknown,
+                Some(recovery) => match recovery.deletion_ledger {
+                    Some(DeletionLedgerStatus::Verified { .. }) => Ledger::Verified,
+                    Some(DeletionLedgerStatus::Corrupt) => Ledger::Corrupt,
+                    None => Ledger::Unsupported,
+                },
+            },
         }
     }
 
     #[cfg(test)]
     pub(crate) fn for_test(security: Security, store: Store) -> Self {
-        Self { security, store }
+        Self {
+            security,
+            store,
+            ledger: Ledger::Unknown,
+        }
     }
 
     /// Why trust-changing Commands are paused on this Plane, if they are.
@@ -167,15 +192,24 @@ impl PlaneHealth {
                 Store::ReadOnly => "read_only",
                 Store::Unknown => "unknown",
             },
+            ledger: match self.ledger {
+                Ledger::Verified => "verified",
+                Ledger::Corrupt => "corrupt",
+                Ledger::Unsupported => "unsupported",
+                Ledger::Unknown => "unknown",
+            },
         }
     }
 }
 
+/// The compact health summary a feed snapshot carries (Wave 3.3 §4.7). The
+/// main window derives its Plane-health notice from it; no counts or gauges.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HealthView {
-    security: &'static str,
-    store: &'static str,
+    pub(crate) security: &'static str,
+    pub(crate) store: &'static str,
+    pub(crate) ledger: &'static str,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]

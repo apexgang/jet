@@ -2,6 +2,7 @@
   import DeliveryPanel from "$lib/features/delivery/DeliveryPanel.svelte";
   import type { PublicRecoveryAction } from "$lib/jet/bridge";
   import type { DesktopSession, WorkPanelTab } from "./session.svelte";
+  import { LOST_RUN_TEXT, needsRunRecovery } from "$lib/features/system/model";
 
   let { session }: { session: DesktopSession } = $props();
 
@@ -299,6 +300,13 @@
           </dl>
 
           {#if session.supervision?.execution?.termination}<p class="termination-result" role="status">{session.supervision.execution.termination.summary}</p>{/if}
+
+          {#if needsRunRecovery(session.selectedRun?.lifecycle, session.supervision?.execution?.needsAttention)}
+            <section class="notice critical lost-run" aria-labelledby="lost-run-title">
+              <strong id="lost-run-title">Recovery needed</strong>
+              <p>{LOST_RUN_TEXT}</p>
+            </section>
+          {/if}
 
           <div class="run-controls" aria-label="Run controls">
             <button disabled={!session.canInterruptTurn || session.controlBusy !== null} onclick={() => session.requestRunControl("interrupt_turn")}>Interrupt Turn…</button>

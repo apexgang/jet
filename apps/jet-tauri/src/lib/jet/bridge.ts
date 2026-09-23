@@ -199,6 +199,8 @@ export type ConversationDetail = {
   workspaceId: string | null;
   workspaceRoot: string | null;
   runs: RunSummary[];
+  /** Set at creation; no Command changes it, so it is disclosed read-only. */
+  retention: "retain" | "forget_after_final_run";
 };
 
 export type ChangedFile = {

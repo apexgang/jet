@@ -209,6 +209,15 @@ impl PublicError {
         Self::new("invalid_response", code, message, false)
     }
 
+    /// A local facility of this app failed in a way a retry may fix, such
+    /// as writing an exported file (`audit.export_failed`). Unlike
+    /// `internal()`, the code names what failed.
+    // Wave 3.3's audit export (a later slice) is the first caller.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn local_internal(code: &'static str, message: &'static str) -> Self {
+        Self::new("internal", code, message, true)
+    }
+
     pub(crate) fn internal() -> Self {
         Self::new(
             "internal",
@@ -419,6 +428,58 @@ mod tests {
         assert_eq!(error.plane_id.as_deref(), Some("local"));
         let json = serde_json::to_value(&error).unwrap();
         assert_eq!(json["planeId"], "local");
+    }
+
+    /// Wave 3.3 local stable codes (§4.6): each passes the allowlist and
+    /// keeps the category its constructor gives it.
+    #[test]
+    fn wave_3_3_local_codes_are_safe_and_categorized() {
+        let invalid_input = [
+            "retention.review_expired",
+            "recovery.review_expired",
+            "client.review_limit",
+            "client.review_used",
+            "client.review_plane_mismatch",
+            "retention.names_invalid",
+            "retention.stop_unacknowledged",
+            "autodelete.rule_unknown",
+            "autodelete.prompt_invalid",
+            "autodelete.days_invalid",
+            "audit.export_too_large",
+        ];
+        let conflict = [
+            "retention.request_unresolved",
+            "retention.mode_locked",
+            "retention.review_stale",
+            "retention.trash_unknown",
+            "autodelete.retry_mismatch",
+            "autodelete.token_expired",
+            "recovery.snapshot_gone",
+            "recovery.not_read_only_local",
+            "recovery.purge_unavailable",
+            "recovery.request_unresolved",
+            "audit.export_required",
+            "audit.export_busy",
+            "storage.collect_busy",
+        ];
+        for code in invalid_input {
+            assert_eq!(safe_code(code).as_deref(), Some(code));
+            let error = PublicError::invalid_input(code, "m");
+            assert_eq!((error.category, error.retryable), ("invalid_input", false));
+        }
+        for code in conflict {
+            assert_eq!(safe_code(code).as_deref(), Some(code));
+            let error = PublicError::conflict(code, "m");
+            assert_eq!((error.category, error.retryable), ("conflict", false));
+        }
+        let failed = PublicError::local_internal("audit.export_failed", "m");
+        assert_eq!(
+            safe_code(&failed.code).as_deref(),
+            Some("audit.export_failed")
+        );
+        assert_eq!((failed.category, failed.retryable), ("internal", true));
+        // `internal()` keeps its own code.
+        assert_eq!(PublicError::internal().code, "client.state_unavailable");
     }
 
     #[test]

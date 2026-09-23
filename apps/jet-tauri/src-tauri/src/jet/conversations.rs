@@ -158,6 +158,8 @@ pub(crate) struct ConversationDetailView {
     workspace_id: Option<String>,
     workspace_root: Option<String>,
     runs: Vec<RunView>,
+    /// Disclosed read-only in the task header; no Command changes it.
+    retention: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -442,6 +444,14 @@ fn detail_view(plane: PlaneId, snapshot: ConversationSnapshot) -> ConversationDe
             .workspace
             .map(|workspace| bounded_text(&workspace.root, 4_096, "Workspace")),
         runs: snapshot.runs.iter().map(run_view).collect(),
+        retention: retention_name(snapshot.conversation.retention),
+    }
+}
+
+fn retention_name(policy: RetentionPolicy) -> &'static str {
+    match policy {
+        RetentionPolicy::Retain => "retain",
+        RetentionPolicy::ForgetAfterFinalRun => "forget_after_final_run",
     }
 }
 
@@ -616,9 +626,11 @@ mod tests {
 
     use uuid::Uuid;
 
+    use jet_protocol::RetentionPolicy;
+
     use super::{
-        command_id, parse_selection, validate_prompt, validate_search, validate_token,
-        ConversationState, StartKey,
+        command_id, parse_selection, retention_name, validate_prompt, validate_search,
+        validate_token, ConversationState, StartKey,
     };
     use crate::jet::planes::PlaneId;
 
@@ -696,5 +708,14 @@ mod tests {
         assert!(validate_search(&"x".repeat(257)).is_err());
         assert!(validate_token("codex_default", "craft.invalid").is_ok());
         assert!(validate_token("../../craft", "craft.invalid").is_err());
+    }
+
+    #[test]
+    fn the_detail_view_discloses_the_retention_policy() {
+        assert_eq!(retention_name(RetentionPolicy::Retain), "retain");
+        assert_eq!(
+            retention_name(RetentionPolicy::ForgetAfterFinalRun),
+            "forget_after_final_run"
+        );
     }
 }

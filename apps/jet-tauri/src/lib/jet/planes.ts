@@ -36,6 +36,12 @@ export type FeatureSupport = {
 export type PlaneHealth = {
   security: "trusted" | "degraded" | "unknown";
   store: "serving" | "read_only" | "unknown";
+  /**
+   * The Deletion ledger a snapshot restore depends on. `unsupported` when the
+   * Plane reports Recovery on a minor that does not name the ledger;
+   * `unknown` before a status or without a Recovery section.
+   */
+  ledger: "verified" | "corrupt" | "unsupported" | "unknown";
 };
 
 /** What the shell can prove about the negotiated minor. Feature table only. */
