@@ -46,6 +46,7 @@ import {
   type WorkPanelSnapshot,
 } from "$lib/jet/bridge";
 import { LOCAL_PLANE, type PlaneId, type PlaneSelection } from "$lib/jet/planes";
+import { loadDesktopPreferences } from "$lib/jet/preferences";
 import { openSettings, type SettingsTarget } from "$lib/jet/settings-window";
 import { PlaneCatalog } from "$lib/features/planes/catalog.svelte";
 import { PlaneHealth } from "$lib/features/system/health.svelte";
@@ -55,6 +56,12 @@ import { needsPairing } from "$lib/features/planes/model";
 import { PlanesSession, type FeedHandler, type PlanesFocus } from "$lib/features/planes/session.svelte";
 import { TerminalTranscriptDecoder } from "$lib/jet/terminal-text";
 import { shouldLoadNextWorkPage } from "$lib/jet/work-continuity";
+import {
+  resolveShortcut,
+  type KeyInput,
+  type ShellIntent,
+  type ShortcutContext,
+} from "./shortcuts";
 import {
   fixtureForState,
   type DesktopFixtureScenario,
@@ -90,6 +97,12 @@ export type LiveTimelineEntry = {
 
 export type RunControlChoice = "interrupt_turn" | "stop_run";
 
+/** One-shot focus moves a view performs once its target is rendered. */
+export type FocusRequest = "search" | "project-folder" | "run-control";
+
+/** A key press the shell may claim; `preventDefault` is called when it does. */
+export type ShortcutEvent = KeyInput & Pick<KeyboardEvent, "defaultPrevented" | "preventDefault">;
+
 export class DesktopSession implements FeedHandler {
   /** Per-Plane health conditions; the notice shows only the selected task's Plane. */
   health = new PlaneHealth();
@@ -112,6 +125,12 @@ export class DesktopSession implements FeedHandler {
   draft = $state("");
   actionNotice = $state<string | null>(null);
   composerFocusRequest = $state(0);
+  /** Bumped when Search should take keyboard focus (Ctrl+K). */
+  searchFocusRequest = $state(0);
+  /** Bumped when Setup's "Choose Folder…" should take focus (Ctrl+Shift+O). */
+  projectFolderFocusRequest = $state(0);
+  /** Bumped when a Run-control confirmation opens; its Cancel takes focus. */
+  runControlFocusRequest = $state(0);
   connectionState = $state<ConnectionViewState>("connecting");
   connection = $state<ConnectionSnapshot | null>(null);
   failure = $state<PublicError | null>(null);
@@ -156,6 +175,15 @@ export class DesktopSession implements FeedHandler {
   terminalColumns = $state(80);
   workPanelNoticeError = $state<PublicError | null>(null);
 
+  /** The last focus request of each kind a view has carried out. */
+  private handledFocus: Record<FocusRequest, number> = { search: 0, "project-folder": 0, "run-control": 0 };
+  /** The control that opened the Run-control confirmation; focus returns to it. */
+  private runControlReturnFocus: { focus(): void; isConnected?: boolean } | null = null;
+  /**
+   * "Reopen the last task" (Settings › General). Off means no task is
+   * selected at launch; Jet starts on New task. Read once in `connect()`.
+   */
+  private reopenLastTask = true;
   private setupRequest = 0;
   private restoreRequest = 0;
   private workRequest = 0;
@@ -399,14 +427,29 @@ export class DesktopSession implements FeedHandler {
    * Plane has loaded.
    */
   private async connectPlanes(): Promise<void> {
-    await this.planes.refresh();
+    const [reopenLastTask] = await Promise.all([this.loadReopenLastTask(), this.planes.refresh()]);
+    this.reopenLastTask = reopenLastTask;
+    // Swift's beginNewTask(): with the preference off, launch on New task
+    // unless the user or the setup redirect has already moved elsewhere.
+    if (!reopenLastTask && this.sidebarSelection === "conversation" && !this.selectedConversationId) {
+      this.select("new-task");
+    }
     if (!this.planes.snapshot) {
       this.failure = this.planes.error;
       this.connectionState = "failed";
       return;
     }
     this.catalog.sync();
-    await this.restoreSelection(this.planes.snapshot.restoredSelection);
+    await this.restoreSelection(reopenLastTask ? this.planes.snapshot.restoredSelection : null);
+  }
+
+  /** The preference, or its default (on, as in Swift) when it can't be read. */
+  private async loadReopenLastTask(): Promise<boolean> {
+    try {
+      return (await loadDesktopPreferences()).reopenLastTask !== false;
+    } catch {
+      return true;
+    }
   }
 
   /** Reads the native registry snapshot and follows it in Recent. */
@@ -454,11 +497,15 @@ export class DesktopSession implements FeedHandler {
   /**
    * Restores the saved selection once its Plane's chain has settled; any
    * selection the user makes meanwhile wins. Without a restorable task the
-   * newest task is selected.
+   * newest task is selected, but only while "Reopen the last task" is on and
+   * the task view is showing: New task, Search, Setup and every other
+   * destination keep nothing selected (D17), so the next Send creates a task
+   * instead of posting into one the user never chose.
    */
   private async restoreSelection(restored: PlaneSelection | null): Promise<void> {
     const request = ++this.restoreRequest;
-    const superseded = () => request !== this.restoreRequest;
+    const superseded = () =>
+      request !== this.restoreRequest || this.sidebarSelection !== "conversation";
     if (restored && this.planes.has(restored.planeId)) {
       await this.catalog.settled(restored.planeId);
       if (superseded()) return;
@@ -481,7 +528,14 @@ export class DesktopSession implements FeedHandler {
     }
     const fallback = ++this.restoreRequest;
     await this.catalog.settled(LOCAL_PLANE);
-    if (fallback !== this.restoreRequest || this.selectedConversationId) return;
+    if (
+      fallback !== this.restoreRequest ||
+      this.selectedConversationId ||
+      !this.reopenLastTask ||
+      this.sidebarSelection !== "conversation"
+    ) {
+      return;
+    }
     const newest = this.catalog.rows[0];
     if (newest) await this.openConversation(newest.id, false, newest.planeId);
   }
@@ -736,7 +790,32 @@ export class DesktopSession implements FeedHandler {
     }
   }
 
+  /**
+   * True once per new focus request of `kind`. A view calls it from an
+   * effect after its target element exists, then moves focus there.
+   */
+  takeFocusRequest(kind: FocusRequest): boolean {
+    const request = this.focusRequest(kind);
+    if (request === this.handledFocus[kind]) return false;
+    this.handledFocus[kind] = request;
+    return true;
+  }
+
+  private focusRequest(kind: FocusRequest): number {
+    switch (kind) {
+      case "search":
+        return this.searchFocusRequest;
+      case "project-folder":
+        return this.projectFolderFocusRequest;
+      case "run-control":
+        return this.runControlFocusRequest;
+    }
+  }
+
   select(destination: SidebarDestination): void {
+    // Leaving a destination drops its pending focus request.
+    if (destination !== "search") this.handledFocus.search = this.searchFocusRequest;
+    if (destination !== "project") this.handledFocus["project-folder"] = this.projectFolderFocusRequest;
     this.sidebarSelection = destination;
     this.actionNotice = null;
     if (destination !== "trash") this.trash.hide();
@@ -828,14 +907,17 @@ export class DesktopSession implements FeedHandler {
     this.conversationBusy = true;
     this.actionNotice = null;
     try {
-      let conversationId = this.selectedConversationId;
+      // New task always creates a task, whatever is still selected (D17).
+      const creating = this.sidebarSelection === "new-task" || !this.selectedConversationId;
+      let conversationId = creating ? null : this.selectedConversationId;
       if (!conversationId) {
-        // New tasks run on this computer in Wave 3.1.
-        this.selectedPlaneId = LOCAL_PLANE;
         if (!this.selectedProjectId) {
           this.actionNotice = "Choose a Project before starting a task.";
           return;
         }
+        if (this.selectedConversationId) this.clearSelectedConversation();
+        // New tasks run on this computer in Wave 3.1.
+        this.selectedPlaneId = LOCAL_PLANE;
         const conversation = await createConversation(this.selectedProjectId);
         this.catalog.upsert(conversation);
         conversationId = conversation.id;
@@ -883,14 +965,40 @@ export class DesktopSession implements FeedHandler {
     }
   }
 
-  requestRunControl(control: RunControlChoice): void {
+  /**
+   * Opens the Interrupt Turn / Stop Run confirmation. It lives in the Run
+   * tab, so the work panel opens on Run and the confirmation's Cancel takes
+   * focus; cancelling returns focus to `invoker`.
+   */
+  requestRunControl(
+    control: RunControlChoice,
+    invoker: { focus(): void; isConnected?: boolean } | null = null,
+  ): void {
     if (control === "interrupt_turn" && !this.canInterruptTurn) return;
     if (control === "stop_run" && !this.canStopRun) return;
+    this.runControlReturnFocus = invoker;
+    this.workPanelPresented = true;
+    this.selectedWorkPanel = "run";
     this.runControlConfirmation = control;
+    this.runControlFocusRequest += 1;
   }
 
+  /** Closes the confirmation and returns focus to the control that opened it. */
   cancelRunControl(): void {
     this.runControlConfirmation = null;
+    const invoker = this.runControlReturnFocus;
+    this.runControlReturnFocus = null;
+    if (invoker && invoker.isConnected !== false) invoker.focus();
+  }
+
+  /** Whether Escape has something to close. */
+  get dismissible(): boolean {
+    return this.runControlConfirmation !== null;
+  }
+
+  /** Escape: closes the open Run-control confirmation. */
+  dismiss(): void {
+    if (this.runControlConfirmation) this.cancelRunControl();
   }
 
   async confirmRunControl(): Promise<void> {
@@ -898,6 +1006,7 @@ export class DesktopSession implements FeedHandler {
     const runId = this.selectedRun?.id;
     if (!control || !runId || this.controlBusy) return;
     this.runControlConfirmation = null;
+    this.runControlReturnFocus = null;
     this.controlBusy = control;
     this.actionNotice = null;
     try {
@@ -1413,6 +1522,18 @@ export class DesktopSession implements FeedHandler {
     if (terminalId) void detachWorkspaceTerminal(terminalId);
   }
 
+  /** Drops the selected task and everything loaded for it. */
+  private clearSelectedConversation(): void {
+    this.trash.clearBanner();
+    this.selectedConversationId = null;
+    this.conversationDetail = null;
+    this.timeline = [];
+    this.supervision = null;
+    this.runControlConfirmation = null;
+    this.runControlReturnFocus = null;
+    this.resetWorkPanel();
+  }
+
   private resetWorkPanel(): void {
     this.workRequest += 1;
     this.workFileRequest += 1;
@@ -1474,22 +1595,57 @@ export class DesktopSession implements FeedHandler {
     return failure;
   }
 
-  handleShortcut(event: KeyboardEvent): void {
-    if (!(event.metaKey || event.ctrlKey)) return;
+  /**
+   * The main window's global key handler. The pure shortcut model decides
+   * what a press means; a press it does not claim is left alone.
+   */
+  handleShortcut(event: ShortcutEvent, context: Omit<ShortcutContext, "dismissible">): void {
+    if (event.defaultPrevented) return;
+    const intent = resolveShortcut(event, { ...context, dismissible: this.dismissible });
+    if (!intent) return;
+    event.preventDefault();
+    this.perform(intent);
+  }
 
-    if (event.key.toLowerCase() === "n") {
-      event.preventDefault();
-      this.select("new-task");
-    } else if (event.key.toLowerCase() === "k") {
-      event.preventDefault();
-      this.select("search");
-    } else if (event.key === "," && !event.altKey && !event.shiftKey) {
-      event.preventDefault();
-      void this.openSettings();
-    } else if (event.altKey && event.key === "0") {
-      event.preventDefault();
-      this.workPanelPresented = !this.workPanelPresented;
+  /** Carries out one shell intent from the keyboard. */
+  perform(intent: ShellIntent): void {
+    switch (intent.kind) {
+      case "new-task":
+        this.select("new-task");
+        return;
+      case "search":
+        this.select("search");
+        this.searchFocusRequest += 1;
+        return;
+      case "add-project":
+        this.select("project");
+        this.projectFolderFocusRequest += 1;
+        return;
+      case "settings":
+        void this.openSettings();
+        return;
+      case "toggle-sidebar":
+        this.toggleSidebar();
+        return;
+      case "toggle-work-panel":
+        this.workPanelPresented = !this.workPanelPresented;
+        return;
+      case "work-panel-tab":
+        this.showPanel(intent.tab);
+        return;
+      case "dismiss":
+        this.dismiss();
+        return;
+      case "toggle-fullscreen":
+      case "close-window":
+      case "quit":
+        // Not enabled in this build; `resolveShortcut` never yields them.
+        return;
     }
+  }
+
+  toggleSidebar(): void {
+    this.sidebarPresented = !this.sidebarPresented;
   }
 
   showFixture(state: FixtureState): void {

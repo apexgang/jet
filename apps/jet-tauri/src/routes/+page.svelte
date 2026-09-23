@@ -4,6 +4,7 @@
   import Conversation from "$lib/features/shell/Conversation.svelte";
   import Sidebar from "$lib/features/shell/Sidebar.svelte";
   import { DesktopSession } from "$lib/features/shell/session.svelte";
+  import { ENABLED_SHORTCUTS, currentPlatform } from "$lib/features/shell/shortcuts";
   import "$lib/features/shell/theme.css";
   import WorkPanel from "$lib/features/shell/WorkPanel.svelte";
 
@@ -11,7 +12,14 @@
 
   onMount(() => {
     session.connect();
-    const handleShortcut = (event: KeyboardEvent) => session.handleShortcut(event);
+    const platform = currentPlatform();
+    const handleShortcut = (event: KeyboardEvent) =>
+      session.handleShortcut(event, {
+        platform,
+        // A native modal dialog owns the keyboard, Escape included.
+        modalOpen: document.querySelector("dialog[open]") !== null,
+        enabled: ENABLED_SHORTCUTS,
+      });
     window.addEventListener("keydown", handleShortcut);
     return () => {
       window.removeEventListener("keydown", handleShortcut);

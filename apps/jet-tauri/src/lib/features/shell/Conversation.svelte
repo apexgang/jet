@@ -3,6 +3,7 @@
   import PlanesPanel from "$lib/features/planes/PlanesPanel.svelte";
   import SchedulesDestination from "$lib/features/schedules/SchedulesDestination.svelte";
   import type { DesktopSession } from "./session.svelte";
+  import { currentPlatform, shortcutAria } from "./shortcuts";
   import SetupPanel from "$lib/features/setup/SetupPanel.svelte";
   import PlaneHealthNotice from "$lib/features/system/PlaneHealthNotice.svelte";
   import { retentionLine } from "$lib/features/system/model";
@@ -13,6 +14,7 @@
   let { session }: { session: DesktopSession } = $props();
   let composer = $state<HTMLTextAreaElement>();
   let moveTrigger = $state<HTMLElement | null>(null);
+  const platform = currentPlatform();
 
   /** The selected task's own Jet Trash state; never inferred from the list. */
   const trashBanner = $derived(
@@ -43,6 +45,28 @@
     if (lifecycle === "canceled") return "Canceled";
     if (lifecycle === "lost") return "Recovery needed";
     return "Ready";
+  });
+
+  /** The approval the task is waiting on, if any: the newest requested one. */
+  const pendingApproval = $derived(
+    session.timeline.findLast((entry) => entry.approval?.state === "requested")?.approval ?? null,
+  );
+
+  /**
+   * What the status region announces. The timeline itself is not live, so
+   * streamed output never floods a screen reader; only status changes are
+   * spoken. "Loading" is a transient refresh and is not announced.
+   */
+  const liveStatus = $derived.by(() => {
+    if (status === "Loading") return null;
+    if (status === "Approval needed" && pendingApproval) return `Approval needed: ${pendingApproval.tool}`;
+    if (status === "Completed") return "Run completed";
+    return `Task status: ${status}`;
+  });
+  let announcedStatus = $state("");
+
+  $effect(() => {
+    if (liveStatus !== null) announcedStatus = liveStatus;
   });
 
   $effect(() => {
@@ -80,8 +104,9 @@
       <button
         class="icon-button sidebar-toggle"
         aria-label={session.sidebarPresented ? "Hide sidebar" : "Show sidebar"}
+        aria-keyshortcuts={shortcutAria("toggle-sidebar", platform)}
         title={session.sidebarPresented ? "Hide sidebar" : "Show sidebar"}
-        onclick={() => (session.sidebarPresented = !session.sidebarPresented)}
+        onclick={() => session.toggleSidebar()}
       >
         Sidebar
       </button>
@@ -125,6 +150,7 @@
       <button
         class="icon-button"
         aria-label={session.workPanelPresented ? "Hide work panel" : "Show work panel"}
+        aria-keyshortcuts={shortcutAria("toggle-work-panel", platform)}
         title={session.workPanelPresented ? "Hide work panel" : "Show work panel"}
         onclick={() => (session.workPanelPresented = !session.workPanelPresented)}
       >
@@ -132,7 +158,9 @@
       </button>
     </header>
 
-    <div class="timeline" aria-live="polite" aria-busy={session.conversationBusy}>
+    <p class="visually-hidden" role="status">{announcedStatus}</p>
+
+    <div class="timeline" aria-busy={session.conversationBusy}>
       <div class="timeline-inner">
         <PlaneHealthNotice
           health={session.health}
@@ -245,12 +273,12 @@
                   <span class="approval-spacer"></span>
                   <button
                     disabled={!session.canInterruptTurn || session.controlBusy !== null}
-                    onclick={() => session.requestRunControl("interrupt_turn")}
+                    onclick={(event) => session.requestRunControl("interrupt_turn", event.currentTarget)}
                   >Interrupt Turn…</button>
                   <button
                     class="danger-action"
                     disabled={!session.canStopRun || session.controlBusy !== null}
-                    onclick={() => session.requestRunControl("stop_run")}
+                    onclick={(event) => session.requestRunControl("stop_run", event.currentTarget)}
                   >Stop Run…</button>
                 </div>
               </article>

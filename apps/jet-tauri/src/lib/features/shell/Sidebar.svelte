@@ -1,9 +1,17 @@
 <script lang="ts">
   import type { DesktopSession, SidebarDestination } from "./session.svelte";
+  import { currentPlatform, shortcutAria, shortcutLabel } from "./shortcuts";
 
   let { session }: { session: DesktopSession } = $props();
   const catalog = $derived(session.catalog);
   const planes = $derived(session.planes);
+  const platform = currentPlatform();
+  let searchInput = $state<HTMLInputElement>();
+
+  // Ctrl+K: the Search field takes focus once it is rendered.
+  $effect(() => {
+    if (searchInput && session.takeFocusRequest("search")) searchInput.focus();
+  });
 
   function selected(destination: SidebarDestination): boolean {
     return session.sidebarSelection === destination;
@@ -18,19 +26,28 @@
 
   <nav aria-label="Primary">
     <div class="nav-group primary-actions">
-      <button class:active={selected("new-task")} onclick={() => session.select("new-task")}>
+      <button
+        class:active={selected("new-task")}
+        aria-keyshortcuts={shortcutAria("new-task", platform)}
+        onclick={() => session.select("new-task")}
+      >
         New task
-        <kbd>Ctrl+N</kbd>
+        <kbd>{shortcutLabel("new-task", platform)}</kbd>
       </button>
-      <button class:active={selected("search")} onclick={() => session.select("search")}>
+      <button
+        class:active={selected("search")}
+        aria-keyshortcuts={shortcutAria("search", platform)}
+        onclick={() => session.select("search")}
+      >
         Search
-        <kbd>Ctrl+K</kbd>
+        <kbd>{shortcutLabel("search", platform)}</kbd>
       </button>
       {#if selected("search")}
         <form class="sidebar-search" onsubmit={(event) => { event.preventDefault(); void catalog.search(); }}>
           <label for="conversation-search">Search tasks</label>
           <div>
             <input
+              bind:this={searchInput}
               id="conversation-search"
               bind:value={catalog.searchText}
               maxlength="256"
@@ -99,7 +116,11 @@
           </button>
         {/each}
       {/if}
-      <button class:active={selected("project")} onclick={() => session.select("project")}>
+      <button
+        class:active={selected("project")}
+        aria-keyshortcuts={shortcutAria("add-project", platform)}
+        onclick={() => session.select("project")}
+      >
         {session.setupSnapshot?.projects.length ? "Manage Projects" : "Add a Project"}
       </button>
     </div>
@@ -164,9 +185,9 @@
           >{planes.attentionCount}</span>
         {/if}
       </button>
-      <button onclick={() => void session.openSettings()}>
+      <button aria-keyshortcuts={shortcutAria("settings", platform)} onclick={() => void session.openSettings()}>
         Settings
-        <kbd>Ctrl+,</kbd>
+        <kbd>{shortcutLabel("settings", platform)}</kbd>
       </button>
     </div>
   </nav>

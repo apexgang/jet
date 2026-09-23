@@ -1,0 +1,458 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
+import type { Channel } from "@tauri-apps/api/core";
+
+import type {
+  ConversationPage,
+  ConversationRow,
+  PlaneUpdate,
+  PublicError,
+  RunSupervision,
+  SetupSnapshot,
+} from "../src/lib/jet/bridge";
+import type { Plane, PlanesSnapshot } from "../src/lib/jet/planes";
+import { DesktopSession, type ShortcutEvent } from "../src/lib/features/shell/session.svelte";
+import { ENABLED_SHORTCUTS } from "../src/lib/features/shell/shortcuts";
+import { withActiveRun } from "./support/session";
+
+afterEach(() => {
+  if (typeof window !== "undefined") clearMocks();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+function failure(category: string, code: string): PublicError {
+  return {
+    category,
+    code,
+    message: `${code} message`,
+    retryable: false,
+    recoveryActions: [],
+    restart: null,
+    revisionConflict: null,
+    protocolLimit: null,
+    planeId: null,
+  };
+}
+
+const LOCAL: Plane = {
+  planeId: "local",
+  kind: "local",
+  label: "This computer",
+  planeIdentity: null,
+  connection: { state: "online" },
+  coreVersion: "0.2.0",
+  credential: null,
+  security: "trusted",
+  store: "serving",
+  features: [],
+  protocol: { exact: null, atLeast: 37, atMost: null },
+};
+
+function planes(restoredSelection: PlanesSnapshot["restoredSelection"] = null): PlanesSnapshot {
+  return {
+    planes: [LOCAL],
+    identity: { clientId: "00000000-0000-4000-8000-00000000000c", key: "unknown", fingerprint: null },
+    restoredSelection,
+    notice: null,
+    maximumRemotePlanes: 16,
+  };
+}
+
+function row(id: string, createdAtUnixMs = 1_000): ConversationRow {
+  return { planeId: "local", id, revision: "1", title: `Task ${id}`, createdAtUnixMs: String(createdAtUnixMs), projectId: "p1" };
+}
+
+const SETUP: SetupSnapshot = {
+  plane: { coreVersion: "0.2.0", daemonStarts: "1", platform: "linux" },
+  capabilities: {
+    harnesses: ["codex"],
+    crafts: [{ id: "craft", version: "1", harnesses: ["codex"] }],
+    credentialStore: "available",
+    credentialStoreLabel: "Keyring",
+    degraded: [],
+    authProviders: [],
+  },
+  projects: [{ id: "p1", name: "Jet", root: "/work/jet" }],
+  accounts: [{ id: "a1", label: "Codex", provider: "openai", state: "ready", stateLabel: "Ready" }],
+  pairing: { gate: "closed", pairedClients: 0, offerPending: false },
+  issues: [],
+};
+
+type Options = {
+  restored?: PlanesSnapshot["restoredSelection"];
+  reopenLastTask?: boolean | "fails";
+  rows?: ConversationRow[];
+  /** Holds the first Recent page until the test releases it. */
+  holdRecent?: boolean;
+};
+
+function harness(options: Options = {}) {
+  const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
+  const feeds: Array<Channel<PlaneUpdate>> = [];
+  let rows = options.rows ?? [row("l1", 1_000), row("l2", 2_000)];
+  let release: () => void = () => undefined;
+  const held = options.holdRecent ? new Promise<void>((resolve) => (release = resolve)) : Promise.resolve();
+  let created = 0;
+  vi.stubGlobal("window", { crypto: globalThis.crypto });
+  mockIPC(async (command, args) => {
+    const { onUpdate, ...plain } = (args ?? {}) as Record<string, unknown>;
+    calls.push({ command, args: plain });
+    switch (command) {
+      case "open_plane_feed":
+        feeds.push(onUpdate as Channel<PlaneUpdate>);
+        return {
+          state: "online",
+          feedId: `feed-${feeds.length}`,
+          planeId: "local",
+          planeIdentity: null,
+          health: { security: "trusted", store: "serving" },
+          coreVersion: "0.2.0",
+          daemonStarts: "1",
+          startedAtUnixMs: "1",
+          cursor: "40",
+        };
+      case "close_plane_feed":
+        return null;
+      case "list_planes":
+        return planes(options.restored ?? null);
+      case "load_desktop_preferences":
+        if (options.reopenLastTask === "fails") throw failure("internal", "preferences.read_failed");
+        return { reopenLastTask: options.reopenLastTask ?? true };
+      case "load_setup":
+        return SETUP;
+      case "load_conversations": {
+        await held;
+        const page: ConversationPage = { planeId: "local", cursor: "40", conversations: rows, nextPage: null };
+        return page;
+      }
+      case "load_conversation":
+        return { conversation: row(plain.conversationId as string), cursor: "40", workspaceId: null, workspaceRoot: null, runs: [] };
+      case "load_run_supervision":
+        return { cursor: "40", maximumEntries: 128, maximumPromptBytes: 65536, turns: [], execution: null };
+      case "create_conversation": {
+        created += 1;
+        const conversation = row(`new${created}`, 9_000 + created);
+        rows = [...rows, conversation];
+        return conversation;
+      }
+      case "start_run":
+        return { runId: "run-new", message: "Started" };
+      case "submit_turn":
+        return { message: "Queued" };
+      case "load_trash_banner":
+      case "load_conversation_trash":
+        return { kind: "absent" };
+      default:
+        return null;
+    }
+  });
+  return { calls, feeds, release: () => release() };
+}
+
+async function settle(session: DesktopSession) {
+  for (let round = 0; round < 3; round += 1) {
+    for (let tick = 0; tick < 30; tick += 1) await Promise.resolve();
+    await session.catalog.settled("local");
+  }
+  for (let tick = 0; tick < 30; tick += 1) await Promise.resolve();
+}
+
+function event(kind: string, conversationId: string | null = null): PlaneUpdate {
+  return {
+    type: "event",
+    sequence: "41",
+    recorded_at_unix_ms: "1",
+    kind,
+    conversation_id: conversationId,
+    run_id: null,
+    timeline: [],
+  };
+}
+
+function keyEvent(input: Partial<ShortcutEvent> & { key: string }) {
+  const prevented = { value: false };
+  const event: ShortcutEvent = {
+    code: "",
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    shiftKey: false,
+    isComposing: false,
+    repeat: false,
+    defaultPrevented: false,
+    preventDefault: () => (prevented.value = true),
+    ...input,
+  };
+  return { event, prevented };
+}
+
+const linux = { platform: "other" as const, modalOpen: false, enabled: ENABLED_SHORTCUTS };
+
+describe("D17: a Plane event never selects a task behind New task", () => {
+  it("startup restoration yields to New task chosen before Recent loads", async () => {
+    const { feeds, release } = harness({ holdRecent: true });
+    const session = new DesktopSession();
+    session.connect();
+    for (let tick = 0; tick < 30; tick += 1) await Promise.resolve();
+    session.select("new-task");
+    release();
+    await settle(session);
+    expect(session.sidebarSelection).toBe("new-task");
+    expect(session.selectedConversationId).toBeNull();
+
+    feeds[0]?.onmessage({ type: "resumed" } as PlaneUpdate);
+    await settle(session);
+    expect(session.sidebarSelection).toBe("new-task");
+    expect(session.selectedConversationId).toBeNull();
+  });
+
+  it("a conversation.created event on New task leaves nothing selected", async () => {
+    vi.useFakeTimers();
+    const { feeds, release } = harness({ holdRecent: true });
+    const session = new DesktopSession();
+    session.connect();
+    for (let tick = 0; tick < 30; tick += 1) await Promise.resolve();
+    session.select("new-task");
+    feeds[0]?.onmessage(event("conversation.created", "l3"));
+    release();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle(session);
+    expect(session.sidebarSelection).toBe("new-task");
+    expect(session.selectedConversationId).toBeNull();
+  });
+
+  it("Send on New task creates a task after a resumed update", async () => {
+    const { calls, feeds, release } = harness({ holdRecent: true });
+    const session = new DesktopSession();
+    session.connect();
+    for (let tick = 0; tick < 30; tick += 1) await Promise.resolve();
+    session.select("new-task");
+    release();
+    await settle(session);
+    feeds[0]?.onmessage({ type: "resumed" } as PlaneUpdate);
+    await settle(session);
+
+    session.draft = "Fix the build";
+    await session.submitDraft();
+    expect(calls.filter((call) => call.command === "create_conversation")).toEqual([
+      { command: "create_conversation", args: { projectId: "p1" } },
+    ]);
+    const sends = calls.filter((call) => call.command === "start_run" || call.command === "submit_turn");
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toMatchObject({ command: "start_run", args: { conversationId: "new1" } });
+    expect(session.selection).toEqual({ planeId: "local", conversationId: "new1" });
+    expect(session.sidebarSelection).toBe("conversation");
+  });
+
+  it("Send on New task ignores a stale selected task", async () => {
+    const { calls } = harness();
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    expect(session.selectedConversationId).toBe("l2");
+    session.sidebarSelection = "new-task";
+    session.supervision = {
+      cursor: "40",
+      maximumEntries: 128,
+      maximumPromptBytes: 65536,
+      turns: [],
+      execution: null,
+    } satisfies RunSupervision;
+
+    session.draft = "Another task";
+    await session.submitDraft();
+    expect(calls.filter((call) => call.command === "create_conversation")).toHaveLength(1);
+    expect(calls.filter((call) => call.command === "submit_turn")).toEqual([]);
+    expect(calls.filter((call) => call.command === "start_run").map((call) => call.args.conversationId)).toEqual([
+      "new1",
+    ]);
+  });
+
+  it("with Reopen the last task off, startup lands on New task and stays there", async () => {
+    const { calls, feeds } = harness({ reopenLastTask: false, restored: { planeId: "local", conversationId: "l1" } });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    expect(session.sidebarSelection).toBe("new-task");
+    expect(session.selectedConversationId).toBeNull();
+    expect(session.workPanelPresented).toBe(false);
+
+    feeds[0]?.onmessage({ type: "resumed" } as PlaneUpdate);
+    await settle(session);
+    expect(session.sidebarSelection).toBe("new-task");
+    expect(session.selectedConversationId).toBeNull();
+    expect(calls.filter((call) => call.command === "load_conversation")).toEqual([]);
+  });
+
+  it("with the preference on, the newest task is still selected in the task view", async () => {
+    harness();
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    expect(session.sidebarSelection).toBe("conversation");
+    expect(session.selection).toEqual({ planeId: "local", conversationId: "l2" });
+  });
+
+  it("an unreadable preference keeps the Swift default (reopen)", async () => {
+    harness({ reopenLastTask: "fails", restored: { planeId: "local", conversationId: "l1" } });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    expect(session.selection).toEqual({ planeId: "local", conversationId: "l1" });
+  });
+});
+
+describe("Run-control confirmation", () => {
+  it("opens the Run tab, asks for focus and remembers the invoker", () => {
+    harness();
+    const session = new DesktopSession();
+    withActiveRun(session);
+    session.workPanelPresented = false;
+    session.selectedWorkPanel = "delivery";
+    const invoker = { focus: vi.fn(), isConnected: true };
+
+    session.requestRunControl("interrupt_turn", invoker);
+    expect(session.runControlConfirmation).toBe("interrupt_turn");
+    expect(session.workPanelPresented).toBe(true);
+    expect(session.selectedWorkPanel).toBe("run");
+    expect(session.runControlFocusRequest).toBe(1);
+    expect(session.takeFocusRequest("run-control")).toBe(true);
+    expect(session.takeFocusRequest("run-control")).toBe(false);
+
+    session.cancelRunControl();
+    expect(session.runControlConfirmation).toBeNull();
+    expect(invoker.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing when the control is not available", () => {
+    harness();
+    const session = new DesktopSession();
+    session.workPanelPresented = false;
+    session.requestRunControl("stop_run", { focus: vi.fn() });
+    expect(session.runControlConfirmation).toBeNull();
+    expect(session.workPanelPresented).toBe(false);
+    expect(session.runControlFocusRequest).toBe(0);
+  });
+
+  it("dismiss (Escape) cancels the confirmation and returns focus", () => {
+    harness();
+    const session = new DesktopSession();
+    withActiveRun(session);
+    const invoker = { focus: vi.fn(), isConnected: true };
+    session.requestRunControl("stop_run", invoker);
+    expect(session.dismissible).toBe(true);
+
+    const { event, prevented } = keyEvent({ key: "Escape", code: "Escape" });
+    session.handleShortcut(event, linux);
+    expect(prevented.value).toBe(true);
+    expect(session.runControlConfirmation).toBeNull();
+    expect(invoker.focus).toHaveBeenCalledTimes(1);
+    expect(session.dismissible).toBe(false);
+  });
+
+  it("does not return focus to a control that left the page", () => {
+    harness();
+    const session = new DesktopSession();
+    withActiveRun(session);
+    const invoker = { focus: vi.fn(), isConnected: false };
+    session.requestRunControl("stop_run", invoker);
+    session.dismiss();
+    expect(invoker.focus).not.toHaveBeenCalled();
+  });
+
+  it("leaves Escape alone when nothing can be dismissed or a dialog is open", () => {
+    harness();
+    const session = new DesktopSession();
+    const idle = keyEvent({ key: "Escape", code: "Escape" });
+    session.handleShortcut(idle.event, linux);
+    expect(idle.prevented.value).toBe(false);
+
+    withActiveRun(session);
+    session.requestRunControl("stop_run", null);
+    const modal = keyEvent({ key: "Escape", code: "Escape" });
+    session.handleShortcut(modal.event, { ...linux, modalOpen: true });
+    expect(modal.prevented.value).toBe(false);
+    expect(session.runControlConfirmation).toBe("stop_run");
+  });
+});
+
+describe("handleShortcut", () => {
+  it("Ctrl+K opens Search and asks it to take focus (D5)", () => {
+    harness();
+    const session = new DesktopSession();
+    const { event, prevented } = keyEvent({ key: "k", code: "KeyK", ctrlKey: true });
+    session.handleShortcut(event, linux);
+    expect(prevented.value).toBe(true);
+    expect(session.sidebarSelection).toBe("search");
+    expect(session.takeFocusRequest("search")).toBe(true);
+  });
+
+  it("Ctrl+Shift+O opens Setup and asks Choose Folder… to take focus", () => {
+    harness();
+    const session = new DesktopSession();
+    session.handleShortcut(keyEvent({ key: "O", code: "KeyO", ctrlKey: true, shiftKey: true }).event, linux);
+    expect(session.sidebarSelection).toBe("project");
+    expect(session.takeFocusRequest("project-folder")).toBe(true);
+  });
+
+  it("a pending focus request is dropped when the user moves elsewhere", () => {
+    harness();
+    const session = new DesktopSession();
+    session.handleShortcut(keyEvent({ key: "k", code: "KeyK", ctrlKey: true }).event, linux);
+    session.select("conversation");
+    session.select("search");
+    expect(session.takeFocusRequest("search")).toBe(false);
+  });
+
+  it("Ctrl+N does nothing while a modal dialog is open (D4)", () => {
+    harness();
+    const session = new DesktopSession();
+    session.select("project");
+    const { event, prevented } = keyEvent({ key: "n", code: "KeyN", ctrlKey: true });
+    session.handleShortcut(event, { ...linux, modalOpen: true });
+    expect(prevented.value).toBe(false);
+    expect(session.sidebarSelection).toBe("project");
+  });
+
+  it("ignores key presses during IME composition and already-handled presses", () => {
+    harness();
+    const session = new DesktopSession();
+    session.select("project");
+    session.handleShortcut(keyEvent({ key: "n", code: "KeyN", ctrlKey: true, isComposing: true }).event, linux);
+    session.handleShortcut(keyEvent({ key: "n", code: "KeyN", ctrlKey: true, defaultPrevented: true }).event, linux);
+    expect(session.sidebarSelection).toBe("project");
+  });
+
+  it("F9 toggles the sidebar and Ctrl+Alt+digits choose work panel tabs", () => {
+    harness();
+    const session = new DesktopSession();
+    session.handleShortcut(keyEvent({ key: "F9", code: "F9" }).event, linux);
+    expect(session.sidebarPresented).toBe(false);
+    session.handleShortcut(keyEvent({ key: "F9", code: "F9" }).event, linux);
+    expect(session.sidebarPresented).toBe(true);
+
+    session.workPanelPresented = false;
+    session.handleShortcut(keyEvent({ key: "3", code: "Digit3", ctrlKey: true, altKey: true }).event, linux);
+    expect(session.selectedWorkPanel).toBe("terminal");
+    expect(session.workPanelPresented).toBe(true);
+    session.handleShortcut(keyEvent({ key: "0", code: "Digit0", ctrlKey: true, altKey: true }).event, linux);
+    expect(session.workPanelPresented).toBe(false);
+  });
+
+  it("Ctrl+, opens the Settings window (Wave 3.2)", async () => {
+    const { calls } = harness();
+    const session = new DesktopSession();
+    session.handleShortcut(keyEvent({ key: ",", code: "Comma", ctrlKey: true }).event, linux);
+    for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
+    expect(calls.map((call) => call.command)).toContain("open_settings");
+  });
+
+  it("does not claim bindings that have not shipped", () => {
+    harness();
+    const session = new DesktopSession();
+    const { event, prevented } = keyEvent({ key: "q", code: "KeyQ", ctrlKey: true });
+    session.handleShortcut(event, linux);
+    expect(prevented.value).toBe(false);
+  });
+});

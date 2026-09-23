@@ -3,8 +3,58 @@
   import type { PublicRecoveryAction } from "$lib/jet/bridge";
   import type { DesktopSession, WorkPanelTab } from "./session.svelte";
   import { LOST_RUN_TEXT, needsRunRecovery } from "$lib/features/system/model";
+  import { currentPlatform, shortcutAria } from "./shortcuts";
 
   let { session }: { session: DesktopSession } = $props();
+  const platform = currentPlatform();
+  const tabButtons: Record<string, HTMLButtonElement | undefined> = $state({});
+  let runControlCancel = $state<HTMLButtonElement>();
+
+  /**
+   * What the panel body shows. Only Deliver and the Run views are real tab
+   * panels; a tab points at its panel (`aria-controls`) only while it exists.
+   */
+  const body = $derived.by(() => {
+    if (session.selectedWorkPanel === "delivery") return "delivery";
+    if (session.workPanelError && session.selectedWorkPanel !== "run") return "error";
+    if (session.workPanelBusy && !session.workPanel && session.selectedWorkPanel !== "run") return "loading";
+    if (!session.selectedRun) return "no-run";
+    return "views";
+  });
+
+  function panelExists(tab: WorkPanelTab): boolean {
+    return tab === "delivery" || body === "views";
+  }
+
+  /** APG tabs with automatic activation: arrows wrap, Home and End jump. */
+  function handleTabKey(event: KeyboardEvent, index: number) {
+    let next: number;
+    switch (event.key) {
+      case "ArrowRight":
+        next = (index + 1) % tabs.length;
+        break;
+      case "ArrowLeft":
+        next = (index - 1 + tabs.length) % tabs.length;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = tabs.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    const tab = tabs[next].id;
+    session.showPanel(tab);
+    tabButtons[tab]?.focus();
+  }
+
+  // The Interrupt Turn / Stop Run confirmation opened: its Cancel takes focus.
+  $effect(() => {
+    if (runControlCancel && session.takeFocusRequest("run-control")) runControlCancel.focus();
+  });
 
   const tabs: Array<{ id: WorkPanelTab; label: string }> = [
     { id: "changes", label: "Changes" },
@@ -68,13 +118,18 @@
 <aside class="work-panel" class:hidden={!session.workPanelPresented} aria-label="Work panel">
   <div class="panel-navigation">
   <div class="panel-tabs" role="tablist" aria-label="Work panel views">
-    {#each tabs as tab}
+    {#each tabs as tab, index (tab.id)}
       <button
+        bind:this={tabButtons[tab.id]}
+        id={`work-tab-${tab.id}`}
         role="tab"
-        aria-controls={`work-${tab.id}`}
+        tabindex={session.selectedWorkPanel === tab.id ? 0 : -1}
+        aria-controls={panelExists(tab.id) ? `work-${tab.id}` : undefined}
         aria-selected={session.selectedWorkPanel === tab.id}
+        aria-keyshortcuts={shortcutAria("work-panel-tab", platform, tab.id)}
         class:active={session.selectedWorkPanel === tab.id}
         onclick={() => session.showPanel(tab.id)}
+        onkeydown={(event) => handleTabKey(event, index)}
       >
         {tab.label}
       </button>
@@ -84,11 +139,11 @@
   </div>
 
   <div class="panel-content" aria-busy={session.workPanelBusy}>
-    <div id="work-delivery" class="work-view" class:active={session.selectedWorkPanel === "delivery"} role="tabpanel" aria-label="Deliver">
+    <div id="work-delivery" class="work-view" class:active={session.selectedWorkPanel === "delivery"} role="tabpanel" aria-labelledby="work-tab-delivery">
       <DeliveryPanel {session} />
     </div>
-    {#if session.selectedWorkPanel !== "delivery"}
-    {#if session.workPanelError && session.selectedWorkPanel !== "run"}
+    {#if body !== "delivery"}
+    {#if body === "error" && session.workPanelError}
       <div class="work-alert" role="alert">
         <strong>Work details unavailable</strong>
         <p>{session.workPanelError.message}</p>
@@ -105,18 +160,18 @@
           {/if}
         </div>
       </div>
-    {:else if session.workPanelBusy && !session.workPanel && session.selectedWorkPanel !== "run"}
+    {:else if body === "loading"}
       <div class="panel-empty" role="status">
         <h2>Loading work details</h2>
         <p>Reading the latest bounded snapshot from the Plane.</p>
       </div>
-    {:else if !session.selectedRun}
+    {:else if body === "no-run"}
       <div class="panel-empty">
         <h2>No Run selected</h2>
         <p>Start a task to inspect its changes, files, terminals, and recovery state.</p>
       </div>
     {:else}
-      <div id="work-changes" class="work-view" class:active={session.selectedWorkPanel === "changes"} role="tabpanel" aria-label="Changes">
+      <div id="work-changes" class="work-view" class:active={session.selectedWorkPanel === "changes"} role="tabpanel" aria-labelledby="work-tab-changes">
         <header class="work-heading">
           <div>
             <h2>Changed files</h2>
@@ -196,7 +251,7 @@
         {/if}
       </div>
 
-      <div id="work-files" class="work-view" class:active={session.selectedWorkPanel === "files"} role="tabpanel" aria-label="Files">
+      <div id="work-files" class="work-view" class:active={session.selectedWorkPanel === "files"} role="tabpanel" aria-labelledby="work-tab-files">
         <header class="work-heading">
           <div>
             <h2>Workspace file</h2>
@@ -240,7 +295,7 @@
         {/if}
       </div>
 
-      <div id="work-terminal" class="work-view" class:active={session.selectedWorkPanel === "terminal"} role="tabpanel" aria-label="Terminal">
+      <div id="work-terminal" class="work-view" class:active={session.selectedWorkPanel === "terminal"} role="tabpanel" aria-labelledby="work-tab-terminal">
         <header class="work-heading">
           <div>
             <h2>Workspace terminal</h2>
@@ -282,7 +337,7 @@
         {/if}
       </div>
 
-      <div id="work-run" class="work-view" class:active={session.selectedWorkPanel === "run"} role="tabpanel" aria-label="Run">
+      <div id="work-run" class="work-view" class:active={session.selectedWorkPanel === "run"} role="tabpanel" aria-labelledby="work-tab-run">
         <section class="run-summary">
           <div class="work-heading inline-heading">
             <div><h2>Current Run</h2><p>Authoritative lifecycle and recovery state</p></div>
@@ -309,8 +364,8 @@
           {/if}
 
           <div class="run-controls" aria-label="Run controls">
-            <button disabled={!session.canInterruptTurn || session.controlBusy !== null} onclick={() => session.requestRunControl("interrupt_turn")}>Interrupt Turn…</button>
-            <button class="danger-action" disabled={!session.canStopRun || session.controlBusy !== null} onclick={() => session.requestRunControl("stop_run")}>Stop Run…</button>
+            <button disabled={!session.canInterruptTurn || session.controlBusy !== null} onclick={(event) => session.requestRunControl("interrupt_turn", event.currentTarget)}>Interrupt Turn…</button>
+            <button class="danger-action" disabled={!session.canStopRun || session.controlBusy !== null} onclick={(event) => session.requestRunControl("stop_run", event.currentTarget)}>Stop Run…</button>
           </div>
 
           {#if session.runControlConfirmation}
@@ -318,7 +373,7 @@
               <h3 id="control-title">{session.runControlConfirmation === "interrupt_turn" ? "Interrupt this Turn?" : "Stop this Run?"}</h3>
               <p>{session.runControlConfirmation === "interrupt_turn" ? "Jet will end the active Turn. The Run stays available for the next queued Turn when native cancellation succeeds." : "Jet will end the whole Run and its native processes. Recorded output and Workspace changes remain available."}</p>
               <div>
-                <button onclick={() => session.cancelRunControl()}>Cancel</button>
+                <button bind:this={runControlCancel} onclick={() => session.cancelRunControl()}>Cancel</button>
                 <button class:danger-action={session.runControlConfirmation === "stop_run"} class:primary-action={session.runControlConfirmation === "interrupt_turn"} onclick={() => session.confirmRunControl()}>{session.runControlConfirmation === "interrupt_turn" ? "Interrupt Turn" : "Stop Run"}</button>
               </div>
             </section>

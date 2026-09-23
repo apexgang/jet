@@ -12,6 +12,12 @@
   let removalNameInput = $state<HTMLInputElement>();
   let removalCancelButton = $state<HTMLButtonElement>();
   let removalReturnFocus: HTMLElement | null = null;
+  let chooseFolderButton = $state<HTMLButtonElement>();
+
+  // Ctrl+Shift+O: "Choose Folder…" takes focus once Setup has loaded.
+  $effect(() => {
+    if (chooseFolderButton && session.takeFocusRequest("project-folder")) chooseFolderButton.focus();
+  });
 
   /** Setup is this computer's Plane; its accounts are managed in Settings. */
   const accountsTarget = landedTarget("accounts", LOCAL_PLANE);
@@ -183,6 +189,7 @@
           {/if}
 
           <button
+            bind:this={chooseFolderButton}
             class="secondary-button choose-folder"
             disabled={session.setupBusy !== null}
             onclick={chooseProjectFolder}
