@@ -42,6 +42,7 @@ pub(crate) enum SettingsSection {
     Appearance,
     Notifications,
     Restoration,
+    Keyboard,
     Harnesses,
     Extensions,
     Accounts,
@@ -66,7 +67,9 @@ pub(crate) enum SettingsSection {
 impl SettingsSection {
     pub(crate) fn pane(self) -> SettingsPane {
         match self {
-            Self::Appearance | Self::Notifications | Self::Restoration => SettingsPane::General,
+            Self::Appearance | Self::Notifications | Self::Restoration | Self::Keyboard => {
+                SettingsPane::General
+            }
             Self::Harnesses | Self::Extensions | Self::Accounts | Self::Usage | Self::Utility => {
                 SettingsPane::Agents
             }
@@ -397,10 +400,11 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const ALL_SECTIONS: [SettingsSection; 22] = [
+    const ALL_SECTIONS: [SettingsSection; 23] = [
         SettingsSection::Appearance,
         SettingsSection::Notifications,
         SettingsSection::Restoration,
+        SettingsSection::Keyboard,
         SettingsSection::Harnesses,
         SettingsSection::Extensions,
         SettingsSection::Accounts,
@@ -428,6 +432,7 @@ mod tests {
             ("appearance", "general"),
             ("notifications", "general"),
             ("restoration", "general"),
+            ("keyboard", "general"),
             ("harnesses", "agents"),
             ("extensions", "agents"),
             ("accounts", "agents"),

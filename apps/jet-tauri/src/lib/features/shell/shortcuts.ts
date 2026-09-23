@@ -6,7 +6,7 @@
  * The macOS bindings mirror the Swift client's menu commands
  * (`apps/jet/jet/App/JetCommands.swift`); Linux uses Ctrl and function keys.
  */
-import type { WorkPanelTab } from "./session.svelte";
+import type { WorkPanelTab } from "$lib/jet/presentation";
 
 export type Platform = "mac" | "other";
 
@@ -64,6 +64,9 @@ export const SHORTCUTS: ReadonlyArray<{
   { intent: "toggle-work-panel", description: "Show or hide the work panel", since: "S1" },
   { intent: "work-panel-tab", description: "Choose a work panel tab", since: "S1" },
   { intent: "dismiss", description: "Close the work panel overlay or cancel a Run confirmation", since: "S1" },
+  { intent: "toggle-fullscreen", description: "Enter or leave full screen", since: "S4" },
+  { intent: "close-window", description: "Close the window", since: "S4" },
+  { intent: "quit", description: "Quit Jet", since: "S4" },
 ];
 
 /** Intents whose action ships in this build; `SHORTCUTS` lists exactly these. */

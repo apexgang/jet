@@ -11,6 +11,7 @@ import type {
   SetupSnapshot,
 } from "../src/lib/jet/bridge";
 import type { Plane, PlanesSnapshot } from "../src/lib/jet/planes";
+import { DEFAULT_PRESENTATION, type ShellPresentation, type ShellPresentationView } from "../src/lib/jet/presentation";
 import { DesktopSession, type ShortcutEvent } from "../src/lib/features/shell/session.svelte";
 import { ENABLED_SHORTCUTS } from "../src/lib/features/shell/shortcuts";
 import { withActiveRun } from "./support/session";
@@ -86,6 +87,13 @@ type Options = {
   /** Holds the first Recent page until the test releases it. */
   holdRecent?: boolean;
   setup?: SetupSnapshot;
+  /** The saved window layout, or a failed read. */
+  presentation?: Partial<ShellPresentation> | "fails";
+  /** Holds the saved layout until the test releases it. */
+  holdPresentation?: boolean;
+  /** Save results in order; `true` fails that save. */
+  saveFails?: boolean[];
+  fullscreenFails?: boolean;
 };
 
 function harness(options: Options = {}) {
@@ -95,6 +103,12 @@ function harness(options: Options = {}) {
   let release: () => void = () => undefined;
   const held = options.holdRecent ? new Promise<void>((resolve) => (release = resolve)) : Promise.resolve();
   let created = 0;
+  let fullscreen = false;
+  let releasePresentation: () => void = () => undefined;
+  const presentationHeld = options.holdPresentation
+    ? new Promise<void>((resolve) => (releasePresentation = resolve))
+    : Promise.resolve();
+  const saveFails = [...(options.saveFails ?? [])];
   vi.stubGlobal("window", { crypto: globalThis.crypto });
   mockIPC(async (command, args) => {
     const { onUpdate, ...plain } = (args ?? {}) as Record<string, unknown>;
@@ -122,6 +136,26 @@ function harness(options: Options = {}) {
         return { reopenLastTask: options.reopenLastTask ?? true };
       case "load_setup":
         return options.setup ?? SETUP;
+      case "load_shell_presentation": {
+        await presentationHeld;
+        if (options.presentation === "fails") throw failure("internal", "client.state_unavailable");
+        const view: ShellPresentationView = {
+          presentation: { ...DEFAULT_PRESENTATION, ...options.presentation },
+          issue: null,
+        };
+        return view;
+      }
+      case "save_shell_presentation": {
+        if (saveFails.shift()) throw failure("internal", "presentation.write_failed");
+        return { presentation: plain.presentation, issue: null };
+      }
+      case "toggle_main_window_fullscreen":
+        if (options.fullscreenFails) throw failure("internal", "window.mode_unavailable");
+        fullscreen = !fullscreen;
+        return { fullscreen };
+      case "close_main_window":
+      case "quit_jet":
+        return null;
       case "load_conversations": {
         await held;
         const page: ConversationPage = { planeId: "local", cursor: "40", conversations: rows, nextPage: null };
@@ -148,7 +182,11 @@ function harness(options: Options = {}) {
         return null;
     }
   });
-  return { calls, feeds, release: () => release() };
+  return { calls, feeds, release: () => release(), releasePresentation: () => releasePresentation() };
+}
+
+async function flush() {
+  for (let tick = 0; tick < 30; tick += 1) await Promise.resolve();
 }
 
 async function settle(session: DesktopSession) {
@@ -453,8 +491,44 @@ describe("handleShortcut", () => {
     harness();
     const session = new DesktopSession();
     const { event, prevented } = keyEvent({ key: "q", code: "KeyQ", ctrlKey: true });
-    session.handleShortcut(event, linux);
+    session.handleShortcut(event, { ...linux, enabled: new Set(["search"]) });
     expect(prevented.value).toBe(false);
+  });
+
+  it("F11 toggles full screen natively and announces the result", async () => {
+    const { calls } = harness();
+    const session = new DesktopSession();
+    const { event, prevented } = keyEvent({ key: "F11", code: "F11" });
+    session.handleShortcut(event, linux);
+    expect(prevented.value).toBe(true);
+    await flush();
+    expect(session.shellStatus).toBe("Full screen on");
+    session.handleShortcut(keyEvent({ key: "F11", code: "F11" }).event, linux);
+    await flush();
+    expect(session.shellStatus).toBe("Full screen off");
+    expect(calls.filter((call) => call.command === "toggle_main_window_fullscreen")).toHaveLength(2);
+  });
+
+  it("a full-screen failure shows copy keyed on its code", async () => {
+    harness({ fullscreenFails: true });
+    const session = new DesktopSession();
+    session.handleShortcut(keyEvent({ key: "F11", code: "F11" }).event, linux);
+    await flush();
+    expect(session.actionNotice).toBe("Full screen isn't available in this window.");
+    expect(session.shellStatus).toBe("");
+  });
+
+  it("Ctrl+W closes the window and Ctrl+Q quits Jet", async () => {
+    const { calls } = harness();
+    const session = new DesktopSession();
+    session.handleShortcut(keyEvent({ key: "w", code: "KeyW", ctrlKey: true }).event, linux);
+    session.handleShortcut(keyEvent({ key: "q", code: "KeyQ", ctrlKey: true }).event, linux);
+    await flush();
+    expect(calls.map((call) => call.command)).toEqual(["close_main_window", "quit_jet"]);
+    // A held Ctrl+Q repeats nothing.
+    session.handleShortcut(keyEvent({ key: "q", code: "KeyQ", ctrlKey: true, repeat: true }).event, linux);
+    await flush();
+    expect(calls.filter((call) => call.command === "quit_jet")).toHaveLength(1);
   });
 });
 
@@ -656,5 +730,211 @@ describe("work panel presentation (layout model)", () => {
     session.setColumnWidth("sidebar", 900);
     session.setColumnWidth("work-panel", 12);
     expect([session.sidebarWidth, session.workPanelWidth]).toEqual([300, 280]);
+  });
+});
+
+describe("window layout: startup ordering", () => {
+  const INCOMPLETE: SetupSnapshot = { ...SETUP, projects: [] };
+
+  it("restores destination, tab, panel, sidebar and widths when Reopen the last task is on", async () => {
+    const { calls } = harness({
+      restored: { planeId: "local", conversationId: "l1" },
+      presentation: {
+        destination: "schedules",
+        sidebarPresented: false,
+        workPanelPresented: false,
+        workPanelTab: "files",
+        sidebarWidth: 280,
+        workPanelWidth: 400,
+      },
+    });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    expect(session.sidebarSelection).toBe("schedules");
+    expect(session.sidebarPresented).toBe(false);
+    expect(session.selectedWorkPanel).toBe("files");
+    expect(session.panel.columnPreference).toBe(false);
+    expect([session.sidebarWidth, session.workPanelWidth]).toEqual([280, 400]);
+    expect(session.presentation.kind).toBe("ready");
+    // Only the task view restores a task.
+    expect(session.selectedConversationId).toBeNull();
+    expect(calls.filter((call) => call.command === "load_conversation")).toEqual([]);
+  });
+
+  it("restores the task view with its task and a hidden panel", async () => {
+    harness({
+      restored: { planeId: "local", conversationId: "l1" },
+      presentation: { destination: "conversation", workPanelPresented: false, workPanelTab: "changes" },
+    });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    expect(session.sidebarSelection).toBe("conversation");
+    expect(session.selection).toEqual({ planeId: "local", conversationId: "l1" });
+    expect(session.workPanelPresented).toBe(false);
+    expect(session.selectedWorkPanel).toBe("changes");
+  });
+
+  it("an incomplete setup wins over the restored destination", async () => {
+    harness({ setup: INCOMPLETE, presentation: { destination: "planes", workPanelPresented: true } });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    expect(session.sidebarSelection).toBe("project");
+    expect(session.workPanelPresented).toBe(false);
+  });
+
+  it("with Reopen the last task off: New task, default tab, panel hidden, nothing selected", async () => {
+    const { calls } = harness({
+      reopenLastTask: false,
+      restored: { planeId: "local", conversationId: "l1" },
+      presentation: {
+        destination: "planes",
+        workPanelTab: "terminal",
+        workPanelPresented: true,
+        sidebarPresented: false,
+        sidebarWidth: 300,
+      },
+    });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    expect(session.sidebarSelection).toBe("new-task");
+    expect(session.selectedWorkPanel).toBe("run");
+    expect(session.workPanelPresented).toBe(false);
+    expect(session.selectedConversationId).toBeNull();
+    expect(calls.filter((call) => call.command === "load_conversation")).toEqual([]);
+    // The sidebar and widths are layout, not task restoration.
+    expect(session.sidebarPresented).toBe(false);
+    expect(session.sidebarWidth).toBe(300);
+  });
+
+  it("an unreadable layout starts with the defaults", async () => {
+    harness({ presentation: "fails" });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    expect(session.presentation).toMatchObject({ kind: "defaulted", error: { code: "client.state_unavailable" } });
+    expect(session.sidebarSelection).toBe("conversation");
+    expect(session.sidebarPresented).toBe(true);
+    expect([session.sidebarWidth, session.workPanelWidth]).toEqual([244, 340]);
+  });
+
+  it("a late layout does not overwrite what the user did meanwhile", async () => {
+    const { calls, releasePresentation } = harness({
+      holdPresentation: true,
+      setup: INCOMPLETE,
+      restored: { planeId: "local", conversationId: "l1" },
+      presentation: { destination: "schedules", sidebarPresented: false, workPanelTab: "files", workPanelWidth: 420 },
+    });
+    const session = new DesktopSession();
+    session.connect();
+    await flush();
+    expect(session.presentation.kind).toBe("loading");
+    session.select("new-task");
+    session.showPanel("delivery", "tab");
+    releasePresentation();
+    await settle(session);
+    expect(session.sidebarSelection).toBe("new-task");
+    expect(session.sidebarPresented).toBe(true);
+    expect(session.selectedWorkPanel).toBe("delivery");
+    // Untouched widths still come back, and the setup redirect yields too.
+    expect(session.workPanelWidth).toBe(420);
+    expect(session.selectedConversationId).toBeNull();
+    expect(calls.filter((call) => call.command === "load_conversation")).toEqual([]);
+  });
+
+  it("a width the user set before the layout arrived is kept", async () => {
+    const { releasePresentation } = harness({ holdPresentation: true, presentation: { sidebarWidth: 290 } });
+    const session = new DesktopSession();
+    session.connect();
+    await flush();
+    session.setColumnWidth("sidebar", 220);
+    releasePresentation();
+    await settle(session);
+    expect(session.sidebarWidth).toBe(220);
+  });
+});
+
+describe("window layout: persistence", () => {
+  function saves(calls: Array<{ command: string; args: Record<string, unknown> }>) {
+    return calls
+      .filter((call) => call.command === "save_shell_presentation")
+      .map((call) => call.args.presentation as ShellPresentation);
+  }
+
+  it("saves nothing while the layout is loading", async () => {
+    const { calls } = harness({ holdPresentation: true });
+    const session = new DesktopSession();
+    session.connect();
+    await flush();
+    session.select("planes");
+    expect(session.presentationKey).toBeNull();
+    await session.persistPresentation();
+    expect(saves(calls)).toEqual([]);
+  });
+
+  it("saves a changed layout once and never the overlay, Search or Needs attention", async () => {
+    const { calls } = harness();
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    await session.persistPresentation();
+    expect(saves(calls)).toEqual([]);
+
+    // Search and Needs attention reopen as the task view.
+    session.select("search");
+    await session.persistPresentation();
+    session.select("attention");
+    await session.persistPresentation();
+    expect(saves(calls)).toEqual([
+      { ...DEFAULT_PRESENTATION, destination: "conversation", workPanelPresented: false },
+      { ...DEFAULT_PRESENTATION, destination: "conversation", workPanelPresented: true },
+    ]);
+
+    session.select("planes");
+    session.setColumnWidth("work-panel", 999);
+    await session.persistPresentation();
+    await session.persistPresentation();
+    expect(saves(calls).slice(2)).toEqual([
+      { ...DEFAULT_PRESENTATION, destination: "planes", workPanelPresented: false, workPanelWidth: 440 },
+    ]);
+
+    // The compact overlay leaves the column preference alone.
+    session.select("conversation");
+    session.setLayoutMode("compact");
+    await session.persistPresentation();
+    session.toggleWorkPanel("toggle");
+    expect(session.workPanelOverlay).toBe(true);
+    await session.persistPresentation();
+    expect(saves(calls).slice(3)).toEqual([
+      { ...DEFAULT_PRESENTATION, destination: "conversation", workPanelPresented: true, workPanelWidth: 440 },
+    ]);
+  });
+
+  it("announces the first failure of a streak and retries only a changed layout", async () => {
+    const { calls } = harness({ saveFails: [true, true, false] });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+
+    session.select("planes");
+    await session.persistPresentation();
+    expect(session.shellStatus).toBe("Jet couldn't save the window layout. It'll try again when the layout changes.");
+    await session.persistPresentation();
+    expect(saves(calls)).toHaveLength(1);
+
+    session.shellStatus = "";
+    session.toggleSidebar();
+    await session.persistPresentation();
+    expect(saves(calls)).toHaveLength(2);
+    expect(session.shellStatus).toBe("");
+
+    session.toggleSidebar();
+    session.select("schedules");
+    await session.persistPresentation();
+    expect(saves(calls)).toHaveLength(3);
+    expect(session.presentation).toMatchObject({ kind: "ready", value: { destination: "schedules" } });
   });
 });

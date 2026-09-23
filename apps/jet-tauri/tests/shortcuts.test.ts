@@ -175,11 +175,29 @@ describe("resolveShortcut guards", () => {
   });
 
   it("never resolves an intent that has not shipped", () => {
-    const enabled = ENABLED_SHORTCUTS;
+    const enabled = new Set<ShellIntentKind>(["search"]);
     expect(resolveShortcut(key({ key: "F11", code: "F11" }), context("other", { enabled }))).toBeNull();
     expect(resolveShortcut(key({ ...letter("w"), ctrlKey: true }), context("other", { enabled }))).toBeNull();
     expect(resolveShortcut(key({ ...letter("q"), ctrlKey: true }), context("other", { enabled }))).toBeNull();
-    expect(resolveShortcut(ctrlN, context("other", { enabled: new Set(["search"]) }))).toBeNull();
+    expect(resolveShortcut(ctrlN, context("other", { enabled }))).toBeNull();
+  });
+
+  it("resolves F11, Ctrl+W and Ctrl+Q in the shipped build, but not held down", () => {
+    const enabled = ENABLED_SHORTCUTS;
+    expect(resolveShortcut(key({ key: "F11", code: "F11" }), context("other", { enabled }))).toEqual({
+      kind: "toggle-fullscreen",
+    });
+    expect(resolveShortcut(key({ ...letter("w"), ctrlKey: true }), context("other", { enabled }))).toEqual({
+      kind: "close-window",
+    });
+    expect(resolveShortcut(key({ ...letter("q"), ctrlKey: true }), context("other", { enabled }))).toEqual({
+      kind: "quit",
+    });
+    expect(resolveShortcut(key({ key: "F11", code: "F11", repeat: true }), context("other", { enabled }))).toBeNull();
+    expect(resolveShortcut(key({ key: "F11", code: "F11", shiftKey: true }), context("other", { enabled }))).toBeNull();
+    expect(
+      resolveShortcut(key({ ...letter("q"), ctrlKey: true }), context("other", { enabled, modalOpen: true })),
+    ).toBeNull();
   });
 });
 
@@ -197,6 +215,11 @@ describe("shortcut labels", () => {
     expect(shortcutLabel("toggle-work-panel", "mac")).toBe("⌥⌘0");
     expect(shortcutLabel("work-panel-tab", "other", "run")).toBe("Ctrl+Alt+4");
     expect(shortcutLabel("dismiss", "other")).toBe("Esc");
+    expect(shortcutLabel("toggle-fullscreen", "other")).toBe("F11");
+    expect(shortcutLabel("toggle-fullscreen", "mac")).toBe("⌃⌘F");
+    expect(shortcutLabel("close-window", "other")).toBe("Ctrl+W");
+    expect(shortcutLabel("quit", "other")).toBe("Ctrl+Q");
+    expect(shortcutLabel("quit", "mac")).toBe("⌘Q");
   });
 
   it("writes aria-keyshortcuts in UI Events key names", () => {
@@ -246,10 +269,13 @@ describe("SHORTCUTS", () => {
     expect([...ENABLED_SHORTCUTS].sort()).toEqual(
       [
         "add-project",
+        "close-window",
         "dismiss",
         "new-task",
+        "quit",
         "search",
         "settings",
+        "toggle-fullscreen",
         "toggle-sidebar",
         "toggle-work-panel",
         "work-panel-tab",

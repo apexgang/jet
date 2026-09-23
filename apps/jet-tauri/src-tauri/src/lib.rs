@@ -1,7 +1,7 @@
 mod jet;
 
-use jet::JetBridge;
-use tauri::{Manager, WindowEvent};
+use jet::{presentation::PresentationState, window_state, JetBridge};
+use tauri::{Manager, RunEvent, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -11,13 +11,22 @@ pub fn run() {
         .setup(|app| {
             let home_directory = app.path().home_dir()?;
             let app_data_directory = app.path().app_data_dir()?;
+            // The bridge creates the app data directory (0700) first.
             app.manage(JetBridge::for_local_plane(
                 &home_directory,
                 &app_data_directory,
             )?);
+            app.manage(PresentationState::new(&app_data_directory));
+            app.manage(window_state::WindowGeometryState::new(&app_data_directory));
+            if let Some(window) = app.get_webview_window(window_state::MAIN_LABEL) {
+                window_state::present(&window, &app.state());
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let Some(geometry) = window.try_state::<window_state::WindowGeometryState>() {
+                window_state::track(window, event, &geometry);
+            }
             if matches!(event, WindowEvent::Destroyed)
                 && window.label() == jet::settings_window::SETTINGS_LABEL
             {
@@ -116,7 +125,19 @@ pub fn run() {
             jet::system::recovery::execute_recovery_action,
             jet::audit::load_security_audit,
             jet::audit::export_security_audit,
+            jet::presentation::load_shell_presentation,
+            jet::presentation::save_shell_presentation,
+            jet::window_mode::toggle_main_window_fullscreen,
+            jet::window_mode::close_main_window,
+            jet::window_mode::quit_jet,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running the Jet desktop application");
+        .build(tauri::generate_context!())
+        .expect("error while building the Jet desktop application")
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                if let Some(geometry) = app.try_state::<window_state::WindowGeometryState>() {
+                    geometry.persist();
+                }
+            }
+        });
 }

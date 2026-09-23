@@ -68,6 +68,11 @@
     "allow-resolve-conversation-names",
     "allow-preview-trash",
     "allow-trash-conversation",
-    "allow-restore-conversation"
+    "allow-restore-conversation",
+    "allow-load-shell-presentation",
+    "allow-save-shell-presentation",
+    "allow-toggle-main-window-fullscreen",
+    "allow-close-main-window",
+    "allow-quit-jet"
   ]
 }

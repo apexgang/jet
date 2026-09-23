@@ -216,6 +216,17 @@ impl PublicError {
         Self::new("internal", code, message, true)
     }
 
+    /// A client-local facility of this app (a window, a local file) that
+    /// could not do what was asked. The code names what failed, so the UI
+    /// keys its copy on it; `retryable` says whether trying again may help.
+    pub(crate) fn local_unavailable(
+        code: &'static str,
+        message: &'static str,
+        retryable: bool,
+    ) -> Self {
+        Self::new("internal", code, message, retryable)
+    }
+
     pub(crate) fn internal() -> Self {
         Self::new(
             "internal",
@@ -382,6 +393,27 @@ mod tests {
     use jet_client::ClientError;
     use jet_protocol::{ErrorCategory, FrameError, WireError};
     use std::io;
+
+    #[test]
+    fn local_unavailable_keeps_code_and_retryable() {
+        let error = PublicError::local_unavailable(
+            "presentation.write_failed",
+            "Jet couldn't save the window layout.",
+            true,
+        );
+        assert_eq!(error.category, "internal");
+        assert_eq!(error.code, "presentation.write_failed");
+        assert!(error.retryable);
+        let fixed = PublicError::local_unavailable(
+            "window.mode_unavailable",
+            "Full screen isn't available in this window.",
+            false,
+        );
+        assert_eq!(fixed.code, "window.mode_unavailable");
+        assert!(!fixed.retryable);
+        assert!(fixed.recovery_actions.is_empty());
+        assert_eq!(fixed.restart, None);
+    }
 
     #[test]
     fn feature_unavailable_keeps_both_protocol_minors() {

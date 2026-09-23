@@ -16,6 +16,7 @@ export const PANES: ReadonlyArray<{
       { id: "appearance", title: "Appearance" },
       { id: "notifications", title: "Notifications" },
       { id: "restoration", title: "Restoration" },
+      { id: "keyboard", title: "Keyboard shortcuts" },
     ],
   },
   {
@@ -71,6 +72,7 @@ export const LANDED_SECTIONS: ReadonlySet<SettingsSection> = new Set<SettingsSec
   "appearance",
   "notifications",
   "restoration",
+  "keyboard",
   "harnesses",
   "extensions",
   "accounts",

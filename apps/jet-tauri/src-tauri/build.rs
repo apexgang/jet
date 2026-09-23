@@ -93,6 +93,11 @@ fn main() {
             "execute_recovery_action",
             "load_security_audit",
             "export_security_audit",
+            "load_shell_presentation",
+            "save_shell_presentation",
+            "toggle_main_window_fullscreen",
+            "close_main_window",
+            "quit_jet",
         ]),
     ))
     .expect("failed to build the Tauri command manifest");

@@ -9,6 +9,7 @@ export type SettingsSection =
   | "appearance"
   | "notifications"
   | "restoration"
+  | "keyboard"
   | "harnesses"
   | "extensions"
   | "accounts"

@@ -47,6 +47,19 @@ import {
 } from "$lib/jet/bridge";
 import { LOCAL_PLANE, type PlaneId, type PlaneSelection } from "$lib/jet/planes";
 import { loadDesktopPreferences } from "$lib/jet/preferences";
+import {
+  DEFAULT_PRESENTATION,
+  closeMainWindow,
+  loadShellPresentation,
+  presentationErrorCopy,
+  quitJet,
+  saveShellPresentation,
+  toRestorable,
+  toggleMainWindowFullscreen,
+  type PresentationIssue,
+  type ShellPresentation,
+  type WorkPanelTab,
+} from "$lib/jet/presentation";
 import { openSettings, type SettingsTarget } from "$lib/jet/settings-window";
 import { PlaneCatalog } from "$lib/features/planes/catalog.svelte";
 import { PlaneHealth } from "$lib/features/system/health.svelte";
@@ -89,7 +102,16 @@ export type SidebarDestination =
   | "trash"
   | "planes";
 
-export type WorkPanelTab = "changes" | "files" | "terminal" | "run" | "delivery";
+export type { WorkPanelTab } from "$lib/jet/presentation";
+
+/**
+ * The saved window layout at startup. `defaulted` means the native read
+ * itself failed: the defaults stay in memory and saving is still tried.
+ */
+export type PresentationLoad =
+  | { kind: "loading" }
+  | { kind: "ready"; value: ShellPresentation; issue: PresentationIssue | null }
+  | { kind: "defaulted"; error: PublicError };
 export type ConnectionViewState = "connecting" | "online" | "reconnecting" | "failed";
 export type SetupViewState =
   | { kind: "loading" }
@@ -155,6 +177,15 @@ export class DesktopSession implements FeedHandler {
   selectedWorkPanel = $state<WorkPanelTab>("run");
   draft = $state("");
   actionNotice = $state<string | null>(null);
+  /** The saved window layout; nothing is saved while it is loading. */
+  presentation = $state<PresentationLoad>({ kind: "loading" });
+  /**
+   * Bumped by startup and by every user navigation or layout change. A
+   * startup step whose generation is stale leaves the user's choice alone.
+   */
+  presentationGeneration = 0;
+  /** Shell-level status for screen readers: full screen, layout save failures. */
+  shellStatus = $state("");
   composerFocusRequest = $state(0);
   /** Bumped when Search should take keyboard focus (Ctrl+K). */
   searchFocusRequest = $state(0);
@@ -227,6 +258,16 @@ export class DesktopSession implements FeedHandler {
    * selected at launch; Jet starts on New task. Read once in `connect()`.
    */
   private reopenLastTask = true;
+  /** True while startup applies the saved layout; those changes are not the user's. */
+  private restoringPresentation = false;
+  /** A column width the user set before the saved layout arrived. */
+  private widthsChangedByUser = false;
+  /** The layout on disk (as loaded or last saved); an equal layout is not saved again. */
+  private savedPresentationKey: string | null = null;
+  /** A layout whose save failed; it is not retried until the layout changes. */
+  private failedPresentationKey: string | null = null;
+  private presentationSaveFailing = false;
+  private presentationSaveRequest = 0;
   private setupRequest = 0;
   private restoreRequest = 0;
   private workRequest = 0;
@@ -460,30 +501,159 @@ export class DesktopSession implements FeedHandler {
   }
 
   connect(): void {
-    void this.refreshSetup(true);
-    void this.connectPlanes();
+    void this.startup();
   }
 
   /**
-   * Reads the registry, walks every Plane's Recent chain (each Plane opens
-   * its feed after its first page) and restores the last selection once its
-   * Plane has loaded.
+   * Startup in the Swift order (`DesktopShellView.swift:48-59`): the saved
+   * layout and "Reopen the last task" first, then Setup, whose redirect to
+   * an incomplete setup wins, then Recent and the restored task. Anything
+   * the user does meanwhile wins over every step.
    */
-  private async connectPlanes(): Promise<void> {
-    const [reopenLastTask] = await Promise.all([this.loadReopenLastTask(), this.planes.refresh()]);
+  private async startup(): Promise<void> {
+    const generation = ++this.presentationGeneration;
+    const [presentation, reopenLastTask] = await Promise.all([
+      this.loadPresentation(),
+      this.loadReopenLastTask(),
+      this.planes.refresh(),
+    ]);
     this.reopenLastTask = reopenLastTask;
-    // Swift's beginNewTask(): with the preference off, launch on New task
-    // unless the user or the setup redirect has already moved elsewhere.
-    if (!reopenLastTask && this.sidebarSelection === "conversation" && !this.selectedConversationId) {
-      this.select("new-task");
+    this.applyStartupPresentation(presentation, reopenLastTask, generation);
+    await this.refreshSetup(true, generation);
+    await this.connectPlanes(reopenLastTask);
+  }
+
+  /** The saved layout, or the defaults when the native read fails. */
+  private async loadPresentation(): Promise<PresentationLoad> {
+    try {
+      const view = await loadShellPresentation();
+      return { kind: "ready", value: view.presentation, issue: view.issue };
+    } catch (error: unknown) {
+      return { kind: "defaulted", error: publicError(error) };
     }
+  }
+
+  /**
+   * Applies the saved layout. With "Reopen the last task" on, the
+   * destination, tab and work panel come back; with it off Jet starts on New
+   * task (Swift `beginNewTask()`). The sidebar and widths come back either
+   * way. When the user acted before the layout arrived, only widths they
+   * have not touched are applied.
+   */
+  private applyStartupPresentation(load: PresentationLoad, reopenLastTask: boolean, generation: number): void {
+    const saved = load.kind === "ready" ? load.value : DEFAULT_PRESENTATION;
+    this.savedPresentationKey = JSON.stringify(saved);
+    this.restoringPresentation = true;
+    try {
+      if (!this.widthsChangedByUser) {
+        this.sidebarWidth = clampWidth(saved.sidebarWidth, SIDEBAR_WIDTH);
+        this.workPanelWidth = clampWidth(saved.workPanelWidth, WORK_PANEL_WIDTH);
+      }
+      if (generation !== this.presentationGeneration) return;
+      this.applySidebar(saved.sidebarPresented);
+      if (reopenLastTask) {
+        if (saved.destination !== "conversation") this.select(saved.destination);
+        this.selectedWorkPanel = saved.workPanelTab;
+        this.applyPanel({ kind: "restore", presented: saved.workPanelPresented });
+      } else {
+        this.select("new-task");
+      }
+    } finally {
+      this.restoringPresentation = false;
+      this.presentation = load;
+    }
+  }
+
+  /** A navigation or layout change by the user supersedes startup restoration. */
+  private userActed(): void {
+    if (!this.restoringPresentation) this.presentationGeneration += 1;
+  }
+
+  /** What the saved window layout would be now. Search and the overlay are never saved. */
+  get presentationSnapshot(): ShellPresentation {
+    return {
+      version: 1,
+      destination: toRestorable(this.sidebarSelection),
+      sidebarPresented: this.sidebarPresented,
+      workPanelPresented: this.panel.columnPreference,
+      workPanelTab: this.selectedWorkPanel,
+      sidebarWidth: clampWidth(this.sidebarWidth, SIDEBAR_WIDTH),
+      workPanelWidth: clampWidth(this.workPanelWidth, WORK_PANEL_WIDTH),
+    };
+  }
+
+  /**
+   * The saved-layout value the page's persist effect follows, or null while
+   * the saved layout is still loading (nothing may be written then).
+   */
+  get presentationKey(): string | null {
+    return this.presentation.kind === "loading" ? null : JSON.stringify(this.presentationSnapshot);
+  }
+
+  /**
+   * Saves the window layout natively when it changed. A failed save is not
+   * retried until the layout changes again, and only the first failure of a
+   * streak is announced; Settings shows the lasting state.
+   */
+  async persistPresentation(): Promise<void> {
+    const key = this.presentationKey;
+    if (key === null || key === this.savedPresentationKey || key === this.failedPresentationKey) return;
+    const request = ++this.presentationSaveRequest;
+    try {
+      const view = await saveShellPresentation(this.presentationSnapshot);
+      if (request !== this.presentationSaveRequest) return;
+      this.savedPresentationKey = key;
+      this.failedPresentationKey = null;
+      this.presentationSaveFailing = false;
+      this.presentation = { kind: "ready", value: view.presentation, issue: view.issue };
+    } catch (error: unknown) {
+      if (request !== this.presentationSaveRequest) return;
+      this.failedPresentationKey = key;
+      if (this.presentationSaveFailing) return;
+      this.presentationSaveFailing = true;
+      this.announce(presentationErrorCopy(publicError(error).code));
+    }
+  }
+
+  /** Announces a shell-level status change in the visually hidden region. */
+  private announce(message: string): void {
+    this.shellStatus = message;
+  }
+
+  /** F11: the result is only announced; the page keeps no full-screen flag. */
+  async toggleFullscreen(): Promise<void> {
+    try {
+      const mode = await toggleMainWindowFullscreen();
+      this.announce(mode.fullscreen ? "Full screen on" : "Full screen off");
+    } catch (error: unknown) {
+      this.actionNotice = presentationErrorCopy(publicError(error).code);
+    }
+  }
+
+  /** Ctrl+W and Ctrl+Q. Runs keep going on their Planes either way. */
+  private async windowAction(action: () => Promise<void>): Promise<void> {
+    try {
+      await action();
+    } catch (error: unknown) {
+      this.actionNotice = presentationErrorCopy(publicError(error).code);
+    }
+  }
+
+  /**
+   * Walks every Plane's Recent chain (each Plane opens its feed after its
+   * first page) and restores the last selection once its Plane has loaded,
+   * but only while the task view is showing.
+   */
+  private async connectPlanes(reopenLastTask: boolean): Promise<void> {
     if (!this.planes.snapshot) {
       this.failure = this.planes.error;
       this.connectionState = "failed";
       return;
     }
     this.catalog.sync();
-    await this.restoreSelection(reopenLastTask ? this.planes.snapshot.restoredSelection : null);
+    const restored =
+      reopenLastTask && this.sidebarSelection === "conversation" ? this.planes.snapshot.restoredSelection : null;
+    await this.restoreSelection(restored);
   }
 
   /** The preference, or its default (on, as in Swift) when it can't be read. */
@@ -620,7 +790,12 @@ export class DesktopSession implements FeedHandler {
     this.connectionState = failure.retryable ? "reconnecting" : "failed";
   }
 
-  async refreshSetup(openWhenIncomplete = false): Promise<void> {
+  /**
+   * Reads Setup. With `openWhenIncomplete`, an incomplete setup opens the
+   * Project destination, unless the user has navigated since `generation`
+   * (the startup that asked for it).
+   */
+  async refreshSetup(openWhenIncomplete = false, generation: number | null = null): Promise<void> {
     const request = ++this.setupRequest;
     if (this.setup.kind !== "ready") this.setup = { kind: "loading" };
     try {
@@ -638,6 +813,7 @@ export class DesktopSession implements FeedHandler {
       }
       if (
         openWhenIncomplete &&
+        (generation === null || generation === this.presentationGeneration) &&
         ((projectsAvailable && snapshot.projects.length === 0) ||
           (accountsAvailable && snapshot.accounts.length === 0))
       ) {
@@ -652,6 +828,7 @@ export class DesktopSession implements FeedHandler {
 
   selectProject(projectId: string): void {
     if (!this.setupSnapshot?.projects.some((project) => project.id === projectId)) return;
+    this.userActed();
     this.selectedProjectId = projectId;
     this.sidebarSelection = "project";
     this.applyPanel({ kind: "auto-close" });
@@ -774,6 +951,7 @@ export class DesktopSession implements FeedHandler {
     this.selectedConversationId = conversationId;
     this.selectedPlaneId = planeId;
     if (show) {
+      this.userActed();
       this.sidebarSelection = "conversation";
       this.applyPanel({ kind: "auto-open" });
     }
@@ -860,6 +1038,7 @@ export class DesktopSession implements FeedHandler {
   }
 
   select(destination: SidebarDestination): void {
+    this.userActed();
     // Leaving a destination drops its pending focus request.
     if (destination !== "search") this.handledFocus.search = this.searchFocusRequest;
     if (destination !== "project") this.handledFocus["project-folder"] = this.projectFolderFocusRequest;
@@ -1133,6 +1312,7 @@ export class DesktopSession implements FeedHandler {
    * one it is a code path, which never covers the conversation.
    */
   showPanel(tab: WorkPanelTab, origin: PanelOrigin | null = null, invoker: FocusTarget | null = null): void {
+    if (origin !== null) this.userActed();
     this.selectedWorkPanel = tab;
     if (origin === null) {
       this.applyPanel({ kind: "auto-open" });
@@ -1712,9 +1892,13 @@ export class DesktopSession implements FeedHandler {
         this.dismiss();
         return;
       case "toggle-fullscreen":
+        void this.toggleFullscreen();
+        return;
       case "close-window":
+        void this.windowAction(closeMainWindow);
+        return;
       case "quit":
-        // Not enabled in this build; `resolveShortcut` never yields them.
+        void this.windowAction(quitJet);
         return;
     }
   }
@@ -1753,11 +1937,13 @@ export class DesktopSession implements FeedHandler {
   }
 
   toggleSidebar(): void {
+    this.userActed();
     this.applySidebar(!this.sidebarPresented);
   }
 
   /** The header button and Ctrl+Alt+0: open or close the work panel. */
   toggleWorkPanel(origin: PanelOrigin, invoker: FocusTarget | null = null): void {
+    this.userActed();
     if (this.workPanelPresented) {
       this.hideWorkPanel();
     } else {
@@ -1770,6 +1956,7 @@ export class DesktopSession implements FeedHandler {
    * Closing the overlay asks for focus to go back to what opened it.
    */
   hideWorkPanel(): void {
+    this.userActed();
     const overlay = this.workPanelOverlay;
     const invoker = this.workPanelReturnFocus;
     this.applyPanel({ kind: "user-close" });
@@ -1794,6 +1981,7 @@ export class DesktopSession implements FeedHandler {
 
   /** Sets a column's requested width, clamped to its range. */
   setColumnWidth(column: "sidebar" | "work-panel", width: number): void {
+    if (!this.restoringPresentation) this.widthsChangedByUser = true;
     if (column === "sidebar") {
       this.sidebarWidth = clampWidth(width, SIDEBAR_WIDTH);
     } else {
@@ -1802,6 +1990,7 @@ export class DesktopSession implements FeedHandler {
   }
 
   private openWorkPanel(origin: PanelOrigin, invoker: FocusTarget | null): void {
+    this.userActed();
     const wasOverlay = this.workPanelOverlay;
     this.applyPanel({ kind: "user-open", origin });
     if (!this.workPanelOverlay) return;

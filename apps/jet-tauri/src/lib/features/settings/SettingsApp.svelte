@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
 
+  import { quitJet } from "$lib/jet/presentation";
   import {
     closeSettings,
     rememberSettingsPane,
@@ -92,9 +93,14 @@
 
   function handleKey(event: KeyboardEvent) {
     if (!event.ctrlKey || event.altKey || event.metaKey) return;
-    if (event.key.toLowerCase() === "w") {
+    const key = event.key.toLowerCase();
+    if (key === "w") {
       event.preventDefault();
       closeSettings().catch(() => undefined);
+    } else if (key === "q" && !event.shiftKey && !event.repeat && !event.isComposing) {
+      // Ctrl+Q quits Jet from either window; Runs keep going on their Planes.
+      event.preventDefault();
+      quitJet().catch(() => undefined);
     } else if (event.key === ",") {
       event.preventDefault();
       focusNavigation();

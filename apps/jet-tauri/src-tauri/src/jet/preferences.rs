@@ -2,20 +2,16 @@
 //! computer, never Plane policy, and never grant daemon authority.
 
 use std::{
-    fs::{self, OpenOptions},
-    io::{Read, Write},
+    fs,
+    io::Read,
     path::{Path, PathBuf},
     sync::Mutex,
 };
 
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
-
 use serde::{Deserialize, Serialize};
 use tauri::State;
-use uuid::Uuid;
 
-use super::{errors::PublicError, JetBridge};
+use super::{errors::PublicError, local_store, JetBridge};
 
 const PREFERENCES_FILE: &str = "desktop-preferences.json";
 const MAX_PREFERENCES_BYTES: u64 = 256;
@@ -58,29 +54,15 @@ fn load(path: &Path) -> DesktopPreferences {
     serde_json::from_slice(&bytes).unwrap_or_default()
 }
 
-/// Owner-only, fsynced, atomic replace (the `identity.rs` pattern). Shared
-/// by every device-local preference file. Blocking: call it on
-/// `spawn_blocking`.
+/// Owner-only, fsynced, atomic replace (`local_store`). Shared by every
+/// device-local preference file. Blocking: call it on `spawn_blocking`.
 pub(super) fn write_private_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let directory = path.parent().unwrap_or_else(|| Path::new("."));
     let name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "preferences".into());
-    let temporary = directory.join(format!(".{name}.{}.tmp", Uuid::new_v4()));
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let result = options.open(&temporary).and_then(|mut file| {
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        fs::rename(&temporary, path)
-    });
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
+    local_store::write_private_atomically(directory, &name, bytes)
 }
 
 fn write(path: &Path, preferences: DesktopPreferences) -> std::io::Result<()> {

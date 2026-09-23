@@ -7,6 +7,16 @@
   import "$lib/features/shell/theme.css";
 
   const session = new DesktopSession();
+  /** Layout changes settle for this long before the window layout is saved. */
+  const PERSIST_DELAY_MS = 300;
+
+  // Saves the window layout natively once it stops changing. Nothing is
+  // written while the saved layout is still loading (the key is null).
+  $effect(() => {
+    if (session.presentationKey === null) return;
+    const timer = setTimeout(() => void session.persistPresentation(), PERSIST_DELAY_MS);
+    return () => clearTimeout(timer);
+  });
 
   onMount(() => {
     session.connect();

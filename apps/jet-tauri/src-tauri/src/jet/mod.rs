@@ -14,17 +14,21 @@ pub(crate) mod ledger;
 mod live_e2e;
 #[cfg(test)]
 mod live_system;
+pub(crate) mod local_store;
 pub(crate) mod notifications;
 pub(crate) mod pairing;
 mod pairing_transcript;
 pub(crate) mod planes;
 pub(crate) mod preferences;
+pub(crate) mod presentation;
 pub(crate) mod retention;
 mod run_control;
 pub(crate) mod settings;
 pub(crate) mod settings_window;
 mod setup;
 pub(crate) mod system;
+pub(crate) mod window_mode;
+pub(crate) mod window_state;
 mod work_panel;
 
 use std::{io, path::Path, sync::Arc, time::Duration};
@@ -509,8 +513,12 @@ mod manifest_tests {
     /// window could not undo. `collect_disposable_storage` only removes
     /// unused temporary files the Plane chose, and
     /// `resolve_conversation_names` reads task titles only (wave 3.3 §5).
-    const SHARED: [&str; 5] = [
+    /// `load_shell_presentation` reads layout only (for the Window layout
+    /// line), and `quit_jet` is Ctrl+Q in both windows (wave 3.4 §5).
+    const SHARED: [&str; 7] = [
         "load_desktop_preferences",
+        "load_shell_presentation",
+        "quit_jet",
         "list_planes",
         "load_plane_detail",
         "collect_disposable_storage",
@@ -621,7 +629,14 @@ mod manifest_tests {
             assert!(!settings.contains(main_only), "{main_only}");
             assert!(handlers.contains(main_only), "{main_only}");
         }
-        for main_only in ["open_settings", "open_plane_feed", "bind_harness_account"] {
+        for main_only in [
+            "open_settings",
+            "open_plane_feed",
+            "bind_harness_account",
+            "save_shell_presentation",
+            "toggle_main_window_fullscreen",
+            "close_main_window",
+        ] {
             assert!(main.contains(main_only), "{main_only}");
             assert!(!settings.contains(main_only), "{main_only}");
         }

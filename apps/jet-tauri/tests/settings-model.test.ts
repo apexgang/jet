@@ -58,6 +58,7 @@ describe("settings targets", () => {
       appearance: "general",
       notifications: "general",
       restoration: "general",
+      keyboard: "general",
       harnesses: "agents",
       extensions: "agents",
       accounts: "agents",
@@ -78,7 +79,7 @@ describe("settings targets", () => {
       audit: "safety",
       versions: "safety",
     });
-    expect(sections).toHaveLength(22);
+    expect(sections).toHaveLength(23);
     expect(PANES.map((pane) => pane.title)).toEqual(["General", "Agents", "Work", "Connections", "Safety and system"]);
   });
 
