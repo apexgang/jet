@@ -235,7 +235,7 @@ describe("agents model", () => {
 describe("agents session", () => {
   function session() {
     const stale = vi.fn();
-    const agents = new AgentsSession({ planeStateChanged: () => undefined, planeStateStale: stale });
+    const agents = new AgentsSession({ planeStateChanged: () => undefined, planeStateStale: stale, mutationBlock: () => null });
     agents.select("local");
     return { agents, stale };
   }
@@ -345,6 +345,106 @@ describe("agents session", () => {
     expect(agents.operation).toEqual({ kind: "idle" });
     agents.select("local");
     expect(agents.operation).toMatchObject({ kind: "uncertain", reviewId: "r-5" });
+  });
+
+  it("asks for local files again after a failed check spent their token", async () => {
+    const sources: unknown[] = [];
+    ipc((command, args) => {
+      if (command === "pick_local_craft_source") {
+        return { sourceToken: "t-1", specificationName: "craft-spec.toml", artifactName: "craft" };
+      }
+      if (command === "discover_craft") {
+        sources.push((args as { source: unknown }).source);
+        throw failure("craft.local_file_invalid");
+      }
+      throw new Error(`Unexpected ${command}`);
+    });
+    const { agents } = session();
+    await agents.pickLocalSource();
+    expect(agents.localPick).toMatchObject({ kind: "picked", source: { sourceToken: "t-1" } });
+    await agents.discover({ type: "local", source_token: "t-1" });
+    expect(agents.operationFor({ action: "install" })).toMatchObject({ kind: "refused" });
+    expect(agents.localPick).toEqual({ kind: "none" });
+    expect(sources).toEqual([{ type: "local", source_token: "t-1" }]);
+
+    // A release check that fails keeps whatever was picked.
+    await agents.pickLocalSource();
+    await agents.discover({ type: "github_release", repository: "a/b", tag: "v1" });
+    expect(agents.localPick.kind).toBe("picked");
+  });
+
+  it("sends nothing from an open review while changes are paused", async () => {
+    const commands: string[] = [];
+    let block: "read_only" | "stale" | null = null;
+    ipc((command) => {
+      commands.push(command);
+      if (command === "prepare_account_bind") return bindReview("r-3");
+      throw new Error(`Unexpected ${command}`);
+    });
+    const agents = new AgentsSession({
+      planeStateChanged: () => undefined,
+      planeStateStale: () => undefined,
+      mutationBlock: () => block,
+    });
+    agents.select("local");
+    await agents.prepareBind("openai");
+    block = "stale";
+    await agents.confirm();
+    expect(commands).toEqual(["prepare_account_bind"]);
+    expect(agents.operation.kind).toBe("confirm");
+  });
+
+  it("shows a late uncertain answer on the Plane it belongs to after switching back", async () => {
+    const answers: Array<(value: unknown) => void> = [];
+    const failures: Array<(error: unknown) => void> = [];
+    ipc((command) => {
+      if (command === "prepare_account_bind") return bindReview("r-6");
+      if (command === "apply_settings_change") {
+        return new Promise((resolve, reject) => {
+          answers.push(resolve);
+          failures.push(reject);
+        });
+      }
+      throw new Error(`Unexpected ${command}`);
+    });
+    const { agents } = session();
+    await agents.prepareBind("openai");
+    const confirming = agents.confirm();
+    await settle();
+    expect(agents.operation.kind).toBe("applying");
+    agents.select(REMOTE);
+    expect(agents.operation).toEqual({ kind: "idle" });
+    agents.select("local");
+    // Still being sent: nothing else may start.
+    expect(agents.operation).toMatchObject({ kind: "applying", reviewId: "r-6" });
+    failures[0](failure("transport.offline", "offline", true));
+    await confirming;
+    expect(agents.operation).toMatchObject({ kind: "uncertain", reviewId: "r-6" });
+    expect(answers).toHaveLength(1);
+  });
+
+  it("reports an account event that arrived during a reload once it is loaded", async () => {
+    const pending: Array<(value: AgentsView) => void> = [];
+    ipc((command) => {
+      if (command === "load_agents") return new Promise<AgentsView>((resolve) => pending.push(resolve));
+      throw new Error(`Unexpected ${command}`);
+    });
+    const { agents } = session();
+    const first = agents.load();
+    pending[0](view("10"));
+    await first;
+    const reload = agents.load();
+    agents.noteChange("account.bound", "12");
+    pending[1](view("11"));
+    await reload;
+    expect(agents.accountsChanged).toBe(true);
+
+    // Covered by the reloaded list: not reported.
+    const again = agents.load();
+    agents.noteChange("account.unbound", "13");
+    pending[2](view("13"));
+    await again;
+    expect(agents.accountsChanged).toBe(false);
   });
 
   it("reports account events after the loaded list only", async () => {

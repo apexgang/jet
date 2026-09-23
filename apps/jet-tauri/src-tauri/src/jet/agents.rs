@@ -50,6 +50,10 @@ const MAX_HISTORY_SERIES: usize = 32;
 const MAX_HISTORY_POINTS: usize = 2_400;
 const MAX_FEATURES: usize = 32;
 const MAX_HOST_ACCESS: usize = 64;
+/// jetd's own bounds, in characters (jet-core craft specification).
+const MAX_HOST_ACCESS_CHARS: usize = 512;
+const MAX_VERSION_CHARS: usize = 128;
+const MAX_PUBLISHER_CHARS: usize = 256;
 /// `docs/auto-continue.md`: delays 1–86,400,000 ms, retries 1–100, and
 /// 1–8,192 bytes of nonblank message text.
 pub(crate) const MIN_DELAY_MS: u32 = 1;
@@ -653,24 +657,44 @@ fn broker_permission_name(permission: BrokerPermission) -> &'static str {
     }
 }
 
-fn host_access_view(access: &CraftHostAccess) -> HostAccessView {
+/// A review fact shown exactly or not at all. Bounded in characters, as
+/// jetd bounds these values, so a valid multibyte value is never hidden.
+fn exact_fact(value: &str, maximum_chars: usize) -> Option<String> {
+    (!value.is_empty()
+        && value.chars().count() <= maximum_chars
+        && value.chars().all(|character| !character.is_control()))
+    .then(|| value.to_owned())
+}
+
+fn host_access_view(access: &CraftHostAccess) -> Option<HostAccessView> {
     let (kind, value) = match access {
         CraftHostAccess::Executable { name } => ("executable", name),
         CraftHostAccess::Filesystem { path } => ("filesystem", path),
         CraftHostAccess::Environment { name } => ("environment", name),
         CraftHostAccess::Network { destination } => ("network", destination),
     };
-    HostAccessView {
+    Some(HostAccessView {
         kind,
-        value: bounded_label(value, 512, "Can't be displayed"),
-    }
+        value: exact_fact(value, MAX_HOST_ACCESS_CHARS)?,
+    })
 }
 
-fn preview_view(preview: &CraftInstallationPreview) -> CraftPreviewView {
+/// The review's exact facts (§7.3). A preview with a list longer than the
+/// shell shows, or a fact it cannot show exactly, is refused: the user
+/// never confirms access they were not shown.
+fn preview_view(preview: &CraftInstallationPreview) -> Result<CraftPreviewView, PublicError> {
     let confirmation = &preview.confirmation;
-    CraftPreviewView {
-        craft_id: bounded_label(&preview.craft_id, MAX_CRAFT_ID_BYTES, "Can't be displayed"),
-        version: bounded_label(&preview.version, 64, "Can't be displayed"),
+    if preview.enabled_features.len() > MAX_FEATURES
+        || confirmation.host_access.len() > MAX_HOST_ACCESS
+    {
+        return Err(craft_not_reviewable());
+    }
+    let fact = |value: &str, maximum_chars: usize| {
+        exact_fact(value, maximum_chars).ok_or_else(craft_not_reviewable)
+    };
+    Ok(CraftPreviewView {
+        craft_id: fact(&preview.craft_id, MAX_CRAFT_ID_BYTES)?,
+        version: fact(&preview.version, MAX_VERSION_CHARS)?,
         source: match confirmation.source {
             CraftSource::GitHubRelease { .. } => "github_release",
             CraftSource::Local { .. } => "local",
@@ -678,13 +702,12 @@ fn preview_view(preview: &CraftInstallationPreview) -> CraftPreviewView {
         enabled_features: preview
             .enabled_features
             .iter()
-            .take(MAX_FEATURES)
-            .map(|feature| bounded_label(feature, 96, "Can't be displayed"))
-            .collect(),
-        repository: bounded_label(&confirmation.repository, 256, "Can't be displayed"),
-        publisher_claim: bounded_label(&confirmation.publisher_claim, 256, "Can't be displayed"),
-        commit: bounded_label(&confirmation.commit, 128, "Can't be displayed"),
-        artifact_sha256: bounded_label(&confirmation.artifact_sha256, 128, "Can't be displayed"),
+            .map(|feature| fact(feature, 96))
+            .collect::<Result<_, _>>()?,
+        repository: fact(&confirmation.repository, 256)?,
+        publisher_claim: fact(&confirmation.publisher_claim, MAX_PUBLISHER_CHARS)?,
+        commit: fact(&confirmation.commit, 128)?,
+        artifact_sha256: fact(&confirmation.artifact_sha256, 128)?,
         broker_permissions: confirmation
             .broker_permissions
             .iter()
@@ -693,14 +716,13 @@ fn preview_view(preview: &CraftInstallationPreview) -> CraftPreviewView {
         host_access: confirmation
             .host_access
             .iter()
-            .take(MAX_HOST_ACCESS)
-            .map(host_access_view)
-            .collect(),
+            .map(|access| host_access_view(access).ok_or_else(craft_not_reviewable))
+            .collect::<Result<_, _>>()?,
         trust: match confirmation.trust {
             CraftTrust::SameUserExecutable => "same_user_executable",
             CraftTrust::DeveloperSource => "developer_source",
         },
-    }
+    })
 }
 
 fn disable_mode_name(mode: CraftDisableMode) -> &'static str {
@@ -1488,7 +1510,7 @@ async fn discover_craft_for(
             .discover_craft(source)
             .await
             .map_err(|e| PublicError::from_client(&e))?;
-        let view = preview_view(&preview);
+        let view = preview_view(&preview)?;
         let review_id = bridge.settings.admit(
             binding,
             SettingsAction::InstallCraft {
@@ -1509,6 +1531,13 @@ async fn discover_craft_for(
 // ---------------------------------------------------------------------------
 // Stable shell codes (§4.7)
 // ---------------------------------------------------------------------------
+
+fn craft_not_reviewable() -> PublicError {
+    PublicError::invalid_input(
+        "agents.not_reviewable",
+        "Jet can't show everything this Craft asks for, so it can't be installed here.",
+    )
+}
 
 fn provider_unavailable() -> PublicError {
     PublicError::invalid_input(

@@ -10,7 +10,7 @@
   import CraftDisableDialog from "./CraftDisableDialog.svelte";
   import CraftInstallDialog from "./CraftInstallDialog.svelte";
   import ExtensionsSection from "./ExtensionsSection.svelte";
-  import { sectionData, withIssues } from "./model";
+  import { blockText, sectionData, withIssues } from "./model";
   import OperationStatus from "./OperationStatus.svelte";
   import SectionState from "./SectionState.svelte";
   import type { SettingsSession } from "./session.svelte";
@@ -29,6 +29,9 @@
 
   const agents = $derived(session.agents);
   const PLANE = { type: "plane" } as const;
+  const id = $props.id();
+  /** The Connect button a bind review returns focus to. */
+  const connectId = (provider: string) => `${id}-connect-${provider}`;
 
   const view = $derived(sectionData(agents.view));
   const block = $derived(session.agentsBlock());
@@ -102,6 +105,7 @@
             </div>
             <button
               class="text-button danger"
+              aria-label={`Disable ${craftTitle(craft)}…`}
               disabled={block !== null || !agents.idle}
               onclick={() => (disabling = craft)}
             >
@@ -117,6 +121,7 @@
       {/if}
       <div class="section-actions">
         <button
+          id={`${id}-add-craft`}
           class="secondary-button"
           disabled={block !== null || !agents.idle}
           onclick={() => (installing = true)}
@@ -197,6 +202,7 @@
       <div class="section-actions">
         {#each data.bindOptions as option (option.provider)}
           <button
+            id={connectId(option.provider)}
             class="secondary-button"
             disabled={block !== null || !agents.idle}
             onclick={() => void agents.prepareBind(option.provider)}
@@ -297,6 +303,8 @@
   <SettingsDialog
     title={`Connect ${bindReview.harness}?`}
     lead={`Jet will use ${bindReview.harness}'s own sign-in on ${session.planeLabel}. Jet doesn't store the credential.`}
+    focus={block !== null ? "cancel" : "primary"}
+    returnFocus={[connectId(bindReview.provider), "section-accounts"]}
     oncancel={() => agents.dismiss()}
   >
     <dl class="removal-facts">
@@ -304,9 +312,18 @@
       <div><dt>Harness</dt><dd>{bindReview.harness}</dd></div>
       <div><dt>Provider</dt><dd>{bindReview.provider}</dd></div>
     </dl>
+    {#if block !== null}
+      <p class="dialog-note" role="status">{blockText(block, session.planeLabel)}</p>
+    {/if}
     {#snippet footer()}
       <button type="button" class="secondary-button" data-dialog-cancel onclick={() => agents.dismiss()}>Cancel</button>
-      <button type="button" class="primary-button" data-dialog-primary onclick={() => void agents.confirm()}>
+      <button
+        type="button"
+        class="primary-button"
+        data-dialog-primary
+        disabled={block !== null}
+        onclick={() => void agents.confirm()}
+      >
         Connect
       </button>
     {/snippet}
@@ -314,7 +331,13 @@
 {/if}
 
 {#if disabling}
-  <CraftDisableDialog {agents} craft={disabling} planeLabel={session.planeLabel} onclose={() => (disabling = null)} />
+  <CraftDisableDialog
+    {agents}
+    craft={disabling}
+    planeLabel={session.planeLabel}
+    {block}
+    onclose={() => (disabling = null)}
+  />
 {/if}
 
 {#if installing}
@@ -323,6 +346,8 @@
     planeLabel={session.planeLabel}
     isLocalPlane={agents.planeId === LOCAL_PLANE}
     {developerMode}
+    {block}
+    returnFocus={[`${id}-add-craft`, "section-harnesses"]}
     onclose={() => (installing = false)}
     onopenpermissions={() => {
       agents.dismiss();

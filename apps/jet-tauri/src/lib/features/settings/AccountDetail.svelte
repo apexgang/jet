@@ -11,7 +11,7 @@
     retryDraft,
     type AutoContinueDraft,
   } from "./agents-model";
-  import { sectionData, utf8Bytes, withIssues } from "./model";
+  import { blockText, sectionData, utf8Bytes, withIssues } from "./model";
   import OperationStatus from "./OperationStatus.svelte";
   import SectionState from "./SectionState.svelte";
   import type { SettingsSession } from "./session.svelte";
@@ -136,6 +136,7 @@
     <fieldset class="policy" aria-labelledby={`${id}-auto`} disabled={block !== null || !agents.idle}>
       <label class="choice">
         <input
+          id={`${id}-mode-off`}
           type="radio"
           name={`${id}-mode`}
           checked={shown.mode === "off"}
@@ -212,7 +213,7 @@
           <button type="button" class="secondary-button" onclick={() => ((draft = null), (attempted = false))}>
             Cancel
           </button>
-          <button type="button" class="primary-button" onclick={() => void save()}>Save</button>
+          <button id={`${id}-save`} type="button" class="primary-button" onclick={() => void save()}>Save</button>
         </div>
       {/if}
     </fieldset>
@@ -232,6 +233,7 @@
 
   <div class="remove">
     <button
+      id={`${id}-remove`}
       class="text-button danger"
       disabled={block !== null || !agents.idle}
       onclick={() => (removing = true)}
@@ -245,6 +247,8 @@
   <SettingsDialog
     title="Change what happens when a usage limit is reached?"
     lead={`This applies to ${account.label} on ${session.planeLabel}.`}
+    focus={block !== null ? "cancel" : "primary"}
+    returnFocus={[`${id}-save`, `${id}-mode-off`]}
     oncancel={cancelReview}
   >
     <dl class="removal-facts">
@@ -254,9 +258,20 @@
         <div><dt>Message</dt><dd>{review.after.message}</dd></div>
       {/if}
     </dl>
+    {#if block !== null}
+      <p class="dialog-note" role="status">{blockText(block, session.planeLabel)}</p>
+    {/if}
     {#snippet footer()}
       <button type="button" class="secondary-button" data-dialog-cancel onclick={cancelReview}>Cancel</button>
-      <button type="button" class="primary-button" data-dialog-primary onclick={() => void confirmPolicy()}>Save</button>
+      <button
+        type="button"
+        class="primary-button"
+        data-dialog-primary
+        disabled={block !== null}
+        onclick={() => void confirmPolicy()}
+      >
+        Save
+      </button>
     {/snippet}
   </SettingsDialog>
 {/if}
@@ -266,6 +281,7 @@
     title={`Remove ${account.label}?`}
     lead={`Jet stops using ${account.label} on ${session.planeLabel}. Tasks already running keep their account.`}
     focus="cancel"
+    returnFocus={[`${id}-remove`, "section-accounts"]}
     oncancel={() => {
       if (!unbinding) removing = false;
     }}
@@ -275,11 +291,20 @@
       <div><dt>Provider</dt><dd>{account.provider}</dd></div>
       <div><dt>Sign-in</dt><dd>{credentialSourceText(account.credentialSource)}</dd></div>
     </dl>
+    {#if block !== null}
+      <p class="dialog-note" role="status">{blockText(block, session.planeLabel)}</p>
+    {/if}
     {#snippet footer()}
       <button type="button" class="secondary-button" data-dialog-cancel disabled={unbinding} onclick={() => (removing = false)}>
         Cancel
       </button>
-      <button type="button" class="danger-button" data-dialog-primary disabled={unbinding} onclick={() => void remove()}>
+      <button
+        type="button"
+        class="danger-button"
+        data-dialog-primary
+        disabled={unbinding || block !== null}
+        onclick={() => void remove()}
+      >
         {unbinding ? "Removing…" : "Remove account"}
       </button>
     {/snippet}

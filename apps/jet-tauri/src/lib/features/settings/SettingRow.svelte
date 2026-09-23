@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { tick } from "svelte";
+
   import type { SettingKeyId, SettingValue } from "$lib/jet/settings";
   import {
     MAX_SETTING_TEXT_BYTES,
@@ -69,7 +71,32 @@
   });
   const textValid = $derived(shown?.type === "text" && textFits(settingKey, shown.value));
 
+  let rowElement = $state<HTMLDivElement>();
+  /**
+   * A change started from this row. Its control is locked while the change
+   * is in flight (and Save, Cancel or the clear button may go away), so
+   * focus falls to the document; it comes back once the row settles.
+   */
+  let returnFocus = $state(false);
+
+  function started(): void {
+    returnFocus = true;
+  }
+
+  $effect(() => {
+    if (!returnFocus || inFlight) return;
+    returnFocus = false;
+    void tick().then(() => {
+      const active = document.activeElement;
+      // Never take focus the user has moved elsewhere.
+      if (active && active !== document.body && !rowElement?.contains(active)) return;
+      const control = document.getElementById(`${id}-control`);
+      if (control instanceof HTMLElement && !control.matches(":disabled")) control.focus();
+    });
+  });
+
   function setFlag(value: boolean): void {
+    started();
     void session.change(settingKey, scope, { kind: "set", value: { type: "flag", value } });
   }
 
@@ -86,15 +113,18 @@
     if (row.kind !== "editing" || shown === null || shown.type === "undisplayable") return;
     if (shown.type === "count" && !countValid) return;
     if (shown.type === "text" && !textValid) return;
+    started();
     void session.change(settingKey, scope, { kind: "set", value: shown });
   }
 
   /** A binding key's `<select>` applies the chosen Account binding at once. */
   function chooseBinding(value: string): void {
+    started();
     void session.change(settingKey, scope, { kind: "set", value: { type: "text", value } });
   }
 
   function useInherited(): void {
+    started();
     void session.change(settingKey, scope, { kind: "clear" });
   }
 
@@ -109,7 +139,7 @@
   }
 </script>
 
-<div class="setting-row" class:busy={inFlight}>
+<div class="setting-row" class:busy={inFlight} aria-busy={inFlight} bind:this={rowElement}>
   <div class="setting-main">
     {#if kind === "flag"}
       <label class="toggle" for={`${id}-control`}>
@@ -205,9 +235,19 @@
     {/if}
     {#if editing}
       <div class="actions">
-        <button class="secondary-button" onclick={() => session.dismiss(settingKey, scope)}>Cancel</button>
+        <button
+          class="secondary-button"
+          aria-label={`Cancel editing ${placement.label}`}
+          onclick={() => {
+            started();
+            session.dismiss(settingKey, scope);
+          }}
+        >
+          Cancel
+        </button>
         <button
           class="primary-button"
+          aria-label={`Save ${placement.label}`}
           disabled={block !== null || (shown?.type === "count" ? !countValid : !textValid)}
           onclick={save}
         >
@@ -215,7 +255,12 @@
         </button>
       </div>
     {:else if setting && storedAt(setting.source, scope) && !inFlight}
-      <button class="text-button" disabled={block !== null} onclick={useInherited}>
+      <button
+        class="text-button"
+        aria-label={`${clearLabel(settingKey, scope)}: ${placement.label}`}
+        disabled={block !== null}
+        onclick={useInherited}
+      >
         {clearLabel(settingKey, scope)}
       </button>
     {/if}
@@ -232,8 +277,24 @@
       <div class="row-notice">
         <p>Jet couldn't confirm this change. It may have been saved. <code>{row.error.code}</code></p>
         <div class="actions">
-          <button class="text-button" onclick={() => void session.retry(settingKey, scope)}>Retry same change</button>
-          <button class="text-button" onclick={() => void session.showCurrent(scope)}>Show current value</button>
+          <button
+            class="text-button"
+            aria-label={`Retry same change: ${placement.label}`}
+            disabled={block !== null}
+            onclick={() => {
+              started();
+              void session.retry(settingKey, scope);
+            }}
+          >
+            Retry same change
+          </button>
+          <button
+            class="text-button"
+            aria-label={`Show current value: ${placement.label}`}
+            onclick={() => void session.showCurrent(scope)}
+          >
+            Show current value
+          </button>
         </div>
       </div>
     {:else if row.kind === "changed_elsewhere"}
@@ -242,12 +303,25 @@
           This was changed on {session.planeLabel} to {valueText(settingKey, row.current.value, bindings)}. Your edit wasn't saved.
         </p>
         <div class="actions">
-          <button class="text-button" onclick={() => session.dismiss(settingKey, scope)}>Use current</button>
+          <button
+            class="text-button"
+            aria-label={`Use current: ${placement.label}`}
+            onclick={() => {
+              started();
+              session.dismiss(settingKey, scope);
+            }}
+          >
+            Use current
+          </button>
           {#if row.draft === null || row.draft.type !== "undisplayable"}
             <button
               class="text-button"
+              aria-label={`Apply my value again: ${placement.label}`}
               disabled={block !== null}
-              onclick={() => void session.applyAgain(settingKey, scope)}
+              onclick={() => {
+                started();
+                void session.applyAgain(settingKey, scope);
+              }}
             >
               Apply my value again
             </button>
@@ -257,7 +331,16 @@
     {:else if row.kind === "refused"}
       <div class="row-notice critical">
         <p>{refusalText(row.error)} <code>{row.error.code}</code></p>
-        <button class="text-button" onclick={() => session.dismiss(settingKey, scope)}>Dismiss</button>
+        <button
+          class="text-button"
+          aria-label={`Dismiss: ${placement.label}`}
+          onclick={() => {
+            started();
+            session.dismiss(settingKey, scope);
+          }}
+        >
+          Dismiss
+        </button>
       </div>
     {/if}
   </div>
@@ -271,8 +354,15 @@
     planeLabel={session.planeLabel}
     {projects}
     {bindings}
-    onconfirm={() => void session.confirm(settingKey, scope)}
-    oncancel={() => session.dismiss(settingKey, scope)}
+    {block}
+    onconfirm={() => {
+      started();
+      void session.confirm(settingKey, scope);
+    }}
+    oncancel={() => {
+      started();
+      session.dismiss(settingKey, scope);
+    }}
   />
 {/if}
 

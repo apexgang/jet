@@ -43,6 +43,8 @@ class Fake {
   calls: Call[] = [];
   channels: Array<{ planeId: string; after: string; channel: Channel<SettingsChange> }> = [];
   cursor = 10;
+  /** The Agents view's cursor; `null` until a test sets it. */
+  agentsCursor: number | null = null;
   planeState: PlaneState = { security: "trusted", recovery: "serving" };
   values = new Map<SettingKeyId, ResolvedSetting>([
     ["energy.constrained", { key: "energy.constrained", value: { type: "flag", value: false }, source: { source: "built_in" } }],
@@ -156,6 +158,19 @@ class Fake {
         return this.prepare(args);
       case "apply_settings_change":
         return this.apply(args);
+      case "load_agents":
+        return {
+          planeState: this.planeState,
+          crafts: [],
+          harnesses: [],
+          credentialStore: null,
+          degraded: [],
+          accounts: [],
+          bindOptions: [],
+          usage: null,
+          cursor: String(this.agentsCursor ?? this.cursor),
+          issues: [],
+        };
       case "watch_settings_changes":
         this.channels.push({ planeId: args.planeId as string, after: args.after as string, channel: args.onChange as Channel<SettingsChange> });
         return null;
@@ -430,21 +445,135 @@ describe("settings session", () => {
   it("keeps stale values while reconnecting and reloads on resume", async () => {
     const fake = new Fake();
     const session = await started(fake);
+    await session.agents.ensureLoaded();
+    expect(session.agents.view).toMatchObject({ kind: "ready", freshness: "live" });
     fake.send({ type: "reconnecting", error: failure("transport.offline", "offline", true) });
     await settle();
     expect(session.plane).toMatchObject({ kind: "ready", freshness: "stale" });
+    // Every section says why its changes are paused, Agents included.
+    expect(session.agents.view).toMatchObject({ kind: "ready", freshness: "stale" });
     expect(session.mutationBlock(PLANE)).toBe("stale");
+    expect(session.agentsBlock()).toBe("stale");
     await session.change("energy.constrained", PLANE, flag(true));
     expect(fake.count("prepare_setting_change")).toBe(0);
 
     const loads = fake.count("load_settings");
+    const agentLoads = fake.count("load_agents");
     fake.cursor = 14;
+    fake.agentsCursor = 12;
     fake.send({ type: "resumed", after: "10" });
     await settle();
     expect(fake.count("load_settings")).toBe(loads + 1);
+    expect(fake.count("load_agents")).toBe(agentLoads + 1);
     expect(session.plane).toMatchObject({ kind: "ready", freshness: "live" });
+    expect(session.agents.view).toMatchObject({ kind: "ready", freshness: "live", data: { cursor: "12" } });
     expect(session.mutationBlock(PLANE)).toBeNull();
-    expect(fake.channels[fake.channels.length - 1].after).toBe("14");
+    expect(session.agentsBlock()).toBeNull();
+    // The lowest cursor, the Agents view's included.
+    expect(fake.channels[fake.channels.length - 1].after).toBe("12");
+  });
+
+  it("sends nothing from an open review once the watcher reconnects", async () => {
+    const fake = new Fake();
+    const session = await started(fake);
+    await session.change("retention.trash_grace_days", PLANE, { kind: "set", value: { type: "count", value: 7 } });
+    expect(session.row("retention.trash_grace_days", PLANE).kind).toBe("confirm");
+    fake.send({ type: "reconnecting", error: failure("transport.offline", "offline", true) });
+    await settle();
+    await session.confirm("retention.trash_grace_days", PLANE);
+    expect(fake.count("apply_settings_change")).toBe(0);
+    expect(session.row("retention.trash_grace_days", PLANE).kind).toBe("confirm");
+  });
+
+  it("keeps the draft of an uncertain change, so a changed value re-applies it", async () => {
+    const fake = new Fake();
+    const session = await started(fake);
+    const current: ResolvedSetting = { key: "energy.concurrency", value: { type: "count", value: 6 }, source: { source: "plane" } };
+    let applies = 0;
+    fake.apply = () => {
+      // Nothing was sent the first time; by the retry the value changed.
+      if (++applies === 1) throw failure("transport.offline", "offline", true);
+      return { kind: "changed", current };
+    };
+    await session.change("energy.concurrency", PLANE, { kind: "set", value: { type: "count", value: 4 } });
+    expect(session.row("energy.concurrency", PLANE)).toMatchObject({
+      kind: "uncertain",
+      draft: { type: "count", value: 4 },
+    });
+    await session.retry("energy.concurrency", PLANE);
+    expect(session.row("energy.concurrency", PLANE)).toEqual({
+      kind: "changed_elsewhere",
+      current,
+      draft: { type: "count", value: 4 },
+    });
+    await session.applyAgain("energy.concurrency", PLANE);
+    expect(fake.last("prepare_setting_change").change).toEqual({ kind: "set", value: { type: "count", value: 4 } });
+  });
+
+  it("shows a late uncertain answer when the user is back on its Plane", async () => {
+    const fake = new Fake();
+    const session = await started(fake);
+    fake.apply = () => {
+      throw failure("transport.offline", "offline", true);
+    };
+    fake.defer.add("apply_settings_change");
+    const change = session.change("energy.constrained", PLANE, flag(true));
+    await settle();
+    expect(session.row("energy.constrained", PLANE).kind).toBe("applying");
+    session.select(REMOTE, "Build box");
+    await settle();
+    expect(session.rows).toEqual({});
+    session.select("local", "This computer");
+    await settle();
+    // Still being sent: no other change may start on the row.
+    expect(session.row("energy.constrained", PLANE)).toMatchObject({ kind: "applying", reviewId: "review-1" });
+    fake.release("apply_settings_change");
+    await change;
+    expect(session.row("energy.constrained", PLANE)).toMatchObject({ kind: "uncertain", reviewId: "review-1" });
+  });
+
+  it("keeps a late uncertain answer for a Plane not shown", async () => {
+    const fake = new Fake();
+    const session = await started(fake);
+    fake.apply = () => {
+      throw failure("transport.offline", "offline", true);
+    };
+    fake.defer.add("apply_settings_change");
+    const change = session.change("energy.constrained", PLANE, flag(true));
+    await settle();
+    session.select(REMOTE, "Build box");
+    await settle();
+    fake.release("apply_settings_change");
+    await change;
+    expect(session.rows).toEqual({});
+    session.select("local", "This computer");
+    await settle();
+    expect(session.row("energy.constrained", PLANE)).toMatchObject({ kind: "uncertain", reviewId: "review-1" });
+  });
+
+  it("replays a change event that arrived while its section reloaded", async () => {
+    const fake = new Fake();
+    const session = await started(fake);
+    // The snapshot was read before another device's write at 11.
+    fake.defer.add("load_settings");
+    const reload = session.loadPlane();
+    expect(session.plane.kind).toBe("loading");
+    fake.send(fake.settingChange(11, "energy.constrained"));
+    await settle();
+    fake.release("load_settings");
+    await reload;
+    await settle();
+    expect(session.plane).toMatchObject({ kind: "ready", freshness: "changed" });
+
+    // An event the reloaded snapshot already covers is not reported.
+    fake.defer.add("load_settings");
+    const again = session.loadPlane();
+    fake.send(fake.settingChange(12, "energy.constrained"));
+    fake.cursor = 12;
+    fake.release("load_settings");
+    await again;
+    await settle();
+    expect(session.plane).toMatchObject({ kind: "ready", freshness: "live" });
   });
 
   it("ignores messages from a replaced watcher", async () => {

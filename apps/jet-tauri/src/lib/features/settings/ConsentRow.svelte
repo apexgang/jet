@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { tick } from "svelte";
+
   import {
     CONSENT_FOR,
     consentState,
@@ -43,7 +45,27 @@
     row.kind === "checking" || row.kind === "confirm" || row.kind === "applying" || row.kind === "uncertain",
   );
 
+  let rowElement = $state<HTMLDivElement>();
+  /** Focus returns to the checkbox once a change started here settles. */
+  let returnFocus = $state(false);
+
+  function started(): void {
+    returnFocus = true;
+  }
+
+  $effect(() => {
+    if (!returnFocus || inFlight) return;
+    returnFocus = false;
+    void tick().then(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body && !rowElement?.contains(active)) return;
+      const control = document.getElementById(`${id}-consent`);
+      if (control instanceof HTMLElement && !control.matches(":disabled")) control.focus();
+    });
+  });
+
   function toggle(checked: boolean): void {
+    started();
     // Consent names the stored binding exactly; unchecking clears it.
     void session.change(
       consentKey,
@@ -56,7 +78,7 @@
 {#if consent === undefined && binding !== undefined && session.sectionFor(PLANE)?.kind === "ready"}
   <p class="consent-note">This setting needs a newer Jet service on {session.planeLabel}.</p>
 {:else if status !== "none" || row.kind !== "idle"}
-  <div class="consent-row">
+  <div class="consent-row" aria-busy={inFlight} bind:this={rowElement}>
     {#if status !== "none"}
       <label class="toggle" for={`${id}-consent`}>
         <input
@@ -88,8 +110,24 @@
       {:else if row.kind === "uncertain"}
         <div class="row-notice">
           <p>Jet couldn't confirm this change. It may have been saved. <code>{row.error.code}</code></p>
-          <button class="text-button" onclick={() => void session.retry(consentKey, PLANE)}>Retry same change</button>
-          <button class="text-button" onclick={() => void session.showCurrent(PLANE)}>Show current value</button>
+          <button
+            class="text-button"
+            aria-label="Retry same change: consent for {label}"
+            disabled={block !== null}
+            onclick={() => {
+              started();
+              void session.retry(consentKey, PLANE);
+            }}
+          >
+            Retry same change
+          </button>
+          <button
+            class="text-button"
+            aria-label="Show current value: consent for {label}"
+            onclick={() => void session.showCurrent(PLANE)}
+          >
+            Show current value
+          </button>
         </div>
       {:else if row.kind === "changed_elsewhere"}
         <div class="row-notice">
@@ -97,12 +135,30 @@
             This was changed on {session.planeLabel} to {valueText(consentKey, row.current.value, bindings)}. Your
             change wasn't saved.
           </p>
-          <button class="text-button" onclick={() => session.dismiss(consentKey, PLANE)}>Use current</button>
+          <button
+            class="text-button"
+            aria-label="Use current: consent for {label}"
+            onclick={() => {
+              started();
+              session.dismiss(consentKey, PLANE);
+            }}
+          >
+            Use current
+          </button>
         </div>
       {:else if row.kind === "refused"}
         <div class="row-notice critical">
           <p>{refusalText(row.error)} <code>{row.error.code}</code></p>
-          <button class="text-button" onclick={() => session.dismiss(consentKey, PLANE)}>Dismiss</button>
+          <button
+            class="text-button"
+            aria-label="Dismiss: consent for {label}"
+            onclick={() => {
+              started();
+              session.dismiss(consentKey, PLANE);
+            }}
+          >
+            Dismiss
+          </button>
         </div>
       {/if}
     </div>
@@ -117,8 +173,15 @@
     planeLabel={session.planeLabel}
     projects={[]}
     {bindings}
-    onconfirm={() => void session.confirm(consentKey, PLANE)}
-    oncancel={() => session.dismiss(consentKey, PLANE)}
+    {block}
+    onconfirm={() => {
+      started();
+      void session.confirm(consentKey, PLANE);
+    }}
+    oncancel={() => {
+      started();
+      session.dismiss(consentKey, PLANE);
+    }}
   />
 {/if}
 

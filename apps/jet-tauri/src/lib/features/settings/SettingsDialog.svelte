@@ -1,10 +1,13 @@
 <script lang="ts">
   import { onMount, tick, type Snippet } from "svelte";
 
+  import { focusedElement, returnFocusWhenReady } from "./focus";
+
   let {
     title,
     lead,
     focus = "primary",
+    returnFocus = [],
     oncancel,
     children,
     footer,
@@ -18,6 +21,12 @@
      * `data-dialog-primary` and `data-dialog-cancel`.
      */
     focus?: "primary" | "cancel";
+    /**
+     * Where focus goes when the dialog closes and the element focused when
+     * it opened is gone or never existed (a dialog opened after an async
+     * prepare): element IDs, tried in order once they can take focus.
+     */
+    returnFocus?: readonly string[];
     /** Escape and Cancel both go through this. */
     oncancel: () => void;
     children: Snippet;
@@ -28,7 +37,8 @@
   const titleId = $props.id();
 
   onMount(() => {
-    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const trigger = focusedElement();
+    const fallbacks = [...returnFocus];
     void tick().then(() => {
       dialog?.showModal();
       const selector = focus === "cancel" ? "[data-dialog-cancel]" : "[data-dialog-primary]";
@@ -37,7 +47,7 @@
     });
     return () => {
       if (dialog?.open) dialog.close();
-      if (returnFocus?.isConnected) returnFocus.focus();
+      returnFocusWhenReady(trigger, fallbacks);
     };
   });
 </script>

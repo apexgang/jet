@@ -2,6 +2,7 @@
   import type { CraftPreview } from "$lib/jet/agents";
   import type { AgentsSession } from "./agents-session.svelte";
   import { brokerPermissionText, hostAccessText, releaseProblem } from "./agents-model";
+  import { blockText } from "./model";
   import SettingsDialog from "./SettingsDialog.svelte";
 
   let {
@@ -9,6 +10,8 @@
     planeLabel,
     isLocalPlane,
     developerMode,
+    block,
+    returnFocus = [],
     onclose,
     onopenpermissions,
   }: {
@@ -18,6 +21,10 @@
     isLocalPlane: boolean;
     /** `craft.developer_mode` on this Plane; `null` when unknown. */
     developerMode: boolean | null;
+    /** Changes are paused (read-only Recovery or a stale view). */
+    block: "read_only" | "stale" | null;
+    /** Where focus goes when the dialog closes and its trigger is gone. */
+    returnFocus?: readonly string[];
     onclose: () => void;
     /** Opens Safety › Permissions, where Developer Mode lives. */
     onopenpermissions: () => void;
@@ -49,6 +56,7 @@
   }
 
   async function check(): Promise<void> {
+    if (block !== null) return;
     attempted = true;
     if (kind === "github_release") {
       if (problem) return;
@@ -59,6 +67,7 @@
   }
 
   async function install(): Promise<void> {
+    if (block !== null) return;
     await agents.confirm();
     const outcome = agents.operationFor(TARGET).kind;
     // Queued or uncertain: the Harnesses section reports it.
@@ -82,6 +91,7 @@
   lead={preview
     ? `Review what this Craft can do on ${planeLabel} before installing it.`
     : `Jet checks the release before anything is installed on ${planeLabel}.`}
+  {returnFocus}
   oncancel={cancel}
 >
   {#if preview}
@@ -185,11 +195,18 @@
           <p class="dialog-alert" role="alert">
             {agents.localPick.error.message} <code>{agents.localPick.error.code}</code>
           </p>
+        {:else if operation.kind === "refused"}
+          <!-- A check uses up the chosen files, even when it fails. -->
+          <p class="dialog-note">Choose the files again to check them.</p>
         {:else}
           <p class="dialog-note">Choose craft-spec.toml, then the built Craft executable.</p>
         {/if}
       </div>
     {/if}
+  {/if}
+
+  {#if block !== null}
+    <p class="dialog-note" role="status">{blockText(block, planeLabel)}</p>
   {/if}
 
   {#if operation.kind === "refused"}
@@ -200,7 +217,13 @@
     <button type="button" class="secondary-button" data-dialog-cancel disabled={busy} onclick={cancel}>Cancel</button>
     {#if preview}
       <button type="button" class="secondary-button" disabled={busy} onclick={editAgain}>Back</button>
-      <button type="button" class="primary-button" data-dialog-primary disabled={busy} onclick={() => void install()}>
+      <button
+        type="button"
+        class="primary-button"
+        data-dialog-primary
+        disabled={busy || block !== null}
+        onclick={() => void install()}
+      >
         {operation.kind === "applying" ? "Installing…" : `Install ${preview.craftId} ${preview.version}`}
       </button>
     {:else}
@@ -208,7 +231,7 @@
         type="button"
         class="primary-button"
         data-dialog-primary
-        disabled={busy || (kind === "local" && !picked)}
+        disabled={busy || block !== null || (kind === "local" && !picked)}
         onclick={() => void check()}
       >
         {operation.kind === "preparing" ? "Checking…" : "Check"}

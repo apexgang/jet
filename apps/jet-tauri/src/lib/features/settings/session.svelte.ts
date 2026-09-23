@@ -23,6 +23,7 @@ import {
   sameSetting,
   sectionData,
   sectionStateFor,
+  withFreshness,
   type SectionState,
   type SettingRowScope,
   type SettingRowState,
@@ -58,10 +59,17 @@ function ready<T>(data: T): SectionState<T> {
   return { kind: "ready", data, freshness: "live", issues: [] };
 }
 
-function withFreshness<T>(state: SectionState<T>, freshness: "changed" | "stale"): SectionState<T> {
-  if (state.kind !== "ready") return state;
-  if (freshness === "changed" && state.freshness === "stale") return state;
-  return { ...state, freshness };
+/** Events kept while a section reloads; beyond this the section is marked changed. */
+const MAX_MISSED_EVENTS = 64;
+
+type MissedEvents = { changes: Array<Extract<SettingsChange, { type: "change" }>>; overflow: boolean };
+
+function noMissed(): Record<SettingsLoader, MissedEvents> {
+  return {
+    plane: { changes: [], overflow: false },
+    project: { changes: [], overflow: false },
+    work: { changes: [], overflow: false },
+  };
 }
 
 /** The draft a row in flight carries, so "Apply my value again" can resend it. */
@@ -74,6 +82,8 @@ function draftOf(row: SettingRowState | undefined): SettingValue | null {
     case "confirm":
       return row.review.after;
     case "changed_elsewhere":
+    case "applying":
+    case "uncertain":
       return row.draft;
     default:
       return null;
@@ -113,25 +123,38 @@ export class SettingsSession {
       this.planeState = state;
     },
     planeStateStale: () => void this.loadPlane(),
+    mutationBlock: () => this.agentsBlock(),
   });
   /** Agents › Extensions of the same Plane. */
   readonly extensions = new ExtensionsSession({
     planeStateStale: () => void this.loadPlane(),
+    mutationBlock: () => this.agentsBlock(),
   });
 
   private started = false;
+  private disposed = false;
   /** Bumped on every Plane switch; every completion checks it. */
   private generation = 0;
   private requests: Record<SettingsLoader, number> = { plane: 0, project: 0, work: 0 };
   private watchGeneration = 0;
-  /** Uncertain rows of Planes not shown now, keyed by Plane and row. */
+  /** Applying and uncertain rows of Planes not shown now, keyed by Plane and row. */
   private retained = new Map<string, SettingRowState>();
+  /**
+   * Watcher events that arrived while their section reloaded. Replayed
+   * against the new snapshot's cursor, so a change committed after the
+   * snapshot was read is never lost.
+   */
+  private missed = noMissed();
 
-  /** Shows one Plane. Rows of the previous Plane are dropped except uncertain ones. */
+  /**
+   * Shows one Plane. Rows of the previous Plane are dropped except those
+   * still being sent or uncertain: their outcome is kept for when the user
+   * returns.
+   */
   select(planeId: PlaneId, label?: string): void {
     if (label !== undefined) this.planeLabel = label;
     if (this.started && planeId === this.planeId) return;
-    this.retainUncertain();
+    this.retainPending();
     this.started = true;
     this.generation++;
     this.watchGeneration++;
@@ -142,7 +165,8 @@ export class SettingsSession {
     this.work = { kind: "loading", last: null };
     this.projectId = null;
     this.project = null;
-    this.rows = this.restoreUncertain(planeId);
+    this.rows = this.restorePending(planeId);
+    this.missed = noMissed();
     this.watch = "idle";
     this.watchError = null;
     this.usageNewer = false;
@@ -154,6 +178,7 @@ export class SettingsSession {
 
   /** Stops watching. The native watcher also stops when the window closes. */
   dispose(): void {
+    this.disposed = true;
     this.generation++;
     this.watchGeneration++;
     this.watch = "idle";
@@ -165,7 +190,13 @@ export class SettingsSession {
   async reload(): Promise<void> {
     const generation = this.generation;
     this.watchGeneration++;
-    await Promise.all([this.loadPlane(), this.loadWork()]);
+    // Agents and Extensions reload only once their pane has loaded them.
+    await Promise.all([
+      this.loadPlane(),
+      this.loadWork(),
+      this.agents.reloadIfLoaded(),
+      this.extensions.reloadLoaded(),
+    ]);
     if (generation !== this.generation) return;
     const projects = sectionData(this.work)?.projects ?? [];
     if (!this.projectId || !projects.some((project) => project.id === this.projectId)) {
@@ -184,6 +215,7 @@ export class SettingsSession {
     if (!projects.some((project) => project.id === projectId)) return;
     this.projectId = projectId;
     this.project = { kind: "loading", last: null };
+    this.missed.project = { changes: [], overflow: false };
     await this.loadProject();
   }
 
@@ -197,9 +229,11 @@ export class SettingsSession {
       if (generation !== this.generation || request !== this.requests.plane) return;
       this.plane = ready(snapshot);
       this.planeState = snapshot.planeState;
+      this.replayMissed("plane");
     } catch (error: unknown) {
       if (generation !== this.generation || request !== this.requests.plane) return;
       this.plane = sectionStateFor(publicError(error), last);
+      this.missed.plane = { changes: [], overflow: false };
     }
   }
 
@@ -218,9 +252,11 @@ export class SettingsSession {
         issues: context.issues.map((issue) => ({ section: issue.section, error: issue.error })),
       };
       this.planeState = context.planeState;
+      this.replayMissed("work");
     } catch (error: unknown) {
       if (generation !== this.generation || request !== this.requests.work) return;
       this.work = sectionStateFor(publicError(error), last);
+      this.missed.work = { changes: [], overflow: false };
     }
   }
 
@@ -234,9 +270,11 @@ export class SettingsSession {
       const snapshot = await loadSettings(planeId, { type: "project", project_id: projectId });
       if (generation !== this.generation || request !== this.requests.project || projectId !== this.projectId) return;
       this.project = ready(snapshot);
+      this.replayMissed("project");
     } catch (error: unknown) {
       if (generation !== this.generation || request !== this.requests.project || projectId !== this.projectId) return;
       this.project = sectionStateFor(publicError(error), last);
+      this.missed.project = { changes: [], overflow: false };
     }
   }
 
@@ -311,19 +349,23 @@ export class SettingsSession {
     await this.prepare(key, scope, snapshot.snapshotId, change, draft, before, true);
   }
 
-  /** Sends a sensitive row's reviewed change. */
+  /**
+   * Sends a sensitive row's reviewed change. A dialog opened before the
+   * view went stale or read-only sends nothing until changes resume.
+   */
   async confirm(key: SettingKeyId, scope: SettingRowScope): Promise<void> {
     const current = this.row(key, scope);
     if (current.kind !== "confirm") return;
-    if (this.planeState?.recovery === "read_only") return;
+    if (this.mutationBlock(scope) !== null) return;
     await this.apply(key, scope, current.review.reviewId, current.review.after);
   }
 
-  /** Resends an uncertain change: same review ID, same body. */
+  /** Resends an uncertain change: same review ID, same body, same draft. */
   async retry(key: SettingKeyId, scope: SettingRowScope): Promise<void> {
     const current = this.row(key, scope);
     if (current.kind !== "uncertain") return;
-    await this.apply(key, scope, current.reviewId, null);
+    if (this.mutationBlock(scope) !== null) return;
+    await this.apply(key, scope, current.reviewId, current.draft);
   }
 
   /** "Apply my value again": a new prepare against the reloaded values. */
@@ -401,23 +443,27 @@ export class SettingsSession {
     reviewId: string,
     draft: SettingValue | null,
   ): Promise<void> {
-    const { planeId, generation } = this;
+    const { planeId } = this;
     const row = rowKey(key, scope);
-    this.setRow(row, { kind: "applying", reviewId });
+    this.setRow(row, { kind: "applying", reviewId, draft });
     let receipt;
     try {
       receipt = await applySettingsChange(planeId, reviewId);
     } catch (thrown: unknown) {
-      const uncertain: SettingRowState = { kind: "uncertain", reviewId, error: publicError(thrown) };
-      if (generation !== this.generation) {
-        // The user switched Planes; keep the uncertainty for when they return.
-        this.retained.set(`${planeId}#${row}`, uncertain);
-        return;
-      }
-      this.setRow(row, uncertain);
+      const uncertain: SettingRowState = { kind: "uncertain", reviewId, draft, error: publicError(thrown) };
+      if (this.owns(planeId, row, reviewId)) this.setRow(row, uncertain);
+      // The user switched Planes; keep the uncertainty for when they return.
+      else if (!this.disposed && planeId !== this.planeId) this.retained.set(`${planeId}#${row}`, uncertain);
       return;
     }
-    if (generation !== this.generation) return;
+    if (!this.owns(planeId, row, reviewId)) {
+      // Answered while its Plane isn't shown: nothing is left to retry.
+      const held = this.retained.get(`${planeId}#${row}`);
+      if (held && (held.kind === "applying" || held.kind === "uncertain") && held.reviewId === reviewId) {
+        this.retained.delete(`${planeId}#${row}`);
+      }
+      return;
+    }
     switch (receipt.kind) {
       case "applied":
         this.setRow(row, { kind: "idle" });
@@ -453,13 +499,20 @@ export class SettingsSession {
     }
   }
 
-  private retainUncertain(): void {
+  /** Whether `row` of the Plane on screen still shows this review being sent. */
+  private owns(planeId: PlaneId, row: string, reviewId: string): boolean {
+    if (this.disposed || planeId !== this.planeId) return false;
+    const current = this.rows[row];
+    return current?.kind === "applying" && current.reviewId === reviewId;
+  }
+
+  private retainPending(): void {
     for (const [key, state] of Object.entries(this.rows)) {
-      if (state.kind === "uncertain") this.retained.set(`${this.planeId}#${key}`, state);
+      if (state.kind === "applying" || state.kind === "uncertain") this.retained.set(`${this.planeId}#${key}`, state);
     }
   }
 
-  private restoreUncertain(planeId: PlaneId): Record<string, SettingRowState> {
+  private restorePending(planeId: PlaneId): Record<string, SettingRowState> {
     const rows: Record<string, SettingRowState> = {};
     for (const [key, state] of this.retained) {
       const separator = key.indexOf("#");
@@ -485,10 +538,46 @@ export class SettingsSession {
     }
   }
 
+  private loading(loader: SettingsLoader): boolean {
+    switch (loader) {
+      case "plane":
+        return this.plane.kind === "loading";
+      case "project":
+        return this.project?.kind === "loading";
+      case "work":
+        return this.work.kind === "loading";
+    }
+  }
+
+  /** Keeps an event for a section that is reloading. */
+  private remember(loader: SettingsLoader, change: Extract<SettingsChange, { type: "change" }>): void {
+    const missed = this.missed[loader];
+    if (missed.changes.length >= MAX_MISSED_EVENTS) {
+      missed.overflow = true;
+      return;
+    }
+    missed.changes.push(change);
+  }
+
+  /** Replays what arrived during a reload; events the new cursor covers are ignored. */
+  private replayMissed(loader: SettingsLoader): void {
+    const { changes, overflow } = this.missed[loader];
+    this.missed[loader] = { changes: [], overflow: false };
+    if (overflow) {
+      if (loader === "plane") this.plane = withFreshness(this.plane, "changed");
+      else if (loader === "work") this.work = withFreshness(this.work, "changed");
+      else if (this.project) this.project = withFreshness(this.project, "changed");
+    }
+    for (const change of changes) void this.receive(change);
+  }
+
   private startWatch(): void {
-    const cursors = (["plane", "project", "work"] as const)
-      .map((loader) => this.cursor(loader))
-      .filter((cursor): cursor is string => cursor !== null);
+    // The Agents view counts once its pane has loaded it: account events
+    // after its cursor must still arrive.
+    const agentsCursor = this.agents.view.kind === "ready" ? this.agents.view.data.cursor : null;
+    const cursors = [...(["plane", "project", "work"] as const).map((loader) => this.cursor(loader)), agentsCursor].filter(
+      (cursor): cursor is string => cursor !== null,
+    );
     if (cursors.length === 0) {
       this.watch = "idle";
       return;
@@ -512,6 +601,8 @@ export class SettingsSession {
     this.plane = withFreshness(this.plane, "stale");
     this.work = withFreshness(this.work, "stale");
     if (this.project) this.project = withFreshness(this.project, "stale");
+    this.agents.markStale();
+    this.extensions.markStale();
   }
 
   /** Handles one watcher message. Exposed for the session tests. */
@@ -536,16 +627,16 @@ export class SettingsSession {
     switch (change.kind) {
       case "setting.changed":
       case "setting.cleared":
-        await this.settingChanged(change.sequence, change.settingKey, change.settingScope, change.projectId);
+        await this.settingChanged(change);
         return;
       case "account.bound":
       case "account.unbound":
         this.agents.noteChange(change.kind, change.sequence);
-        if (newer(change.sequence, this.cursor("work"))) this.work = withFreshness(this.work, "changed");
+        this.workChanged(change);
         return;
       case "project.registered":
       case "project.removed":
-        if (newer(change.sequence, this.cursor("work"))) this.work = withFreshness(this.work, "changed");
+        this.workChanged(change);
         return;
       case "usage.recorded":
         this.usageNewer = true;
@@ -566,12 +657,16 @@ export class SettingsSession {
     }
   }
 
-  private async settingChanged(
-    sequence: string,
-    key: SettingKeyId | null,
-    settingScope: "plane" | "project" | "conversation" | null,
-    projectId: string | null,
-  ): Promise<void> {
+  private workChanged(change: Extract<SettingsChange, { type: "change" }>): void {
+    if (this.loading("work")) {
+      this.remember("work", change);
+      return;
+    }
+    if (newer(change.sequence, this.cursor("work"))) this.work = withFreshness(this.work, "changed");
+  }
+
+  private async settingChanged(change: Extract<SettingsChange, { type: "change" }>): Promise<void> {
+    const { sequence, settingKey: key, settingScope, projectId } = change;
     let scope: SettingRowScope;
     let loader: SettingsLoader;
     if (settingScope === "plane") {
@@ -582,6 +677,10 @@ export class SettingsSession {
       loader = "project";
     } else {
       // Conversation scope and other Projects are not shown here.
+      return;
+    }
+    if (this.loading(loader)) {
+      this.remember(loader, change);
       return;
     }
     if (!newer(sequence, this.cursor(loader))) return;

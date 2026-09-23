@@ -21,7 +21,7 @@ import type { PublicError } from "$lib/jet/bridge";
 import { publicError } from "$lib/jet/errors";
 import { LOCAL_PLANE, type PlaneId } from "$lib/jet/planes";
 import { applySettingsChange, type AppliedDetail, type PlaneState, type SettingsReview } from "$lib/jet/settings";
-import { sectionData, sectionStateFor, type SectionState } from "./model";
+import { sectionData, sectionStateFor, withFreshness, type SectionState } from "./model";
 
 /** Which Agents action an operation belongs to. */
 export type OperationTarget =
@@ -56,6 +56,8 @@ export type AgentsHost = {
   planeStateChanged(state: PlaneState): void;
   /** A refusal that names Plane state (degraded audit, read-only recovery). */
   planeStateStale(): void;
+  /** Why changes are paused now (read-only Recovery, a stale view); `null` when they may be sent. */
+  mutationBlock(): "read_only" | "stale" | null;
 };
 
 function newer(sequence: string, cursor: string | null): boolean {
@@ -101,17 +103,22 @@ export class AgentsSession {
   private historyRequest = 0;
   private detailRequests: Record<string, number> = {};
   private operationRequest = 0;
-  /** Uncertain operations of Planes not shown now. */
+  private disposed = false;
+  /** The newest account event that arrived while the view reloaded. */
+  private missedAccounts: string | null = null;
+  /** Applying and uncertain operations of Planes not shown now. */
   private retained = new Map<PlaneId, AgentOperation>();
 
   constructor(host: AgentsHost) {
     this.host = host;
   }
 
-  /** Shows one Plane. Keeps an uncertain operation for when the user returns. */
+  /** Shows one Plane. Keeps an applying or uncertain operation for when the user returns. */
   select(planeId: PlaneId): void {
     if (this.started && planeId === this.planeId) return;
-    if (this.operation.kind === "uncertain") this.retained.set(this.planeId, this.operation);
+    if (this.operation.kind === "applying" || this.operation.kind === "uncertain") {
+      this.retained.set(this.planeId, this.operation);
+    }
     this.started = true;
     this.loaded = false;
     this.generation++;
@@ -124,13 +131,30 @@ export class AgentsSession {
     this.accountsChanged = false;
     this.changedDetails = [];
     this.localPick = { kind: "none" };
+    this.missedAccounts = null;
     this.operation = this.retained.get(planeId) ?? { kind: "idle" };
     this.retained.delete(planeId);
   }
 
   /** Stops accepting completions (the window is closing). */
   dispose(): void {
+    this.disposed = true;
     this.generation++;
+  }
+
+  /** The change watcher is reconnecting or stopped: every section shows its last values as stale. */
+  markStale(): void {
+    this.view = withFreshness(this.view, "stale");
+    this.history = withFreshness(this.history, "stale");
+    this.details = Object.fromEntries(
+      Object.entries(this.details).map(([id, state]) => [id, withFreshness(state, "stale")]),
+    );
+  }
+
+  /** Reloads what the pane has loaded (the watcher resumed). */
+  async reloadIfLoaded(): Promise<void> {
+    if (!this.loaded) return;
+    await Promise.all([this.load(), this.loadHistory(), ...Object.keys(this.details).map((id) => this.loadDetail(id))]);
   }
 
   /**
@@ -151,7 +175,9 @@ export class AgentsSession {
         freshness: "live",
         issues: view.issues.map((issue) => ({ section: issue.section, error: issue.error })),
       };
-      this.accountsChanged = false;
+      // An account event that arrived during the reload and is newer than it.
+      this.accountsChanged = this.missedAccounts !== null && newer(this.missedAccounts, view.cursor);
+      this.missedAccounts = null;
       this.host.planeStateChanged(view.planeState);
       // Details of accounts that are gone are dropped.
       const ids = new Set(view.accounts.map((account) => account.id));
@@ -160,6 +186,7 @@ export class AgentsSession {
     } catch (error: unknown) {
       if (generation !== this.generation || request !== this.viewRequest) return;
       this.view = sectionStateFor(publicError(error), last);
+      this.missedAccounts = null;
     }
   }
 
@@ -174,7 +201,12 @@ export class AgentsSession {
   noteChange(kind: string, sequence: string): void {
     const data = sectionData(this.view);
     if (kind === "account.bound" || kind === "account.unbound") {
-      if (data && newer(sequence, data.cursor)) this.accountsChanged = true;
+      if (this.view.kind === "loading") {
+        // Compared with the cursor of the view being loaded once it arrives.
+        if (this.missedAccounts === null || newer(sequence, this.missedAccounts)) this.missedAccounts = sequence;
+      } else if (data && newer(sequence, data.cursor)) {
+        this.accountsChanged = true;
+      }
     } else if (kind === "auto_continue.changed" || kind === "auto_continue.configured") {
       // The event names no account: every detail loaded before it may be out of date.
       const stale = Object.entries(this.details)
@@ -267,9 +299,15 @@ export class AgentsSession {
     return this.prepare({ action: "disable", craftId }, () => prepareCraftDisable(this.planeId, craftId, mode), true);
   }
 
-  /** Verifies a Craft source; the user confirms the preview. */
+  /**
+   * Verifies a Craft source; the user confirms the preview. A local source
+   * token is single-use and spent even when the check fails, so a refusal
+   * asks for the files again instead of offering a Check that can't work.
+   */
   discover(source: CraftSourceInput): Promise<void> {
-    return this.prepare({ action: "install" }, () => discoverCraft(this.planeId, source), false);
+    return this.prepare({ action: "install" }, () => discoverCraft(this.planeId, source), false, () => {
+      if (source.type === "local" && this.localPick.kind === "picked") this.localPick = { kind: "none" };
+    });
   }
 
   /** Opens the native file dialogs for a local Craft (this computer only). */
@@ -287,10 +325,14 @@ export class AgentsSession {
     }
   }
 
-  /** Sends the reviewed change shown in `confirm`. */
+  /**
+   * Sends the reviewed change shown in `confirm`. Nothing is sent while
+   * changes are paused, even from a review opened before they were.
+   */
   async confirm(): Promise<void> {
     const current = this.operation;
     if (current.kind !== "confirm") return;
+    if (this.host.mutationBlock() !== null) return;
     await this.apply(current.target, current.review.reviewId);
   }
 
@@ -298,6 +340,7 @@ export class AgentsSession {
   async retry(): Promise<void> {
     const current = this.operation;
     if (current.kind !== "uncertain") return;
+    if (this.host.mutationBlock() !== null) return;
     await this.apply(current.target, current.reviewId);
   }
 
@@ -318,6 +361,7 @@ export class AgentsSession {
     target: OperationTarget,
     run: () => Promise<SettingsReview>,
     confirmAtOnce: boolean,
+    refused?: () => void,
   ): Promise<void> {
     if (!this.idle) return;
     const { generation } = this;
@@ -330,6 +374,7 @@ export class AgentsSession {
       if (generation !== this.generation || request !== this.operationRequest) return;
       // Nothing was sent: a prepare only reads.
       this.operation = { kind: "refused", target, error: publicError(error) };
+      refused?.();
       return;
     }
     if (generation !== this.generation || request !== this.operationRequest) return;
@@ -338,22 +383,28 @@ export class AgentsSession {
   }
 
   private async apply(target: OperationTarget, reviewId: string): Promise<void> {
-    const { planeId, generation } = this;
-    const request = ++this.operationRequest;
+    const { planeId } = this;
+    // Any prepare still in flight is out of date.
+    this.operationRequest++;
     this.operation = { kind: "applying", target, reviewId };
     let receipt;
     try {
       receipt = await applySettingsChange(planeId, reviewId);
     } catch (thrown: unknown) {
       const uncertain: AgentOperation = { kind: "uncertain", target, reviewId, error: publicError(thrown) };
-      if (generation !== this.generation) {
-        this.retained.set(planeId, uncertain);
-        return;
-      }
-      if (request === this.operationRequest) this.operation = uncertain;
+      if (this.owns(planeId, reviewId)) this.operation = uncertain;
+      // The user switched Planes; keep the uncertainty for when they return.
+      else if (!this.disposed && planeId !== this.planeId) this.retained.set(planeId, uncertain);
       return;
     }
-    if (generation !== this.generation || request !== this.operationRequest) return;
+    if (!this.owns(planeId, reviewId)) {
+      // Answered while its Plane isn't shown: nothing is left to retry.
+      const held = this.retained.get(planeId);
+      if (held && (held.kind === "applying" || held.kind === "uncertain") && held.reviewId === reviewId) {
+        this.retained.delete(planeId);
+      }
+      return;
+    }
     switch (receipt.kind) {
       case "applied":
         this.operation = { kind: "done", target, detail: receipt.detail };
@@ -372,5 +423,11 @@ export class AgentsSession {
         this.operation = { kind: "refused", target, error: publicError(null) };
         return;
     }
+  }
+
+  /** Whether the Plane on screen still shows this review being sent. */
+  private owns(planeId: PlaneId, reviewId: string): boolean {
+    if (this.disposed || planeId !== this.planeId) return false;
+    return this.operation.kind === "applying" && this.operation.reviewId === reviewId;
   }
 }

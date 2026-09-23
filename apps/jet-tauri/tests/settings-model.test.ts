@@ -25,12 +25,15 @@ import {
   paneOf,
   recoveryFor,
   resolveTarget,
+  reviewConsequence,
+  reviewDestructive,
   sectionHeadingId,
   sectionStateFor,
   settingsTargetForError,
   type SectionState,
 } from "../src/lib/features/settings/model";
 import type { PublicError } from "../src/lib/jet/bridge";
+import type { SettingKeyId, SettingValue, SettingsReview } from "../src/lib/jet/settings";
 
 function error(code: string, category = "invalid_input", retryable = false, planeId: string | null = null): PublicError {
   return {
@@ -354,5 +357,47 @@ describe("setting placement", () => {
     const plane = { key: "energy.constrained" as const, value: { type: "flag" as const, value: true }, source: { source: "plane" as const } };
     expect(sameSetting(plane, { ...plane })).toBe(true);
     expect(sameSetting(plane, { ...plane, source: { source: "built_in" } })).toBe(false);
+  });
+});
+
+describe("review dialog copy", () => {
+  const review = (key: SettingKeyId, before: SettingValue | null, after: SettingValue | null): SettingsReview => ({
+    reviewId: "r",
+    subject: { kind: "setting", key, scope: { type: "plane" } },
+    before: before === null ? null : { key, value: before, source: { source: "built_in" } },
+    after,
+  });
+  const flag = (value: boolean): SettingValue => ({ type: "flag", value });
+  const days = (value: number): SettingValue => ({ type: "count", value });
+  const text = (value: string): SettingValue => ({ type: "text", value });
+
+  it("states the consequence of the direction the change goes", () => {
+    const on = reviewConsequence("craft.developer_mode", review("craft.developer_mode", flag(false), flag(true)));
+    const off = reviewConsequence("craft.developer_mode", review("craft.developer_mode", flag(true), flag(false)));
+    expect(on).toBe(SETTING_PLACEMENT["craft.developer_mode"].consequence);
+    expect(off).toBe(SETTING_PLACEMENT["craft.developer_mode"].consequenceOff);
+    expect(off).not.toBe(on);
+    // Clearing a flag restores a value whose direction isn't known here.
+    expect(reviewConsequence("git.auto_push", review("git.auto_push", flag(true), null))).toBeUndefined();
+    // Withdrawing consent clears it.
+    const key = "utility.content_consent";
+    expect(reviewConsequence(key, review(key, text("b"), null))).toBe(SETTING_PLACEMENT[key].consequenceOff);
+    expect(reviewConsequence(key, review(key, text(""), text("b")))).toBe(SETTING_PLACEMENT[key].consequence);
+    // Every sensitive flag or consent says what turning it off means.
+    for (const settingKey of SETTING_KEYS) {
+      const placement = SETTING_PLACEMENT[settingKey];
+      const flagLike = settingKey.endsWith("_consent") || ["energy.foreground_override", "craft.developer_mode", "git.auto_push", "git.auto_draft_pull_request", "review.automatic"].includes(settingKey);
+      if (placement.sensitive && flagLike) expect(placement.consequenceOff, settingKey).toBeTruthy();
+    }
+  });
+
+  it("starts on Cancel only when a retention gets shorter", () => {
+    const key = "retention.trash_grace_days";
+    expect(reviewDestructive(key, review(key, days(30), days(7)))).toBe(true);
+    expect(reviewDestructive(key, review(key, days(7), days(30)))).toBe(false);
+    expect(reviewDestructive(key, review(key, days(7), null))).toBe(true);
+    const audit = "security.audit_retention_days";
+    expect(reviewDestructive(audit, review(audit, days(90), days(30)))).toBe(true);
+    expect(reviewDestructive("review.automatic", review("review.automatic", flag(true), flag(false)))).toBe(false);
   });
 });

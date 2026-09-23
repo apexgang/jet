@@ -192,7 +192,10 @@ pub(crate) struct SettingsWindowState {
     /// Set by `open_settings`, consumed by the window's navigation watcher.
     pending: Mutex<Option<SettingsTarget>>,
     /// The one navigation watcher: the Settings window's channel.
-    navigation: Mutex<Option<(u64, Channel<SettingsNavigation>)>>,
+    navigation: Mutex<Option<Channel<SettingsNavigation>>>,
+    /// One number per navigation message, the initial reply included. The
+    /// reply and Channel messages travel separately, so the window keeps
+    /// only the newest number it has seen.
     generation: AtomicU64,
     /// Serializes file writes so the last remembered pane is the one on disk.
     write: tokio::sync::Mutex<()>,
@@ -217,10 +220,14 @@ impl SettingsWindowState {
         Ok(())
     }
 
-    /// Starts a new watcher generation and returns the target the window
+    fn next_generation(&self) -> u64 {
+        self.generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Numbers the watcher's first message and returns the target the window
     /// should show first: a pending deep link exactly once, else the last pane.
     fn begin_watch(&self) -> Result<(u64, SettingsTarget), PublicError> {
-        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = self.next_generation();
         let pending = self
             .pending
             .lock()
@@ -245,7 +252,7 @@ impl SettingsWindowState {
         *self
             .navigation
             .lock()
-            .map_err(|_| PublicError::internal())? = Some((generation, channel));
+            .map_err(|_| PublicError::internal())? = Some(channel);
         Ok(SettingsNavigation {
             generation: generation.to_string(),
             target,
@@ -259,15 +266,17 @@ impl SettingsWindowState {
             .navigation
             .lock()
             .map_err(|_| PublicError::internal())?;
-        let Some((generation, channel)) = navigation.as_ref() else {
+        let Some(channel) = navigation.as_ref() else {
             return Ok(());
         };
         let mut pending = self.pending.lock().map_err(|_| PublicError::internal())?;
         let Some(target) = pending.take() else {
             return Ok(());
         };
+        // Numbered after the watcher's initial reply, so a link that
+        // arrives first is never replaced by that older reply.
         let message = SettingsNavigation {
-            generation: generation.to_string(),
+            generation: self.next_generation().to_string(),
             target: target.clone(),
         };
         if channel.send(message).is_err() {
@@ -576,12 +585,13 @@ mod tests {
         assert_eq!(sent.len(), 1);
         let message: serde_json::Value = serde_json::from_str(&sent[0]).unwrap();
         assert_eq!(
-            message,
-            json!({
-                "generation": initial.generation,
-                "target": {"pane": "general", "section": "notifications", "plane_id": null}
-            })
+            message["target"],
+            json!({"pane": "general", "section": "notifications", "plane_id": null})
         );
+        // Newer than the initial reply, whichever reaches the window first.
+        let link: u64 = message["generation"].as_str().unwrap().parse().unwrap();
+        let first: u64 = initial.generation.parse().unwrap();
+        assert!(link > first);
         // Consumed: a later watcher starts at the last pane.
         assert_eq!(state.begin_watch().unwrap().1, SettingsTarget::default());
 

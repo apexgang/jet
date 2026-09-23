@@ -390,7 +390,7 @@ fn a_review_keeps_its_body_guards_only_its_first_attempt_and_replays_its_receipt
             value: Some(ValueView::Flag(true)),
         },
     };
-    state.record(id, &receipt);
+    state.record(id, &receipt, now);
     assert!(matches!(
         state.begin(id, PlaneId::Local, now).unwrap(),
         Begin::Known(SettingsReceipt::Applied { .. })
@@ -462,6 +462,54 @@ fn unattempted_reviews_expire_and_only_they_are_evicted() {
             .code,
         "settings.request_limit"
     );
+}
+
+#[test]
+fn resolved_reviews_expire_and_never_exhaust_the_ledger() {
+    let state = SettingsState::default();
+    let start = Instant::now();
+    let key = SettingKey::EnergyConstrained;
+    let applied = SettingsReceipt::Applied {
+        detail: AppliedDetail::Setting {
+            key: key_spelling(key),
+            value: Some(ValueView::Flag(true)),
+        },
+    };
+    // More answered changes than the ledger holds, all at the same instant.
+    let first = state.admit(local(), set_action(key), None, start).unwrap();
+    state.mark_attempted(first).unwrap();
+    state.record(first, &applied, start);
+    for _ in 0..REVIEW_CAPACITY + 1 {
+        let id = state.admit(local(), set_action(key), None, start).unwrap();
+        state.mark_attempted(id).unwrap();
+        state.record(id, &applied, start);
+    }
+    assert!(state.reviews.lock().unwrap().len() <= REVIEW_CAPACITY);
+    // Admitting still works; the oldest receipt made room.
+    let next = state.admit(local(), set_action(key), None, start).unwrap();
+    assert_eq!(begin_error(&state, first, start), "settings.review_expired");
+    send(state.begin(next, PlaneId::Local, start).unwrap());
+
+    // A receipt answers a lost reply for a while after it was recorded,
+    // even when the review itself is older than its lifetime.
+    let late = state.admit(local(), set_action(key), None, start).unwrap();
+    state.mark_attempted(late).unwrap();
+    let resolved = start + REVIEW_LIFETIME;
+    state.record(late, &applied, resolved);
+    let soon = resolved + REVIEW_LIFETIME / 2;
+    state
+        .admit(local(), set_action(SettingKey::DeveloperMode), None, soon)
+        .unwrap();
+    assert!(matches!(
+        state.begin(late, PlaneId::Local, soon).unwrap(),
+        Begin::Known(SettingsReceipt::Applied { .. })
+    ));
+    // Then it expires.
+    let after = resolved + REVIEW_LIFETIME;
+    state
+        .admit(local(), set_action(SettingKey::DeveloperMode), None, after)
+        .unwrap();
+    assert_eq!(begin_error(&state, late, after), "settings.review_expired");
 }
 
 #[test]

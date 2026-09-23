@@ -22,13 +22,21 @@
       removalName === session.removalPreview.name,
   );
 
-  function closeRemoval(): void {
+  function closeRemoval(returnFocus = true): void {
     if (removalDialog?.open) removalDialog.close();
     removalName = "";
     permanentRemoval = false;
     session.cancelProjectRemoval();
-    removalReturnFocus?.focus();
+    if (returnFocus) removalReturnFocus?.focus();
     removalReturnFocus = null;
+  }
+
+  /** Leaves this panel for Schedules: its trigger goes away, so focus moves to the destination's heading. */
+  async function openSchedules(): Promise<void> {
+    closeRemoval(false);
+    session.select("schedules");
+    await tick();
+    document.getElementById("schedules-title")?.focus();
   }
 
   async function confirmRemoval(): Promise<void> {
@@ -340,7 +348,7 @@
               <li>
                 {obstacle}
                 {#if obstacle === "Disable scheduled tasks first"}
-                  <button class="text-button" type="button" onclick={() => { closeRemoval(); session.select("schedules"); }}>
+                  <button class="text-button" type="button" onclick={() => void openSchedules()}>
                     Open Schedules
                   </button>
                 {/if}
@@ -364,7 +372,7 @@
       {/if}
 
       <footer>
-        <button bind:this={removalCancelButton} class="secondary-button" type="button" onclick={closeRemoval}>Cancel</button>
+        <button bind:this={removalCancelButton} class="secondary-button" type="button" onclick={() => closeRemoval()}>Cancel</button>
         <button
           class="danger-button"
           disabled={!removalReady || session.setupBusy !== null}

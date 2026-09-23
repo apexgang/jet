@@ -223,7 +223,7 @@ class Fake {
 
 function session(fake: Fake, stale = vi.fn()): ExtensionsSession {
   fake.install();
-  const extensions = new ExtensionsSession({ planeStateStale: stale }, { visible: () => true, pollMs: 2_000 });
+  const extensions = new ExtensionsSession({ planeStateStale: stale, mutationBlock: () => null }, { visible: () => true, pollMs: 2_000 });
   extensions.select("local");
   return extensions;
 }
@@ -288,7 +288,7 @@ describe("extensions session", () => {
     const fake = new Fake();
     fake.install();
     let visible = false;
-    const extensions = new ExtensionsSession({ planeStateStale: vi.fn() }, { visible: () => visible, pollMs: 2_000 });
+    const extensions = new ExtensionsSession({ planeStateStale: vi.fn(), mutationBlock: () => null }, { visible: () => visible, pollMs: 2_000 });
     extensions.select("local");
     fake.catalog = catalog({ changes: [{ changeId: CHANGE, extensionId: "skill:a", action: "remove" }] });
     await extensions.ensureLoaded(["codex"]);
@@ -316,6 +316,24 @@ describe("extensions session", () => {
     await Promise.all([loading, inspecting]);
     expect(extensions.catalogs).toEqual({});
     expect(extensions.inspection).toEqual({ kind: "none" });
+  });
+
+  it("sends nothing from an open review while changes are paused", async () => {
+    const fake = new Fake();
+    fake.install();
+    let block: "read_only" | "stale" | null = null;
+    const extensions = new ExtensionsSession(
+      { planeStateStale: vi.fn(), mutationBlock: () => block },
+      { visible: () => true, pollMs: 2_000 },
+    );
+    extensions.select("local");
+    await extensions.inspect("codex", "Codex", STANDALONE);
+    await extensions.prepare("remove");
+    expect(extensions.operation.kind).toBe("confirm");
+    block = "read_only";
+    await extensions.confirm();
+    expect(fake.count("apply_settings_change")).toBe(0);
+    expect(extensions.operation.kind).toBe("confirm");
   });
 
   it("keeps an uncertain change and retries it with the same review ID", async () => {

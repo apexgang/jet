@@ -37,7 +37,7 @@
   let navigation = $state<Navigation>({ kind: "starting" });
   let nav = $state<HTMLElement>();
   let mounted = false;
-  /** The newest native watcher generation; older messages are ignored. */
+  /** The newest native navigation number; it and older ones are ignored. */
   let generation = 0;
 
   const pane = $derived(navigation.kind === "starting" ? null : navigation.pane);
@@ -60,7 +60,7 @@
 
   async function show(message: SettingsNavigation) {
     const next = Number(message.generation);
-    if (!Number.isSafeInteger(next) || next < generation) return;
+    if (!Number.isSafeInteger(next) || next <= generation) return;
     generation = next;
     const target = resolveTarget(message.target);
     if (message.target.plane_id && PLANE_PANES.has(target.pane)) requestedPlane = message.target.plane_id;

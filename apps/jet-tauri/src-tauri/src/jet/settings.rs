@@ -665,11 +665,23 @@ struct SettingsReview {
     created_at: Instant,
     attempted: bool,
     result: Option<SettingsReceipt>,
+    /// When the receipt was recorded. A resolved review is kept only long
+    /// enough to answer a lost IPC reply.
+    resolved_at: Option<Instant>,
 }
 
 impl SettingsReview {
     fn unresolved(&self) -> bool {
         self.attempted && self.result.is_none()
+    }
+
+    /// Unresolved reviews are the only record of an uncertain send and are
+    /// never dropped. Others live for `REVIEW_LIFETIME`: from admission
+    /// until they are resolved, then from their receipt.
+    fn retained(&self, now: Instant) -> bool {
+        self.unresolved()
+            || now.saturating_duration_since(self.resolved_at.unwrap_or(self.created_at))
+                < REVIEW_LIFETIME
     }
 
     fn occupies(&self, plane: PlaneId, slot: &Slot) -> bool {
@@ -773,14 +785,20 @@ impl SettingsState {
         {
             return Err(request_unresolved());
         }
-        reviews.retain(|_, review| {
-            review.attempted || now.saturating_duration_since(review.created_at) < REVIEW_LIFETIME
-        });
+        reviews.retain(|_, review| review.retained(now));
         if reviews.len() >= REVIEW_CAPACITY {
+            // Never evict an unresolved review. Unattempted reviews go
+            // first, then the oldest resolved receipts.
             let oldest = reviews
                 .iter()
                 .filter(|(_, review)| !review.attempted)
                 .min_by_key(|(_, review)| review.order)
+                .or_else(|| {
+                    reviews
+                        .iter()
+                        .filter(|(_, review)| review.result.is_some())
+                        .min_by_key(|(_, review)| review.order)
+                })
                 .map(|(id, _)| *id);
             match oldest {
                 Some(id) => {
@@ -800,6 +818,7 @@ impl SettingsState {
                 created_at: now,
                 attempted: false,
                 result: None,
+                resolved_at: None,
             },
         );
         Ok(id)
@@ -845,10 +864,11 @@ impl SettingsState {
         Ok(())
     }
 
-    fn record(&self, id: Uuid, receipt: &SettingsReceipt) {
+    fn record(&self, id: Uuid, receipt: &SettingsReceipt, now: Instant) {
         if let Ok(mut reviews) = self.reviews.lock() {
             if let Some(review) = reviews.get_mut(&id) {
                 review.result = Some(receipt.clone());
+                review.resolved_at = Some(now);
             }
         }
     }
@@ -1075,7 +1095,7 @@ pub(crate) async fn apply_settings_change_for(
         Ok(client) => client,
         Err(error) => {
             let receipt = SettingsReceipt::Refused { error };
-            bridge.settings.record(id, &receipt);
+            bridge.settings.record(id, &receipt, Instant::now());
             return Ok(receipt);
         }
     };
@@ -1111,7 +1131,7 @@ async fn send_reviewed(
                 let public = bridge.settle(&binding, PublicError::from_client(&error));
                 if definite(&error, &public) {
                     let receipt = SettingsReceipt::Refused { error: public };
-                    bridge.settings.record(id, &receipt);
+                    bridge.settings.record(id, &receipt, Instant::now());
                     return Ok(receipt);
                 }
                 return Err(public);
@@ -1148,7 +1168,7 @@ async fn send_reviewed(
             SettingsReceipt::Refused { error: public }
         }
     };
-    bridge.settings.record(id, &receipt);
+    bridge.settings.record(id, &receipt, Instant::now());
     Ok(receipt)
 }
 

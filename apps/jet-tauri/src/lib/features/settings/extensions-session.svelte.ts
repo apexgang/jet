@@ -12,7 +12,7 @@ import {
 import { LOCAL_PLANE, type PlaneId } from "$lib/jet/planes";
 import { applySettingsChange, type SettingsReview } from "$lib/jet/settings";
 import { CHANGE_POLL_MS, isTerminalChange, type ExtensionEntry, type TrackedChangeState } from "./extensions-model";
-import { sectionData, sectionStateFor, type SectionState } from "./model";
+import { sectionData, sectionStateFor, withFreshness, type SectionState } from "./model";
 
 /** Which entry an inspection or change is about. */
 export type ExtensionSubject = { craftId: string; harness: string; extensionId: string };
@@ -54,6 +54,8 @@ export type TrackedChange = {
 export type ExtensionsHost = {
   /** A refusal that names Plane state (degraded audit, read-only recovery). */
   planeStateStale(): void;
+  /** Why changes are paused now (read-only Recovery, a stale view); `null` when they may be sent. */
+  mutationBlock(): "read_only" | "stale" | null;
 };
 
 export type ExtensionsOptions = {
@@ -87,7 +89,8 @@ export class ExtensionsSession {
   private inspectionRequest = 0;
   private operationRequest = 0;
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** Uncertain operations of Planes not shown now. */
+  private disposed = false;
+  /** Applying and uncertain operations of Planes not shown now. */
   private retained = new Map<PlaneId, ExtensionOperation>();
 
   constructor(host: ExtensionsHost, options: ExtensionsOptions = {}) {
@@ -96,10 +99,12 @@ export class ExtensionsSession {
     this.pollMs = options.pollMs ?? CHANGE_POLL_MS;
   }
 
-  /** Shows one Plane. Keeps an uncertain change for when the user returns. */
+  /** Shows one Plane. Keeps an applying or uncertain change for when the user returns. */
   select(planeId: PlaneId): void {
     if (this.started && planeId === this.planeId) return;
-    if (this.operation.kind === "uncertain") this.retained.set(this.planeId, this.operation);
+    if (this.operation.kind === "applying" || this.operation.kind === "uncertain") {
+      this.retained.set(this.planeId, this.operation);
+    }
     this.started = true;
     this.stopPolling();
     this.generation++;
@@ -114,8 +119,21 @@ export class ExtensionsSession {
 
   /** Stops accepting completions and polling (the window is closing). */
   dispose(): void {
+    this.disposed = true;
     this.generation++;
     this.stopPolling();
+  }
+
+  /** The change watcher is reconnecting or stopped: catalogs show their last values as stale. */
+  markStale(): void {
+    this.catalogs = Object.fromEntries(
+      Object.entries(this.catalogs).map(([craftId, state]) => [craftId, withFreshness(state, "stale")]),
+    );
+  }
+
+  /** Reads every catalog loaded on this Plane again (the watcher resumed). */
+  async reloadLoaded(): Promise<void> {
+    await this.reloadAll(Object.keys(this.catalogs));
   }
 
   // -------------------------------------------------------------------------
@@ -244,6 +262,8 @@ export class ExtensionsSession {
   async confirm(): Promise<void> {
     const current = this.operation;
     if (current.kind !== "confirm") return;
+    // Nothing is sent while changes are paused, even from an open review.
+    if (this.host.mutationBlock() !== null) return;
     await this.apply(current.subject, current.action, current.review.reviewId);
   }
 
@@ -251,6 +271,7 @@ export class ExtensionsSession {
   async retry(): Promise<void> {
     const current = this.operation;
     if (current.kind !== "uncertain") return;
+    if (this.host.mutationBlock() !== null) return;
     await this.apply(current.subject, current.action, current.reviewId);
   }
 
@@ -260,22 +281,29 @@ export class ExtensionsSession {
   }
 
   private async apply(subject: ExtensionSubject, action: ExtensionAction, reviewId: string): Promise<void> {
-    const { planeId, generation } = this;
-    const request = ++this.operationRequest;
+    const { planeId } = this;
+    // Any prepare still in flight is out of date.
+    this.operationRequest++;
     this.operation = { kind: "applying", subject, action, reviewId };
     let receipt;
     try {
       receipt = await applySettingsChange(planeId, reviewId);
     } catch (thrown: unknown) {
       const uncertain: ExtensionOperation = { kind: "uncertain", subject, action, reviewId, error: publicError(thrown) };
-      if (generation !== this.generation) {
-        this.retained.set(planeId, uncertain);
-        return;
-      }
-      if (request === this.operationRequest) this.operation = uncertain;
+      if (this.owns(planeId, reviewId)) this.operation = uncertain;
+      // The user switched Planes; keep the uncertainty for when they return.
+      else if (!this.disposed && planeId !== this.planeId) this.retained.set(planeId, uncertain);
       return;
     }
-    if (generation !== this.generation || request !== this.operationRequest) return;
+    if (!this.owns(planeId, reviewId)) {
+      // Answered while its Plane isn't shown: a queued change is tracked
+      // again from the catalog when the user returns.
+      const held = this.retained.get(planeId);
+      if (held && (held.kind === "applying" || held.kind === "uncertain") && held.reviewId === reviewId) {
+        this.retained.delete(planeId);
+      }
+      return;
+    }
     if (receipt.kind === "applied" && receipt.detail.kind === "extension_change_queued") {
       const { changeId } = receipt.detail;
       this.operation = { kind: "queued", subject, action, changeId };
@@ -356,6 +384,12 @@ export class ExtensionsSession {
       if (error.code === "extensions.change_unknown") return;
     }
     this.schedule(changeId, generation);
+  }
+
+  /** Whether the Plane on screen still shows this review being sent. */
+  private owns(planeId: PlaneId, reviewId: string): boolean {
+    if (this.disposed || planeId !== this.planeId) return false;
+    return this.operation.kind === "applying" && this.operation.reviewId === reviewId;
   }
 
   private stopPolling(): void {

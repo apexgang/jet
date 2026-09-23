@@ -442,7 +442,7 @@ fn a_craft_preview_shows_its_facts_but_never_the_local_paths() {
             trust: CraftTrust::DeveloperSource,
         },
     };
-    let view = serde_json::to_value(preview_view(&preview)).unwrap();
+    let view = serde_json::to_value(preview_view(&preview).unwrap()).unwrap();
     assert_eq!(view["source"], "local");
     assert_eq!(view["trust"], "developer_source");
     assert_eq!(view["brokerPermissions"], json!(["artifact_read"]));
@@ -451,6 +451,75 @@ fn a_craft_preview_shows_its_facts_but_never_the_local_paths() {
         json!([{"kind": "network", "value": "api.example.com:443"}])
     );
     assert!(!view.to_string().contains("/home/someone"));
+}
+
+fn reviewable_preview() -> CraftInstallationPreview {
+    CraftInstallationPreview {
+        craft_id: "example".into(),
+        version: "0.1.0".into(),
+        enabled_features: vec!["tools".into()],
+        confirmation: CraftInstallationConfirmation {
+            source: CraftSource::GitHubRelease {
+                repository: "example/craft".into(),
+                tag: "v0.1.0".into(),
+            },
+            repository: "example/craft".into(),
+            publisher_claim: "Example".into(),
+            commit: "abc123".into(),
+            artifact_sha256: "e".repeat(64),
+            broker_permissions: vec![],
+            host_access: vec![],
+            trust: CraftTrust::SameUserExecutable,
+        },
+    }
+}
+
+#[test]
+fn a_craft_preview_that_cannot_be_shown_in_full_is_not_reviewable() {
+    let code = |preview: &CraftInstallationPreview| preview_view(preview).unwrap_err().code;
+
+    // More host access than the review lists.
+    let mut many = reviewable_preview();
+    many.confirmation.host_access = (0..65)
+        .map(|n| CraftHostAccess::Environment {
+            name: format!("VAR_{n}"),
+        })
+        .collect();
+    assert_eq!(code(&many), "agents.not_reviewable");
+    many.confirmation.host_access.truncate(64);
+    assert_eq!(preview_view(&many).unwrap().host_access.len(), 64);
+
+    // A path longer than jetd allows, or one with a control character.
+    let mut oversized = reviewable_preview();
+    oversized.confirmation.host_access = vec![CraftHostAccess::Filesystem {
+        path: format!("/{}", "a".repeat(512)),
+    }];
+    assert_eq!(code(&oversized), "agents.not_reviewable");
+    let mut control = reviewable_preview();
+    control.confirmation.host_access = vec![CraftHostAccess::Network {
+        destination: "example.com\n:443".into(),
+    }];
+    assert_eq!(code(&control), "agents.not_reviewable");
+
+    // Values jetd accepts are shown exactly, even multibyte ones.
+    let mut multibyte = reviewable_preview();
+    let cyrillic = format!("/{}", "ж".repeat(300));
+    multibyte.confirmation.host_access = vec![CraftHostAccess::Filesystem {
+        path: cyrillic.clone(),
+    }];
+    multibyte.version = "1".repeat(128);
+    multibyte.confirmation.publisher_claim = "ё".repeat(256);
+    let view = serde_json::to_value(preview_view(&multibyte).unwrap()).unwrap();
+    assert_eq!(view["hostAccess"][0]["value"], cyrillic);
+    assert_eq!(view["version"], "1".repeat(128));
+
+    // An identity fact that can't be shown refuses the review.
+    let mut claim = reviewable_preview();
+    claim.confirmation.publisher_claim = "p".repeat(257);
+    assert_eq!(code(&claim), "agents.not_reviewable");
+    let mut empty = reviewable_preview();
+    empty.confirmation.commit = String::new();
+    assert_eq!(code(&empty), "agents.not_reviewable");
 }
 
 // ---------------------------------------------------------------------------

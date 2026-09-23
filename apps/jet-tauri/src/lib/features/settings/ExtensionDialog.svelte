@@ -94,12 +94,21 @@
             Jet couldn't confirm this change. It may have been queued. <code>{operation.error.code}</code>
           </p>
         {/if}
+        {#if blocked}
+          <p class="dialog-note" role="status">Changes are paused on {planeLabel}.</p>
+        {/if}
         {#snippet footer()}
           <button type="button" class="secondary-button" data-dialog-cancel disabled={busy} onclick={close}>
             {operation.kind === "uncertain" ? "Close" : "Cancel"}
           </button>
           {#if operation.kind === "uncertain"}
-            <button type="button" class="primary-button" data-dialog-primary onclick={() => void extensions.retry()}>
+            <button
+              type="button"
+              class="primary-button"
+              data-dialog-primary
+              disabled={blocked}
+              onclick={() => void extensions.retry()}
+            >
               Retry same change
             </button>
           {:else}
@@ -108,7 +117,7 @@
               type="button"
               class={destructive ? "danger-button" : "primary-button"}
               data-dialog-primary
-              disabled={busy}
+              disabled={busy || blocked}
               onclick={() => void extensions.confirm()}
             >
               {operation.kind === "applying" ? "Saving…" : actionLabel(review.action)}

@@ -256,6 +256,13 @@ export function withIssues<T>(state: SectionState<T>, sections: readonly string[
 }
 
 /** The data a state can still show, fresh or not. */
+/** Marks ready data changed elsewhere or stale; a stale view stays stale until reloaded. */
+export function withFreshness<T>(state: SectionState<T>, freshness: "changed" | "stale"): SectionState<T> {
+  if (state.kind !== "ready") return state;
+  if (freshness === "changed" && state.freshness === "stale") return state;
+  return { ...state, freshness };
+}
+
 export function sectionData<T>(state: SectionState<T>): T | null {
   switch (state.kind) {
     case "ready":
@@ -287,6 +294,10 @@ export type SettingPlacement = {
   sensitive: boolean;
   /** What confirming means, shown in the review dialog of sensitive rows. */
   consequence?: string;
+  /** What confirming means when a flag or consent is turned off. */
+  consequenceOff?: string;
+  /** Lowering the value deletes data for good: the review starts on Cancel. */
+  destructiveDecrease?: boolean;
   unit?: "MiB" | "days" | "tasks";
 };
 
@@ -336,24 +347,28 @@ export const SETTING_PLACEMENT: Readonly<Record<SettingKeyId, SettingPlacement>>
     label: "Let my own tasks run above the limit",
     help: "Tasks you start yourself don't wait for the limit.",
     consequence: "Tasks you start can use more of this Plane's power and memory than the limit allows.",
+    consequenceOff: "Tasks you start wait for the limit like any other task.",
   },
   "craft.developer_mode": {
     scopes: PLANE, pane: "safety", section: "permissions", sensitive: true,
     label: "Allow local and source-built Harness packages",
     help: "Needed to add a Craft from files on this Plane.",
     consequence: "Local packages aren't verified. They run with your user account's permissions.",
+    consequenceOff: "Local and source-built packages can't be added on this Plane.",
   },
   "security.audit_retention_days": {
     scopes: PLANE, pane: "safety", section: "audit", sensitive: true, unit: "days",
     label: "Keep the security audit for",
     help: "This Plane sets the shortest period it allows.",
     consequence: "Audit records older than this are deleted and can't be reviewed later.",
+    destructiveDecrease: true,
   },
   "retention.trash_grace_days": {
     scopes: PLANE, pane: "work", section: "retention", sensitive: true, unit: "days",
     label: "Keep tasks in Jet Trash for",
     help: "After this, tasks in Jet Trash are deleted for good.",
     consequence: "Tasks already in Jet Trash longer than this are deleted for good.",
+    destructiveDecrease: true,
   },
   "git.message_instructions": {
     scopes: PLANE, pane: "work", section: "delivery", sensitive: false,
@@ -380,12 +395,14 @@ export const SETTING_PLACEMENT: Readonly<Record<SettingKeyId, SettingPlacement>>
     label: "Push each task's branch",
     help: PUSH_DISCLOSURE,
     consequence: `${PUSH_DISCLOSURE} Anyone with access to the remote sees the changes.`,
+    consequenceOff: "Jet stops pushing task branches. Branches already pushed stay on the remote.",
   },
   "git.auto_draft_pull_request": {
     scopes: PROJECT, pane: "work", section: "projects", sensitive: true,
     label: "Open a draft pull request for each task",
     help: `${PUSH_DISCLOSURE} The draft stays up to date on GitHub.`,
     consequence: `${PUSH_DISCLOSURE} A draft pull request is created on GitHub and kept up to date.`,
+    consequenceOff: "Jet stops opening draft pull requests. Pull requests already opened stay on GitHub.",
   },
   "git.branch_prefix": {
     scopes: PROJECT, pane: "work", section: "projects", sensitive: false,
@@ -408,6 +425,7 @@ export const SETTING_PLACEMENT: Readonly<Record<SettingKeyId, SettingPlacement>>
     label: "Allow Jet to send task content for naming and summaries",
     help: "Applies to the chosen account only.",
     consequence: "Task content is sent to the chosen account's provider.",
+    consequenceOff: "Jet stops sending task content to this account for naming and summaries.",
   },
   "utility.autodelete_compilation": {
     scopes: PLANE, pane: "agents", section: "utility", sensitive: false,
@@ -419,6 +437,7 @@ export const SETTING_PLACEMENT: Readonly<Record<SettingKeyId, SettingPlacement>>
     label: "Let Jet review eligible approval requests",
     help: "Requests Jet can't decide still wait for you.",
     consequence: "Jet decides eligible approval requests for you on this Plane.",
+    consequenceOff: "Every approval request on this Plane waits for you.",
   },
   "review.account_binding": {
     scopes: PLANE, pane: "work", section: "reviews", sensitive: true,
@@ -431,6 +450,7 @@ export const SETTING_PLACEMENT: Readonly<Record<SettingKeyId, SettingPlacement>>
     label: "Allow Jet to send task content to the reviewer account",
     help: "Applies to the chosen reviewer only.",
     consequence: "Task content is sent to the reviewer account's provider.",
+    consequenceOff: "Jet stops sending task content to the reviewer account.",
   },
 };
 
@@ -475,6 +495,37 @@ export function valueKind(key: SettingKeyId): "flag" | "count" | "text" {
 
 export function isSensitive(key: SettingKeyId): boolean {
   return SETTING_PLACEMENT[key].sensitive;
+}
+
+/**
+ * The consequence line of a review, for the direction it changes in.
+ * Clearing a flag restores an inherited value whose direction isn't known
+ * here, so it shows none rather than a wrong one.
+ */
+export function reviewConsequence(key: SettingKeyId, review: SettingsReview): string | undefined {
+  const placement = SETTING_PLACEMENT[key];
+  const after = review.after;
+  if (isConsentKey(key)) {
+    const granted = after?.type === "text" && after.value !== "";
+    return granted ? placement.consequence : placement.consequenceOff;
+  }
+  if (valueKind(key) === "flag") {
+    if (after?.type !== "flag") return undefined;
+    return after.value ? placement.consequence : placement.consequenceOff;
+  }
+  return placement.consequence;
+}
+
+/**
+ * Whether confirming may delete data for good: a lower retention, or a
+ * value that can't be compared. Such reviews start on Cancel.
+ */
+export function reviewDestructive(key: SettingKeyId, review: SettingsReview): boolean {
+  if (!SETTING_PLACEMENT[key].destructiveDecrease) return false;
+  const before = review.before?.value;
+  const after = review.after;
+  if (before?.type !== "count" || after?.type !== "count") return true;
+  return after.value < before.value;
 }
 
 /** Where a value comes from, in the vocabulary of the row's badge. */
@@ -616,8 +667,9 @@ export type SettingRowState =
   | { kind: "editing"; draft: SettingValue }
   | { kind: "checking"; draft: SettingValue | null }
   | { kind: "confirm"; review: SettingsReview }
-  | { kind: "applying"; reviewId: string }
-  | { kind: "uncertain"; reviewId: string; error: PublicError }
+  /** `draft` is the value sent; `null` sends a clear. */
+  | { kind: "applying"; reviewId: string; draft: SettingValue | null }
+  | { kind: "uncertain"; reviewId: string; draft: SettingValue | null; error: PublicError }
   | { kind: "changed_elsewhere"; current: ResolvedSetting; draft: SettingValue | null }
   | { kind: "refused"; error: PublicError };
 
@@ -656,3 +708,10 @@ export const schedulesAvailability = {
 /** Every Plane pane ends with this disclosure. */
 export const LAST_WRITER_WINS =
   "Jet applies the most recent change. If another device changes the same setting at the same time, the later change wins.";
+
+/** Why a review can't be confirmed right now, for its dialog. */
+export function blockText(block: "read_only" | "stale", planeLabel: string): string {
+  return block === "read_only"
+    ? `${planeLabel} is in read-only recovery. Changes wait until it's restored.`
+    : `Changes are paused until Jet reconnects to ${planeLabel}.`;
+}
