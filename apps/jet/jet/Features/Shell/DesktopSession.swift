@@ -314,6 +314,7 @@ final class DesktopSession {
     var gitDeliveryAdmissionUncertain: JetGitDeliveryRequest?
     var notificationAuthorization: JetNotificationAuthorization = .notDetermined
     var notificationError: String?
+    var requestedSettingsPane: JetSettingsPane?
 
     private var scenarios: [DesktopFixtureState: DesktopFixtureScenario] = [:]
     private var didLoadFixtures = false
@@ -599,6 +600,14 @@ final class DesktopSession {
         }
         if case .connected = selectedPlane?.connection { return true }
         return false
+    }
+
+    func settingsAccess() async throws -> any JetSettingsAccess {
+        try await activeClient()
+    }
+
+    func requestSettings(_ pane: JetSettingsPane) {
+        requestedSettingsPane = pane
     }
 
     private var setupStateIsIdle: Bool {
@@ -2384,7 +2393,7 @@ final class DesktopSession {
         case .conversation:
             isWorkPanelPresented = true
         case .schedules:
-            actionNotice = "Schedules are planned for Wave 3."
+            actionNotice = "Schedules are managed in Work Settings on macOS."
         case .planes:
             isWorkPanelPresented = false
         }

@@ -27,6 +27,7 @@ struct ProjectSetupView: View {
                         Button("Try again") {
                             Task { await session.loadSetup() }
                         }
+                        JetSettingsRecoveryButton(session: session, error: error)
                     }
                     .frame(maxWidth: .infinity, minHeight: 320)
                 case let .ready(snapshot):
@@ -93,7 +94,7 @@ struct ProjectSetupView: View {
                         .foregroundStyle(.orange)
                 }
                 if let capabilitiesIssue {
-                    SetupIssueView(issue: capabilitiesIssue)
+                    SetupIssueView(session: session, issue: capabilitiesIssue)
                 }
             }
         } trailing: {
@@ -112,7 +113,7 @@ struct ProjectSetupView: View {
                     .foregroundStyle(.secondary)
 
                 if let issue = snapshot.issue(for: .projects) {
-                    SetupIssueView(issue: issue)
+                    SetupIssueView(session: session, issue: issue)
                 } else if snapshot.projects.projects.isEmpty {
                     Text("No Projects yet. Add the root folder of a Git working tree.")
                         .foregroundStyle(.secondary)
@@ -189,7 +190,7 @@ struct ProjectSetupView: View {
                     .foregroundStyle(.secondary)
 
                 if let issue = snapshot.issue(for: .accounts) {
-                    SetupIssueView(issue: issue)
+                    SetupIssueView(session: session, issue: issue)
                 } else {
                     ForEach(snapshot.accounts.bindings) { binding in
                         LabeledContent(binding.label) {
@@ -229,7 +230,7 @@ struct ProjectSetupView: View {
 
         SetupRow(symbol: "desktopcomputer", symbolColor: .secondary, title: "Remote Plane") {
             if let issue = snapshot.issue(for: .pairing) {
-                SetupIssueView(issue: issue)
+                SetupIssueView(session: session, issue: issue)
             } else if snapshot.pairing.pairedClients > 0 {
                 Text("\(snapshot.pairing.pairedClients) paired client\(snapshot.pairing.pairedClients == 1 ? "" : "s")")
                     .foregroundStyle(.secondary)
@@ -262,18 +263,22 @@ struct ProjectSetupView: View {
 }
 
 private struct SetupIssueView: View {
+    let session: DesktopSession
     let issue: JetSetupIssue
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(issue.error.message)
-                .foregroundStyle(.orange)
-            Text(issue.error.code)
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(issue.error.message)
+                    .foregroundStyle(.orange)
+                Text(issue.error.code)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(issue.section.title) unavailable. \(issue.error.message) \(issue.error.code)")
+            JetSettingsRecoveryButton(session: session, error: issue.error)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(issue.section.title) unavailable. \(issue.error.message) \(issue.error.code)")
     }
 }
 

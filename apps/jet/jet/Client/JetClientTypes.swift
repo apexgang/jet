@@ -883,6 +883,158 @@ nonisolated struct JetSettingCleared: Sendable, Equatable {
     let scope: JetSettingScope
 }
 
+nonisolated enum JetSettingValue: Sendable, Equatable {
+    case flag(Bool)
+    case text(String)
+    case count(UInt32)
+}
+
+nonisolated enum JetSettingSource: Sendable, Equatable {
+    case builtIn
+    case scope(JetSettingScope)
+}
+
+nonisolated struct JetResolvedSetting: Sendable, Equatable, Identifiable {
+    let key: SettingKey
+    let value: JetSettingValue
+    let source: JetSettingSource
+
+    var id: String { key.rawValue }
+}
+
+nonisolated struct JetSettingSnapshot: Sendable, Equatable {
+    let cursor: UInt64
+    let scope: JetSettingScope
+    let settings: [JetResolvedSetting]
+
+    func value(for key: SettingKey) -> JetSettingValue? {
+        settings.first { $0.key.rawValue == key.rawValue }?.value
+    }
+
+    func source(for key: SettingKey) -> JetSettingSource? {
+        settings.first { $0.key.rawValue == key.rawValue }?.source
+    }
+}
+
+nonisolated struct JetSettingSet: Sendable, Equatable {
+    let key: SettingKey
+    let scope: JetSettingScope
+    let value: JetSettingValue
+}
+
+nonisolated struct JetUsageTokens: Sendable, Equatable {
+    let input: UInt64
+    let cachedInput: UInt64
+    let output: UInt64
+    let reasoning: UInt64
+
+    var total: UInt64 {
+        let generated = input.addingReportingOverflow(output)
+        guard !generated.overflow else { return .max }
+        let reasoned = generated.partialValue.addingReportingOverflow(reasoning)
+        return reasoned.overflow ? .max : reasoned.partialValue
+    }
+}
+
+nonisolated enum JetUsageFreshness: Sendable, Equatable {
+    case fresh
+    case stale
+    case unreachable(String)
+}
+
+nonisolated struct JetQuotaWindowSummary: Sendable, Equatable, Identifiable {
+    let bindingID: UUID
+    let provider: String
+    let window: String
+    let unit: String
+    let used: UInt64
+    let limit: UInt64?
+    let resetsAtUnixMilliseconds: Int64?
+    let freshness: JetUsageFreshness
+
+    var id: String { "\(bindingID.uuidString)-\(provider)-\(window)" }
+}
+
+nonisolated struct JetUsageSnapshot: Sendable, Equatable {
+    let cursor: UInt64
+    let planeID: UUID
+    let tokens: JetUsageTokens
+    let measurements: UInt64
+    let estimated: UInt64
+    let interim: UInt64
+    let quotaWindows: [JetQuotaWindowSummary]
+}
+
+nonisolated struct JetUsageHistorySeries: Sendable, Equatable, Identifiable {
+    let model: String?
+    let tokens: JetUsageTokens
+    let measurements: UInt64
+
+    var id: String { model ?? "unreported-model" }
+}
+
+nonisolated struct JetUsageHistorySnapshot: Sendable, Equatable {
+    let cursor: UInt64
+    let planeID: UUID
+    let resolution: String
+    let series: [JetUsageHistorySeries]
+}
+
+nonisolated struct JetScheduledTask: Sendable, Equatable, Identifiable {
+    let id: UUID
+    let conversationID: UUID
+    let timeZone: String
+    let localTime: String
+    let prompt: String
+    let nextDueAtUnixMilliseconds: Int64
+    let nextIntendedLocal: String
+}
+
+nonisolated struct JetScheduledTaskSnapshot: Sendable, Equatable {
+    let cursor: UInt64
+    let tasks: [JetScheduledTask]
+}
+
+nonisolated struct JetExtensionCatalogSummary: Sendable, Equatable, Identifiable {
+    let craftID: String
+    let harness: String
+    let nativeMetadata: String
+
+    var id: String { craftID }
+}
+
+nonisolated enum JetExtensionAction: String, CaseIterable, Sendable, Equatable {
+    case install
+    case update
+    case disable
+    case remove
+
+    var title: String {
+        switch self {
+        case .install: "Install"
+        case .update: "Update"
+        case .disable: "Disable"
+        case .remove: "Remove"
+        }
+    }
+}
+
+nonisolated struct JetExtensionProposal: Sendable, Equatable, Identifiable {
+    let catalog: JetExtensionCatalogSummary
+    let extensionID: String
+    let action: JetExtensionAction
+
+    var id: String { "\(catalog.craftID)-\(extensionID)-\(action.rawValue)" }
+}
+
+nonisolated struct JetExtensionChangeSummary: Sendable, Equatable, Identifiable {
+    let id: UUID
+    let craftID: String
+    let extensionID: String
+    let action: JetExtensionAction
+    let state: String
+}
+
 nonisolated enum JetPresentationErrorCategory: String, Sendable {
     case offline
     case invalidInput = "invalid_input"

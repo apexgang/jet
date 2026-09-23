@@ -454,6 +454,29 @@ actor JetClient {
         return try decodeAccountBindings(data, requestID: requestID)
     }
 
+    func unbindHarnessAccount(
+        _ bindingID: UUID,
+        commandID: UUID = UUID()
+    ) async throws {
+        try await requireProtocolMinor(4, feature: "Harness accounts")
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "unbind_account",
+                "binding_id": bindingID.uuidString.lowercased(),
+            ],
+            commandID: commandID
+        )
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "account_unbound"
+        )
+        guard uuid(result["binding_id"]) == bindingID else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+    }
+
     func bindHarnessAccount(
         _ option: JetAuthProvider,
         commandID: UUID = UUID()
@@ -478,6 +501,194 @@ actor JetClient {
             commandID: commandID
         )
         return try decodeBoundAccount(data, requestID: requestID)
+    }
+
+    func usage() async throws -> JetUsageSnapshot {
+        try await requireProtocolMinor(29, feature: "Usage")
+        let (data, requestID) = try await sendQuery([
+            "type": "usage",
+            "selection": ["scope": "plane"],
+        ])
+        return try decodeUsage(data, requestID: requestID)
+    }
+
+    func usageHistory(
+        fromUnixMilliseconds: Int64,
+        untilUnixMilliseconds: Int64
+    ) async throws -> JetUsageHistorySnapshot {
+        guard fromUnixMilliseconds < untilUnixMilliseconds else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "usage.range_inverted",
+                message: "Choose a Usage history range with an end after its start."
+            ))
+        }
+        try await requireProtocolMinor(43, feature: "Usage history")
+        let (data, requestID) = try await sendQuery([
+            "type": "usage_history",
+            "selection": ["scope": "plane"],
+            "range": [
+                "from_unix_ms": fromUnixMilliseconds,
+                "until_unix_ms": untilUnixMilliseconds,
+            ],
+            "resolution": "day",
+        ])
+        return try decodeUsageHistory(data, requestID: requestID)
+    }
+
+    func extensionCatalog(craftID: String) async throws -> JetExtensionCatalogSummary {
+        try validateExtensionToken(craftID, field: "Craft")
+        try await requireProtocolMinor(28, feature: "Harness extensions")
+        let (data, requestID) = try await sendQuery([
+            "type": "extension_catalog",
+            "craft_id": craftID,
+        ])
+        return try decodeExtensionCatalog(
+            data,
+            requestID: requestID,
+            expectedCraftID: craftID
+        )
+    }
+
+    func inspectExtension(
+        craftID: String,
+        extensionID: String,
+        action: JetExtensionAction
+    ) async throws -> JetExtensionProposal {
+        try validateExtensionToken(craftID, field: "Craft")
+        try validateExtensionToken(extensionID, field: "Extension")
+        try await requireProtocolMinor(28, feature: "Harness extensions")
+        let (data, requestID) = try await sendQuery([
+            "type": "inspect_extension",
+            "craft_id": craftID,
+            "extension_id": extensionID,
+        ])
+        return JetExtensionProposal(
+            catalog: try decodeExtensionCatalog(
+                data,
+                requestID: requestID,
+                expectedCraftID: craftID
+            ),
+            extensionID: extensionID,
+            action: action
+        )
+    }
+
+    func changeExtension(
+        _ proposal: JetExtensionProposal,
+        commandID: UUID = UUID()
+    ) async throws -> UUID {
+        try validateExtensionToken(proposal.catalog.craftID, field: "Craft")
+        try validateExtensionToken(proposal.extensionID, field: "Extension")
+        try await requireProtocolMinor(28, feature: "Harness extensions")
+        // ASVS 2.2.2 and 8.3.1: this is the exact inspected catalog and
+        // closed action vocabulary. jetd revalidates both before mutation.
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "change_extension",
+                "confirmation": [
+                    "catalog": [
+                        "craft_id": proposal.catalog.craftID,
+                        "harness": proposal.catalog.harness,
+                        "native_metadata": proposal.catalog.nativeMetadata,
+                    ],
+                    "extension_id": proposal.extensionID,
+                    "action": proposal.action.rawValue,
+                    "scope": "user",
+                    "trust": "same_user_executable",
+                ],
+            ],
+            commandID: commandID
+        )
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "extension_change_queued"
+        )
+        guard let changeID = uuid(result["change_id"]) else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return changeID
+    }
+
+    func extensionChange(_ changeID: UUID) async throws -> JetExtensionChangeSummary {
+        try await requireProtocolMinor(28, feature: "Harness extensions")
+        let (data, requestID) = try await sendQuery([
+            "type": "extension_change",
+            "change_id": changeID.uuidString.lowercased(),
+        ])
+        return try decodeExtensionChange(
+            data,
+            requestID: requestID,
+            expectedChangeID: changeID
+        )
+    }
+
+    func scheduledTasks(conversationID: UUID) async throws -> JetScheduledTaskSnapshot {
+        try await requireProtocolMinor(21, feature: "Schedules")
+        let (data, requestID) = try await sendQuery([
+            "type": "scheduled_tasks",
+            "conversation_id": conversationID.uuidString.lowercased(),
+        ])
+        return try decodeScheduledTasks(
+            data,
+            requestID: requestID,
+            expectedConversationID: conversationID
+        )
+    }
+
+    func createSchedule(
+        conversationID: UUID,
+        timeZone: String,
+        localTime: String,
+        prompt: String,
+        commandID: UUID = UUID()
+    ) async throws -> JetScheduledTask {
+        try validateSchedule(timeZone: timeZone, localTime: localTime, prompt: prompt)
+        try await requireProtocolMinor(21, feature: "Schedules")
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "create_schedule",
+                "conversation_id": conversationID.uuidString.lowercased(),
+                "time_zone": timeZone,
+                "local_time": localTime,
+                "prompt": prompt,
+            ],
+            commandID: commandID
+        )
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "schedule_created"
+        )
+        guard let task = result["task"] as? [String: Any] else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return try decodeScheduledTask(task, expectedConversationID: conversationID)
+    }
+
+    func cancelSchedule(
+        _ scheduleID: UUID,
+        commandID: UUID = UUID()
+    ) async throws {
+        try await requireProtocolMinor(21, feature: "Schedules")
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "cancel_schedule",
+                "schedule_id": scheduleID.uuidString.lowercased(),
+            ],
+            commandID: commandID
+        )
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "schedule_canceled"
+        )
+        guard uuid(result["schedule_id"]) == scheduleID else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
     }
 
     func pairing() async throws -> JetPairingSummary {
@@ -1075,52 +1286,66 @@ actor JetClient {
         }
     }
 
-    /// A durable Command keeps the same command ID and exact command object
-    /// across reconnect attempts. Cancelling the caller never means rollback.
+    func settings(scope: JetSettingScope) async throws -> JetSettingSnapshot {
+        try await requireProtocolMinor(3, feature: "Settings")
+        let (data, requestID) = try await sendQuery([
+            "type": "settings",
+            "scope": wireScope(scope),
+            "selection": ["type": "all"],
+        ])
+        return try decodeSettings(
+            data,
+            requestID: requestID,
+            expectedScope: scope
+        )
+    }
+
+    func setSetting(
+        _ key: SettingKey,
+        value: JetSettingValue,
+        scope: JetSettingScope,
+        commandID: UUID = UUID()
+    ) async throws -> JetSettingSet {
+        try await requireProtocolMinor(3, feature: "Settings")
+        try validateSetting(key: key, value: value, scope: scope)
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "set_setting",
+                "key": key.rawValue,
+                "scope": wireScope(scope),
+                "value": wireSettingValue(value),
+            ],
+            commandID: commandID
+        )
+        return try decodeSettingSet(
+            data,
+            requestID: requestID,
+            expectedKey: key,
+            expectedValue: value,
+            expectedScope: scope
+        )
+    }
+
     func clearSetting(
         _ key: SettingKey,
         scope: JetSettingScope,
         commandID: UUID = UUID()
     ) async throws -> JetSettingCleared {
-        let command = [
-            "type": "clear_setting",
-            "key": key.rawValue,
-            "scope": wireScope(scope),
-        ] as [String: Any]
-        var attempt = 0
-
-        while true {
-            do {
-                try await ensureConnected()
-                let requestID = takeRequestID()
-                let payload = try encodeClientMessage([
-                    "kind": "command",
-                    "id": NSNumber(value: requestID),
-                    "command_id": commandID.uuidString.lowercased(),
-                    "command": command,
-                ])
-                let response = try await exchange(
-                    payload,
-                    cancellationFailure: .commandOutcomeUnknown(commandID: commandID)
-                )
-                return try decodeSettingCleared(
-                    response,
-                    requestID: requestID,
-                    expectedKey: key,
-                    expectedScope: scope
-                )
-            } catch {
-                if isOffline(error), attempt < configuration.reconnectDelays.count {
-                    try await waitBeforeReconnect(attempt: attempt)
-                    attempt += 1
-                    continue
-                }
-                if isOffline(error) {
-                    throw JetClientFailure.commandOutcomeUnknown(commandID: commandID)
-                }
-                throw normalized(error)
-            }
-        }
+        try await requireProtocolMinor(3, feature: "Settings")
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "clear_setting",
+                "key": key.rawValue,
+                "scope": wireScope(scope),
+            ],
+            commandID: commandID
+        )
+        return try decodeSettingCleared(
+            data,
+            requestID: requestID,
+            expectedKey: key,
+            expectedScope: scope
+        )
     }
 
     private func ensureConnected() async throws {
@@ -3098,6 +3323,352 @@ actor JetClient {
         )
     }
 
+    private func decodeSettings(
+        _ data: Data,
+        requestID: UInt64,
+        expectedScope: JetSettingScope
+    ) throws -> JetSettingSnapshot {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "settings"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let scope = decodeScope(result["scope"]),
+              scope == expectedScope,
+              let values = result["settings"] as? [[String: Any]]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        var settings: [JetResolvedSetting] = []
+        settings.reserveCapacity(values.count)
+        var keys = Set<String>()
+        for value in values {
+            let setting = try decodeSetting(value)
+            guard keys.insert(setting.key.rawValue).inserted else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            settings.append(setting)
+        }
+        return JetSettingSnapshot(cursor: cursor, scope: scope, settings: settings)
+    }
+
+    private func decodeSetting(_ value: [String: Any]) throws -> JetResolvedSetting {
+        guard let rawKey = value["key"] as? String,
+              let key = SettingKey(rawValue: rawKey),
+              let settingValue = decodeSettingValue(value["value"]),
+              let sourceValue = value["source"] as? [String: Any],
+              let rawSource = sourceValue["source"] as? String
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let source: JetSettingSource
+        switch rawSource {
+        case "built_in":
+            source = .builtIn
+        case "scope":
+            guard let scope = decodeScope(sourceValue["scope"]) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            source = .scope(scope)
+        default:
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetResolvedSetting(key: key, value: settingValue, source: source)
+    }
+
+    private func decodeSettingSet(
+        _ data: Data,
+        requestID: UInt64,
+        expectedKey: SettingKey,
+        expectedValue: JetSettingValue,
+        expectedScope: JetSettingScope
+    ) throws -> JetSettingSet {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "setting_set"
+        )
+        guard result["key"] as? String == expectedKey.rawValue,
+              decodeScope(result["scope"]) == expectedScope,
+              decodeSettingValue(result["value"]) == expectedValue
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetSettingSet(
+            key: expectedKey,
+            scope: expectedScope,
+            value: expectedValue
+        )
+    }
+
+    private func decodeSettingValue(_ value: Any?) -> JetSettingValue? {
+        guard let value = value as? [String: Any],
+              let type = value["type"] as? String
+        else { return nil }
+        switch type {
+        case "flag":
+            return (value["value"] as? Bool).map(JetSettingValue.flag)
+        case "text":
+            return (value["value"] as? String).map(JetSettingValue.text)
+        case "count":
+            return unsigned32(value["value"]).map(JetSettingValue.count)
+        default:
+            return nil
+        }
+    }
+
+    private func decodeUsage(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetUsageSnapshot {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "usage"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let planeID = uuid(result["plane_id"]),
+              let consumption = result["consumption"] as? [String: Any],
+              let tokens = decodeUsageTokens(consumption["tokens"]),
+              let measurements = unsigned64(consumption["measurements"]),
+              let estimated = unsigned64(consumption["estimated"]),
+              let interim = unsigned64(consumption["interim"]),
+              let windows = result["quota_windows"] as? [[String: Any]]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetUsageSnapshot(
+            cursor: cursor,
+            planeID: planeID,
+            tokens: tokens,
+            measurements: measurements,
+            estimated: estimated,
+            interim: interim,
+            quotaWindows: try windows.map(decodeQuotaWindow)
+        )
+    }
+
+    private func decodeQuotaWindow(
+        _ value: [String: Any]
+    ) throws -> JetQuotaWindowSummary {
+        guard let bindingID = uuid(value["binding_id"]),
+              let provider = value["provider"] as? String,
+              let window = value["window"] as? String,
+              let measure = value["measure"] as? [String: Any],
+              let unit = measure["unit"] as? String,
+              ["tokens", "requests", "credits", "share"].contains(unit),
+              let used = unsigned64(measure["used"]),
+              let freshnessValue = value["freshness"] as? [String: Any],
+              let state = freshnessValue["state"] as? String
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let freshness: JetUsageFreshness
+        switch state {
+        case "fresh": freshness = .fresh
+        case "stale": freshness = .stale
+        case "unreachable":
+            guard let reason = freshnessValue["reason"] as? String else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            freshness = .unreachable(reason)
+        default:
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetQuotaWindowSummary(
+            bindingID: bindingID,
+            provider: provider,
+            window: window,
+            unit: unit,
+            used: used,
+            limit: try optionalUnsigned64(measure["limit"]),
+            resetsAtUnixMilliseconds: try optionalSigned64(value["resets_at_unix_ms"]),
+            freshness: freshness
+        )
+    }
+
+    private func decodeUsageHistory(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetUsageHistorySnapshot {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "usage_history"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let planeID = uuid(result["plane_id"]),
+              let resolution = result["resolution"] as? String,
+              ["hour", "day"].contains(resolution),
+              let rawSeries = result["series"] as? [[String: Any]]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let series = try rawSeries.map { value in
+            guard let points = value["points"] as? [[String: Any]] else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            var totals = JetUsageTokens(input: 0, cachedInput: 0, output: 0, reasoning: 0)
+            var measurements: UInt64 = 0
+            for point in points {
+                guard let tokens = decodeUsageTokens(point["tokens"]),
+                      let count = unsigned64(point["measurements"])
+                else {
+                    throw JetClientFailure.presentation(.invalidResponse)
+                }
+                totals = addUsageTokens(totals, tokens)
+                measurements = clampedAdd(measurements, count)
+            }
+            return JetUsageHistorySeries(
+                model: try optionalBoundedText(value["model"], maximumBytes: 1_024),
+                tokens: totals,
+                measurements: measurements
+            )
+        }
+        return JetUsageHistorySnapshot(
+            cursor: cursor,
+            planeID: planeID,
+            resolution: resolution,
+            series: series
+        )
+    }
+
+    private func decodeUsageTokens(_ value: Any?) -> JetUsageTokens? {
+        guard let value = value as? [String: Any],
+              let input = unsigned64(value["input"]),
+              let cachedInput = unsigned64(value["cached_input"]),
+              let output = unsigned64(value["output"]),
+              let reasoning = unsigned64(value["reasoning"])
+        else { return nil }
+        return JetUsageTokens(
+            input: input,
+            cachedInput: cachedInput,
+            output: output,
+            reasoning: reasoning
+        )
+    }
+
+    private func decodeExtensionCatalog(
+        _ data: Data,
+        requestID: UInt64,
+        expectedCraftID: String
+    ) throws -> JetExtensionCatalogSummary {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "extension_catalog"
+        )
+        guard let craftID = result["craft_id"] as? String,
+              craftID == expectedCraftID,
+              let harness = result["harness"] as? String,
+              let nativeMetadata = result["native_metadata"] as? String,
+              !craftID.isEmpty,
+              !harness.isEmpty,
+              nativeMetadata.utf8.count <= 65_536
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetExtensionCatalogSummary(
+            craftID: craftID,
+            harness: harness,
+            nativeMetadata: nativeMetadata
+        )
+    }
+
+    private func decodeExtensionChange(
+        _ data: Data,
+        requestID: UInt64,
+        expectedChangeID: UUID
+    ) throws -> JetExtensionChangeSummary {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "extension_change"
+        )
+        guard let changeID = uuid(result["change_id"]),
+              changeID == expectedChangeID,
+              let craftID = result["craft_id"] as? String,
+              let extensionID = result["extension_id"] as? String,
+              let rawAction = result["action"] as? String,
+              let action = JetExtensionAction(rawValue: rawAction),
+              let state = result["state"] as? String,
+              ["staged", "applied", "refused", "outcome_unknown"].contains(state)
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetExtensionChangeSummary(
+            id: changeID,
+            craftID: craftID,
+            extensionID: extensionID,
+            action: action,
+            state: state
+        )
+    }
+
+    private func decodeScheduledTasks(
+        _ data: Data,
+        requestID: UInt64,
+        expectedConversationID: UUID
+    ) throws -> JetScheduledTaskSnapshot {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "scheduled_tasks"
+        )
+        guard let cursorText = result["cursor"] as? String,
+              let cursor = UInt64(cursorText),
+              let values = result["tasks"] as? [[String: Any]],
+              values.count <= 32
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetScheduledTaskSnapshot(
+            cursor: cursor,
+            tasks: try values.map {
+                try decodeScheduledTask($0, expectedConversationID: expectedConversationID)
+            }
+        )
+    }
+
+    private func decodeScheduledTask(
+        _ value: [String: Any],
+        expectedConversationID: UUID
+    ) throws -> JetScheduledTask {
+        guard let scheduleID = uuid(value["schedule_id"]),
+              let conversationID = uuid(value["conversation_id"]),
+              conversationID == expectedConversationID,
+              let timeZone = value["time_zone"] as? String,
+              let localTime = value["local_time"] as? String,
+              let prompt = value["prompt"] as? String,
+              prompt.utf8.count <= 8_192,
+              let next = value["next"] as? [String: Any],
+              let dueAt = signed64(next["due_at_unix_ms"]),
+              let intendedLocal = next["intended_local"] as? String
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetScheduledTask(
+            id: scheduleID,
+            conversationID: conversationID,
+            timeZone: timeZone,
+            localTime: localTime,
+            prompt: prompt,
+            nextDueAtUnixMilliseconds: dueAt,
+            nextIntendedLocal: intendedLocal
+        )
+    }
+
     private func decodeSettingCleared(
         _ data: Data,
         requestID: UInt64,
@@ -3341,6 +3912,17 @@ actor JetClient {
         }
     }
 
+    private func wireSettingValue(_ value: JetSettingValue) -> [String: Any] {
+        switch value {
+        case let .flag(flag):
+            ["type": "flag", "value": flag]
+        case let .text(text):
+            ["type": "text", "value": text]
+        case let .count(count):
+            ["type": "count", "value": NSNumber(value: count)]
+        }
+    }
+
     private func wireFileTarget(_ target: JetFileTarget) -> [String: Any] {
         switch target {
         case let .project(projectID):
@@ -3417,6 +3999,162 @@ actor JetClient {
                 )
             )
         }
+    }
+
+    private func validateSetting(
+        key: SettingKey,
+        value: JetSettingValue,
+        scope: JetSettingScope
+    ) throws {
+        let rawKey = key.rawValue
+        let planeOnly: Set<String> = [
+            "storage.disposable_mib", "energy.concurrency",
+            "energy.low_power_concurrency", "energy.constrained",
+            "energy.foreground_override", "artifact.max_mib", "artifact.run_mib",
+            "utility.account_binding", "utility.content_consent",
+            "utility.autodelete_compilation", "utility.git_text",
+            "git.message_instructions", "security.audit_retention_days",
+            "retention.trash_grace_days", "craft.developer_mode",
+            "review.automatic", "review.account_binding",
+            "review.cross_provider_consent",
+        ]
+        let projectOrConversation: Set<String> = [
+            "git.auto_commit", "git.auto_branch", "git.auto_push",
+            "git.auto_draft_pull_request", "git.branch_prefix",
+        ]
+        let scopeAccepted = if planeOnly.contains(rawKey) {
+            scope == .plane
+        } else if projectOrConversation.contains(rawKey) {
+            switch scope {
+            case .project, .conversation: true
+            case .plane: false
+            }
+        } else if rawKey == "utility.automatic_naming" {
+            true
+        } else {
+            false
+        }
+        guard scopeAccepted else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "setting.scope_unsupported",
+                message: "This setting is not available at the selected scope."
+            ))
+        }
+
+        let countKeys: Set<String> = [
+            "storage.disposable_mib", "energy.concurrency",
+            "energy.low_power_concurrency", "artifact.max_mib", "artifact.run_mib",
+            "security.audit_retention_days", "retention.trash_grace_days",
+        ]
+        let textKeys: Set<String> = [
+            "utility.account_binding", "utility.content_consent", "git.branch_prefix",
+            "git.message_instructions", "review.account_binding",
+            "review.cross_provider_consent",
+        ]
+        let shapeAccepted = switch value {
+        case .count: countKeys.contains(rawKey)
+        case .text: textKeys.contains(rawKey)
+        case .flag: !countKeys.contains(rawKey) && !textKeys.contains(rawKey)
+        }
+        guard shapeAccepted else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "setting.value_unsupported",
+                message: "This setting does not accept that value."
+            ))
+        }
+        if case let .text(text) = value, text.utf8.count > 2_048 {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "setting.value_too_long",
+                message: "Setting text is limited to 2,048 UTF-8 bytes."
+            ))
+        }
+        if case let .count(count) = value,
+           rawKey == "security.audit_retention_days",
+           count < 90
+        {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "setting.value_below_minimum",
+                message: "Keep the Security audit for at least 90 days."
+            ))
+        }
+        if case let .count(count) = value,
+           rawKey == "retention.trash_grace_days",
+           count < 1
+        {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "setting.value_below_minimum",
+                message: "Keep tasks in Jet Trash for at least one day."
+            ))
+        }
+        let bindingKeys: Set<String> = [
+            "utility.account_binding", "utility.content_consent",
+            "review.account_binding", "review.cross_provider_consent",
+        ]
+        if case let .text(text) = value,
+           bindingKeys.contains(rawKey),
+           !text.isEmpty,
+           UUID(uuidString: text) == nil
+        {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "setting.binding_invalid",
+                message: "Choose an Account binding or use the default."
+            ))
+        }
+    }
+
+    private func validateExtensionToken(_ value: String, field: String) throws {
+        guard !value.isEmpty,
+              value.utf8.count <= 1_024,
+              !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "extension.identity_invalid",
+                message: "\(field) identity must use 1 to 1,024 UTF-8 bytes without control characters."
+            ))
+        }
+    }
+
+    private func validateSchedule(
+        timeZone: String,
+        localTime: String,
+        prompt: String
+    ) throws {
+        let components = localTime.split(separator: ":", omittingEmptySubsequences: false)
+        guard TimeZone(identifier: timeZone) != nil,
+              components.count == 3,
+              components.allSatisfy({ $0.count == 2 && $0.allSatisfy(\.isNumber) }),
+              let hour = Int(components[0]), (0 ... 23).contains(hour),
+              let minute = Int(components[1]), (0 ... 59).contains(minute),
+              let second = Int(components[2]), (0 ... 59).contains(second)
+        else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "schedule.time_invalid",
+                message: "Choose a valid local time and IANA time zone."
+            ))
+        }
+        guard !prompt.isEmpty, prompt.utf8.count <= 8_192 else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "schedule.prompt_invalid",
+                message: "Enter schedule instructions between 1 and 8,192 UTF-8 bytes."
+            ))
+        }
+    }
+
+    private func addUsageTokens(
+        _ left: JetUsageTokens,
+        _ right: JetUsageTokens
+    ) -> JetUsageTokens {
+        JetUsageTokens(
+            input: clampedAdd(left.input, right.input),
+            cachedInput: clampedAdd(left.cachedInput, right.cachedInput),
+            output: clampedAdd(left.output, right.output),
+            reasoning: clampedAdd(left.reasoning, right.reasoning)
+        )
+    }
+
+    private func clampedAdd(_ left: UInt64, _ right: UInt64) -> UInt64 {
+        let result = left.addingReportingOverflow(right)
+        return result.overflow ? .max : result.partialValue
     }
 
     private func validateGitDelivery(_ request: JetGitDeliveryRequest) throws {
@@ -3557,6 +4295,14 @@ actor JetClient {
     private func optionalUnsigned64(_ value: Any?) throws -> UInt64? {
         guard let value, !(value is NSNull) else { return nil }
         guard let value = unsigned64(value) else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return value
+    }
+
+    private func optionalSigned64(_ value: Any?) throws -> Int64? {
+        guard let value, !(value is NSNull) else { return nil }
+        guard let value = signed64(value) else {
             throw JetClientFailure.presentation(.invalidResponse)
         }
         return value

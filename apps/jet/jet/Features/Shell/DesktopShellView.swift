@@ -279,8 +279,18 @@ private struct SidebarView: View {
             }
 
             Section {
+#if os(macOS)
+                Button {
+                    session.requestSettings(.work)
+                    openSettings()
+                } label: {
+                    Label("Schedules", systemImage: "calendar")
+                }
+                .buttonStyle(.plain)
+#else
                 Label("Schedules", systemImage: "calendar")
                     .tag(SidebarDestination.schedules)
+#endif
                 Label("Planes", systemImage: "desktopcomputer")
                     .tag(SidebarDestination.planes)
 #if os(macOS)
@@ -1059,6 +1069,7 @@ private struct WorkPanelView: View {
                         if error.recoveryActions.isEmpty, error.retryable {
                             Button("Try Again") { Task { await session.loadWorkPanel() } }
                         }
+                        JetSettingsRecoveryButton(session: session, error: error)
                     }
                     .padding()
                 } else if session.workOperation == "refresh",
@@ -1102,6 +1113,8 @@ private struct WorkPanelView: View {
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
+                            JetSettingsRecoveryButton(session: session, error: error)
+                                .controlSize(.small)
                         }
                     }
                 }
@@ -1375,10 +1388,16 @@ private struct DeliveryWorkView: View {
             }
 
             if let notice = session.gitDeliveryNotice {
-                Text(notice)
-                    .font(.caption)
-                    .foregroundStyle(deliveryNoticeColor)
-                    .accessibilityLabel(notice)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundStyle(deliveryNoticeColor)
+                        .accessibilityLabel(notice)
+                    if let error = session.gitDeliveryError {
+                        JetSettingsRecoveryButton(session: session, error: error)
+                            .controlSize(.small)
+                    }
+                }
             }
 
             Divider()
