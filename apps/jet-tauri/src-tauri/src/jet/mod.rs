@@ -79,15 +79,17 @@ impl JetBridge {
     }
 
     fn with_planes(planes: PlaneRegistry, app_data_directory: &Path) -> Self {
+        let notifications = std::sync::Arc::new(notifications::NotificationState::new(
+            app_data_directory,
+            |plane| planes.contains(plane),
+        ));
         Self {
             planes: Arc::new(planes),
             feeds: Arc::new(FeedRegistry::default()),
             delivery: delivery::DeliveryState::default(),
             pairing: pairing::PairingState::default(),
             enrollment: enrollment::EnrollmentState::default(),
-            notifications: std::sync::Arc::new(notifications::NotificationState::new(
-                app_data_directory,
-            )),
+            notifications,
             setup: setup::SetupState::default(),
             conversations: conversations::ConversationState::new(app_data_directory),
             run_control: run_control::RunControlState::default(),

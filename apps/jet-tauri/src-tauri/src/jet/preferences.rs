@@ -58,17 +58,22 @@ fn load(path: &Path) -> DesktopPreferences {
     serde_json::from_slice(&bytes).unwrap_or_default()
 }
 
-/// Owner-only, fsynced, atomic replace (the `identity.rs` pattern).
-fn write(path: &Path, preferences: DesktopPreferences) -> std::io::Result<()> {
-    let bytes = serde_json::to_vec(&preferences).map_err(std::io::Error::other)?;
+/// Owner-only, fsynced, atomic replace (the `identity.rs` pattern). Shared
+/// by every device-local preference file. Blocking: call it on
+/// `spawn_blocking`.
+pub(super) fn write_private_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let directory = path.parent().unwrap_or_else(|| Path::new("."));
-    let temporary = directory.join(format!(".{PREFERENCES_FILE}.{}.tmp", Uuid::new_v4()));
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "preferences".into());
+    let temporary = directory.join(format!(".{name}.{}.tmp", Uuid::new_v4()));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
     options.mode(0o600);
     let result = options.open(&temporary).and_then(|mut file| {
-        file.write_all(&bytes)?;
+        file.write_all(bytes)?;
         file.sync_all()?;
         fs::rename(&temporary, path)
     });
@@ -76,6 +81,11 @@ fn write(path: &Path, preferences: DesktopPreferences) -> std::io::Result<()> {
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+fn write(path: &Path, preferences: DesktopPreferences) -> std::io::Result<()> {
+    let bytes = serde_json::to_vec(&preferences).map_err(std::io::Error::other)?;
+    write_private_atomically(path, &bytes)
 }
 
 pub(crate) struct PreferencesState {

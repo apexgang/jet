@@ -660,6 +660,16 @@ impl PlaneRegistry {
             .map(|entry| entry.label.clone())
     }
 
+    /// Every registered Plane with its bounded label, in registry order.
+    /// Never connects.
+    pub(crate) fn labels(&self) -> Vec<(PlaneId, String)> {
+        self.all()
+            .unwrap_or_default()
+            .iter()
+            .map(|entry| (entry.id, entry.label.clone()))
+            .collect()
+    }
+
     pub(crate) fn contains(&self, plane: PlaneId) -> bool {
         matches!(self.entry(plane), Ok(Some(_)))
     }
