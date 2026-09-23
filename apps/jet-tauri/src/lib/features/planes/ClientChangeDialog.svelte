@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from "svelte";
 
+  import { CLIENTS_ANCHORS, focusLost, restoreFocus } from "./focus";
   import { formatFingerprint, identityPrefix, planeErrorCopy } from "./model";
   import type { OwnerPairing } from "./pairing.svelte";
 
@@ -43,15 +44,50 @@
         void tick().then(() => closeButton?.focus());
       } else if (!open && dialog?.open) {
         dialog.close();
-        returnFocus?.focus();
+        // An applied revoke removes the row that held "Revoke…" once the
+        // list reloads, so focus goes to the list heading instead.
+        const removed = change.kind === "done" && change.receipt.kind === "applied" && change.review.change === "revoke";
+        const target = removed ? null : returnFocus;
         returnFocus = null;
+        void tick().then(() => restoreFocus(target, CLIENTS_ANCHORS));
       }
     });
   });
 
+  // The inline Disable review appears after the list: move focus to it, and
+  // back to where it was opened from (or the list heading) when it ends.
+  let inlineHeading = $state<HTMLHeadingElement>();
+  let inlineReturn: HTMLElement | null = null;
+  const inlineOpen = $derived(
+    review !== null && !modalChange && (change.kind === "review" || change.kind === "sending"),
+  );
+  $effect(() => {
+    const open = inlineOpen;
+    untrack(() => {
+      if (open && inlineReturn === null) {
+        inlineReturn = document.activeElement instanceof HTMLElement ? document.activeElement : document.body;
+        void tick().then(() => inlineHeading?.focus());
+      } else if (!open && inlineReturn !== null) {
+        const target = inlineReturn === document.body ? null : inlineReturn;
+        inlineReturn = null;
+        void tick().then(() => {
+          if (focusLost()) restoreFocus(target, CLIENTS_ANCHORS);
+        });
+      }
+    });
+  });
+
+  const sending = $derived(change.kind === "sending");
+
   function dismiss(): void {
     if (change.kind === "sending") return;
     pairing.cancelChange();
+  }
+
+  /** Busy buttons stay focusable (aria-disabled), so focus never drops out. */
+  function execute(): void {
+    if (change.kind === "sending") return;
+    void pairing.executeChange();
   }
 </script>
 
@@ -103,7 +139,7 @@
             bind:this={cancelButton}
             class="secondary-button"
             type="button"
-            disabled={change.kind === "sending"}
+            aria-disabled={sending ? "true" : undefined}
             onclick={dismiss}
           >
             Cancel
@@ -111,8 +147,8 @@
           <button
             class="danger-button"
             type="button"
-            disabled={change.kind === "sending"}
-            onclick={() => pairing.executeChange()}
+            aria-disabled={sending ? "true" : undefined}
+            onclick={execute}
           >
             {change.kind === "sending"
               ? review.change === "revoke" ? "Revoking…" : "Disabling…"
@@ -124,22 +160,18 @@
   {/if}
 </dialog>
 
-{#if review && !modalChange && (change.kind === "review" || change.kind === "sending")}
+{#if review && inlineOpen}
   <section class="client-change-inline" aria-labelledby="client-change-inline-title">
-    <h4 id="client-change-inline-title">
+    <h4 id="client-change-inline-title" tabindex="-1" bind:this={inlineHeading}>
       {review.change === "enable" ? "Enabling" : "Disable"} {who} on {review.planeLabel}{review.change === "enable" ? "…" : "?"}
     </h4>
     {#if review.change === "disable"}
       <p>It stops controlling {review.planeLabel} until you enable it again. Its key is kept.</p>
       <div class="client-change-actions">
-        <button
-          class="danger-button"
-          disabled={change.kind === "sending"}
-          onclick={() => pairing.executeChange()}
-        >
-          {change.kind === "sending" ? "Disabling…" : "Disable"}
+        <button class="danger-button" aria-disabled={sending ? "true" : undefined} onclick={execute}>
+          {sending ? "Disabling…" : "Disable"}
         </button>
-        <button class="secondary-button" disabled={change.kind === "sending"} onclick={dismiss}>Cancel</button>
+        <button class="secondary-button" aria-disabled={sending ? "true" : undefined} onclick={dismiss}>Cancel</button>
       </div>
     {/if}
   </section>
@@ -193,6 +225,12 @@
   .client-change-inline h4,
   .client-change-inline p {
     margin: 0;
+  }
+
+  .client-change-dialog button[aria-disabled="true"],
+  .client-change-inline button[aria-disabled="true"] {
+    opacity: 0.55;
+    cursor: default;
   }
 
   .client-change-actions {

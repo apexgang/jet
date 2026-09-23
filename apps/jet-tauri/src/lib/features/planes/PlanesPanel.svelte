@@ -45,7 +45,7 @@
 <section class="planes-panel" aria-labelledby="planes-title">
   <header class="setup-header">
     <div>
-      <h1 id="planes-title">Planes</h1>
+      <h1 id="planes-title" tabindex="-1">Planes</h1>
       <p>Planes run your tasks. This computer is always listed; remote Planes you pair with appear here too.</p>
     </div>
     <button class="secondary-button" onclick={() => { void session.refreshPlanes(); void planes.loadDetail(); void planes.pairing.load(); }}>
@@ -107,6 +107,7 @@
         {#if addBlockedReason}
           <button
             bind:this={addButton}
+            id="planes-add-button"
             class="secondary-button"
             aria-disabled="true"
             aria-describedby="add-plane-reason"
@@ -116,7 +117,7 @@
           </button>
           <p id="add-plane-reason" class="planes-reason">{addBlockedReason}</p>
         {:else}
-          <button bind:this={addButton} class="secondary-button" onclick={() => planes.startAdd()}>
+          <button bind:this={addButton} id="planes-add-button" class="secondary-button" onclick={() => planes.startAdd()}>
             Add a Plane
           </button>
         {/if}

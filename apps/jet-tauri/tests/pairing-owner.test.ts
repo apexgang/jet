@@ -397,6 +397,81 @@ describe("owner Pairing confirmation", () => {
     }
   });
 
+  it("completes a Pair again from a client that is already listed", async () => {
+    let current = view({ gate: "closed", clients: [client(THIS_CLIENT), client(OTHER_CLIENT, { access: "disabled" })] });
+    const calls = ipc((command, args) => {
+      if (command === "load_pairing") return current;
+      if (command === "set_pairing_gate") {
+        current = view({ gate: args.gate as "open" | "closed", pending: current.pending, clients: current.clients });
+        return current;
+      }
+      if (command === "open_pairing_offer") {
+        current = view({ gate: "open", pending: pending({ kind: "offered" }), clients: current.clients });
+        return disclosure;
+      }
+      if (command === "confirm_pairing_request") {
+        current = view({
+          gate: "open",
+          pending: pending({ kind: "confirmed", clientId: OTHER_CLIENT }),
+          clients: current.clients,
+        });
+        return current.pending;
+      }
+      throw new Error(`Unexpected ${command}`);
+    });
+    const pairing = new OwnerPairing(() => "This computer");
+    await shown(pairing);
+    await pairing.pairComputer();
+    await settle();
+
+    current = view({
+      gate: "open",
+      pending: pending({ kind: "awaiting_confirmation", clientId: OTHER_CLIENT, clientIsThisComputer: false }),
+      clients: current.clients,
+    });
+    pairing.pairingEvent("local");
+    await settle();
+    pairing.setConfirmValue("482913");
+    await pairing.submitConfirm();
+    await settle();
+    expect(pairing.confirm).toEqual({ kind: "confirmed" });
+
+    // pairing.completed: no new row, the same client ID with a new key.
+    calls.length = 0;
+    current = view({
+      gate: "open",
+      pending: null,
+      clients: [client(THIS_CLIENT), client(OTHER_CLIENT, { fingerprint: "AAAA BBBB CCCC DDDD", pairedAtUnixMs: "1800000000000" })],
+    });
+    pairing.pairingEvent("local");
+    await settle();
+    expect(pairing.confirm).toEqual({ kind: "idle" });
+    expect(pairing.notice).toBe("aaaa bbbb cccc dddd is paired again. Pairing is closed again.");
+    expect(calls.filter((call) => call.command === "set_pairing_gate")).toEqual([
+      { command: "set_pairing_gate", args: { planeId: "local", gate: "closed" } },
+    ]);
+  });
+
+  it("a claim that disappears without a paired client returns to idle", async () => {
+    let current = view({
+      gate: "open",
+      clients: [client(THIS_CLIENT), client(OTHER_CLIENT)],
+      pending: pending({ kind: "awaiting_confirmation", clientId: OTHER_CLIENT, clientIsThisComputer: false }),
+    });
+    ipc((command) => {
+      if (command === "load_pairing") return current;
+      throw new Error(`Unexpected ${command}`);
+    });
+    const pairing = new OwnerPairing(() => "This computer");
+    await shown(pairing);
+    expect(pairing.confirm.kind).toBe("entering");
+    current = view({ gate: "open", clients: [client(THIS_CLIENT), client(OTHER_CLIENT)], pending: null });
+    pairing.pairingEvent("local");
+    await settle();
+    expect(pairing.confirm).toEqual({ kind: "idle" });
+    expect(pairing.notice).toBeNull();
+  });
+
   it("paused mutations disable every pairing change with the reason", async () => {
     const calls = ipc((command) => {
       if (command === "load_pairing") {

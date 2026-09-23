@@ -1123,25 +1123,26 @@ pub(crate) mod tests {
             serde_json::to_value(&plane).unwrap()["connection"]["state"],
             "online"
         );
-        // Same address, case-insensitive host: refused before any ssh.
+        let existing = serde_json::to_value(&plane).unwrap()["planeId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        // Same address, case-insensitive host: refused before any ssh, and
+        // the error names the entry it duplicates.
         let spawns = setup.spawner.spawns();
-        assert_eq!(
-            add(&setup.bridge, "alice@BUILD-BOX", None, now)
-                .await
-                .unwrap_err()
-                .code,
-            "plane.already_registered"
-        );
+        let error = add(&setup.bridge, "alice@BUILD-BOX", None, now)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "plane.already_registered");
+        assert_eq!(error.plane_id.as_deref(), Some(existing.as_str()));
         assert_eq!(setup.spawner.spawns(), spawns);
         // Another alias that reaches the same Plane is refused by identity.
         login_script(&setup.spawner, key, PLANE);
-        assert_eq!(
-            add(&setup.bridge, "build-alias", None, now)
-                .await
-                .unwrap_err()
-                .code,
-            "plane.already_registered"
-        );
+        let error = add(&setup.bridge, "build-alias", None, now)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "plane.already_registered");
+        assert_eq!(error.plane_id.as_deref(), Some(existing.as_str()));
         assert_eq!(setup.bridge.planes.remote_count(), 1);
     }
 
@@ -1185,6 +1186,30 @@ pub(crate) mod tests {
         );
         let saved = std::fs::read_to_string(setup.directory.path().join("planes.json")).unwrap();
         assert!(saved.contains(&format!(r#""localIdentity": "{PLANE}""#)));
+
+        // Neither Retry nor Pair again brings the duplicate online: only
+        // Forget ends it, whatever the webview asks.
+        let spawns = setup.spawner.spawns();
+        let (_, client) = setup.bridge.plane(Some(&plane_id)).unwrap();
+        client.reset().await;
+        assert!(client.status().await.is_err());
+        let error = repair(&setup.bridge, &plane_id, None, Instant::now())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "plane.duplicates_local");
+        assert_eq!(setup.spawner.spawns(), spawns);
+        let view = serde_json::to_value(
+            setup
+                .bridge
+                .planes
+                .view(PlaneId::parse(&plane_id).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            view["connection"]["error"]["code"],
+            "plane.duplicates_local"
+        );
     }
 
     #[tokio::test]

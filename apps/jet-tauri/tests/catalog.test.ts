@@ -282,6 +282,63 @@ describe("PlaneCatalog Recent", () => {
     expect(catalog.rows[0].id).toBe("l00002");
   });
 
+  it("conversation.created re-reads from tailPage", async () => {
+    vi.useFakeTimers();
+    let localRows = 600;
+    const { calls } = ipc((_command, args) => chain("local", localRows)(args.nextPage as string | null));
+    const { catalog } = catalogFor([LOCAL_PLANE]);
+    await catalog.load("local");
+    const tailPage = catalog.section("local")?.tailPage;
+    expect(tailPage).toBe("local:2");
+    calls.length = 0;
+
+    localRows = 601;
+    catalog.receiveEvent("local", "conversation.created");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await catalog.settled("local");
+    const reads = calls.filter((call) => call.command === "load_conversations");
+    expect(reads).toHaveLength(1);
+    expect(reads[0].args.nextPage).toBe(tailPage);
+    expect(catalog.rows[0].id).toBe("l00600");
+    expect(catalog.section("local")).toMatchObject({ tailPage: "local:2", pages: 3, chain: "complete" });
+  });
+
+  it("falls back to a full walk when the tail read reports pagination_stale", async () => {
+    vi.useFakeTimers();
+    let staleOnce = false;
+    const { calls } = ipc((_command, args) => {
+      if (staleOnce && args.nextPage === "local:1") {
+        staleOnce = false;
+        throw stale();
+      }
+      return chain("local", 300)(args.nextPage as string | null);
+    });
+    const { catalog } = catalogFor([LOCAL_PLANE]);
+    await catalog.load("local");
+    calls.length = 0;
+    staleOnce = true;
+    catalog.receiveEvent("local", "conversation.created");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await catalog.settled("local");
+    const pages = calls.filter((call) => call.command === "load_conversations").map((call) => call.args.nextPage);
+    expect(pages).toEqual(["local:1", null, "local:1"]);
+    expect(catalog.section("local")?.state.kind).toBe("ready");
+  });
+
+  it("a rename re-walks the whole chain even after a created event", async () => {
+    vi.useFakeTimers();
+    const { calls } = ipc((_command, args) => chain("local", 300)(args.nextPage as string | null));
+    const { catalog } = catalogFor([LOCAL_PLANE]);
+    await catalog.load("local");
+    calls.length = 0;
+    catalog.receiveEvent("local", "conversation.created");
+    catalog.receiveEvent("local", "conversation.name_changed");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await catalog.settled("local");
+    const pages = calls.filter((call) => call.command === "load_conversations").map((call) => call.args.nextPage);
+    expect(pages).toEqual([null, "local:1"]);
+  });
+
   it("ignores a late page from a forgotten Plane", async () => {
     const late = deferred<ConversationPage>();
     ipc((_command, args) => (args.planeId === REMOTE ? late.promise : chain("local", 1)(null)));
@@ -472,5 +529,40 @@ describe("DesktopSession with the catalog", () => {
     expect(session.actionNotice).toBeNull();
     expect(session.planes.selectedPlaneId).toBe(REMOTE);
     expect(session.planes.focusRequest?.section).toBe("detail");
+  });
+
+  it("Pair again recovery deep-links into the repair flow of the refused remote Plane", () => {
+    desktopIpc(null);
+    const session = new DesktopSession();
+    const refused = { ...REMOTE_PLANE, connection: { state: "failed" as const, error: failure("unauthorized", "connection.unauthorized") } };
+    session.planes.snapshot = snapshot([LOCAL_PLANE, refused]);
+    const error = { ...failure("unauthorized", "connection.unauthorized"), planeId: REMOTE };
+    expect(session.pairAgainTarget(error)).toBe(REMOTE);
+    // This computer's own Plane and other failures are not fixed by pairing.
+    expect(session.pairAgainTarget({ ...error, planeId: "local" })).toBeNull();
+    expect(session.pairAgainTarget(failure("offline", "transport.offline"), REMOTE)).toBeNull();
+    session.selectedPlaneId = REMOTE;
+    expect(session.selectedPlaneError?.code).toBe("connection.unauthorized");
+    session.pairAgain(REMOTE);
+    expect(session.sidebarSelection).toBe("planes");
+    expect(session.planes.selectedPlaneId).toBe(REMOTE);
+    expect(session.planes.focusRequest?.section).toBe("repair");
+  });
+
+  it("gates a remote task on its own Plane, not on this computer's feed", () => {
+    desktopIpc(null);
+    const session = new DesktopSession();
+    session.planes.snapshot = snapshot([LOCAL_PLANE, REMOTE_PLANE]);
+    session.connectionState = "reconnecting";
+    session.selectedPlaneId = REMOTE;
+    expect(session.selectedPlaneOnline).toBe(true);
+    session.planes.snapshot = snapshot([
+      LOCAL_PLANE,
+      { ...REMOTE_PLANE, connection: { state: "reconnecting", error: failure("offline", "transport.offline") } },
+    ]);
+    session.connectionState = "online";
+    expect(session.selectedPlaneOnline).toBe(false);
+    session.selectedPlaneId = "local";
+    expect(session.selectedPlaneOnline).toBe(true);
   });
 });

@@ -61,22 +61,56 @@ impl ConnectionSnapshot {
     }
 }
 
-/// One live feed task per Plane. Opening a feed aborts that Plane's previous
-/// task, so recoveries and reconnects never leave an orphaned poll loop.
+/// One live feed per Plane. Opening a feed reserves that Plane's slot at
+/// once and aborts the task it replaces, so recoveries and reconnects never
+/// leave an orphaned poll loop, and the open that started last wins even
+/// when an earlier open's status read finishes later.
 #[derive(Default)]
 pub(crate) struct FeedRegistry {
-    by_plane: Mutex<HashMap<PlaneId, (Uuid, AbortHandle)>>,
+    by_plane: Mutex<HashMap<PlaneId, FeedSlot>>,
+}
+
+struct FeedSlot {
+    feed: Uuid,
+    /// `None` while the open that reserved the slot is still reading status.
+    task: Option<AbortHandle>,
+}
+
+impl FeedSlot {
+    fn abort(self) {
+        if let Some(task) = self.task {
+            task.abort();
+        }
+    }
 }
 
 impl FeedRegistry {
-    /// Makes `feed` the current feed of `plane` and aborts the one it replaces.
-    fn replace(&self, plane: PlaneId, feed: Uuid, task: AbortHandle) {
-        match self.by_plane.lock() {
-            Ok(mut feeds) => {
-                if let Some((_, previous)) = feeds.insert(plane, (feed, task)) {
-                    previous.abort();
-                }
+    /// Makes `feed` the current feed of `plane` before any I/O and aborts
+    /// the task it replaces.
+    fn reserve(&self, plane: PlaneId, feed: Uuid) {
+        if let Ok(mut feeds) = self.by_plane.lock() {
+            if let Some(previous) = feeds.insert(plane, FeedSlot { feed, task: None }) {
+                previous.abort();
             }
+        }
+    }
+
+    /// Whether `feed` still holds its Plane's slot.
+    fn is_current(&self, plane: PlaneId, feed: Uuid) -> bool {
+        self.by_plane
+            .lock()
+            .is_ok_and(|feeds| feeds.get(&plane).is_some_and(|slot| slot.feed == feed))
+    }
+
+    /// Attaches a spawned task to its reservation. A newer open, a close or
+    /// a forget took the slot in the meantime: the task is aborted at once,
+    /// so a stale open never replaces a newer feed.
+    fn attach(&self, plane: PlaneId, feed: Uuid, task: AbortHandle) {
+        match self.by_plane.lock() {
+            Ok(mut feeds) => match feeds.get_mut(&plane) {
+                Some(slot) if slot.feed == feed && slot.task.is_none() => slot.task = Some(task),
+                _ => task.abort(),
+            },
             // Without the registry the task could not be stopped later.
             Err(_) => task.abort(),
         }
@@ -87,9 +121,9 @@ impl FeedRegistry {
         let mut feeds = self.by_plane.lock().map_err(|_| PublicError::internal())?;
         let plane = feeds
             .iter()
-            .find_map(|(plane, (current, _))| (*current == feed).then_some(*plane));
-        if let Some((_, task)) = plane.and_then(|plane| feeds.remove(&plane)) {
-            task.abort();
+            .find_map(|(plane, slot)| (slot.feed == feed).then_some(*plane));
+        if let Some(slot) = plane.and_then(|plane| feeds.remove(&plane)) {
+            slot.abort();
         }
         Ok(())
     }
@@ -97,19 +131,17 @@ impl FeedRegistry {
     /// Aborts whatever feed a forgotten Plane still has.
     pub(crate) fn forget(&self, plane: PlaneId) {
         if let Ok(mut feeds) = self.by_plane.lock() {
-            if let Some((_, task)) = feeds.remove(&plane) {
-                task.abort();
+            if let Some(slot) = feeds.remove(&plane) {
+                slot.abort();
             }
         }
     }
 
-    /// Forgets a task that ended by itself, without touching a newer feed.
+    /// Releases a feed that ended by itself, or an open that failed, without
+    /// touching a newer feed.
     fn finished(&self, plane: PlaneId, feed: Uuid) {
         if let Ok(mut feeds) = self.by_plane.lock() {
-            if feeds
-                .get(&plane)
-                .is_some_and(|(current, _)| *current == feed)
-            {
+            if feeds.get(&plane).is_some_and(|slot| slot.feed == feed) {
                 feeds.remove(&plane);
             }
         }
@@ -312,6 +344,11 @@ pub(crate) async fn open_plane_feed(
     let requested_cursor = parse_resume_cursor(after)?;
     let (binding, client) = bridge.plane(plane_id.as_deref())?;
     let plane = binding.plane;
+    // Reserve the slot first: the previous task stops now, even when this
+    // open fails, and a later open supersedes this one whatever order the
+    // status reads finish in.
+    let feed = Uuid::new_v4();
+    bridge.feeds.reserve(plane, feed);
     // `reset` is the user's Retry: it clears a remote Plane's sticky or
     // backed-off failure. The local Plane connects per request and has no
     // such state, so every open already starts a fresh attempt there.
@@ -321,7 +358,7 @@ pub(crate) async fn open_plane_feed(
     let context = FeedContext {
         app,
         plane,
-        feed: Uuid::new_v4(),
+        feed,
         client,
         planes: Arc::clone(&bridge.planes),
         feeds: Arc::clone(&bridge.feeds),
@@ -344,7 +381,12 @@ pub(crate) async fn open_plane_feed(
         }
         Err(error) => {
             let public = bridge.settle(&binding, PublicError::from_client(&error));
+            if !bridge.feeds.is_current(plane, feed) {
+                // A newer open (or a forget) owns the Plane's state now.
+                return Err(public);
+            }
             if !public.retryable {
+                bridge.feeds.finished(plane, feed);
                 bridge.planes.set_connection(
                     plane,
                     ConnectionView::Failed {
@@ -431,13 +473,17 @@ async fn reconnect(
     }
 }
 
-/// Spawns a feed task and registers it as its Plane's only feed.
+/// Spawns a feed task and attaches it to its reservation. A superseded
+/// open's task is aborted before it runs, so a late close of its id is moot.
 fn spawn_feed(
     (feeds, plane, feed): (Arc<FeedRegistry>, PlaneId, Uuid),
     task: impl std::future::Future<Output = ()> + Send + 'static,
 ) {
+    if !feeds.is_current(plane, feed) {
+        return;
+    }
     let task = tokio::spawn(task);
-    feeds.replace(plane, feed, task.abort_handle());
+    feeds.attach(plane, feed, task.abort_handle());
 }
 
 pub(crate) fn close_plane_feed(bridge: &JetBridge, feed_id: String) -> Result<(), PublicError> {
@@ -505,6 +551,12 @@ mod tests {
         task.is_finished()
     }
 
+    /// What `open_plane_feed` does once its status read succeeded.
+    fn open(feeds: &FeedRegistry, plane: PlaneId, feed: Uuid, task: &tokio::task::JoinHandle<()>) {
+        feeds.reserve(plane, feed);
+        feeds.attach(plane, feed, task.abort_handle());
+    }
+
     #[tokio::test]
     async fn opening_a_feed_aborts_only_the_same_planes_previous_feed() {
         let feeds = FeedRegistry::default();
@@ -515,9 +567,9 @@ mod tests {
             Uuid::from_u128(11),
             Uuid::from_u128(12),
         );
-        feeds.replace(PlaneId::Local, first_id, first.abort_handle());
-        feeds.replace(remote, other_id, other.abort_handle());
-        feeds.replace(PlaneId::Local, second_id, second.abort_handle());
+        open(&feeds, PlaneId::Local, first_id, &first);
+        open(&feeds, remote, other_id, &other);
+        open(&feeds, PlaneId::Local, second_id, &second);
         assert!(settled(&first).await, "the replaced feed must stop polling");
         assert!(!second.is_finished());
         assert!(!other.is_finished());
@@ -531,12 +583,63 @@ mod tests {
 
         // A task that ended by itself never removes a newer registration.
         let third = pending_task();
-        feeds.replace(remote, Uuid::from_u128(13), third.abort_handle());
+        open(&feeds, remote, Uuid::from_u128(13), &third);
         assert!(settled(&other).await);
         feeds.finished(remote, other_id);
         assert_eq!(feeds.by_plane.lock().unwrap().len(), 1);
         feeds.close(Uuid::from_u128(13)).unwrap();
         assert!(settled(&third).await);
+        assert!(feeds.by_plane.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failing_open_aborts_the_planes_previous_feed() {
+        let feeds = FeedRegistry::default();
+        let previous = pending_task();
+        open(&feeds, PlaneId::Local, Uuid::from_u128(20), &previous);
+        // The new open reserves before its status read, which then fails.
+        let failing = Uuid::from_u128(21);
+        feeds.reserve(PlaneId::Local, failing);
+        assert!(
+            settled(&previous).await,
+            "the old loop must not outlive a failed open"
+        );
+        feeds.finished(PlaneId::Local, failing);
+        assert!(feeds.by_plane.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_open_that_started_last_wins_whatever_order_status_returns_in() {
+        let feeds = FeedRegistry::default();
+        let (older, newer) = (Uuid::from_u128(30), Uuid::from_u128(31));
+        feeds.reserve(PlaneId::Local, older);
+        feeds.reserve(PlaneId::Local, newer);
+        // The newer open's status answers first.
+        let newer_task = pending_task();
+        feeds.attach(PlaneId::Local, newer, newer_task.abort_handle());
+        // The older open's status answers later: it must not replace B.
+        assert!(!feeds.is_current(PlaneId::Local, older));
+        let older_task = pending_task();
+        feeds.attach(PlaneId::Local, older, older_task.abort_handle());
+        assert!(settled(&older_task).await);
+        assert!(!newer_task.is_finished());
+        // The webview closes the stale open's id: the live feed survives.
+        feeds.close(older).unwrap();
+        assert!(!settled(&newer_task).await);
+        feeds.close(newer).unwrap();
+        assert!(settled(&newer_task).await);
+    }
+
+    #[tokio::test]
+    async fn a_forgotten_planes_late_open_never_runs() {
+        let feeds = FeedRegistry::default();
+        let remote = PlaneId::Remote(Uuid::from_u128(4));
+        let feed = Uuid::from_u128(40);
+        feeds.reserve(remote, feed);
+        feeds.forget(remote);
+        let late = pending_task();
+        feeds.attach(remote, feed, late.abort_handle());
+        assert!(settled(&late).await);
         assert!(feeds.by_plane.lock().unwrap().is_empty());
     }
 

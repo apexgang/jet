@@ -180,6 +180,22 @@ describe("classifySection", () => {
 describe("Recent status rows", () => {
   const label = (planeId: string) => (planeId === "local" ? "This computer" : "host");
 
+  it("offers Pair again only for a remote Plane whose key was refused or is gone", () => {
+    const rows = recentStatusRows(
+      [
+        section("local", { kind: "denied", error: error("unauthorized", "connection.unauthorized") }),
+        section("p-ended", { kind: "failed", error: error("unauthorized", "identity.session_ended") }),
+        section("p-missing", { kind: "failed", error: error("unavailable", "identity.key_missing") }),
+      ],
+      label,
+    );
+    expect(rows.map(({ planeId, action }) => [planeId, action])).toEqual([
+      ["local", "open_planes"],
+      ["p-ended", "pair_again"],
+      ["p-missing", "pair_again"],
+    ]);
+  });
+
   it("names every non-ready Plane with its own action", () => {
     const rows = recentStatusRows(
       [
@@ -199,7 +215,7 @@ describe("Recent status rows", () => {
       ["p-loading", "loading", null],
       ["p-offline", "offline", "retry"],
       ["p-stale", "stale", "retry"],
-      ["p-denied", "denied", "open_planes"],
+      ["p-denied", "denied", "pair_again"],
       ["p-unsupported", "unsupported", "open_planes"],
       ["p-failed", "failed", "retry"],
       ["p-partial", "partial", "open_planes"],

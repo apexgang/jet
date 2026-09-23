@@ -10,7 +10,7 @@
 
   const status = $derived.by(() => {
     if (session.conversationFreshness === "cached") return "Offline cache";
-    if (session.connectionState !== "online") return "Reconnecting";
+    if (!session.selectedPlaneOnline) return "Reconnecting";
     if (session.conversationFreshness === "loading" || session.conversationBusy) return "Loading";
     if (session.supervision?.execution?.activity === "waiting_for_approval") return "Approval needed";
     if (session.supervision?.execution?.activity === "waiting_for_user") return "Waiting for you";
@@ -97,8 +97,10 @@
       <div class="timeline-inner">
         {#if session.selectionUnavailable}
           <div class="notice" role="status">
-            <strong>{session.selectedPlaneLabel} is unavailable</strong>
             <p>{session.selectedPlaneLabel} is unavailable. This task will load when it reconnects.</p>
+            {#if session.pairAgainTarget(session.selectedPlaneError)}
+              <button class="text-button" onclick={() => session.pairAgain(session.selectedPlaneId)}>Pair again</button>
+            {/if}
             <button class="text-button" onclick={() => session.openPlanes({ planeId: session.selectedPlaneId, focus: "detail" })}>
               Open Planes
             </button>
@@ -197,7 +199,7 @@
           ></textarea>
           <button
             class="send-button"
-            disabled={!session.canSubmitDraft || session.conversationBusy || session.connectionState !== "online"}
+            disabled={!session.canSubmitDraft || session.conversationBusy || !session.selectedPlaneOnline}
             onclick={() => session.submitDraft()}
           >
             {session.conversationBusy ? "Sending" : "Send"}

@@ -10,6 +10,7 @@ import {
   type ClientChange,
   type ClientChangeReceipt,
   type ClientChangeReview,
+  type PairedClient,
   type PairingView,
 } from "$lib/jet/pairing";
 import type { PlaneId } from "$lib/jet/planes";
@@ -80,7 +81,12 @@ export class OwnerPairing {
 
   private loadRequest = 0;
   private claimant: string | null = null;
-  private knownClients = new Set<string>();
+  /** The offer the claimant claimed; its disappearance ends the claim. */
+  private claimOffer: string | null = null;
+  /** The client rows of the previous read, to tell a completed re-pair apart. */
+  private knownClients = new Map<string, PairedClient>();
+  /** Whether `knownClients` holds an earlier read of this Plane. */
+  private knownRead = false;
   /** Uncertain client changes survive switching Planes, per Plane. */
   private retained = new Map<PlaneId, Extract<ClientChangeState, { kind: "uncertain" }>>();
   /** Revoke-then-forget: forget this Plane once its revoke has applied. */
@@ -130,7 +136,8 @@ export class OwnerPairing {
     this.planeId = planeId;
     this.state = { kind: "loading" };
     this.checkedAtUnixMs = null;
-    this.knownClients = new Set();
+    this.knownClients = new Map();
+    this.knownRead = false;
     const retained = this.retained.get(planeId);
     if (retained) this.change = retained;
     void this.load();
@@ -159,6 +166,7 @@ export class OwnerPairing {
     this.busy = false;
     this.openedGateForThisPairing = false;
     this.claimant = null;
+    this.claimOffer = null;
   }
 
   private current(planeId: PlaneId): boolean {
@@ -204,7 +212,8 @@ export class OwnerPairing {
     this.checkedAtUnixMs = Date.now();
     this.track(view);
     this.reconcile(view);
-    this.knownClients = new Set(view.clients.map((client) => client.clientId));
+    this.knownClients = new Map(view.clients.map((client) => [client.clientId, client]));
+    this.knownRead = true;
   }
 
   /** Moves the local flow to what the Plane now reports. */
@@ -226,14 +235,18 @@ export class OwnerPairing {
       }
     }
 
+    // Whether the owner had already confirmed before this read.
+    const wasConfirmed = this.confirm.kind === "confirmed";
     if (progress?.kind === "awaiting_confirmation" && pending) {
       this.claimant = progress.clientId;
+      this.claimOffer = pending.offerId;
       const sameOffer =
         (this.confirm.kind === "entering" || this.confirm.kind === "sending" || this.confirm.kind === "mismatch") &&
         this.confirm.offerId === pending.offerId;
       if (!sameOffer) this.confirm = { kind: "entering", offerId: pending.offerId, value: "" };
-    } else if (progress?.kind === "confirmed") {
+    } else if (progress?.kind === "confirmed" && pending) {
       this.claimant = progress.clientId;
+      this.claimOffer = pending.offerId;
       this.confirm = { kind: "confirmed" };
     } else if (progress?.kind === "ended") {
       if (this.confirm.kind !== "idle") {
@@ -243,17 +256,36 @@ export class OwnerPairing {
     }
 
     const claimant = this.claimant;
-    const completed = claimant
-      ? view.clients.find((client) => client.clientId === claimant && !this.knownClients.has(client.clientId))
-      : undefined;
-    if (completed) {
-      this.claimant = null;
-      this.confirm = { kind: "idle" };
-      this.offer = { kind: "none" };
-      this.notice = `${formatFingerprint(completed.fingerprint)} is now paired.`;
-      if (this.openedGateForThisPairing && view.gate === "open") void this.closeAfterCompletion();
-      else this.openedGateForThisPairing = false;
+    // Without an earlier read there is nothing to compare the claimant with.
+    if (!claimant || !this.knownRead) return;
+    const row = view.clients.find((client) => client.clientId === claimant);
+    const before = this.knownClients.get(claimant);
+    const claimGone = !pending || pending.offerId !== this.claimOffer;
+    // A client that was already listed may pair again (Pair again replaces its
+    // key under the same client ID), so a new row is not the only sign of
+    // completion: jetd also drops the pending pairing once it completes.
+    const replaced =
+      row !== undefined &&
+      before !== undefined &&
+      (before.fingerprint !== row.fingerprint || before.pairedAtUnixMs !== row.pairedAtUnixMs);
+    const completed = row !== undefined && (!before || replaced || (claimGone && wasConfirmed));
+    if (!completed) {
+      if (claimGone) {
+        // The claim ended without a paired client.
+        this.claimant = null;
+        this.claimOffer = null;
+        this.confirm = { kind: "idle" };
+      }
+      return;
     }
+    this.claimant = null;
+    this.claimOffer = null;
+    this.confirm = { kind: "idle" };
+    this.offer = { kind: "none" };
+    const fingerprint = formatFingerprint(row.fingerprint);
+    this.notice = before ? `${fingerprint} is paired again.` : `${fingerprint} is now paired.`;
+    if (this.openedGateForThisPairing && view.gate === "open") void this.closeAfterCompletion();
+    else this.openedGateForThisPairing = false;
   }
 
   private async closeAfterCompletion(): Promise<void> {

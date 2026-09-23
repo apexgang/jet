@@ -160,6 +160,8 @@ export class PlaneEnrollment {
     }
     if (generation !== this.generation) {
       if (result.kind === "pairing_required") void cancelRemotePairing(result.draftId).catch(() => undefined);
+      // Cancelled too late: the Plane is registered natively all the same.
+      else this.pairedAfterCancel(result.plane, repairOf !== null);
       return;
     }
     if (result.kind === "connected") {
@@ -213,7 +215,11 @@ export class PlaneEnrollment {
     this.state = { step: "completing", draftId, repairOf, enrollment };
     try {
       const plane = await completeRemotePairing(enrollment.ticketId);
-      if (generation !== this.generation) return;
+      if (generation !== this.generation) {
+        // Cancel cannot stop a Finish already running natively.
+        this.pairedAfterCancel(plane, repairOf !== null);
+        return;
+      }
       await this.finished(plane, repairOf !== null);
     } catch (error: unknown) {
       if (generation !== this.generation) return;
@@ -241,6 +247,16 @@ export class PlaneEnrollment {
         };
       }
     }
+  }
+
+  /**
+   * A cancelled wizard whose native step still registered the Plane: the
+   * Planes list, Recent and the feed catch up, but the wizard stays closed.
+   */
+  private pairedAfterCancel(plane: Plane, repaired: boolean): void {
+    void Promise.resolve()
+      .then(() => this.paired(plane, repaired))
+      .catch(() => undefined);
   }
 
   private async finished(plane: Plane, repaired: boolean): Promise<void> {

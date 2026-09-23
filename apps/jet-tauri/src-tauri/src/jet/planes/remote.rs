@@ -12,7 +12,10 @@
 //! and the next `connect()` sees the exited child and logs in again. Request
 //! paths that see `Closed` also `invalidate` the session.
 use std::{
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 
@@ -24,7 +27,7 @@ use uuid::Uuid;
 
 use super::{
     spawner::{SshChild, SshSpawner},
-    ConnectionView, Observed, PlaneId,
+    unknown_plane, ConnectionView, Observed, PlaneId, DUPLICATES_LOCAL,
 };
 use crate::jet::{
     errors::PublicError,
@@ -80,6 +83,9 @@ pub(crate) struct RemoteConnector {
     keys: Arc<IdentityKeys>,
     observed: Arc<Mutex<Observed>>,
     slot: tokio::sync::Mutex<Slot>,
+    /// Set when the Plane is forgotten: no login happens after that, so a
+    /// request that was in flight cannot reach the Plane again.
+    closed: AtomicBool,
 }
 
 impl std::fmt::Debug for RemoteConnector {
@@ -121,6 +127,7 @@ impl RemoteConnector {
                 was_online,
                 ..Slot::default()
             }),
+            closed: AtomicBool::new(false),
         }
     }
 
@@ -148,7 +155,14 @@ impl RemoteConnector {
     /// attempt and never spawn parallel ssh processes; a stored failure is
     /// returned without spawning while it is sticky or backing off.
     pub(crate) async fn connect(&self) -> Result<Arc<Client>, PublicError> {
+        if self.is_closed() {
+            return Err(self.closed_error());
+        }
         let mut slot = self.slot.lock().await;
+        if self.is_closed() {
+            slot.session = None;
+            return Err(self.closed_error());
+        }
         if let Some(session) = slot.session.as_mut() {
             if !session.child.has_exited() {
                 return Ok(session.client());
@@ -180,9 +194,13 @@ impl RemoteConnector {
         .await
         {
             Ok((session, status)) => {
+                if self.is_closed() {
+                    // Forgotten while logging in: dropping the session kills ssh.
+                    drop(session);
+                    return Err(self.closed_error());
+                }
                 if let Ok(mut observed) = self.observed.lock() {
-                    observed.apply_status(&status);
-                    observed.connection = ConnectionView::Online;
+                    observed.logged_in(&status);
                 }
                 let client = session.client();
                 slot.session = Some(session);
@@ -220,9 +238,18 @@ impl RemoteConnector {
         });
     }
 
-    /// The user's Retry: clears a sticky or backed-off failure.
+    /// The user's Retry: clears a sticky or backed-off failure. A remote
+    /// entry that is this computer's own Plane stays failed: only Forget
+    /// ends it, whatever the webview asks.
     pub(crate) async fn reset(&self) {
         let mut slot = self.slot.lock().await;
+        if slot
+            .failure
+            .as_ref()
+            .is_some_and(|failure| failure.error.code == DUPLICATES_LOCAL)
+        {
+            return;
+        }
         slot.failure = None;
         slot.backoff = 0;
     }
@@ -274,9 +301,27 @@ impl RemoteConnector {
         true
     }
 
-    /// Kills ssh. Used when the Plane is forgotten.
+    /// Kills ssh; a later request logs in again. Used by Pair again.
     pub(crate) async fn shutdown(&self) {
         self.slot.lock().await.session = None;
+    }
+
+    /// The Plane was forgotten: kills ssh and refuses every later login. It
+    /// never waits for a login in flight (which may sit in a keyring
+    /// prompt); that login drops its own session when it ends.
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        if let Ok(mut slot) = self.slot.try_lock() {
+            slot.session = None;
+        }
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+
+    fn closed_error(&self) -> PublicError {
+        unknown_plane().with_plane(self.plane.to_string())
     }
 
     /// How long until the connector would try again, so feed loops pace
@@ -450,7 +495,7 @@ pub(crate) mod tests {
     use jet_protocol::{
         decode_control, encode_control, ClientHello, ClientMessage, ConnectionProof, Frame,
         FrameReader, FrameWriter, QueryRequest, QueryResponse, RecoveryState, RecoveryStatus,
-        ServerHello, ServerMessage, StreamId, WireError,
+        ServerHello, ServerMessage, StreamId, WireError, REMOTE_AUTH_MINOR,
     };
     use tokio::io::{AsyncReadExt, DuplexStream, ReadHalf, WriteHalf};
 
@@ -633,10 +678,15 @@ pub(crate) mod tests {
     }
 
     /// Answers status queries with `identity` until the client leaves.
-    pub(crate) async fn serve_status(
+    pub(crate) async fn serve_status(reader: ServerReader, writer: ServerWriter, identity: Uuid) {
+        serve_status_with(reader, writer, status(identity)).await;
+    }
+
+    /// Answers status queries with `answer` until the client leaves.
+    pub(crate) async fn serve_status_with(
         mut reader: ServerReader,
         mut writer: ServerWriter,
-        identity: Uuid,
+        answer: PlaneStatus,
     ) {
         while let Some((stream, message)) = next_message(&mut reader).await {
             match &message {
@@ -650,7 +700,7 @@ pub(crate) mod tests {
                         stream,
                         ServerMessage::QueryResult {
                             id,
-                            result: QueryResponse::Status(status(identity)),
+                            result: QueryResponse::Status(answer.clone()),
                         },
                     )
                     .await;
@@ -774,11 +824,61 @@ pub(crate) mod tests {
             Some(0)
         });
         harness.connector.connect().await.unwrap();
-        let observed = harness.observed.lock().unwrap();
-        assert_eq!(observed.connection, ConnectionView::Online);
-        assert_eq!(observed.identity, Some(PLANE));
+        {
+            let observed = harness.observed.lock().unwrap();
+            assert_eq!(observed.connection, ConnectionView::Online);
+            assert_eq!(observed.identity, Some(PLANE));
+            let protocol = serde_json::to_value(observed.knowledge.view()).unwrap();
+            assert!(protocol["atLeast"].as_u64().unwrap() >= 37);
+        }
+
+        // A Plane whose status carries no recovery field still proved the
+        // remote-auth minor by accepting the signed login.
+        let older_plane = self::harness(Fail::Nothing).await;
+        let key = older_plane.key;
+        older_plane.spawner.push(move |stream| async move {
+            let (reader, writer) = welcome(open(stream).await, &key).await;
+            let mut older = status(PLANE);
+            older.recovery = None;
+            serve_status_with(reader, writer, older).await;
+            Some(0)
+        });
+        older_plane.connector.connect().await.unwrap();
+        let observed = older_plane.observed.lock().unwrap();
         let protocol = serde_json::to_value(observed.knowledge.view()).unwrap();
-        assert!(protocol["atLeast"].as_u64().unwrap() >= 37);
+        assert!(protocol["atLeast"].as_u64().unwrap() >= u64::from(REMOTE_AUTH_MINOR));
+    }
+
+    #[tokio::test]
+    async fn a_closed_connector_never_logs_in_again() {
+        let harness = harness(Fail::Nothing).await;
+        let key = harness.key;
+        harness.spawner.push(move |stream| async move {
+            let (reader, writer) = welcome(open(stream).await, &key).await;
+            serve_status(reader, writer, PLANE).await;
+            Some(0)
+        });
+        harness.connector.connect().await.unwrap();
+        harness.connector.close();
+        assert!(!harness.connector.has_session().await);
+        let error = harness.connector.connect().await.err().unwrap();
+        assert_eq!(error.code, "plane.unknown");
+        harness.connector.reset().await;
+        assert!(harness.connector.connect().await.is_err());
+        assert_eq!(harness.spawner.spawns(), 1);
+    }
+
+    #[tokio::test]
+    async fn retry_keeps_a_duplicate_of_the_local_plane_failed() {
+        let harness = harness(Fail::Nothing).await;
+        harness
+            .connector
+            .fail(super::super::duplicates_local())
+            .await;
+        harness.connector.reset().await;
+        let error = harness.connector.connect().await.err().unwrap();
+        assert_eq!(error.code, DUPLICATES_LOCAL);
+        assert_eq!(harness.spawner.spawns(), 0);
     }
 
     #[tokio::test]

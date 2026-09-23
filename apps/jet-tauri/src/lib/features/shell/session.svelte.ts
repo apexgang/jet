@@ -47,6 +47,7 @@ import {
 } from "$lib/jet/bridge";
 import { LOCAL_PLANE, type PlaneId, type PlaneSelection } from "$lib/jet/planes";
 import { PlaneCatalog } from "$lib/features/planes/catalog.svelte";
+import { needsPairing } from "$lib/features/planes/model";
 import { PlanesSession, type FeedHandler, type PlanesFocus } from "$lib/features/planes/session.svelte";
 import { TerminalTranscriptDecoder } from "$lib/jet/terminal-text";
 import { shouldLoadNextWorkPage } from "$lib/jet/work-continuity";
@@ -217,6 +218,40 @@ export class DesktopSession implements FeedHandler {
   /** The selected Plane's feed fence, shown in Run details. */
   get selectedPlaneCursor(): string | null {
     return this.catalog.cursor(this.selectedPlaneId);
+  }
+
+  /**
+   * Whether the selected Conversation's own Plane is online. The local
+   * Plane follows this window's feed; a remote Plane follows the native
+   * registry. Sending, Delivery and the composer gate on this, never on
+   * this computer's state for a remote task.
+   */
+  get selectedPlaneOnline(): boolean {
+    if (this.selectedPlaneId === LOCAL_PLANE) return this.connectionState === "online";
+    return this.planes.plane(this.selectedPlaneId)?.connection.state === "online";
+  }
+
+  /** Why the selected task's Plane is not usable, if it reported why. */
+  get selectedPlaneError(): PublicError | null {
+    const connection = this.planes.plane(this.selectedPlaneId)?.connection;
+    if (connection && "error" in connection) return connection.error;
+    const state = this.catalog.section(this.selectedPlaneId)?.state;
+    return state && "error" in state ? state.error : null;
+  }
+
+  /**
+   * The remote Plane an error can be fixed on by pairing again, or null.
+   * The error names its Plane; `fallback` is used when it does not.
+   */
+  pairAgainTarget(error: PublicError | null, fallback: PlaneId | null = this.selectedPlaneId): PlaneId | null {
+    if (!needsPairing(error)) return null;
+    const planeId = error?.planeId ?? fallback;
+    return planeId && this.planes.plane(planeId)?.kind === "remote" ? planeId : null;
+  }
+
+  /** "Pair again": opens Planes straight into the repair flow. */
+  pairAgain(planeId: PlaneId): void {
+    this.openPlanes({ planeId, focus: "repair" });
   }
 
   /**
@@ -710,7 +745,7 @@ export class DesktopSession implements FeedHandler {
 
   async submitDraft(): Promise<void> {
     if (!this.canSubmitDraft || this.conversationBusy) return;
-    if (this.connectionState !== "online") {
+    if (!this.selectedPlaneOnline) {
       this.actionNotice = "Reconnect to the Plane before sending. Your draft was kept.";
       return;
     }

@@ -137,6 +137,8 @@
           </p>
           {#if row.action === "retry"}
             <button class="text-button" onclick={() => session.retryPlane(row.planeId)}>Retry</button>
+          {:else if row.action === "pair_again"}
+            <button class="text-button" onclick={() => session.pairAgain(row.planeId)}>Pair again</button>
           {:else if row.action === "open_planes"}
             <button class="text-button" onclick={() => session.openPlanes({ planeId: row.planeId, focus: "detail" })}>
               Open Planes

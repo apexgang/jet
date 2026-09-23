@@ -12,12 +12,12 @@
   let runId = $state("");
   let turn = $state(1);
   const needsCheckpoint = $derived(kind === "commit" || kind === "draft_pull_request");
-  const blocked = $derived(session.connectionState !== "online" || !delivery.fresh || delivery.busy || delivery.review?.kind === "uncertain" || delivery.review?.kind === "sending");
+  const blocked = $derived(!session.selectedPlaneOnline || !delivery.fresh || delivery.busy || delivery.review?.kind === "uncertain" || delivery.review?.kind === "sending");
   const runs = $derived(session.conversationDetail?.runs ?? []);
   $effect(() => {
     const id = session.selectedConversationId;
     const planeId = session.selectedPlaneId;
-    const online = session.connectionState === "online";
+    const online = session.selectedPlaneOnline;
     const visible = session.workPanelPresented && session.selectedWorkPanel === "delivery";
     untrack(() => {
       if (delivery.conversationId !== id || delivery.planeId !== planeId) { runId = ""; turn = 1; branch = ""; remote = "origin"; base = ""; }
@@ -27,7 +27,7 @@
     });
   });
   $effect(() => {
-    if (session.connectionState !== "online" || !session.selectedConversationId || !session.workPanelPresented || session.selectedWorkPanel !== "delivery") return;
+    if (!session.selectedPlaneOnline || !session.selectedConversationId || !session.workPanelPresented || session.selectedWorkPanel !== "delivery") return;
     // History is bounded to the newest 100 operations. A live poll also covers
     // automatic delivery and operations started by another client.
     const timer = setInterval(() => { if (!delivery.loading) void delivery.refresh(); }, 4000);
@@ -87,12 +87,12 @@
     {:else if delivery.review?.kind === "acknowledge"}
       <section class="delivery-review" aria-label="Acknowledge unknown outcome"><h3>Have you inspected Git and GitHub?</h3><p>This releases the delivery barrier for operation {delivery.review.deliveryId}. Its outcome stays unknown. No Git operation is retried.</p><div class="delivery-actions"><button disabled={blocked} onclick={() => delivery.confirm()}>I inspected it · acknowledge</button><button onclick={() => delivery.cancel()}>Cancel</button></div></section>
     {:else if delivery.review?.kind === "uncertain"}
-      <div class="work-alert" role="alert"><h3>Request outcome is uncertain</h3><p>Jet may have accepted this request. Check its acknowledgement using the same request before starting another operation.</p><button disabled={session.connectionState !== "online" || delivery.busy} onclick={() => delivery.confirm()}>Retry same request</button></div>
+      <div class="work-alert" role="alert"><h3>Request outcome is uncertain</h3><p>Jet may have accepted this request. Check its acknowledgement using the same request before starting another operation.</p><button disabled={!session.selectedPlaneOnline || delivery.busy} onclick={() => delivery.confirm()}>Retry same request</button></div>
     {:else if delivery.review?.kind === "sending"}<p role="status">Waiting for the Plane to acknowledge the request…</p>
     {:else if delivery.review?.kind === "queued"}<p role="status">Request accepted. Its delivery result appears in history; acceptance does not mean completion.</p>
     {:else if delivery.review?.kind === "acknowledged"}<p role="status">Acknowledgement recorded. The original outcome remains unknown.</p>{/if}
 
-    <header class="work-heading"><h3>Delivery history</h3><button disabled={delivery.loading || session.connectionState !== "online"} onclick={() => delivery.refresh()}>Refresh</button></header>
+    <header class="work-heading"><h3>Delivery history</h3><button disabled={delivery.loading || !session.selectedPlaneOnline} onclick={() => delivery.refresh()}>Refresh</button></header>
     <p aria-live="polite">{deliverySummary(delivery.rows)}</p>
     <ol class="delivery-history">
       {#each delivery.rows as row (row.id)}

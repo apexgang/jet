@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from "svelte";
 
+  import { ADD_ANCHORS, CONNECTION_ANCHORS, restoreFocus } from "./focus";
   import { enrollmentFailureCopy, formatClockTime, normalizeManualCode, spokenDigits } from "./model";
   import type { PlanesSession } from "./session.svelte";
 
@@ -22,6 +23,11 @@
 
   let dialog = $state<HTMLDialogElement>();
   let returnFocus: HTMLElement | null = null;
+  /** Whether the last wizard was Pair again, for where focus returns. */
+  let repairedPlane = false;
+  $effect(() => {
+    if (enrollment.open) repairedPlane = repairing;
+  });
   let now = $state(Date.now());
 
   // One modal owner: open on the first step, close (and return focus) when
@@ -41,8 +47,12 @@
         void tick().then(focusStep);
       } else if (!open && dialog?.open) {
         dialog.close();
-        returnFocus?.focus();
+        // Pair again's button leaves once the Plane is online; Setup's
+        // "Add a Plane" left when Planes opened.
+        const anchors = repairedPlane ? CONNECTION_ANCHORS : ADD_ANCHORS;
+        const target = returnFocus;
         returnFocus = null;
+        void tick().then(() => restoreFocus(target, anchors));
       }
       void step;
     });
@@ -67,6 +77,11 @@
     if (!Number.isFinite(deadline)) return null;
     const left = deadline - now;
     return left > 0 && left <= 5 * 60_000 ? formatClockTime(deadline) : null;
+  }
+
+  /** The label of a listed Plane an error names, for "same Plane as …". */
+  function existingLabel(planeId: string): string | null {
+    return planes.has(planeId) ? planes.label(planeId) : null;
   }
 
   function onCodeInput(event: Event): void {
@@ -120,7 +135,7 @@
           </p>
           {#if wizard.error}
             <p class="section-error" role="alert">
-              {enrollmentFailureCopy(wizard.error, wizard.value || "that address")} <code>{wizard.error.code}</code>
+              {enrollmentFailureCopy(wizard.error, wizard.value || "that address", existingLabel)} <code>{wizard.error.code}</code>
             </p>
           {/if}
         </div>
@@ -181,7 +196,7 @@
           <input
             id="add-plane-code"
             class="add-plane-code-input"
-            data-autofocus
+            data-autofocus={wizard.step === "code" ? true : undefined}
             inputmode="numeric"
             autocomplete="one-time-code"
             spellcheck="false"
@@ -198,11 +213,14 @@
           </p>
           {#if wizard.step === "code" && wizard.error}
             <p class="section-error" role="alert">
-              {enrollmentFailureCopy(wizard.error, wizard.destination)} <code>{wizard.error.code}</code>
+              {enrollmentFailureCopy(wizard.error, wizard.destination, existingLabel)} <code>{wizard.error.code}</code>
             </p>
           {/if}
           {#if wizard.step === "claiming"}
-            <p class="add-plane-muted" aria-live="polite">Checking the code with {wizard.destination}…</p>
+            <!-- The input is disabled while checking, so focus waits here. -->
+            <p class="add-plane-muted" aria-live="polite" data-autofocus tabindex="-1">
+              Checking the code with {wizard.destination}…
+            </p>
           {/if}
         </div>
         <footer>
@@ -233,16 +251,23 @@
           {/if}
           {#if wizard.step === "confirm" && wizard.error}
             <p class="section-error" role="alert">
-              {enrollmentFailureCopy(wizard.error, pending.destination)} <code>{wizard.error.code}</code>
+              {enrollmentFailureCopy(wizard.error, pending.destination, existingLabel)} <code>{wizard.error.code}</code>
             </p>
           {/if}
           {#if wizard.step === "completing"}
-            <p class="add-plane-muted" aria-live="polite">Finishing pairing with {pending.destination}…</p>
+            <p class="add-plane-muted" aria-live="polite" data-autofocus tabindex="-1">
+              Finishing pairing with {pending.destination}…
+            </p>
           {/if}
         </div>
         <footer>
           <button class="secondary-button" type="button" onclick={() => enrollment.cancel()}>Cancel</button>
-          <button class="primary-button" type="submit" data-autofocus disabled={wizard.step === "completing"}>
+          <button
+            class="primary-button"
+            type="submit"
+            data-autofocus={wizard.step === "confirm" ? true : undefined}
+            disabled={wizard.step === "completing"}
+          >
             {wizard.step === "completing" ? "Finishing…" : "Finish pairing"}
           </button>
         </footer>
@@ -260,7 +285,7 @@
         </footer>
       {:else if wizard.step === "failed"}
         <p class="section-error" role="alert">
-          {enrollmentFailureCopy(wizard.error, wizard.destination)} <code>{wizard.error.code}</code>
+          {enrollmentFailureCopy(wizard.error, wizard.destination, existingLabel)} <code>{wizard.error.code}</code>
         </p>
         <footer>
           <button class="secondary-button" type="button" onclick={() => enrollment.cancel()}>Close</button>

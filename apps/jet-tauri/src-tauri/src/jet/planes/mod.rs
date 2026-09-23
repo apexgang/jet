@@ -16,7 +16,8 @@ use std::{
 
 use jet_protocol::{
     CapabilityObservation, CapabilitySnapshot, DegradedCondition, ExternalTool, PlaneStatus,
-    RecoveryState, SecurityState, ToolAvailability, SETTINGS_AND_CAPABILITIES_MINOR,
+    RecoveryState, SecurityState, ToolAvailability, REMOTE_AUTH_MINOR,
+    SETTINGS_AND_CAPABILITIES_MINOR,
 };
 use serde::Serialize;
 use tauri::State;
@@ -277,6 +278,14 @@ impl Observed {
         self.knowledge.observe_status(status);
         self.health = PlaneHealth::from_status(status);
     }
+
+    /// A signed remote login succeeded: it proves the remote-auth minor as
+    /// well as what its status reports.
+    pub(crate) fn logged_in(&mut self, status: &PlaneStatus) {
+        self.apply_status(status);
+        self.knowledge.observe_success(REMOTE_AUTH_MINOR);
+        self.connection = ConnectionView::Online;
+    }
 }
 
 /// What the shell keeps about a remote Plane. The SSH endpoint stays
@@ -436,8 +445,7 @@ impl PlaneRegistry {
             ..Observed::default()
         };
         let session = session.map(|(session, status)| {
-            observed.apply_status(&status);
-            observed.connection = ConnectionView::Online;
+            observed.logged_in(&status);
             session
         });
         let observed = Arc::new(Mutex::new(observed));
@@ -706,14 +714,15 @@ impl PlaneRegistry {
         skip: Option<Uuid>,
     ) -> Result<(), PublicError> {
         let key = DestinationKey::of(destination);
-        let taken = self.all()?.iter().any(|entry| {
-            entry.id != skip.map_or(PlaneId::Local, PlaneId::Remote)
-                && entry.remote.as_ref().is_some_and(|meta| meta.key == key)
+        let taken = self.all()?.iter().find_map(|entry| {
+            (entry.id != skip.map_or(PlaneId::Local, PlaneId::Remote)
+                && entry.remote.as_ref().is_some_and(|meta| meta.key == key))
+            .then_some(entry.id)
         });
-        if taken {
-            return Err(already_registered());
+        match taken {
+            Some(existing) => Err(already_registered(existing)),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     /// Refuses a Plane identity that another entry, or the local Plane,
@@ -723,23 +732,27 @@ impl PlaneRegistry {
         identity: Uuid,
         skip: Option<Uuid>,
     ) -> Result<(), PublicError> {
-        let local = self
-            .identity(PlaneId::Local)
-            .or_else(|| self.local_identity.lock().ok().and_then(|value| *value));
-        if local == Some(identity) {
-            return Err(already_registered());
+        if self.known_local_identity() == Some(identity) {
+            return Err(already_registered(PlaneId::Local));
         }
-        let taken = self.all()?.iter().any(|entry| {
-            entry.id != skip.map_or(PlaneId::Local, PlaneId::Remote)
+        let taken = self.all()?.iter().find_map(|entry| {
+            (entry.id != skip.map_or(PlaneId::Local, PlaneId::Remote)
                 && entry
                     .remote
                     .as_ref()
-                    .is_some_and(|meta| meta.plane_identity == identity)
+                    .is_some_and(|meta| meta.plane_identity == identity))
+            .then_some(entry.id)
         });
-        if taken {
-            return Err(already_registered());
+        match taken {
+            Some(existing) => Err(already_registered(existing)),
+            None => Ok(()),
         }
-        Ok(())
+    }
+
+    /// The local Plane's identity: observed now, or remembered from before.
+    fn known_local_identity(&self) -> Option<Uuid> {
+        self.identity(PlaneId::Local)
+            .or_else(|| self.local_identity.lock().ok().and_then(|value| *value))
     }
 
     pub(crate) fn check_capacity(&self) -> Result<(), PublicError> {
@@ -761,6 +774,10 @@ impl PlaneRegistry {
         }
         let entry = self.entry(plane)?.ok_or_else(unknown_plane)?;
         let meta = entry.remote.as_ref().ok_or_else(unknown_plane)?;
+        if self.known_local_identity() == Some(meta.plane_identity) {
+            // This computer's own Plane reached over SSH: only Forget.
+            return Err(duplicates_local().with_plane(plane.to_string()));
+        }
         Ok(RemoteTarget {
             binding: PlaneBinding {
                 plane,
@@ -869,7 +886,7 @@ impl PlaneRegistry {
             removed
         };
         if let Some(meta) = &removed.remote {
-            meta.connector.shutdown().await;
+            meta.connector.close();
         }
         Ok(())
     }
@@ -990,16 +1007,21 @@ fn review_moved(plane: PlaneId) -> PublicError {
     .with_plane(plane.to_string())
 }
 
-pub(crate) fn already_registered() -> PublicError {
+/// Names the entry the new Plane duplicates (`local` for this computer), so
+/// the copy can say which one it is.
+pub(crate) fn already_registered(existing: PlaneId) -> PublicError {
     PublicError::conflict(
         "plane.already_registered",
         "This is the same Plane as one already on this computer.",
     )
+    .with_plane(existing.to_string())
 }
+
+pub(crate) const DUPLICATES_LOCAL: &str = "plane.duplicates_local";
 
 fn duplicates_local() -> PublicError {
     PublicError::conflict(
-        "plane.duplicates_local",
+        DUPLICATES_LOCAL,
         "This is this computer's own Plane. Forget it.",
     )
 }
@@ -1015,7 +1037,7 @@ fn registry_unsaved() -> PublicError {
     PublicError::internal()
 }
 
-fn unknown_plane() -> PublicError {
+pub(crate) fn unknown_plane() -> PublicError {
     PublicError::invalid_input(
         "plane.unknown",
         "That Plane is not registered on this computer.",

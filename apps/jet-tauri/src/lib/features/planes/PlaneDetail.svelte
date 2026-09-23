@@ -2,6 +2,7 @@
   import { tick, untrack } from "svelte";
 
   import type { DesktopSession } from "$lib/features/shell/session.svelte";
+  import { focusLost } from "./focus";
   import PairingSection from "./PairingSection.svelte";
   import {
     featureLabel,
@@ -83,6 +84,38 @@
     });
   });
 
+  let forgetHeading = $state<HTMLHeadingElement>();
+  let forgetButton = $state<HTMLButtonElement>();
+  let titleHeading = $state<HTMLHeadingElement>();
+  let forgetShown = false;
+
+  // The Forget choice replaces its button, or opens from the Connection
+  // section further up: focus moves to its heading so it is announced. When
+  // it closes without forgetting, focus returns to "Forget {label}…".
+  $effect(() => {
+    const shown = forgetting !== null;
+    untrack(() => {
+      if (shown && !forgetShown) void tick().then(() => forgetHeading?.focus());
+      else if (!shown && forgetShown) {
+        void tick().then(() => {
+          if (focusLost()) forgetButton?.focus();
+        });
+      }
+      forgetShown = shown;
+    });
+  });
+
+  // Forgetting a Plane (or a revoke that forgets it) replaces this detail
+  // with another Plane's: never leave keyboard focus on the page itself.
+  $effect(() => {
+    void plane?.planeId;
+    untrack(() => {
+      void tick().then(() => {
+        if (focusLost()) titleHeading?.focus();
+      });
+    });
+  });
+
   async function retry(): Promise<void> {
     if (!plane || retrying) return;
     retrying = true;
@@ -124,7 +157,7 @@
   </section>
 {:else}
   <section class="plane-detail" aria-labelledby="plane-detail-title">
-    <h2 id="plane-detail-title" class="plane-detail-title">{plane.label}</h2>
+    <h2 id="plane-detail-title" class="plane-detail-title" tabindex="-1" bind:this={titleHeading}>{plane.label}</h2>
 
     <section class="plane-section" aria-labelledby="plane-connection-heading">
       <h3 id="plane-connection-heading" tabindex="-1" bind:this={connectionHeading}>Connection</h3>
@@ -283,10 +316,12 @@
 
     {#if plane.kind === "remote"}
       <section class="plane-section" aria-labelledby="plane-forget-heading">
-        <h3 id="plane-forget-heading">Forget {plane.label}</h3>
+        <h3 id="plane-forget-heading" tabindex="-1" bind:this={forgetHeading}>Forget {plane.label}</h3>
         {#if !forgetting}
           <div class="plane-actions">
-            <button class="secondary-button" onclick={() => planes.askForget(plane.planeId)}>Forget {plane.label}…</button>
+            <button bind:this={forgetButton} class="secondary-button" onclick={() => planes.askForget(plane.planeId)}>
+              Forget {plane.label}…
+            </button>
           </div>
         {:else}
           <p>

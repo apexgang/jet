@@ -47,7 +47,7 @@ export type RecentStatusRow = {
   kind: RecentStatusKind;
   error: PublicError | null;
   text: string;
-  action: "retry" | "open_planes" | null;
+  action: "retry" | "open_planes" | "pair_again" | null;
 };
 
 export type SearchPlaneState =
@@ -211,6 +211,18 @@ export function formatSavedTime(unixMs: number | null): string {
   return new Date(unixMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+/**
+ * A remote Plane that refused this computer's key, or whose key is gone, is
+ * fixed by pairing again; this computer's own Plane never is.
+ */
+function pairAgainAction(
+  planeId: PlaneId,
+  error: PublicError,
+  otherwise: RecentStatusRow["action"],
+): RecentStatusRow["action"] {
+  return planeId !== "local" && needsPairing(error) ? "pair_again" : otherwise;
+}
+
 /** One status row for every Plane whose Recent section is not simply ready. */
 export function recentStatusRows(
   sections: readonly CatalogSection[],
@@ -259,7 +271,7 @@ export function recentStatusRows(
           kind: "denied",
           error: state.error,
           text: `${label} doesn't allow this computer.`,
-          action: "open_planes",
+          action: pairAgainAction(section.planeId, state.error, "open_planes"),
         });
         break;
       case "unsupported":
@@ -277,7 +289,7 @@ export function recentStatusRows(
           kind: "failed",
           error: state.error,
           text: `Tasks from ${label} couldn't load.`,
-          action: "retry",
+          action: pairAgainAction(section.planeId, state.error, "retry"),
         });
         break;
     }
@@ -565,8 +577,15 @@ export function offerLapsed(error: PublicError): boolean {
   );
 }
 
-/** Enrollment failure copy, chosen by stable code (§7.4). */
-export function enrollmentFailureCopy(error: PublicError, destination: string): string {
+/**
+ * Enrollment failure copy, chosen by stable code (§7.4). `existingLabel`
+ * names the registered Plane an error points at, when it is still listed.
+ */
+export function enrollmentFailureCopy(
+  error: PublicError,
+  destination: string,
+  existingLabel: (planeId: string) => string | null = () => null,
+): string {
   switch (error.code) {
     case "ssh.connection_failed":
       return `Jet couldn't connect over SSH. Check the address, and that \`ssh ${destination}\` works in a terminal without asking questions.`;
@@ -596,8 +615,12 @@ export function enrollmentFailureCopy(error: PublicError, destination: string): 
       return "Type the 8-digit code shown on the other computer.";
     case "enrollment.draft_expired":
       return "This pairing request expired. Start adding the Plane again.";
-    case "plane.already_registered":
-      return "This is the same Plane as one already on this computer.";
+    case "plane.already_registered": {
+      const existing = error.planeId ? existingLabel(error.planeId) : null;
+      return existing
+        ? `This is the same Plane as ${existing}.`
+        : "This is the same Plane as one already on this computer.";
+    }
     case "plane.identity_changed":
       return `${destination} now reaches a different Plane. Forget it and add it again if that's expected.`;
     case "plane.destination_invalid":

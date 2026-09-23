@@ -31,12 +31,11 @@ export type SearchState = {
   byPlane: Record<PlaneId, SearchPlaneState>;
 };
 
-/** Events that change a Plane's Recent list. */
-const CATALOG_EVENTS = new Set([
-  "conversation.created",
-  "conversation.name_changed",
-  "conversation.trashed",
-]);
+/** Events that change existing rows, so the whole chain is re-walked. */
+const REWALK_EVENTS = new Set(["conversation.name_changed", "conversation.trashed"]);
+
+/** A new task only appends, so the chain is re-read from its tail page. */
+const TAIL_EVENT = "conversation.created";
 
 const REFRESH_DEBOUNCE_MS = 1_000;
 
@@ -59,7 +58,7 @@ export class PlaneCatalog {
 
   private generations = new Map<PlaneId, number>();
   private walks = new Map<PlaneId, Promise<void>>();
-  private refreshTimers = new Map<PlaneId, ReturnType<typeof setTimeout>>();
+  private refreshTimers = new Map<PlaneId, { full: boolean; timer: ReturnType<typeof setTimeout> }>();
   private searchRequest = 0;
 
   private readonly planes: PlanesSession;
@@ -145,8 +144,8 @@ export class PlaneCatalog {
   forget(planeId: PlaneId): void {
     this.bump(planeId);
     this.walks.delete(planeId);
-    const timer = this.refreshTimers.get(planeId);
-    if (timer) clearTimeout(timer);
+    const pending = this.refreshTimers.get(planeId);
+    if (pending) clearTimeout(pending.timer);
     this.refreshTimers.delete(planeId);
     const { [planeId]: _dropped, ...rest } = this.sections;
     this.sections = rest;
@@ -285,18 +284,86 @@ export class PlaneCatalog {
     if (section.state.kind !== "ready") void this.load(planeId);
   }
 
-  /** Feed events on Plane P re-walk only P's chain, debounced. */
+  /**
+   * Feed events on Plane P refresh only P's section, debounced. A created task
+   * re-reads from P's `tailPage`; a rename or trash re-walks P's whole chain.
+   * A pending re-walk absorbs a later tail read, never the other way round.
+   */
   receiveEvent(planeId: PlaneId, kind: string): void {
-    if (!CATALOG_EVENTS.has(kind) || !this.sections[planeId]) return;
-    const timer = this.refreshTimers.get(planeId);
-    if (timer) clearTimeout(timer);
-    this.refreshTimers.set(
-      planeId,
-      setTimeout(() => {
+    const rewalk = REWALK_EVENTS.has(kind);
+    if ((!rewalk && kind !== TAIL_EVENT) || !this.sections[planeId]) return;
+    const pending = this.refreshTimers.get(planeId);
+    if (pending) clearTimeout(pending.timer);
+    const full = rewalk || (pending?.full ?? false);
+    this.refreshTimers.set(planeId, {
+      full,
+      timer: setTimeout(() => {
         this.refreshTimers.delete(planeId);
-        void this.load(planeId);
+        void (full ? this.load(planeId) : this.loadTail(planeId));
       }, REFRESH_DEBOUNCE_MS),
-    );
+    });
+  }
+
+  /**
+   * Re-reads one Plane's chain from its `tailPage`, which answers the last
+   * page plus anything newer, and merges the rows into the section. Falls back
+   * to a full walk when there is no tail yet, a walk is running, or the Plane
+   * reports that its pagination went stale.
+   */
+  loadTail(planeId: PlaneId): Promise<void> {
+    const section = this.sections[planeId];
+    const existing = sectionData(section?.state);
+    if (!section || !section.tailPage || section.chain === "paging" || section.state.kind !== "ready" || !existing) {
+      return this.load(planeId);
+    }
+    const read = this.readTail(planeId, section, existing);
+    this.walks.set(planeId, read);
+    return read;
+  }
+
+  private async readTail(planeId: PlaneId, section: CatalogSection, existing: ConversationRow[]): Promise<void> {
+    const generation = this.bump(planeId);
+    const current = () => this.generations.get(planeId) === generation && this.planes.has(planeId);
+    const pageLimit = this.planes.plane(planeId)?.kind === "remote" ? REMOTE_PAGE_LIMIT : Infinity;
+    let tailPage = section.tailPage;
+    // The tail page is read again, so it is not counted twice.
+    let pages = Math.max(section.pages - 1, 0);
+    let rows = existing;
+    let partial: CatalogSection["partial"] = section.partial;
+    this.update(planeId, { chain: "paging" });
+    try {
+      let page: ConversationPage = await loadConversations(tailPage, planeId);
+      if (!current()) return;
+      pages += 1;
+      rows = retainNewest(rows, page.conversations);
+      while (page.nextPage) {
+        if (pages >= pageLimit) {
+          partial = "page_limit";
+          break;
+        }
+        tailPage = page.nextPage;
+        page = await loadConversations(tailPage, planeId);
+        if (!current()) return;
+        pages += 1;
+        rows = retainNewest(rows, page.conversations);
+      }
+      this.update(planeId, {
+        state: { kind: "ready", data: rows },
+        tailPage,
+        pages,
+        chain: partial ? "partial" : "complete",
+        partial,
+        savedAtUnixMs: Date.now(),
+      });
+    } catch (error: unknown) {
+      if (!current()) return;
+      const failure = publicError(error);
+      if (failure.restart?.reason === "pagination_stale") {
+        await this.load(planeId);
+        return;
+      }
+      this.fail(planeId, failure, rows);
+    }
   }
 
   /** Adds or replaces one row the shell learned about directly. */
@@ -365,7 +432,7 @@ export class PlaneCatalog {
 
   /** Clears pending refresh timers, for example when the window closes. */
   dispose(): void {
-    for (const timer of this.refreshTimers.values()) clearTimeout(timer);
+    for (const pending of this.refreshTimers.values()) clearTimeout(pending.timer);
     this.refreshTimers.clear();
     for (const planeId of this.generations.keys()) this.bump(planeId);
   }

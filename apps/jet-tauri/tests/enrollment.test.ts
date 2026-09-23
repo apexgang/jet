@@ -275,6 +275,39 @@ describe("Add a Plane wizard", () => {
     expect(cancelled).toEqual([DRAFT, TICKET]);
   });
 
+  it("cancel during Finish keeps the wizard closed but still reports the Plane it registered", async () => {
+    let resolve: (value: unknown) => void = () => undefined;
+    ipc((command) => {
+      switch (command) {
+        case "add_remote_plane":
+          return { kind: "pairing_required", draftId: DRAFT, destination: "alice@build-box" };
+        case "claim_remote_pairing":
+          return enrollment;
+        case "complete_remote_pairing":
+          return new Promise((done) => (resolve = done));
+        case "cancel_remote_pairing":
+          return null;
+      }
+      throw new Error(`Unexpected ${command}`);
+    });
+    const paired = vi.fn();
+    const wizard = new PlaneEnrollment(paired);
+    wizard.startAdd();
+    wizard.setDestination("alice@build-box");
+    await wizard.submitDestination();
+    wizard.setCode("12345678");
+    await wizard.submitCode();
+    const finishing = wizard.finish();
+    await settle();
+    expect(wizard.state.step).toBe("completing");
+    wizard.cancel();
+    resolve(plane());
+    await finishing;
+    await settle();
+    expect(wizard.state).toEqual({ step: "closed" });
+    expect(paired).toHaveBeenCalledWith(plane(), false);
+  });
+
   it("never ends the confirm step on the countdown; an expired offer returns to the code", async () => {
     vi.useFakeTimers();
     ipc((command) => {
@@ -342,6 +375,14 @@ describe("Add a Plane wizard", () => {
     }
     expect(copy("enrollment.transcript_invalid")).toContain("reply didn't check out");
     expect(copy("plane.already_registered")).toContain("same Plane");
+    const labels = (planeId: string) => (planeId === "local" ? "This computer" : null);
+    expect(
+      enrollmentFailureCopy({ ...failure("plane.already_registered"), planeId: "local" }, "localhost", labels),
+    ).toBe("This is the same Plane as This computer.");
+    // A Plane that is no longer listed falls back to the generic sentence.
+    expect(
+      enrollmentFailureCopy({ ...failure("plane.already_registered"), planeId: "gone" }, "box", labels),
+    ).toBe("This is the same Plane as one already on this computer.");
     expect(copy("plane.identity_changed")).toContain("now reaches a different Plane");
     expect(copy("connection.limit", "unavailable")).toContain("too many connections");
     expect(copy("security.audit_degraded")).toContain("security record needs attention");
