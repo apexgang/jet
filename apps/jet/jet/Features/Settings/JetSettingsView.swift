@@ -505,12 +505,8 @@ private struct WorkSettingsPane: View {
             JetTrashSection(
                 model: recovery,
                 planeName: session.selectedPlane?.name ?? "Local Plane",
-                selectedTitle: session.selectedConversation?.title
-            ).selectedTask
-            JetTrashSection(
-                model: recovery,
-                planeName: session.selectedPlane?.name ?? "Local Plane",
-                selectedTitle: session.selectedConversation?.title
+                selectedTitle: session.selectedConversation?.title,
+                conversationTitles: Dictionary(uniqueKeysWithValues: session.conversations.map { ($0.id, $0.title) })
             )
             JetAutodeleteSection(
                 model: recovery,
@@ -808,9 +804,10 @@ private struct SettingCountRow: View {
             if currentValue != nil {
                 LabeledContent(title) {
                     HStack {
-                        TextField(unit, text: $draft)
+                        TextField("", text: $draft)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 90)
+                            .accessibilityLabel(unit)
                         Text(unit)
                             .foregroundStyle(.secondary)
                     }

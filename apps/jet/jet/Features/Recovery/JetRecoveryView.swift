@@ -4,10 +4,16 @@ struct JetTrashSection: View {
     @Bindable var model: JetRecoveryModel
     let planeName: String
     let selectedTitle: String?
+    let conversationTitles: [UUID: String]
     @State private var pendingAction: JetRetentionAction?
     @State private var pendingRestore: JetTrashEntry?
 
+    // ASVS 2.3.1: do not offer a mutation while the Plane is in Recovery mode.
+    private var isReadOnly: Bool { model.health?.recoveryState == "read_only" }
+
+    @ViewBuilder
     var body: some View {
+        selectedTask
         Section("Jet Trash") {
             Text("Entries are held on \(planeName) until their shown expiry. Restore before expiry to keep a task.")
                 .font(.caption)
@@ -25,7 +31,7 @@ struct JetTrashSection: View {
                             Spacer()
                             if entry.canRestore {
                                 Button("Restore") { pendingRestore = entry }
-                                    .disabled(model.operation != nil || model.issues[.trash] != nil)
+                                    .disabled(isReadOnly || model.operation != nil || model.issues[.trash] != nil)
                                     .accessibilityIdentifier("trash-restore-\(entry.id.uuidString)")
                             }
                         }
@@ -56,9 +62,13 @@ struct JetTrashSection: View {
         }
     }
 
-    @ViewBuilder
     var selectedTask: some View {
         Section("Remove current task") {
+            if isReadOnly {
+                Text("This Plane is read-only. Restore a verified snapshot in Safety & System before changing tasks.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
             if let conversationID = model.selectedConversationID {
                 Text(selectedTitle ?? conversationID.uuidString).font(.headline)
                 if let preview = model.preview, preview.conversationID == conversationID {
@@ -73,10 +83,10 @@ struct JetTrashSection: View {
                             .font(.caption)
                         HStack {
                             Button("Forget on this Plane") { pendingAction = .forget }
-                                .disabled(model.operation != nil || model.issues[.preview] != nil || preview.blocksForget)
+                                .disabled(isReadOnly || model.operation != nil || model.issues[.preview] != nil || preview.blocksForget)
                                 .accessibilityIdentifier("retention-forget")
                             Button("Delete everywhere", role: .destructive) { pendingAction = .deleteEverywhere }
-                                .disabled(model.operation != nil || model.issues[.preview] != nil)
+                                .disabled(isReadOnly || model.operation != nil || model.issues[.preview] != nil)
                                 .accessibilityIdentifier("retention-delete-everywhere")
                         }
                         if preview.blocksForget {
@@ -92,6 +102,7 @@ struct JetTrashSection: View {
                     .foregroundStyle(.secondary)
             }
         }
+        // ASVS 2.3.1: the owning view keeps this confirmation in the rendered workflow.
         .confirmationDialog(
             pendingAction == .forget ? "Forget this task?" : "Delete this task everywhere?",
             isPresented: Binding(get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } }),
@@ -113,7 +124,8 @@ struct JetTrashSection: View {
 
     private func title(for id: UUID) -> String {
         if model.selectedConversationID == id { return selectedTitle ?? id.uuidString }
-        return "Task \(id.uuidString.prefix(8))"
+        if let title = conversationTitles[id] { return title }
+        return "Task \(id.uuidString.suffix(8))"
     }
 }
 
@@ -123,6 +135,9 @@ struct JetAutodeleteSection: View {
     @State private var pendingRule: JetAutodeleteRule?
     @State private var pendingKind: RuleConfirmation?
 
+    // ASVS 2.3.1: rule changes resume only after the Plane can serve writes.
+    private var isReadOnly: Bool { model.health?.recoveryState == "read_only" }
+
     private enum RuleConfirmation { case approve, everywhere, delete }
 
     var body: some View {
@@ -130,6 +145,11 @@ struct JetAutodeleteSection: View {
             Text("Rules run on \(planeName) only after you approve an exact inactivity period. Protected tasks stay out of Trash.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if isReadOnly {
+                Text("This Plane is read-only. Restore a verified snapshot before changing rules.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
             if model.isLoading && model.autodelete == nil { ProgressView("Loading rules") }
             if model.autodelete != nil && model.issues[.autodelete] != nil {
                 Text("Showing the last observed rules. Refresh before approving a change.")
@@ -144,7 +164,7 @@ struct JetAutodeleteSection: View {
             Text("\(model.rulePrompt.utf8.count.formatted()) / 4,096 bytes")
                 .font(.caption).foregroundStyle(.secondary)
             Button("Compile Rule") { Task { await model.compileRule() } }
-                .disabled(model.operation != nil || model.issues[.autodelete] != nil || model.rulePrompt.isEmpty || model.rulePrompt.utf8.count > 4_096)
+                .disabled(isReadOnly || model.operation != nil || model.issues[.autodelete] != nil || model.rulePrompt.isEmpty || model.rulePrompt.utf8.count > 4_096)
             RecoveryIssue(error: model.issues[.autodelete])
         }
         .confirmationDialog(
@@ -184,23 +204,24 @@ struct JetAutodeleteSection: View {
                 }
             }
             HStack {
-                TextField("Idle days", text: Binding(
+                TextField("", text: Binding(
                     get: { model.ruleDays[rule.id] ?? rule.state.days.map(String.init) ?? "" },
                     set: { model.ruleDays[rule.id] = $0 }
                 ))
                 .frame(width: 90)
+                .accessibilityLabel("Idle days")
                 Button("Set Days") { Task { await model.setRuleDays(rule) } }
-                    .disabled(model.operation != nil || model.issues[.autodelete] != nil || !validDays(rule))
+                    .disabled(isReadOnly || model.operation != nil || model.issues[.autodelete] != nil || !validDays(rule))
                 if case .draft = rule.state {
                     Button("Approve") { confirm(rule, .approve) }
-                        .disabled(model.operation != nil || model.issues[.autodelete] != nil)
+                        .disabled(isReadOnly || model.operation != nil || model.issues[.autodelete] != nil)
                 }
                 if case .approved = rule.state, rule.scope == "forget" {
                     Button("Allow Everywhere", role: .destructive) { confirm(rule, .everywhere) }
-                        .disabled(model.operation != nil || model.issues[.autodelete] != nil)
+                        .disabled(isReadOnly || model.operation != nil || model.issues[.autodelete] != nil)
                 }
                 Button("Remove Rule", role: .destructive) { confirm(rule, .delete) }
-                    .disabled(model.operation != nil || model.issues[.autodelete] != nil)
+                    .disabled(isReadOnly || model.operation != nil || model.issues[.autodelete] != nil)
             }
         }
         .padding(.vertical, 5)
