@@ -88,4 +88,7 @@
   button { justify-self: start; color: var(--text); background: var(--raised); border: 1px solid var(--border); border-radius: 5px; padding: 10px 14px; cursor: pointer; }
   button:hover:not(:disabled) { background: var(--hover); }
   button:disabled { opacity: .5; cursor: default; }
+  @media (forced-colors: active) {
+    button:disabled { color: GrayText; border-color: GrayText; opacity: 1; }
+  }
 </style>

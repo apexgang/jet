@@ -238,6 +238,14 @@
     opacity: 0.55;
   }
 
+  @media (forced-colors: active) {
+    .planes-list > .secondary-button[aria-disabled="true"] {
+      color: GrayText;
+      border-color: GrayText;
+      opacity: 1;
+    }
+  }
+
   @media (max-width: 1100px) {
     .planes-layout {
       grid-template-columns: minmax(0, 1fr);

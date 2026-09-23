@@ -233,6 +233,15 @@
     cursor: default;
   }
 
+  @media (forced-colors: active) {
+    .client-change-dialog button[aria-disabled="true"],
+    .client-change-inline button[aria-disabled="true"] {
+      color: GrayText;
+      border-color: GrayText;
+      opacity: 1;
+    }
+  }
+
   .client-change-actions {
     display: flex;
     flex-wrap: wrap;

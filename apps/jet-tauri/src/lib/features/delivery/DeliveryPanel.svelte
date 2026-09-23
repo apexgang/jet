@@ -119,6 +119,9 @@
   button { background: var(--raised); border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; cursor: pointer; }
   button:hover:not(:disabled) { background: var(--hover); }
   button:disabled { opacity: .5; cursor: default; }
+  @media (forced-colors: active) {
+    button:disabled { color: GrayText; border-color: GrayText; opacity: 1; }
+  }
   .muted { color: var(--muted); margin: 0; }
   h3 { font-size: 14px; margin: 0 0 8px; }
   .delivery-review { border-block: 1px solid var(--border); padding-block: 18px; margin-block: 24px; }

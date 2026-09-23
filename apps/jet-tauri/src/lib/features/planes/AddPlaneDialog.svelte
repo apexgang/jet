@@ -330,6 +330,13 @@
     outline: none;
   }
 
+  /* Forced palettes still show where programmatic focus landed. */
+  @media (forced-colors: active) {
+    .add-plane-muted:focus {
+      outline: 2px solid Highlight;
+    }
+  }
+
   .add-plane-code-input {
     font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
     font-size: 18px;

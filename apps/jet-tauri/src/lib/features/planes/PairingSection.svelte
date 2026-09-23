@@ -345,7 +345,7 @@
 
   .pairing-section h3:focus-visible,
   .pairing-section h4:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--focus);
     outline-offset: 2px;
   }
 
@@ -475,5 +475,13 @@
   .pairing-section [aria-disabled="true"] {
     opacity: 0.55;
     cursor: default;
+  }
+
+  @media (forced-colors: active) {
+    .pairing-section [aria-disabled="true"] {
+      color: GrayText;
+      border-color: GrayText;
+      opacity: 1;
+    }
   }
 </style>

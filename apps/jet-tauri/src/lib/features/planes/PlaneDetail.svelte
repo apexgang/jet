@@ -399,7 +399,7 @@
   }
 
   .plane-section h3:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--focus);
     outline-offset: 2px;
   }
 
@@ -448,6 +448,14 @@
 
   .plane-actions button[aria-disabled="true"] {
     opacity: 0.55;
+  }
+
+  @media (forced-colors: active) {
+    .plane-actions button[aria-disabled="true"] {
+      color: GrayText;
+      border-color: GrayText;
+      opacity: 1;
+    }
   }
 
   .plane-connection-error p {

@@ -437,6 +437,16 @@
     opacity: 0.6;
   }
 
+  @media (forced-colors: active) {
+    input:disabled,
+    select:disabled,
+    textarea:disabled {
+      color: GrayText;
+      border-color: GrayText;
+      opacity: 1;
+    }
+  }
+
   .unit,
   .help,
   .byte-count,

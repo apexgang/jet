@@ -1,13 +1,23 @@
 :root {
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #eaf0f3;
-  background: #0e1215;
+  color: var(--text);
+  background: var(--background);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   color-scheme: dark;
+
+  /* Every colour in the app is a token defined here and redefined for the
+     light scheme and increased contrast below. Rules and component styles
+     only reference tokens (tests/theme-contract.test.ts). */
   --accent: #29b6f6;
   --accent-strong: #57c6f7;
+  --accent-active: #78d1f6;
+  /* Accent used as text. `--accent` itself is for fills, borders and carets. */
+  --accent-text: var(--accent);
+  --on-accent: #071116;
+  --focus: var(--accent);
+  --selected-indicator: var(--accent);
   --background: #0e1215;
   --sidebar: #11171b;
   --panel: #11161a;
@@ -16,15 +26,41 @@
   --selected: #202c33;
   --border: #283137;
   --border-soft: #20282d;
+  --border-hover: #43515a;
+  /* 3:1 on every surface: the increased-contrast border and resizer line. */
+  --border-strong: #68757d;
+  --input-border: #3a454c;
   --text: #eaf0f3;
   --muted: #9aa7ae;
   --quiet: #7d8990;
+  --placeholder: #89969d;
   --success: #59ca82;
   --warning: #efa94d;
   --danger: #f06a6a;
   /* Status colors for small text, which needs 4.5:1 on the background. */
-  --success-text: #59ca82;
+  --success-text: var(--success);
   --danger-text: #ff9a9a;
+  --danger-border: #7f3c42;
+  --danger-fill: #a83d45;
+  --danger-fill-hover: #bd4851;
+  --on-danger: #ffffff;
+  --attention-bg: #55331a;
+  --attention-text: #ffd6a1;
+  --working-border: #1b5d78;
+  --working-text: #92dcfa;
+  --warning-border: #65451f;
+  --warning-text: #f8c985;
+  --notice-border: #3b4f5a;
+  --notice-bg: #121d23;
+  --critical-border: #63363a;
+  --critical-bg: #211618;
+  --code-bg: #0b0f12;
+  --code-text: #cad5da;
+  --disabled-fill: #29343a;
+  --disabled-text: #78858b;
+  --shadow: rgb(0 0 0 / 0.48);
+  --shadow-soft: rgb(0 0 0 / 0.24);
+  --scrim: rgb(0 0 0 / 0.55);
 }
 
 * {
@@ -71,7 +107,7 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -93,8 +129,7 @@ textarea:focus-visible {
   min-height: 92px;
   padding: 18px 28px;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--background) 94%, transparent);
-  backdrop-filter: blur(14px);
+  background: var(--background);
 }
 
 .setup-header h1 {
@@ -328,7 +363,7 @@ textarea:focus-visible {
   min-width: 0;
   height: 36px;
   padding: 7px 10px;
-  border: 1px solid #3a454c;
+  border: 1px solid var(--input-border);
   border-radius: 8px;
   background: var(--raised);
   color: var(--text);
@@ -382,7 +417,7 @@ textarea:focus-visible {
 .primary-button {
   border: 0;
   background: var(--accent);
-  color: #071116;
+  color: var(--on-accent);
 }
 
 .primary-button:hover:not(:disabled) {
@@ -396,7 +431,7 @@ textarea:focus-visible {
 }
 
 .secondary-button:hover:not(:disabled) {
-  border-color: #43515a;
+  border-color: var(--border-hover);
   background: var(--hover);
 }
 
@@ -413,12 +448,12 @@ textarea:focus-visible {
 
 .danger-button {
   border: 0;
-  background: #a83d45;
-  color: white;
+  background: var(--danger-fill);
+  color: var(--on-danger);
 }
 
 .danger-button:hover:not(:disabled) {
-  background: #bd4851;
+  background: var(--danger-fill-hover);
 }
 
 .primary-button:disabled,
@@ -491,11 +526,11 @@ textarea:focus-visible {
   border-radius: 14px;
   background: var(--raised);
   color: var(--text);
-  box-shadow: 0 24px 80px rgb(0 0 0 / 0.48);
+  box-shadow: 0 24px 80px var(--shadow);
 }
 
 .removal-dialog::backdrop {
-  background: rgb(0 0 0 / 0.55);
+  background: var(--scrim);
 }
 
 .removal-dialog form {
@@ -792,7 +827,7 @@ textarea:focus-visible {
 }
 
 ::selection {
-  color: #071116;
+  color: var(--on-accent);
   background: var(--accent-strong);
 }
 
@@ -919,8 +954,8 @@ textarea:focus-visible {
   min-width: 20px;
   padding: 2px 6px;
   border-radius: 999px;
-  background: #55331a;
-  color: #ffd6a1;
+  background: var(--attention-bg);
+  color: var(--attention-text);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   text-align: center;
@@ -980,7 +1015,7 @@ textarea:focus-visible {
 }
 
 .load-more {
-  color: var(--accent) !important;
+  color: var(--accent-text) !important;
   font-size: 11px;
 }
 
@@ -1083,8 +1118,8 @@ kbd {
   min-width: 20px;
   padding: 2px 6px;
   border-radius: 999px;
-  background: #55331a;
-  color: #ffd6a1;
+  background: var(--attention-bg);
+  color: var(--attention-text);
   font-size: 11px;
   text-align: center;
 }
@@ -1190,7 +1225,7 @@ kbd {
 }
 
 .icon-button:hover {
-  border-color: #3a474f;
+  border-color: var(--border-hover);
   background: var(--hover);
   color: var(--text);
 }
@@ -1205,13 +1240,13 @@ kbd {
 }
 
 .run-status.working {
-  border-color: #1b5d78;
-  color: #92dcfa;
+  border-color: var(--working-border);
+  color: var(--working-text);
 }
 
 .run-status.warning {
-  border-color: #65451f;
-  color: #f8c985;
+  border-color: var(--warning-border);
+  color: var(--warning-text);
 }
 
 .timeline {
@@ -1230,14 +1265,14 @@ kbd {
 
 .notice {
   padding: 12px 14px;
-  border: 1px solid #3b4f5a;
+  border: 1px solid var(--notice-border);
   border-radius: 10px;
-  background: #121d23;
+  background: var(--notice-bg);
 }
 
 .notice.critical {
-  border-color: #63363a;
-  background: #211618;
+  border-color: var(--critical-border);
+  background: var(--critical-bg);
 }
 
 .notice strong {
@@ -1297,7 +1332,7 @@ kbd {
   display: grid;
   gap: 15px;
   padding: 17px;
-  border: 1px solid #65451f;
+  border: 1px solid var(--warning-border);
   border-radius: 12px;
   background: color-mix(in srgb, var(--warning) 7%, var(--raised));
 }
@@ -1416,7 +1451,7 @@ kbd {
 .run-controls button:hover:not(:disabled),
 .control-confirmation button:hover:not(:disabled),
 .turn-queue button:hover:not(:disabled) {
-  border-color: #43515a;
+  border-color: var(--border-hover);
   background: var(--hover);
   color: var(--text);
 }
@@ -1437,15 +1472,15 @@ kbd {
 .control-confirmation .primary-action {
   border-color: var(--accent);
   background: var(--accent);
-  color: #071116;
+  color: var(--on-accent);
   font-weight: 650;
 }
 
 .approval-actions .danger-action,
 .run-controls .danger-action,
 .control-confirmation .danger-action {
-  border-color: #7f3c42;
-  color: #ff9a9a;
+  border-color: var(--danger-border);
+  color: var(--danger-text);
 }
 
 .composer-region {
@@ -1476,13 +1511,13 @@ kbd {
   align-items: end;
   gap: 10px;
   padding: 10px 10px 10px 13px;
-  border: 1px solid #3a454c;
+  border: 1px solid var(--input-border);
   border-radius: 14px;
   background: var(--raised);
 }
 
 .composer-box:focus-within {
-  border-color: var(--accent);
+  border-color: var(--focus);
 }
 
 .composer-box textarea {
@@ -1498,7 +1533,7 @@ kbd {
 }
 
 .composer-box textarea::placeholder {
-  color: #89969d;
+  color: var(--placeholder);
 }
 
 .send-button {
@@ -1507,7 +1542,7 @@ kbd {
   border: 0;
   border-radius: 9px;
   background: var(--accent);
-  color: #071116;
+  color: var(--on-accent);
   font-size: 12px;
   font-weight: 700;
 }
@@ -1517,12 +1552,12 @@ kbd {
 }
 
 .send-button:active:not(:disabled) {
-  background: #78d1f6;
+  background: var(--accent-active);
 }
 
 .send-button:disabled {
-  background: #29343a;
-  color: #78858b;
+  background: var(--disabled-fill);
+  color: var(--disabled-text);
 }
 
 .context-row {
@@ -1551,7 +1586,7 @@ kbd {
 }
 
 .draft-limit.over-limit {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .work-panel {
@@ -1711,7 +1746,7 @@ kbd {
 }
 
 .file-status.added { color: var(--success); }
-.file-status.deleted { color: var(--danger); }
+.file-status.deleted { color: var(--danger-text); }
 .file-status.modified { color: var(--warning); }
 
 .file-path {
@@ -1745,8 +1780,8 @@ kbd {
   overflow: auto;
   resize: none;
   border-block: 1px solid var(--border-soft);
-  background: #0b0f12;
-  color: #cad5da;
+  background: var(--code-bg);
+  color: var(--code-text);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 10px;
   line-height: 1.55;
@@ -1802,7 +1837,7 @@ kbd {
 .work-notice {
   position: sticky;
   bottom: 12px;
-  box-shadow: 0 8px 20px rgb(0 0 0 / 24%);
+  box-shadow: 0 8px 20px var(--shadow-soft);
 }
 
 .work-empty {
@@ -1853,8 +1888,8 @@ kbd {
   resize: vertical;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #0b0f12;
-  color: #dce5e9;
+  background: var(--code-bg);
+  color: var(--code-text);
   caret-color: var(--accent);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 10px;
@@ -1994,7 +2029,7 @@ kbd {
 .control-confirmation {
   margin-top: 12px;
   padding: 13px;
-  border: 1px solid #65451f;
+  border: 1px solid var(--warning-border);
   border-radius: 9px;
   background: color-mix(in srgb, var(--warning) 6%, var(--raised));
 }
@@ -2082,6 +2117,10 @@ kbd {
     color-scheme: light;
     --accent: #087dab;
     --accent-strong: #006b95;
+    --accent-active: #005a7d;
+    /* #087dab is 4.08:1 on the sidebar, so accent text uses the darker tone. */
+    --accent-text: #006b95;
+    --on-accent: #ffffff;
     --background: #f7f8f8;
     --sidebar: #eef1f2;
     --panel: #f2f4f5;
@@ -2090,29 +2129,164 @@ kbd {
     --selected: #d9e5ea;
     --border: #cfd7db;
     --border-soft: #dce2e5;
+    --border-hover: #aab5bb;
+    --border-strong: #707d85;
+    --input-border: #8a979e;
     --text: #172027;
     --muted: #53636c;
     --quiet: #52616a;
+    --placeholder: #5d6b73;
+    --success: #1b6b38;
     --warning: #805000;
     --danger: #a12c35;
-    --success-text: #1d6f3f;
     --danger-text: #a12c35;
+    --danger-border: #d7a7ab;
+    --danger-fill: #a83d45;
+    --danger-fill-hover: #bd4851;
+    --on-danger: #ffffff;
+    --attention-bg: #fbe3c4;
+    --attention-text: #5c3300;
+    --working-border: #8cc3d8;
+    --working-text: #075e80;
+    --warning-border: #d4b07a;
+    --warning-text: #805000;
+    --notice-border: #a9c7d3;
+    --notice-bg: #edf8fc;
+    --critical-border: #d7a7ab;
+    --critical-bg: #fff1f2;
+    --code-bg: #f2f4f5;
+    --code-text: #172027;
+    --disabled-fill: #e4e8ea;
+    --disabled-text: #6b777d;
+    --shadow: rgb(16 24 28 / 0.22);
+    --shadow-soft: rgb(16 24 28 / 0.12);
+    --scrim: rgb(16 24 28 / 0.4);
+  }
+}
+
+/* Increased contrast (prefers-contrast: more). Both schemes declare the same
+   tokens: secondary text moves towards --text and every border becomes the
+   scheme's 3:1 --border-strong. */
+@media (prefers-contrast: more) {
+  :root {
+    --muted: #b7c2c8;
+    --quiet: #a3aeb4;
+    --placeholder: #a3aeb4;
+    --border: var(--border-strong);
+    --border-soft: var(--border-strong);
+    --border-hover: var(--text);
+    --input-border: var(--border-strong);
+  }
+}
+
+@media (prefers-contrast: more) and (prefers-color-scheme: light) {
+  :root {
+    --muted: #3d4a52;
+    --quiet: #3f4c54;
+    --placeholder: #3f4c54;
+    --border: var(--border-strong);
+    --border-soft: var(--border-strong);
+    --border-hover: var(--text);
+    --input-border: var(--border-strong);
+  }
+}
+
+@media (prefers-contrast: more) {
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline-width: 2px;
+    box-shadow: 0 0 0 4px var(--background);
   }
 
-  .notice {
-    border-color: #a9c7d3;
-    background: #edf8fc;
+  .nav-group button.active,
+  .nav-group .search-group-heading[aria-pressed="true"],
+  .project-line.selected,
+  .changed-files button.selected {
+    box-shadow: inset 3px 0 0 var(--selected-indicator);
   }
 
-  .notice.critical {
-    border-color: #d7a7ab;
-    background: #fff1f2;
+  .panel-tabs [role="tab"][aria-selected="true"] {
+    box-shadow: inset 0 -3px 0 var(--selected-indicator);
   }
 
-  .send-button,
-  .primary-button {
-    /* Dark text on the light accent is 4.1:1; white is 4.6:1. */
-    color: #ffffff;
+  /* Borders instead of shadows. */
+  .removal-dialog,
+  .work-notice {
+    border: 1px solid var(--border-strong);
+    box-shadow: none;
+  }
+
+  .composer-box:focus-within {
+    outline: 2px solid var(--focus);
+  }
+}
+
+/* Forced colours (Windows High Contrast, forced palettes): the system palette
+   wins over the appearance, so state that relies on a background colour gets
+   system colours instead. */
+@media (forced-colors: active) {
+  .nav-group button.active,
+  .nav-group .search-group-heading[aria-pressed="true"],
+  .project-line.selected,
+  .panel-tabs [role="tab"][aria-selected="true"],
+  .changed-files button.selected {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .composer-box:focus-within {
+    outline: 2px solid Highlight;
+  }
+
+  /* Status meaning is also carried by the adjacent text. The compound
+     selectors match the specificity of the coloured variants. */
+  .status-dot,
+  .status-dot.online,
+  .status-dot.failed,
+  .setup-icon,
+  .setup-icon.online,
+  .setup-icon.online.warning,
+  .setup-icon.folder,
+  .setup-icon.remote,
+  .brand-mark {
+    forced-color-adjust: none;
+    border-color: CanvasText;
+    background: CanvasText;
+  }
+
+  .setup-icon.remote {
+    box-shadow: 0 0 0 3px Canvas, 0 0 0 4px CanvasText;
+  }
+
+  button:disabled,
+  .primary-button:disabled,
+  .secondary-button:disabled,
+  .danger-button:disabled,
+  .text-button:disabled,
+  .approval-actions button:disabled,
+  .run-controls button:disabled,
+  .control-confirmation button:disabled,
+  .turn-queue button:disabled,
+  .move-trash-modes:disabled .move-trash-mode {
+    border-color: GrayText;
+    color: GrayText;
+    opacity: 1;
+  }
+
+  /* The chosen Move to Trash mode keeps a system-colored border. */
+  .removal-dialog .move-trash-mode:has(input:checked) {
+    border: 2px solid Highlight;
+  }
+}
+
+/* Nothing in Jet is translucent. Dimmed backdrops become near-opaque. */
+@media (prefers-reduced-transparency: reduce) {
+  .removal-dialog::backdrop {
+    background: var(--background);
+    opacity: 0.92;
   }
 }
 
@@ -2155,14 +2329,6 @@ kbd {
   .conversation-title p,
   .run-status {
     display: none;
-  }
-}
-
-/* Windows High Contrast and other forced palettes drop backgrounds, so the
-   chosen Move to Trash mode keeps a system-colored border. */
-@media (forced-colors: active) {
-  .removal-dialog .move-trash-mode:has(input:checked) {
-    border: 2px solid Highlight;
   }
 }
 
