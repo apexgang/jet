@@ -1,6 +1,7 @@
 <script lang="ts">
   import { paneTitle, settingsTargetForError } from "$lib/features/settings/model";
   import PlanesPanel from "$lib/features/planes/PlanesPanel.svelte";
+  import SchedulesDestination from "$lib/features/schedules/SchedulesDestination.svelte";
   import type { DesktopSession } from "./session.svelte";
   import SetupPanel from "$lib/features/setup/SetupPanel.svelte";
 
@@ -51,6 +52,8 @@
   <SetupPanel {session} />
 {:else if session.sidebarSelection === "planes"}
   <PlanesPanel {session} />
+{:else if session.sidebarSelection === "schedules"}
+  <SchedulesDestination standalone />
 {:else}
   <section class="conversation" aria-label="Current task">
     <header class="conversation-header">

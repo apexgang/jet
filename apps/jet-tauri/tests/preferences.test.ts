@@ -34,7 +34,12 @@ describe("desktop preferences adapter", () => {
     mockIPC(() => {
       throw { category: "invalid_input", code: "preferences.invalid", message: "Those desktop preferences are not valid.", retryable: false };
     });
-    const failure = await setDesktopPreferences({ reopenLastTask: true }).catch((error: unknown) => publicError(error));
+    const failure = await setDesktopPreferences({ reopenLastTask: true }).then(
+      () => {
+        throw new Error("expected a refusal");
+      },
+      (error: unknown) => publicError(error),
+    );
     expect(failure.code).toBe("preferences.invalid");
   });
 });

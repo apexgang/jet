@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
 
   import {
     closeSettings,
@@ -7,10 +7,24 @@
     watchSettingsNavigation,
     type SettingsNavigation,
     type SettingsPane,
+    type SettingsSection,
   } from "$lib/jet/settings-window";
+  import type { PlaneId } from "$lib/jet/planes";
   import ConnectionsPane from "./ConnectionsPane.svelte";
   import GeneralPane from "./GeneralPane.svelte";
-  import { landedPanes, paneTitle, resolveTarget, sectionHeadingId } from "./model";
+  import PlaneBanners from "./PlaneBanners.svelte";
+  import PlanePicker from "./PlanePicker.svelte";
+  import SafetyPane from "./SafetyPane.svelte";
+  import { SettingsSession } from "./session.svelte";
+  import WorkPane from "./WorkPane.svelte";
+  import {
+    LAST_WRITER_WINS,
+    PLANE_PANES,
+    landedPanes,
+    paneTitle,
+    resolveTarget,
+    sectionHeadingId,
+  } from "./model";
 
   const panes = landedPanes();
 
@@ -26,6 +40,18 @@
   let generation = 0;
 
   const pane = $derived(navigation.kind === "starting" ? null : navigation.pane);
+  /** Plane settings for the Agents, Work and Safety panes. */
+  const session = new SettingsSession();
+  /** The Plane a deep link asked for; the picker changes it afterwards. */
+  let requestedPlane = $state<PlaneId | null>(null);
+
+  // A Plane pane starts (or switches) the session; General and Connections never connect.
+  $effect(() => {
+    const current = pane;
+    const plane = requestedPlane;
+    if (current === null || !PLANE_PANES.has(current)) return;
+    untrack(() => session.select(plane ?? session.planeId));
+  });
 
   function reducedMotion(): boolean {
     return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
@@ -36,11 +62,17 @@
     if (!Number.isSafeInteger(next) || next < generation) return;
     generation = next;
     const target = resolveTarget(message.target);
-    navigation = { kind: "ready", pane: target.pane };
-    if (!target.section) return;
+    if (message.target.plane_id && PLANE_PANES.has(target.pane)) requestedPlane = message.target.plane_id;
+    await go(target.pane, target.section);
+  }
+
+  /** Shows a pane and moves focus to one of its section headings. */
+  async function go(next: SettingsPane, section: SettingsSection | null) {
+    navigation = { kind: "ready", pane: next };
+    if (!section) return;
     await tick();
     if (!mounted) return;
-    const heading = document.getElementById(sectionHeadingId(target.section));
+    const heading = document.getElementById(sectionHeadingId(section));
     heading?.focus({ preventScroll: true });
     heading?.scrollIntoView({ block: "start", behavior: reducedMotion() ? "auto" : "smooth" });
   }
@@ -81,6 +113,7 @@
     return () => {
       mounted = false;
       window.removeEventListener("keydown", handleKey);
+      session.dispose();
     };
   });
 </script>
@@ -114,6 +147,23 @@
         <GeneralPane />
       {:else if pane === "connections"}
         <ConnectionsPane />
+      {:else if pane === "work" || pane === "safety"}
+        <div class="plane-context">
+          <PlanePicker
+            planeId={session.planeId}
+            onselect={(planeId, label) => {
+              requestedPlane = planeId;
+              session.select(planeId, label);
+            }}
+          />
+          <PlaneBanners {session} onopenaudit={() => void go("safety", "audit")} />
+        </div>
+        {#if pane === "work"}
+          <WorkPane {session} />
+        {:else}
+          <SafetyPane {session} />
+        {/if}
+        <p class="disclosure">{LAST_WRITER_WINS}</p>
       {/if}
     {:else}
       <span class="visually-hidden">Loading Settings</span>
@@ -169,6 +219,17 @@
     padding: 28px 32px 40px;
     overflow: auto;
     line-height: 1.6;
+  }
+
+  .plane-context {
+    display: grid;
+    gap: 12px;
+  }
+
+  .disclosure {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
   }
 
   h1 {

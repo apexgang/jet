@@ -727,7 +727,7 @@ fn expired_preview(code: &'static str) -> PublicError {
     PublicError::invalid_input(code, "This preview expired. Refresh it before continuing.")
 }
 
-fn project_name(root: &str) -> String {
+pub(crate) fn project_name(root: &str) -> String {
     Path::new(root)
         .file_name()
         .and_then(|name| name.to_str())

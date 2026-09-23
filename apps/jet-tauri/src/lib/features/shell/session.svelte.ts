@@ -730,7 +730,8 @@ export class DesktopSession implements FeedHandler {
         this.workPanelPresented = true;
         break;
       case "schedules":
-        this.actionNotice = "Schedules are planned for Wave 3.";
+        // The destination states the backend dependency itself.
+        this.workPanelPresented = false;
         break;
       case "planes":
         this.workPanelPresented = false;

@@ -327,7 +327,14 @@
           <strong>This Project cannot be removed yet.</strong>
           <ul>
             {#each removal.obstacles as obstacle}
-              <li>{obstacle}</li>
+              <li>
+                {obstacle}
+                {#if obstacle === "Disable scheduled tasks first"}
+                  <button class="text-button" type="button" onclick={() => { closeRemoval(); session.select("schedules"); }}>
+                    Open Schedules
+                  </button>
+                {/if}
+              </li>
             {/each}
           </ul>
         </div>

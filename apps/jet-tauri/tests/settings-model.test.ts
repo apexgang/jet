@@ -2,7 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import {
   LANDED_SECTIONS,
+  MAX_SETTING_TEXT_BYTES,
   PANES,
+  SETTING_KEYS,
+  SETTING_PLACEMENT,
+  isSensitive,
+  planeRows,
+  projectRows,
+  sameSetting,
+  sourceLabel,
+  storedAt,
+  textFits,
+  utf8Bytes,
+  valueText,
   landedPanes,
   paneOf,
   recoveryFor,
@@ -59,7 +71,7 @@ describe("settings targets", () => {
   });
 
   it("shows only panes with a landed section", () => {
-    expect(landedPanes().map((pane) => pane.id)).toEqual(["general", "connections"]);
+    expect(landedPanes().map((pane) => pane.id)).toEqual(["general", "work", "connections", "safety"]);
     for (const section of LANDED_SECTIONS) expect(landedPanes().some((pane) => pane.id === paneOf(section))).toBe(true);
   });
 
@@ -67,6 +79,8 @@ describe("settings targets", () => {
     expect(resolveTarget({ pane: "connections", section: "planes" })).toEqual({ pane: "connections", section: "planes" });
     expect(resolveTarget({ pane: "general" })).toEqual({ pane: "general", section: null });
     expect(resolveTarget({ pane: "agents", section: "accounts" })).toEqual({ pane: "general", section: null });
+    expect(resolveTarget({ pane: "work", section: "reviews" })).toEqual({ pane: "work", section: null });
+    expect(resolveTarget({ pane: "safety", section: "audit", plane_id: REMOTE })).toEqual({ pane: "safety", section: "audit" });
     expect(resolveTarget({ pane: "general", section: "planes" })).toEqual({ pane: "general", section: null });
     expect(sectionHeadingId("local_service")).toBe("section-local-service");
   });
@@ -80,15 +94,27 @@ describe("settings targets", () => {
     expect(settingsTargetForError(error("transport.offline", "offline", true, REMOTE))).toEqual({ pane: "connections", section: "planes" });
   });
 
+  it("maps slice 2 codes to Work and Safety, carrying the failing Plane", () => {
+    const cases: Array<[string, string, string]> = [
+      ["git.invalid_policy", "work", "delivery"],
+      ["git.policy_changed", "work", "delivery"],
+      ["retention.grace_unreadable", "work", "retention"],
+      ["energy.budget_exhausted", "safety", "execution"],
+      ["energy.policy_unreadable", "safety", "execution"],
+      ["storage.disk_pressure", "safety", "storage"],
+      ["craft.developer_mode_required", "safety", "permissions"],
+      ["security.audit_degraded", "safety", "audit"],
+      ["review.audit_degraded", "safety", "audit"],
+    ];
+    for (const [code, pane, section] of cases) {
+      expect(settingsTargetForError(error(code)), code).toEqual({ pane, section });
+      expect(settingsTargetForError(error(code, "conflict", false, REMOTE)), code).toEqual({ pane, section, plane_id: REMOTE });
+    }
+  });
+
   it("returns null for unknown codes and for sections that have not landed", () => {
     expect(settingsTargetForError(error("conversation.not_found"))).toBeNull();
     for (const code of [
-      "git.invalid_policy",
-      "retention.grace_unreadable",
-      "energy.budget_exhausted",
-      "storage.disk_pressure",
-      "craft.developer_mode_required",
-      "security.audit_degraded",
       "account.not_found",
       "craft.disabled",
       "utility.consent_required",
@@ -126,5 +152,126 @@ describe("section states", () => {
     expect(state).toMatchObject({ kind: "offline", last: { value: 1 } });
     expect(recoveryFor({ kind: "ready", data: 1, freshness: "live", issues: [] })).toBeNull();
     expect(recoveryFor({ kind: "ready", data: 1, freshness: "changed", issues: [] })).toBe("check_again");
+  });
+});
+
+describe("setting placement", () => {
+  /** wave 3.2 §3.2, mirrored from jet-core `CATALOG`. */
+  const DOCUMENTED: Record<string, string[]> = {
+    "storage.disposable_mib": ["plane"],
+    "git.message_instructions": ["plane"],
+    "retention.trash_grace_days": ["plane"],
+    "security.audit_retention_days": ["plane"],
+    "utility.git_text": ["plane"],
+    "utility.content_consent": ["plane"],
+    "utility.account_binding": ["plane"],
+    "utility.autodelete_compilation": ["plane"],
+    "craft.developer_mode": ["plane"],
+    "review.automatic": ["plane"],
+    "review.account_binding": ["plane"],
+    "review.cross_provider_consent": ["plane"],
+    "artifact.max_mib": ["plane"],
+    "artifact.run_mib": ["plane"],
+    "energy.concurrency": ["plane"],
+    "energy.low_power_concurrency": ["plane"],
+    "energy.constrained": ["plane"],
+    "energy.foreground_override": ["plane"],
+    "git.auto_commit": ["project", "conversation"],
+    "git.auto_branch": ["project", "conversation"],
+    "git.auto_push": ["project", "conversation"],
+    "git.auto_draft_pull_request": ["project", "conversation"],
+    "git.branch_prefix": ["project", "conversation"],
+    "utility.automatic_naming": ["plane", "project", "conversation"],
+  };
+
+  it("places all 24 keys with the documented scopes", () => {
+    expect(SETTING_KEYS).toHaveLength(24);
+    expect(Object.fromEntries(SETTING_KEYS.map((key) => [key, [...SETTING_PLACEMENT[key].scopes]]))).toEqual(DOCUMENTED);
+    for (const key of SETTING_KEYS) {
+      const placement = SETTING_PLACEMENT[key];
+      expect(paneOf(placement.section), key).toBe(placement.pane);
+    }
+  });
+
+  it("never lists Project-only Git keys on a Plane pane", () => {
+    const planeKeys = PANES.flatMap((pane) => pane.sections.flatMap((section) => planeRows(section.id)));
+    for (const key of ["git.auto_commit", "git.auto_branch", "git.auto_push", "git.auto_draft_pull_request", "git.branch_prefix"]) {
+      expect(planeKeys).not.toContain(key);
+    }
+    expect(projectRows()).toEqual([
+      "git.auto_commit",
+      "git.auto_branch",
+      "git.auto_push",
+      "git.auto_draft_pull_request",
+      "git.branch_prefix",
+      "utility.automatic_naming",
+    ]);
+    expect(planeRows("execution")).toEqual([
+      "energy.concurrency",
+      "energy.low_power_concurrency",
+      "energy.constrained",
+      "energy.foreground_override",
+    ]);
+    expect(planeRows("storage")).toEqual(["storage.disposable_mib", "artifact.max_mib", "artifact.run_mib"]);
+    expect(planeRows("delivery")).toEqual(["git.message_instructions", "utility.git_text"]);
+    expect(planeRows("retention")).toEqual(["retention.trash_grace_days"]);
+    expect(planeRows("audit")).toEqual(["security.audit_retention_days"]);
+    expect(planeRows("permissions")).toEqual(["craft.developer_mode"]);
+  });
+
+  it("confirms exactly the sensitive keys", () => {
+    expect(SETTING_KEYS.filter(isSensitive).sort()).toEqual(
+      [
+        "craft.developer_mode",
+        "review.automatic",
+        "review.account_binding",
+        "review.cross_provider_consent",
+        "utility.account_binding",
+        "utility.content_consent",
+        "energy.foreground_override",
+        "git.auto_push",
+        "git.auto_draft_pull_request",
+        "security.audit_retention_days",
+        "retention.trash_grace_days",
+      ].sort(),
+    );
+    for (const key of SETTING_KEYS.filter(isSensitive)) expect(SETTING_PLACEMENT[key].consequence, key).toBeTruthy();
+  });
+
+  it("labels every source", () => {
+    const projects = [{ id: "p1", name: "jet" }];
+    expect(sourceLabel({ source: "built_in" }, projects)).toBe("Default");
+    expect(sourceLabel({ source: "plane" }, projects)).toBe("Set for this Plane");
+    expect(sourceLabel({ source: "project", projectId: "p1" }, projects)).toBe("Set for jet");
+    expect(sourceLabel({ source: "project", projectId: "p2" }, projects)).toBe("Set for this Project");
+    expect(sourceLabel({ source: "conversation", conversationId: "c" }, projects)).toBe("Set for one task");
+    expect(storedAt({ source: "plane" }, { type: "plane" })).toBe(true);
+    expect(storedAt({ source: "built_in" }, { type: "plane" })).toBe(false);
+    expect(storedAt({ source: "plane" }, { type: "project", projectId: "p1" })).toBe(false);
+    expect(storedAt({ source: "project", projectId: "p1" }, { type: "project", projectId: "p1" })).toBe(true);
+  });
+
+  it("counts text in UTF-8 bytes at the 2,048 limit", () => {
+    expect(MAX_SETTING_TEXT_BYTES).toBe(2048);
+    expect(utf8Bytes("é")).toBe(2);
+    expect(utf8Bytes("🚀")).toBe(4);
+    expect(textFits("git.branch_prefix", "é".repeat(1024))).toBe(true);
+    expect(textFits("git.branch_prefix", `${"é".repeat(1024)}a`)).toBe(false);
+    expect(textFits("git.branch_prefix", "🚀".repeat(512))).toBe(true);
+    expect(textFits("git.branch_prefix", "a\nb")).toBe(false);
+    expect(textFits("git.message_instructions", "a\n\tb")).toBe(true);
+    expect(textFits("git.message_instructions", "a\u001bb")).toBe(false);
+    expect(textFits("git.branch_prefix", "")).toBe(true);
+  });
+
+  it("describes values in plain words", () => {
+    expect(valueText("energy.constrained", { type: "flag", value: true })).toBe("On");
+    expect(valueText("retention.trash_grace_days", { type: "count", value: 30 })).toBe("30 days");
+    expect(valueText("git.branch_prefix", { type: "text", value: "" })).toBe("Empty");
+    expect(valueText("git.branch_prefix", { type: "undisplayable" })).toBe("A value that can't be displayed");
+    expect(valueText("git.branch_prefix", null)).toBe("The inherited value");
+    const plane = { key: "energy.constrained" as const, value: { type: "flag" as const, value: true }, source: { source: "plane" as const } };
+    expect(sameSetting(plane, { ...plane })).toBe(true);
+    expect(sameSetting(plane, { ...plane, source: { source: "built_in" } })).toBe(false);
   });
 });

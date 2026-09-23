@@ -7,8 +7,8 @@ use jet_protocol::{
 };
 use uuid::Uuid;
 
-#[cfg(test)]
 use jet_protocol::{SettingKey, SettingScope};
+use serde::Deserialize;
 
 use super::{
     errors::{PublicError, ToPublic},
@@ -379,6 +379,18 @@ pub(crate) struct EventSummary {
     pub(crate) conversation_id: Option<Uuid>,
     pub(crate) run_id: Option<Uuid>,
     pub(crate) timeline: Vec<TimelineProjection>,
+    /// Which Setting a `setting.changed` or `setting.cleared` event names.
+    /// Only the Settings change watcher reads it; the main feed never does.
+    pub(crate) setting: Option<SettingEventProjection>,
+}
+
+/// The identifiers of a Setting event. The value never crosses: the
+/// Settings window reloads the section instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SettingEventProjection {
+    pub(crate) key: &'static str,
+    pub(crate) scope: &'static str,
+    pub(crate) project_id: Option<Uuid>,
 }
 
 pub(crate) struct TimelineProjection {
@@ -403,9 +415,10 @@ pub(crate) struct ApprovalProjection {
 }
 
 impl EventSummary {
-    fn from_event(event: Event) -> Self {
+    pub(crate) fn from_event(event: Event) -> Self {
         let timeline = timeline_projection(&event);
         let notification = super::notifications::NotificationSignal::from_event(&event);
+        let setting = setting_projection(&event);
         Self {
             notification,
             sequence: event.sequence,
@@ -414,8 +427,34 @@ impl EventSummary {
             conversation_id: event.conversation_id,
             run_id: event.run_id,
             timeline,
+            setting,
         }
     }
+}
+
+/// ASVS 1.5.2: typed, allowlisted identifiers only. The payload is parsed
+/// into `SettingKey`/`SettingScope`, extra fields (including the value) are
+/// ignored, and anything else projects to nothing.
+fn setting_projection(event: &Event) -> Option<SettingEventProjection> {
+    #[derive(serde::Deserialize)]
+    struct Named {
+        key: SettingKey,
+        scope: SettingScope,
+    }
+    if !matches!(event.kind.as_str(), "setting.changed" | "setting.cleared") {
+        return None;
+    }
+    let named = Named::deserialize(&event.payload).ok()?;
+    let (scope, project_id) = match named.scope {
+        SettingScope::Plane => ("plane", None),
+        SettingScope::Project { project_id } => ("project", Some(project_id)),
+        SettingScope::Conversation { .. } => ("conversation", None),
+    };
+    Some(SettingEventProjection {
+        key: super::settings::key_spelling(named.key),
+        scope,
+        project_id,
+    })
 }
 
 fn timeline_projection(event: &Event) -> Vec<TimelineProjection> {
@@ -738,7 +777,7 @@ fn safe_event_kind(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod unit_tests {
+pub(crate) mod unit_tests {
     use std::time::Duration;
 
     use jet_protocol::{
@@ -965,7 +1004,7 @@ mod unit_tests {
         server.await.unwrap();
     }
 
-    async fn accept(
+    pub(crate) async fn accept(
         listener: &UnixListener,
         expected_client_id: Uuid,
     ) -> (FrameReader<OwnedReadHalf>, FrameWriter<OwnedWriteHalf>) {
@@ -1000,14 +1039,16 @@ mod unit_tests {
         (reader, writer)
     }
 
-    async fn next_message(reader: &mut FrameReader<OwnedReadHalf>) -> (StreamId, ClientMessage) {
+    pub(crate) async fn next_message(
+        reader: &mut FrameReader<OwnedReadHalf>,
+    ) -> (StreamId, ClientMessage) {
         let Frame::Control { stream_id, payload } = reader.read().await.unwrap() else {
             panic!("expected a control-frame request");
         };
         (stream_id, decode_control(&payload).unwrap())
     }
 
-    async fn reply(
+    pub(crate) async fn reply(
         writer: &mut FrameWriter<OwnedWriteHalf>,
         stream: StreamId,
         message: ServerMessage,
@@ -1021,7 +1062,7 @@ mod unit_tests {
             .unwrap();
     }
 
-    fn request_id(message: &ClientMessage) -> u64 {
+    pub(crate) fn request_id(message: &ClientMessage) -> u64 {
         match message {
             ClientMessage::Query { id, .. } | ClientMessage::Command { id, .. } => *id,
             other => panic!("unexpected request: {other:?}"),
@@ -1052,7 +1093,7 @@ mod unit_tests {
         ));
     }
 
-    fn status(cursor: u64) -> PlaneStatus {
+    pub(crate) fn status(cursor: u64) -> PlaneStatus {
         PlaneStatus {
             cursor: Some(cursor),
             plane_id: Uuid::from_u128(1),

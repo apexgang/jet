@@ -295,6 +295,7 @@ impl From<NativeUpdate> for PlaneUpdate {
                 conversation_id,
                 run_id,
                 timeline,
+                setting: _,
             }) => Self::Event {
                 sequence: sequence.to_string(),
                 recorded_at_unix_ms: recorded_at_unix_ms.to_string(),
@@ -493,7 +494,7 @@ pub(crate) fn close_plane_feed(bridge: &JetBridge, feed_id: String) -> Result<()
     bridge.feeds.close(feed)
 }
 
-fn parse_resume_cursor(after: Option<String>) -> Result<Option<u64>, PublicError> {
+pub(crate) fn parse_resume_cursor(after: Option<String>) -> Result<Option<u64>, PublicError> {
     after
         .map(|value| {
             if value.is_empty()

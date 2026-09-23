@@ -44,6 +44,7 @@ pub(crate) struct JetBridge {
     run_control: run_control::RunControlState,
     work_panel: work_panel::WorkPanelState,
     settings_window: settings_window::SettingsWindowState,
+    settings: settings::SettingsState,
     preferences: preferences::PreferencesState,
 }
 
@@ -88,6 +89,7 @@ impl JetBridge {
             run_control: run_control::RunControlState::default(),
             work_panel: work_panel::WorkPanelState::default(),
             settings_window: settings_window::SettingsWindowState::new(app_data_directory),
+            settings: settings::SettingsState::default(),
             preferences: preferences::PreferencesState::new(app_data_directory),
         }
     }
@@ -138,6 +140,7 @@ impl JetBridge {
     /// The Settings window was destroyed: drop what only it could receive.
     pub(crate) fn settings_window_closed(&self) {
         self.settings_window.window_destroyed();
+        self.settings.window_destroyed();
     }
 
     /// Records what a failure proves about its Plane and names the Plane.
@@ -490,13 +493,18 @@ mod manifest_tests {
     ];
 
     /// Commands only the Settings window may call.
-    const SETTINGS_ONLY: [&str; 6] = [
+    const SETTINGS_ONLY: [&str; 11] = [
         "watch_settings_navigation",
         "remember_settings_pane",
         "close_settings",
         "set_desktop_preferences",
         "load_notification_settings",
         "set_notification_settings",
+        "load_settings",
+        "prepare_setting_change",
+        "apply_settings_change",
+        "load_work_context",
+        "watch_settings_changes",
     ];
 
     /// `generate_handler!` names, the `build.rs` manifest and the union of

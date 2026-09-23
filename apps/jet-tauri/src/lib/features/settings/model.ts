@@ -1,5 +1,6 @@
 import type { PublicError } from "$lib/jet/bridge";
 import { LOCAL_PLANE } from "$lib/jet/planes";
+import type { ResolvedSetting, SettingKeyId, SettingSource, SettingValue, SettingsReview } from "$lib/jet/settings";
 import type { SettingsPane, SettingsSection, SettingsTarget } from "$lib/jet/settings-window";
 
 /** Pane and section titles, in design-language order (docs/design-language.md 216-222). */
@@ -69,6 +70,14 @@ export const LANDED_SECTIONS: ReadonlySet<SettingsSection> = new Set<SettingsSec
   "restoration",
   "local_service",
   "planes",
+  "projects",
+  "delivery",
+  "schedules",
+  "retention",
+  "execution",
+  "permissions",
+  "storage",
+  "audit",
 ]);
 
 export function paneOf(section: SettingsSection): SettingsPane {
@@ -148,7 +157,7 @@ const PREFIX_TARGETS: ReadonlyArray<[string, SettingsPane, SettingsSection]> = [
 ];
 
 /** Panes whose settings belong to one Plane; a link carries that Plane. */
-const PLANE_PANES: ReadonlySet<SettingsPane> = new Set<SettingsPane>(["agents", "work", "safety"]);
+export const PLANE_PANES: ReadonlySet<SettingsPane> = new Set<SettingsPane>(["agents", "work", "safety"]);
 
 /**
  * The Settings location that can fix an error, or null. Exact code first,
@@ -224,6 +233,12 @@ export function recoveryFor(state: SectionState<unknown>): RecoveryAction {
   }
 }
 
+/** The same state with only the issues one sub-section renders. */
+export function withIssues<T>(state: SectionState<T>, sections: readonly string[]): SectionState<T> {
+  if (state.kind !== "ready") return state;
+  return { ...state, issues: state.issues.filter((issue) => sections.includes(issue.section)) };
+}
+
 /** The data a state can still show, fresh or not. */
 export function sectionData<T>(state: SectionState<T>): T | null {
   switch (state.kind) {
@@ -238,3 +253,336 @@ export function sectionData<T>(state: SectionState<T>): T | null {
       return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Setting rows (wave 3.2 §7.2)
+// ---------------------------------------------------------------------------
+
+export type ScopeKind = "plane" | "project" | "conversation";
+
+export type SettingPlacement = {
+  /** Mirrors the shell's `SETTING_SCOPES` (jet-core `CATALOG`). */
+  scopes: readonly ScopeKind[];
+  pane: SettingsPane;
+  section: SettingsSection;
+  label: string;
+  help: string;
+  /** Sensitive rows confirm through a review dialog before applying. */
+  sensitive: boolean;
+  /** What confirming means, shown in the review dialog of sensitive rows. */
+  consequence?: string;
+  unit?: "MiB" | "days" | "tasks";
+};
+
+const PLANE: readonly ScopeKind[] = ["plane"];
+const PROJECT: readonly ScopeKind[] = ["project", "conversation"];
+const EVERY: readonly ScopeKind[] = ["plane", "project", "conversation"];
+
+const PUSH_DISCLOSURE = "Jet will push to the task's branch without forcing.";
+
+/**
+ * Where each Setting is shown. Placement never comes from a snapshot: a
+ * Plane resolves every key its minor names, at every scope.
+ */
+export const SETTING_PLACEMENT: Readonly<Record<SettingKeyId, SettingPlacement>> = {
+  "storage.disposable_mib": {
+    scopes: PLANE, pane: "safety", section: "storage", sensitive: false, unit: "MiB",
+    label: "Space for disposable files",
+    help: "Caches and build output Jet may delete to free space.",
+  },
+  "artifact.max_mib": {
+    scopes: PLANE, pane: "safety", section: "storage", sensitive: false, unit: "MiB",
+    label: "Largest single artifact",
+    help: "Bigger outputs from a task aren't kept.",
+  },
+  "artifact.run_mib": {
+    scopes: PLANE, pane: "safety", section: "storage", sensitive: false, unit: "MiB",
+    label: "New artifacts per run",
+    help: "The most new output one run may keep.",
+  },
+  "energy.concurrency": {
+    scopes: PLANE, pane: "safety", section: "execution", sensitive: false, unit: "tasks",
+    label: "Maximum tasks at once",
+    help: "Tasks beyond this wait their turn.",
+  },
+  "energy.low_power_concurrency": {
+    scopes: PLANE, pane: "safety", section: "execution", sensitive: false, unit: "tasks",
+    label: "Tasks at once on battery or low power",
+    help: "Used when this Plane runs on battery or saves power.",
+  },
+  "energy.constrained": {
+    scopes: PLANE, pane: "safety", section: "execution", sensitive: false,
+    label: "Always use the low-power limit",
+    help: "Keeps the lower limit even on mains power.",
+  },
+  "energy.foreground_override": {
+    scopes: PLANE, pane: "safety", section: "execution", sensitive: true,
+    label: "Let my own tasks run above the limit",
+    help: "Tasks you start yourself don't wait for the limit.",
+    consequence: "Tasks you start can use more of this Plane's power and memory than the limit allows.",
+  },
+  "craft.developer_mode": {
+    scopes: PLANE, pane: "safety", section: "permissions", sensitive: true,
+    label: "Allow local and source-built Harness packages",
+    help: "Needed to add a Craft from files on this Plane.",
+    consequence: "Local packages aren't verified. They run with your user account's permissions.",
+  },
+  "security.audit_retention_days": {
+    scopes: PLANE, pane: "safety", section: "audit", sensitive: true, unit: "days",
+    label: "Keep the security audit for",
+    help: "This Plane sets the shortest period it allows.",
+    consequence: "Audit records older than this are deleted and can't be reviewed later.",
+  },
+  "retention.trash_grace_days": {
+    scopes: PLANE, pane: "work", section: "retention", sensitive: true, unit: "days",
+    label: "Keep tasks in Jet Trash for",
+    help: "After this, tasks in Jet Trash are deleted for good.",
+    consequence: "Tasks already in Jet Trash longer than this are deleted for good.",
+  },
+  "git.message_instructions": {
+    scopes: PLANE, pane: "work", section: "delivery", sensitive: false,
+    label: "Instructions for commit messages and pull requests",
+    help: "Jet follows these when it writes Git text on this Plane.",
+  },
+  "utility.git_text": {
+    scopes: PLANE, pane: "work", section: "delivery", sensitive: false,
+    label: "Write commit messages and pull request text automatically",
+    help: "Uses the account chosen for naming and summaries.",
+  },
+  "git.auto_commit": {
+    scopes: PROJECT, pane: "work", section: "projects", sensitive: false,
+    label: "Commit changes after each turn",
+    help: "Jet commits a task's changes when a turn succeeds.",
+  },
+  "git.auto_branch": {
+    scopes: PROJECT, pane: "work", section: "projects", sensitive: false,
+    label: "Create a branch for each task",
+    help: "Created after the first successful turn.",
+  },
+  "git.auto_push": {
+    scopes: PROJECT, pane: "work", section: "projects", sensitive: true,
+    label: "Push each task's branch",
+    help: PUSH_DISCLOSURE,
+    consequence: `${PUSH_DISCLOSURE} Anyone with access to the remote sees the changes.`,
+  },
+  "git.auto_draft_pull_request": {
+    scopes: PROJECT, pane: "work", section: "projects", sensitive: true,
+    label: "Open a draft pull request for each task",
+    help: `${PUSH_DISCLOSURE} The draft stays up to date on GitHub.`,
+    consequence: `${PUSH_DISCLOSURE} A draft pull request is created on GitHub and kept up to date.`,
+  },
+  "git.branch_prefix": {
+    scopes: PROJECT, pane: "work", section: "projects", sensitive: false,
+    label: "Branch name prefix",
+    help: "Starts the name of each branch Jet proposes.",
+  },
+  "utility.automatic_naming": {
+    scopes: EVERY, pane: "agents", section: "utility", sensitive: false,
+    label: "Name tasks automatically",
+    help: "Jet suggests a name after the first turn.",
+  },
+  "utility.account_binding": {
+    scopes: PLANE, pane: "agents", section: "utility", sensitive: true,
+    label: "Account used for naming and summaries",
+    help: "Jet uses this account for short background work.",
+    consequence: "Changing the account doesn't carry over permission to send task content.",
+  },
+  "utility.content_consent": {
+    scopes: PLANE, pane: "agents", section: "utility", sensitive: true,
+    label: "Allow Jet to send task content for naming and summaries",
+    help: "Applies to the chosen account only.",
+    consequence: "Task content is sent to the chosen account's provider.",
+  },
+  "utility.autodelete_compilation": {
+    scopes: PLANE, pane: "agents", section: "utility", sensitive: false,
+    label: "Help write auto-delete rules",
+    help: "Turns a description into an auto-delete rule for you to review.",
+  },
+  "review.automatic": {
+    scopes: PLANE, pane: "work", section: "reviews", sensitive: true,
+    label: "Let Jet review eligible approval requests",
+    help: "Requests Jet can't decide still wait for you.",
+    consequence: "Jet decides eligible approval requests for you on this Plane.",
+  },
+  "review.account_binding": {
+    scopes: PLANE, pane: "work", section: "reviews", sensitive: true,
+    label: "Reviewer account",
+    help: "Empty uses each run's own account.",
+    consequence: "Changing the reviewer doesn't carry over permission to send task content.",
+  },
+  "review.cross_provider_consent": {
+    scopes: PLANE, pane: "work", section: "reviews", sensitive: true,
+    label: "Allow Jet to send task content to the reviewer account",
+    help: "Applies to the chosen reviewer only.",
+    consequence: "Task content is sent to the reviewer account's provider.",
+  },
+};
+
+export const SETTING_KEYS = Object.keys(SETTING_PLACEMENT) as SettingKeyId[];
+
+/** Keys a Plane-scope section renders, in table order. */
+export function planeRows(section: SettingsSection): SettingKeyId[] {
+  return SETTING_KEYS.filter((key) => {
+    const placement = SETTING_PLACEMENT[key];
+    return placement.section === section && placement.scopes.includes("plane");
+  });
+}
+
+/** Keys the Projects section renders at Project scope. */
+export function projectRows(): SettingKeyId[] {
+  const order: SettingKeyId[] = [
+    "git.auto_commit",
+    "git.auto_branch",
+    "git.auto_push",
+    "git.auto_draft_pull_request",
+    "git.branch_prefix",
+    "utility.automatic_naming",
+  ];
+  return order.filter((key) => SETTING_PLACEMENT[key].scopes.includes("project"));
+}
+
+/** The value shape a key holds (jet-core `CATALOG` built-ins). */
+export function valueKind(key: SettingKeyId): "flag" | "count" | "text" {
+  if (SETTING_PLACEMENT[key].unit) return "count";
+  switch (key) {
+    case "git.branch_prefix":
+    case "git.message_instructions":
+    case "utility.account_binding":
+    case "utility.content_consent":
+    case "review.account_binding":
+    case "review.cross_provider_consent":
+      return "text";
+    default:
+      return "flag";
+  }
+}
+
+export function isSensitive(key: SettingKeyId): boolean {
+  return SETTING_PLACEMENT[key].sensitive;
+}
+
+/** Where a value comes from, in the vocabulary of the row's badge. */
+export function sourceLabel(source: SettingSource, projects: ReadonlyArray<{ id: string; name: string }>): string {
+  switch (source.source) {
+    case "built_in":
+      return "Default";
+    case "plane":
+      return "Set for this Plane";
+    case "project": {
+      const project = projects.find((candidate) => candidate.id === source.projectId);
+      return `Set for ${project?.name ?? "this Project"}`;
+    }
+    case "conversation":
+      return "Set for one task";
+  }
+}
+
+/** Whether the row's own scope stores the value, so it can be cleared. */
+export function storedAt(source: SettingSource, scope: SettingRowScope): boolean {
+  return scope.type === "plane"
+    ? source.source === "plane"
+    : source.source === "project" && source.projectId === scope.projectId;
+}
+
+export type SettingRowScope = { type: "plane" } | { type: "project"; projectId: string };
+
+/** "Use default" on the Plane, "Use Plane value" on a Project. */
+export function clearLabel(key: SettingKeyId, scope: SettingRowScope): string {
+  return scope.type === "project" && SETTING_PLACEMENT[key].scopes.includes("plane") ? "Use Plane value" : "Use default";
+}
+
+export const MAX_SETTING_TEXT_BYTES = 2_048;
+
+/** UTF-8 length, the unit the Plane limits text by. */
+export function utf8Bytes(text: string): number {
+  return new TextEncoder().encode(text).length;
+}
+
+/** Text a row may send: the Plane's limit, and no control characters. */
+export function textFits(key: SettingKeyId, text: string): boolean {
+  if (utf8Bytes(text) > MAX_SETTING_TEXT_BYTES) return false;
+  const lineBreaksAllowed = key === "git.message_instructions";
+  for (const character of text) {
+    const code = character.codePointAt(0) ?? 0;
+    const control = code < 0x20 || (code >= 0x7f && code <= 0x9f);
+    if (control && !(lineBreaksAllowed && (character === "\n" || character === "\t"))) return false;
+  }
+  return true;
+}
+
+/** Plain-language value for reviews and "changed elsewhere" copy. */
+export function valueText(key: SettingKeyId, value: SettingValue | null): string {
+  if (value === null) return "The inherited value";
+  switch (value.type) {
+    case "flag":
+      return value.value ? "On" : "Off";
+    case "count": {
+      const unit = SETTING_PLACEMENT[key].unit;
+      return unit ? `${value.value.toLocaleString("en-US")} ${unit}` : value.value.toLocaleString("en-US");
+    }
+    case "text":
+      return value.value === "" ? "Empty" : value.value;
+    case "undisplayable":
+      return "A value that can't be displayed";
+  }
+}
+
+export function sameValue(left: SettingValue, right: SettingValue): boolean {
+  if (left.type === "undisplayable" || right.type === "undisplayable") return left.type === right.type;
+  return left.type === right.type && left.value === right.value;
+}
+
+export function sameSetting(left: ResolvedSetting, right: ResolvedSetting): boolean {
+  return (
+    left.key === right.key &&
+    sameValue(left.value, right.value) &&
+    JSON.stringify(left.source) === JSON.stringify(right.source)
+  );
+}
+
+/** One row's editing state (wave 3.2 §7.2). */
+export type SettingRowState =
+  | { kind: "idle" }
+  | { kind: "editing"; draft: SettingValue }
+  | { kind: "checking"; draft: SettingValue | null }
+  | { kind: "confirm"; review: SettingsReview }
+  | { kind: "applying"; reviewId: string }
+  | { kind: "uncertain"; reviewId: string; error: PublicError }
+  | { kind: "changed_elsewhere"; current: ResolvedSetting; draft: SettingValue | null }
+  | { kind: "refused"; error: PublicError };
+
+/** Inline copy for refusals the Plane explains by code. */
+export function refusalText(error: PublicError): string {
+  switch (error.code) {
+    case "setting.value_below_minimum":
+      return "That's below the minimum this Plane allows.";
+    case "setting.value_too_long":
+      return "That's longer than this Plane allows.";
+    case "security.audit_degraded":
+      return "Changes to trust and policy are paused until this Plane's audit is repaired (Safety › Audit).";
+    case "recovery.read_only":
+      return "This Plane is in read-only recovery. Changes wait until it's restored.";
+    case "protocol.feature_unavailable":
+    case "protocol.unsupported_minor":
+      return "This setting needs a newer Jet service on this Plane.";
+    default:
+      return error.message;
+  }
+}
+
+/**
+ * Schedules have no read or write path in `jet-client` yet (backend
+ * dependency `jet_client_schedules`). The destination says so; it never
+ * shows a fake list.
+ */
+export const schedulesAvailability = {
+  kind: "dependency",
+  dependency: "jet_client_schedules",
+  summary: "Scheduled tasks can't be shown in this version of Jet for Linux yet.",
+  detail:
+    "Your Jet service supports daily schedules, but this app can't read or change them yet. Existing schedules keep running on their Plane.",
+} as const;
+
+/** Every Plane pane ends with this disclosure. */
+export const LAST_WRITER_WINS =
+  "Jet applies the most recent change. If another device changes the same setting at the same time, the later change wins.";
