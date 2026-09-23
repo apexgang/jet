@@ -1,5 +1,6 @@
 <script lang="ts">
   import NotificationSettings from "$lib/features/notifications/NotificationSettings.svelte";
+  import PlanesPanel from "$lib/features/planes/PlanesPanel.svelte";
   import type { DesktopSession } from "./session.svelte";
   import SetupPanel from "$lib/features/setup/SetupPanel.svelte";
 
@@ -50,6 +51,8 @@
   <NotificationSettings />
 {:else if session.sidebarSelection === "project"}
   <SetupPanel {session} />
+{:else if session.sidebarSelection === "planes"}
+  <PlanesPanel {session} />
 {:else}
   <section class="conversation" aria-label="Current task">
     <header class="conversation-header">
@@ -88,10 +91,18 @@
 
     <div class="timeline" aria-live="polite" aria-busy={session.conversationBusy}>
       <div class="timeline-inner">
-        {#if session.conversationFreshness === "cached"}
+        {#if session.selectionUnavailable}
+          <div class="notice" role="status">
+            <strong>{session.selectedPlaneLabel} is unavailable</strong>
+            <p>{session.selectedPlaneLabel} is unavailable. This task will load when it reconnects.</p>
+            <button class="text-button" onclick={() => session.openPlanes({ planeId: session.selectedPlaneId, focus: "detail" })}>
+              Open Planes
+            </button>
+          </div>
+        {:else if session.conversationFreshness === "cached"}
           <div class="notice">
             <strong>Showing cached state</strong>
-            <p>Jet will refresh this Conversation after the local Plane reconnects.</p>
+            <p>Jet will refresh this Conversation after {session.selectedPlaneLabel} reconnects.</p>
           </div>
         {/if}
 

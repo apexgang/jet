@@ -2,6 +2,8 @@
   import type { DesktopSession, SidebarDestination } from "./session.svelte";
 
   let { session }: { session: DesktopSession } = $props();
+  const catalog = $derived(session.catalog);
+  const planes = $derived(session.planes);
 
   function selected(destination: SidebarDestination): boolean {
     return session.sidebarSelection === destination;
@@ -25,29 +27,54 @@
         <kbd>⌘K</kbd>
       </button>
       {#if selected("search")}
-        <form class="sidebar-search" onsubmit={(event) => { event.preventDefault(); void session.search(); }}>
+        <form class="sidebar-search" onsubmit={(event) => { event.preventDefault(); void catalog.search(); }}>
           <label for="conversation-search">Search tasks</label>
           <div>
             <input
               id="conversation-search"
-              bind:value={session.searchText}
+              bind:value={catalog.searchText}
               maxlength="256"
               placeholder="Name, path, or branch"
             />
-            <button type="submit" disabled={session.searchBusy || !session.searchText.trim()}>
-              {session.searchBusy ? "Searching" : "Search"}
+            <button type="submit" disabled={catalog.searching || !catalog.searchText.trim()}>
+              {catalog.searching ? "Searching" : "Search"}
             </button>
           </div>
         </form>
-        {#if session.searchResult}
+        {#if catalog.searchState}
           <div class="search-results" aria-live="polite">
-            {#each session.searchResult.hits as hit (`${hit.conversationId}-${hit.sequence}`)}
-              <button onclick={() => session.openSearchHit(hit.conversationId, session.searchResult?.planeId)}>
-                <span>{hit.excerpt}</span>
-                <small>{hit.field}</small>
-              </button>
-            {:else}
-              <p>No matching tasks</p>
+            {#each catalog.groups as group (group.planeId)}
+              <section class="search-group" aria-label={`Results on ${group.label}`}>
+                {#if group.showHeading}
+                  <button
+                    class="search-group-heading"
+                    aria-pressed={catalog.searchFilter === group.planeId}
+                    title={catalog.searchFilter === group.planeId ? "Show every Plane" : `Show only ${group.label}`}
+                    onclick={() => catalog.toggleSearchFilter(group.planeId)}
+                  >
+                    {group.label}
+                  </button>
+                {/if}
+                {#if group.state.kind === "ready"}
+                  {#each group.state.result.hits as hit (`${hit.conversationId}-${hit.sequence}`)}
+                    <button onclick={() => session.openSearchHit(hit.conversationId, group.planeId)}>
+                      <span>{hit.excerpt}</span>
+                      <small>{hit.field}</small>
+                    </button>
+                  {/each}
+                {/if}
+                {#if group.text}
+                  <p>
+                    {group.text}
+                    {#if group.state.kind !== "ready" && group.state.kind !== "searching"}
+                      <code>{group.state.error.code}</code>
+                    {/if}
+                  </p>
+                {/if}
+                {#if group.indexing}
+                  <p>Still indexing on {group.label}</p>
+                {/if}
+              </section>
             {/each}
           </div>
         {/if}
@@ -79,33 +106,58 @@
 
     <div class="nav-group">
       <p class="nav-heading">Recent</p>
-      {#each session.conversations as conversation (`${conversation.planeId}:${conversation.id}`)}
+      {#each catalog.visibleRows as conversation (`${conversation.planeId}:${conversation.id}`)}
         <button
           class:active={selected("conversation") && session.isSelected(conversation.planeId, conversation.id)}
           class="conversation-link"
           aria-current={session.isSelected(conversation.planeId, conversation.id) ? "page" : undefined}
+          aria-label={planes.multiple ? `${conversation.title}, on ${conversation.planeLabel}` : undefined}
           onclick={() => session.openConversation(conversation.id, true, conversation.planeId)}
         >
-          {conversation.title}
+          <span class="conversation-link-title">{conversation.title}</span>
+          {#if planes.multiple}
+            <small aria-hidden="true">{conversation.planeLabel}</small>
+          {/if}
         </button>
       {:else}
-        <p class="empty-nav">
-          {session.conversationFreshness === "live" ? "No tasks yet" : "Tasks unavailable"}
-        </p>
+        {#if catalog.empty}
+          <p class="empty-nav">No tasks yet</p>
+        {:else if catalog.statusRows.length === 0}
+          <p class="empty-nav">{planes.error ? "Tasks unavailable" : "Loading tasks…"}</p>
+        {/if}
       {/each}
-      {#if session.nextConversationPage}
-        <button class="load-more" disabled={session.conversationBusy} onclick={() => session.loadMoreConversations()}>
-          {session.conversationBusy ? "Loading" : "Show more"}
-        </button>
+      {#if catalog.hasMore}
+        <button class="load-more" onclick={() => catalog.showMore()}>Show more</button>
       {/if}
+      {#each catalog.statusRows as row (row.planeId)}
+        <div class="empty-nav recent-status" role={row.kind === "loading" ? undefined : "status"}>
+          <p>
+            {row.text}
+            {#if row.error}<code>{row.error.code}</code>{/if}
+          </p>
+          {#if row.action === "retry"}
+            <button class="text-button" onclick={() => session.retryPlane(row.planeId)}>Retry</button>
+          {:else if row.action === "open_planes"}
+            <button class="text-button" onclick={() => session.openPlanes({ planeId: row.planeId, focus: "detail" })}>
+              Open Planes
+            </button>
+          {/if}
+        </div>
+      {/each}
     </div>
 
     <div class="nav-group secondary-actions">
       <button class:active={selected("schedules")} onclick={() => session.select("schedules")}>
         Schedules
       </button>
-      <button class:active={selected("planes")} onclick={() => session.select("planes")}>
-        Planes
+      <button class:active={selected("planes")} onclick={() => session.openPlanes()}>
+        <span>Planes</span>
+        {#if planes.attentionCount > 0}
+          <span
+            class="attention-count"
+            aria-label={`${planes.attentionCount} ${planes.attentionCount === 1 ? "Plane needs" : "Planes need"} attention`}
+          >{planes.attentionCount}</span>
+        {/if}
       </button>
       <button class:active={selected("settings")} onclick={() => session.select("settings")}>
         Settings
@@ -114,10 +166,24 @@
   </nav>
 
   <div class="plane-status" aria-live="polite">
-    <span class:online={session.connectionState === "online"} class="status-dot"></span>
-    <span>
-      <strong>{session.localPlaneLabel}</strong>
-      <small>{session.connectionLabel}</small>
-    </span>
+    {#if planes.aggregate}
+      {@const aggregate = planes.aggregate}
+      <span
+        class:online={aggregate.tone === "ok"}
+        class:failed={aggregate.tone === "danger"}
+        class="status-dot"
+        aria-hidden="true"
+      ></span>
+      <span>
+        <strong>{aggregate.title}</strong>
+        <small>{aggregate.detail}</small>
+      </span>
+    {:else}
+      <span class:online={session.connectionState === "online"} class="status-dot" aria-hidden="true"></span>
+      <span>
+        <strong>{session.localPlaneLabel}</strong>
+        <small>{session.connectionLabel}</small>
+      </span>
+    {/if}
   </div>
 </aside>

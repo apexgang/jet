@@ -290,7 +290,7 @@
             <div><dt>Checkpoint</dt><dd>{session.workPanel?.scope ?? "Unavailable"}</dd></div>
             <div><dt>Latest Turn</dt><dd>{session.workPanel?.latestTurn ?? "—"}</dd></div>
             <div><dt>Changed files</dt><dd>{session.workPanel?.totalFiles ?? 0}</dd></div>
-            <div><dt>Cursor</dt><dd>{session.conversationDetail?.cursor ?? session.conversationCursor}</dd></div>
+            <div><dt>Cursor</dt><dd>{session.conversationDetail?.cursor ?? session.selectedPlaneCursor ?? "Unknown"}</dd></div>
             <div><dt>Revision</dt><dd>{session.selectedRun?.revision ?? "Unavailable"}</dd></div>
           </dl>
 
