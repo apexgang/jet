@@ -16,6 +16,7 @@ import {
   type SettingValue,
   type WorkContext,
 } from "$lib/jet/settings";
+import { AutodeleteSession, type RulesBlock } from "$lib/features/autodelete/session.svelte";
 import { SystemSession } from "$lib/features/system/session.svelte";
 import { AgentsSession } from "./agents-session.svelte";
 import { ExtensionsSession } from "./extensions-session.svelte";
@@ -131,8 +132,16 @@ export class SettingsSession {
     planeStateStale: () => void this.loadPlane(),
     mutationBlock: () => this.agentsBlock(),
   });
-  /** Safety › Versions, Storage health and Diagnostics of the same Plane. */
-  readonly system = new SystemSession();
+  /**
+   * Safety › Versions, Storage health and Diagnostics of the same Plane. A
+   * new Jet service start it detects invalidates the auto-delete rules too.
+   */
+  readonly system = new SystemSession(Date.now, () => this.autodelete.planeRestarted());
+  /** Work › Retention › Auto-delete of the same Plane. */
+  readonly autodelete = new AutodeleteSession({
+    mutationBlock: () => this.autodeleteBlock(),
+    observe: (error) => this.system.observe(error),
+  });
 
   private started = false;
   private disposed = false;
@@ -177,6 +186,7 @@ export class SettingsSession {
     this.agents.select(planeId);
     this.extensions.select(planeId);
     this.system.select(planeId);
+    this.autodelete.select(planeId);
     void this.reload();
   }
 
@@ -189,6 +199,7 @@ export class SettingsSession {
     this.agents.dispose();
     this.extensions.dispose();
     this.system.dispose();
+    this.autodelete.dispose();
   }
 
   /** Reloads every section, then watches from the lowest section cursor. */
@@ -202,6 +213,7 @@ export class SettingsSession {
       this.agents.reloadIfLoaded(),
       this.extensions.reloadLoaded(),
       this.system.reloadIfLoaded(),
+      this.autodelete.reloadIfLoaded(),
     ]);
     if (generation !== this.generation) return;
     const projects = sectionData(this.work)?.projects ?? [];
@@ -322,6 +334,16 @@ export class SettingsSession {
     if (this.watch === "stale" || this.watch === "failed") return "stale";
     const view = this.agents.view;
     if (view.kind !== "ready" || view.freshness === "stale") return "stale";
+    return null;
+  }
+
+  /**
+   * Whether auto-delete rule changes may start: read-only Recovery and a
+   * stale watcher pause them. The rules view checks its own freshness.
+   */
+  autodeleteBlock(): RulesBlock {
+    if (this.planeState?.recovery === "read_only") return "read_only";
+    if (this.watch === "stale" || this.watch === "failed") return "stale";
     return null;
   }
 
@@ -611,6 +633,7 @@ export class SettingsSession {
     this.agents.markStale();
     this.extensions.markStale();
     this.system.markStale();
+    this.autodelete.markStale();
   }
 
   /** Handles one watcher message. Exposed for the session tests. */
@@ -635,7 +658,10 @@ export class SettingsSession {
     switch (change.kind) {
       case "setting.changed":
       case "setting.cleared":
-        if (change.settingScope === "plane") void this.system.settingChanged(change.settingKey);
+        if (change.settingScope === "plane") {
+          void this.system.settingChanged(change.settingKey);
+          void this.autodelete.settingChanged(change.settingKey);
+        }
         await this.settingChanged(change);
         return;
       case "account.bound":

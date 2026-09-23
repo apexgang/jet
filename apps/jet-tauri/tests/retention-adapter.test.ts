@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 
 import {
+  changeAutodeleteRule,
+  loadAutodeleteRules,
   loadTrash,
   loadTrashStatus,
   previewTrash,
@@ -45,6 +47,24 @@ describe("Jet Trash IPC adapter", () => {
       ["trash_conversation", { planeId: REMOTE, reviewId: "review-1", mode: "delete_everywhere", acknowledgeStop: true }],
       ["trash_conversation", { planeId: "local", reviewId: "review-2", mode: "forget", acknowledgeStop: false }],
       ["restore_conversation", { planeId: REMOTE, conversationId: "c1" }],
+    ]);
+  });
+
+  it("sends auto-delete reads and changes with snake_case change fields", async () => {
+    const calls = record();
+    await loadAutodeleteRules(REMOTE);
+    await changeAutodeleteRule(REMOTE, { kind: "compile", rule_id: null, prompt: "Old tasks" });
+    await changeAutodeleteRule("local", { kind: "set_inactive_days", rule_id: "r1", inactive_days: 30 });
+    await changeAutodeleteRule("local", { kind: "approve", token_id: "t1" });
+    await changeAutodeleteRule("local", { kind: "authorize_everywhere", token_id: "t2" });
+    await changeAutodeleteRule("local", { kind: "delete", rule_id: "r1" });
+    expect(calls).toEqual([
+      ["load_autodelete_rules", { planeId: REMOTE }],
+      ["change_autodelete_rule", { planeId: REMOTE, change: { kind: "compile", rule_id: null, prompt: "Old tasks" } }],
+      ["change_autodelete_rule", { planeId: "local", change: { kind: "set_inactive_days", rule_id: "r1", inactive_days: 30 } }],
+      ["change_autodelete_rule", { planeId: "local", change: { kind: "approve", token_id: "t1" } }],
+      ["change_autodelete_rule", { planeId: "local", change: { kind: "authorize_everywhere", token_id: "t2" } }],
+      ["change_autodelete_rule", { planeId: "local", change: { kind: "delete", rule_id: "r1" } }],
     ]);
   });
 });

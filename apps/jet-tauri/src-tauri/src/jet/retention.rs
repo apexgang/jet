@@ -9,6 +9,8 @@
 //! after the review is never stopped unseen. Restore Command IDs are keyed by
 //! the Trash entry the shell itself read, so a task trashed again gets a new
 //! ID and can never replay an old receipt.
+//!
+//! Auto-delete rules for the Settings window live in [`autodelete`].
 use std::{collections::HashMap, sync::Mutex};
 
 use jet_client::{Client, ClientError};
@@ -27,6 +29,8 @@ use super::{
     planes::{PlaneBinding, PlaneId},
     JetBridge,
 };
+
+pub(crate) mod autodelete;
 
 /// `conversation_trash` answers at most this many entries, soonest expiry
 /// first, without a cursor (`jet-store/src/conversation/trash.rs`).
@@ -48,6 +52,8 @@ pub(crate) struct RetentionState {
     /// shell last read. Restore IDs are keyed from here, never from input.
     trash_index: Mutex<HashMap<PlaneId, HashMap<Uuid, i64>>>,
     restores: Mutex<HashMap<RestoreKey, Uuid>>,
+    /// Auto-delete rule slots, approval tokens and attribution.
+    rules: autodelete::RuleState,
 }
 
 impl Default for RetentionState {
@@ -56,6 +62,7 @@ impl Default for RetentionState {
             trash_reviews: Ledger::new(RETENTION_CODES),
             trash_index: Mutex::new(HashMap::new()),
             restores: Mutex::new(HashMap::new()),
+            rules: autodelete::RuleState::default(),
         }
     }
 }
@@ -249,7 +256,7 @@ pub(crate) struct ConversationNameView {
     title: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProtectionView {
     kind: &'static str,
@@ -829,19 +836,23 @@ fn check_preview(preview: &RetentionPreview, id: Uuid) -> Result<(), PublicError
 /// `retention.trash_grace_days` for the disclosure, on the same connection.
 /// A failed read only leaves the number out.
 async fn grace_days(connection: &Client) -> Option<u32> {
-    let key = SettingKey::RetentionTrashGraceDays;
-    let snapshot = connection
+    match plane_setting(connection, SettingKey::RetentionTrashGraceDays).await? {
+        SettingValue::Count(days) => Some(days),
+        SettingValue::Flag(_) | SettingValue::Text(_) => None,
+    }
+}
+
+/// One Plane-scope Setting's resolved value, read for a disclosure on the
+/// same connection. Any failure leaves it out.
+async fn plane_setting(connection: &Client, key: SettingKey) -> Option<SettingValue> {
+    connection
         .settings(SettingScope::Plane, SettingSelection::Key { key })
         .await
-        .ok()?;
-    snapshot
+        .ok()?
         .settings
-        .iter()
+        .into_iter()
         .find(|setting| setting.key == key)
-        .and_then(|setting| match setting.value {
-            SettingValue::Count(days) => Some(days),
-            SettingValue::Flag(_) | SettingValue::Text(_) => None,
-        })
+        .map(|setting| setting.value)
 }
 
 fn plane_label(bridge: &JetBridge, plane: PlaneId) -> String {

@@ -1,17 +1,37 @@
 <script lang="ts">
+  import { untrack } from "svelte";
+
+  import AutodeleteRules from "$lib/features/autodelete/AutodeleteRules.svelte";
   import SchedulesDestination from "$lib/features/schedules/SchedulesDestination.svelte";
   import type { SettingsSnapshot, WorkContext } from "$lib/jet/settings";
+  import type { SettingsSection } from "$lib/jet/settings-window";
   import ConsentRow from "./ConsentRow.svelte";
   import SectionState from "./SectionState.svelte";
   import SettingRow from "./SettingRow.svelte";
   import { planeRows, projectRows, sectionData, withIssues } from "./model";
   import type { SettingsSession } from "./session.svelte";
 
-  let { session }: { session: SettingsSession } = $props();
+  let {
+    session,
+    onopen,
+  }: {
+    session: SettingsSession;
+    /** Shows another Settings section in this window. */
+    onopen: (section: SettingsSection) => void;
+  } = $props();
+
+  // Auto-delete rules load once per Plane selection while this pane is shown.
+  $effect(() => {
+    void session.autodelete.selection;
+    untrack(() => void session.autodelete.ensureLoaded());
+  });
 
   const projects = $derived(sectionData(session.work)?.projects ?? []);
   const projectsState = $derived(withIssues(session.work, ["projects"]));
-  const autodeleteState = $derived(withIssues(session.work, ["autodelete"]));
+  const graceDays = $derived.by(() => {
+    const value = session.setting("retention.trash_grace_days", { type: "plane" })?.value;
+    return value?.type === "count" ? value.value : null;
+  });
   const accountsIssue = $derived(
     session.work.kind === "ready" ? session.work.issues.find((issue) => issue.section === "accounts") : undefined,
   );
@@ -145,24 +165,7 @@
     {/snippet}
   </SectionState>
   <h3>Auto-delete</h3>
-  <SectionState
-    state={autodeleteState}
-    title="Auto-delete"
-    planeLabel={session.planeLabel}
-    onretry={() => void session.showCurrent(null)}
-  >
-    {#snippet children(context: WorkContext)}
-      {#if context.autodelete}
-        <p>
-          {context.autodelete.count === 0
-            ? "No auto-delete rules"
-            : context.autodelete.count === 1
-              ? "1 auto-delete rule"
-              : `${context.autodelete.count.toLocaleString("en-US")} auto-delete rules`}
-        </p>
-      {/if}
-    {/snippet}
-  </SectionState>
+  <AutodeleteRules autodelete={session.autodelete} planeLabel={session.planeLabel} {graceDays} {onopen} />
 </section>
 
 <style>

@@ -98,3 +98,81 @@ export const trashConversation = (planeId: PlaneId, reviewId: string, mode: Tras
 /** Restores the task's Trash entry as last read natively. */
 export const restoreConversation = (planeId: PlaneId, conversationId: string) =>
   invoke<RestoreOutcome>("restore_conversation", { planeId, conversationId });
+
+// ---------------------------------------------------------------------------
+// Auto-delete rules (Settings window)
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a rule stands. Tokens are opaque native handles for exactly the
+ * interpretation shown; the webview never sends the days it approves.
+ */
+export type RuleState =
+  | { kind: "compiling" }
+  | { kind: "refused"; reason: string }
+  | { kind: "draft"; inactiveDays: number; approveToken: string }
+  | {
+      kind: "approved";
+      inactiveDays: number;
+      approvedAtUnixMs: string;
+      /** Set only for a Forget rule: authorizes delete everywhere. */
+      everywhereToken: string | null;
+    };
+
+export type AutodeleteCandidate = {
+  conversationId: string;
+  lastActiveAtUnixMs: string;
+  /** Empty: the next sweep would move the task to Jet Trash. */
+  protections: ProtectionView[];
+};
+
+export type AutodeleteRule = {
+  ruleId: string;
+  /** The rule's wording; empty when the Plane's text couldn't be shown. */
+  prompt: string;
+  state: RuleState;
+  scope: "forget" | "everywhere";
+  createdAtUnixMs: string;
+  updatedAtUnixMs: string;
+  candidates: AutodeleteCandidate[];
+  /** The Plane listed its limit of 32; more tasks may match. */
+  candidatesCapped: boolean;
+  /** Present only when the Utility model drafted the interpretation shown. */
+  attribution: { provider: string; model: string } | null;
+};
+
+/** One change to one rule. Inner fields are snake_case, like other input enums. */
+export type AutodeleteChange =
+  | { kind: "compile"; rule_id: string | null; prompt: string }
+  | { kind: "set_inactive_days"; rule_id: string; inactive_days: number }
+  | { kind: "approve"; token_id: string }
+  | { kind: "authorize_everywhere"; token_id: string }
+  | { kind: "delete"; rule_id: string };
+
+/** A change Jet sent but couldn't confirm. `ruleId` is null for a new rule. */
+export type PendingRuleChange = { ruleId: string | null; change: AutodeleteChange };
+
+export type AutodeleteRules = {
+  planeId: PlaneId;
+  planeLabel: string;
+  cursor: string;
+  /** Null when the Plane's Setting couldn't be read. */
+  drafting: { enabled: boolean | null; bindingConfigured: boolean | null };
+  rules: AutodeleteRule[];
+  pending: PendingRuleChange[];
+};
+
+export type RuleChangeOutcome =
+  | { kind: "recorded"; rule: AutodeleteRule }
+  | { kind: "deleted"; ruleId: string }
+  | { kind: "refused"; error: PublicError };
+
+export const loadAutodeleteRules = (planeId: PlaneId) =>
+  invoke<AutodeleteRules>("load_autodelete_rules", { planeId });
+
+/**
+ * Sends one change. A rejection means Jet couldn't confirm it: "Try again"
+ * resends the same change, which the shell sends under the same Command ID.
+ */
+export const changeAutodeleteRule = (planeId: PlaneId, change: AutodeleteChange) =>
+  invoke<RuleChangeOutcome>("change_autodelete_rule", { planeId, change });

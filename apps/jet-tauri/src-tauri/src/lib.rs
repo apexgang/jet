@@ -110,6 +110,8 @@ pub fn run() {
             jet::retention::preview_trash,
             jet::retention::trash_conversation,
             jet::retention::restore_conversation,
+            jet::retention::autodelete::load_autodelete_rules,
+            jet::retention::autodelete::change_autodelete_rule,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Jet desktop application");

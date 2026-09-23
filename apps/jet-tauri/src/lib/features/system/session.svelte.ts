@@ -42,9 +42,12 @@ export class SystemSession {
   /** The Plane's daemon start count from the last health read. */
   private daemonStarts: string | null = null;
   private now: () => number;
+  /** Told when a health read shows the Plane's Jet service started again. */
+  private onRestart: () => void;
 
-  constructor(now: () => number = Date.now) {
+  constructor(now: () => number = Date.now, onRestart: () => void = () => undefined) {
     this.now = now;
+    this.onRestart = onRestart;
   }
 
   /** Shows one Plane. Nothing is loaded until the Safety pane asks. */
@@ -156,6 +159,7 @@ export class SystemSession {
   private restarted(): number {
     this.generation++;
     this.collect = { kind: "idle" };
+    this.onRestart();
     return this.generation;
   }
 }

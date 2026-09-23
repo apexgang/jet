@@ -163,7 +163,7 @@
         {#if pane === "agents"}
           <AgentsPane {session} onopenpermissions={() => void go("safety", "permissions")} />
         {:else if pane === "work"}
-          <WorkPane {session} />
+          <WorkPane {session} onopen={(section) => void go(paneOf(section), section)} />
         {:else}
           <SafetyPane {session} onopen={(section) => void go(paneOf(section), section)} />
         {/if}

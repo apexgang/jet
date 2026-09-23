@@ -339,7 +339,9 @@ fn lifecycle_name(lifecycle: RunLifecycle) -> &'static str {
     }
 }
 
-fn safe_code(value: &str) -> Option<String> {
+/// A daemon code that may cross to the webview: dotted lowercase ASCII,
+/// at most 96 bytes.
+pub(crate) fn safe_code(value: &str) -> Option<String> {
     (value.len() <= 96
         && !value.is_empty()
         && value.bytes().all(|byte| {
