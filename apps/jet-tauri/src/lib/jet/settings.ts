@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 
 import type { AutoContinuePolicyView, CraftPreview, CredentialSourceKind } from "./agents";
 import type { PublicError } from "./bridge";
+import type { ExtensionReviewPreview } from "./extensions";
 import type { PlaneId } from "./planes";
 
 /** The 24 Setting spellings (`jet-protocol/src/setting.rs`). */
@@ -81,7 +82,8 @@ export type ReviewSubject =
   | { kind: "auto_continue"; bindingId: string; before: AutoContinuePolicyView; after: AutoContinuePolicyView }
   | { kind: "unbind"; bindingId: string; label: string; provider: string; credentialSource: CredentialSourceKind }
   | { kind: "disable_craft"; craftId: string; harnessNames: string[]; mode: "wait" | "force" }
-  | { kind: "install_craft"; preview: CraftPreview };
+  | { kind: "install_craft"; preview: CraftPreview }
+  | { kind: "change_extension"; preview: ExtensionReviewPreview };
 
 export type SettingsReview = {
   reviewId: string;
@@ -98,7 +100,8 @@ export type AppliedDetail =
   | { kind: "auto_continue" }
   | { kind: "account_unbound"; cleanup: "none" | "keyring_item_remains" | "helper" | "session" }
   | { kind: "craft_disabled" }
-  | { kind: "craft_install_queued"; craftId: string; version: string };
+  | { kind: "craft_install_queued"; craftId: string; version: string }
+  | { kind: "extension_change_queued"; changeId: string };
 
 export type SettingChangePreparation =
   | { kind: "review"; review: SettingsReview }

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings-window",
-  "description": "Device preferences, navigation, read-only Plane summaries, and reviewed Plane setting, Account binding, Auto-continue and Craft changes for the Settings window. Local Craft files are chosen in a native dialog opened by the shell. It never receives Plane feeds or agent content, and grants no pairing, Plane, dialog, or window-core permission.",
+  "description": "Device preferences, navigation, read-only Plane summaries, and reviewed Plane setting, Account binding, Auto-continue, Craft and Harness extension changes for the Settings window. Local Craft files are chosen in a native dialog opened by the shell. It never receives Plane feeds or agent content, and grants no pairing, Plane, dialog, or window-core permission.",
   "windows": [
     "settings"
   ],
@@ -31,6 +31,10 @@
     "allow-prepare-craft-disable",
     "allow-pick-local-craft-source",
     "allow-discover-craft",
+    "allow-load-extension-catalog",
+    "allow-inspect-extension",
+    "allow-prepare-extension-change",
+    "allow-load-extension-change",
     "allow-list-planes",
     "allow-load-plane-detail"
   ]

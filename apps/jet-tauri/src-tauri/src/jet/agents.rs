@@ -728,7 +728,7 @@ fn parse_binding(value: &str) -> Result<Uuid, PublicError> {
     }
 }
 
-fn validate_craft_id(craft_id: &str) -> Result<(), PublicError> {
+pub(crate) fn validate_craft_id(craft_id: &str) -> Result<(), PublicError> {
     let valid = !craft_id.is_empty()
         && craft_id.len() <= MAX_CRAFT_ID_BYTES
         && craft_id.bytes().all(|byte| {

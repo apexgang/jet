@@ -5,6 +5,7 @@ mod conversations;
 pub(crate) mod delivery;
 pub(crate) mod enrollment;
 mod errors;
+pub(crate) mod extensions;
 mod identity;
 mod keystore;
 #[cfg(test)]
@@ -47,6 +48,7 @@ pub(crate) struct JetBridge {
     settings_window: settings_window::SettingsWindowState,
     settings: settings::SettingsState,
     agents: agents::AgentsState,
+    extensions: extensions::ExtensionsState,
     preferences: preferences::PreferencesState,
 }
 
@@ -93,6 +95,7 @@ impl JetBridge {
             settings_window: settings_window::SettingsWindowState::new(app_data_directory),
             settings: settings::SettingsState::default(),
             agents: agents::AgentsState::default(),
+            extensions: extensions::ExtensionsState::default(),
             preferences: preferences::PreferencesState::new(app_data_directory),
         }
     }
@@ -496,7 +499,7 @@ mod manifest_tests {
     ];
 
     /// Commands only the Settings window may call.
-    const SETTINGS_ONLY: [&str; 20] = [
+    const SETTINGS_ONLY: [&str; 24] = [
         "watch_settings_navigation",
         "remember_settings_pane",
         "close_settings",
@@ -517,6 +520,10 @@ mod manifest_tests {
         "prepare_craft_disable",
         "pick_local_craft_source",
         "discover_craft",
+        "load_extension_catalog",
+        "inspect_extension",
+        "prepare_extension_change",
+        "load_extension_change",
     ];
 
     /// `generate_handler!` names, the `build.rs` manifest and the union of

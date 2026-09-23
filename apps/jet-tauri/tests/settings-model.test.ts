@@ -86,8 +86,9 @@ describe("settings targets", () => {
     expect(resolveTarget({ pane: "general" })).toEqual({ pane: "general", section: null });
     expect(resolveTarget({ pane: "agents", section: "accounts" })).toEqual({ pane: "agents", section: "accounts" });
     expect(resolveTarget({ pane: "work", section: "reviews" })).toEqual({ pane: "work", section: "reviews" });
-    // Extensions land in slice 4: the pane opens at its top.
-    expect(resolveTarget({ pane: "agents", section: "extensions" })).toEqual({ pane: "agents", section: null });
+    expect(resolveTarget({ pane: "agents", section: "extensions" })).toEqual({ pane: "agents", section: "extensions" });
+    // A section of another pane opens the pane at its top.
+    expect(resolveTarget({ pane: "work", section: "extensions" })).toEqual({ pane: "work", section: null });
     expect(resolveTarget({ pane: "safety", section: "audit", plane_id: REMOTE })).toEqual({ pane: "safety", section: "audit" });
     expect(resolveTarget({ pane: "general", section: "planes" })).toEqual({ pane: "general", section: null });
     expect(sectionHeadingId("local_service")).toBe("section-local-service");
@@ -145,12 +146,25 @@ describe("settings targets", () => {
     }
     expect(landedTarget("accounts", "local")).toEqual({ pane: "agents", section: "accounts", plane_id: "local" });
     expect(landedTarget("reviews")).toEqual({ pane: "work", section: "reviews" });
-    expect(landedTarget("extensions", "local")).toBeNull();
+  });
+
+  it("maps slice 4 extension codes to Agents › Extensions by prefix", () => {
+    for (const code of ["extension.refused", "extension.change_pending", "extension.preview_stale", "extension.unavailable"]) {
+      expect(settingsTargetForError(error(code)), code).toEqual({ pane: "agents", section: "extensions" });
+      expect(settingsTargetForError(error(code, "conflict", false, REMOTE)), code).toEqual({
+        pane: "agents",
+        section: "extensions",
+        plane_id: REMOTE,
+      });
+    }
+    // An exact code wins over the prefix.
+    expect(settingsTargetForError(error("craft.disabled"))).toEqual({ pane: "agents", section: "harnesses" });
+    expect(landedTarget("extensions", "local")).toEqual({ pane: "agents", section: "extensions", plane_id: "local" });
   });
 
   it("returns null for unknown codes and for sections that have not landed", () => {
     expect(settingsTargetForError(error("conversation.not_found"))).toBeNull();
-    for (const code of ["extension.refused", "extension.change_pending", "recovery.read_only"]) {
+    for (const code of ["recovery.read_only", "extensions.catalog_unreadable"]) {
       expect(settingsTargetForError(error(code)), code).toBeNull();
     }
   });

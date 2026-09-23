@@ -98,6 +98,8 @@ export function receiptText(detail: AppliedDetail): string {
       return "Disabled. Jet can't turn it back on for this Plane.";
     case "craft_install_queued":
       return `Installing ${detail.craftId} ${detail.version}. It appears here when it's ready.`;
+    case "extension_change_queued":
+      return "Change queued. New tasks wait until it finishes.";
     case "setting":
       return "Saved.";
   }

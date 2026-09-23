@@ -69,6 +69,7 @@ export const LANDED_SECTIONS: ReadonlySet<SettingsSection> = new Set<SettingsSec
   "notifications",
   "restoration",
   "harnesses",
+  "extensions",
   "accounts",
   "usage",
   "utility",

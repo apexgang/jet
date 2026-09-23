@@ -17,6 +17,7 @@ import {
   type WorkContext,
 } from "$lib/jet/settings";
 import { AgentsSession } from "./agents-session.svelte";
+import { ExtensionsSession } from "./extensions-session.svelte";
 import {
   isSensitive,
   sameSetting,
@@ -113,6 +114,10 @@ export class SettingsSession {
     },
     planeStateStale: () => void this.loadPlane(),
   });
+  /** Agents › Extensions of the same Plane. */
+  readonly extensions = new ExtensionsSession({
+    planeStateStale: () => void this.loadPlane(),
+  });
 
   private started = false;
   /** Bumped on every Plane switch; every completion checks it. */
@@ -143,6 +148,7 @@ export class SettingsSession {
     this.usageNewer = false;
     this.schedulesChanged = false;
     this.agents.select(planeId);
+    this.extensions.select(planeId);
     void this.reload();
   }
 
@@ -152,6 +158,7 @@ export class SettingsSession {
     this.watchGeneration++;
     this.watch = "idle";
     this.agents.dispose();
+    this.extensions.dispose();
   }
 
   /** Reloads every section, then watches from the lowest section cursor. */

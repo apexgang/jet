@@ -19,8 +19,9 @@ use std::{
 use jet_client::{Client, ClientError};
 use jet_protocol::{
     AutoContinuePolicy, AutoContinueTarget, CapabilityObservation, CraftDisableMode,
-    CraftInstallationConfirmation, CredentialSource, PlaneStatus, RecoveryState, ResolvedSetting,
-    SecurityState, SettingKey, SettingScope, SettingSelection, SettingSource, SettingValue,
+    CraftInstallationConfirmation, CredentialSource, ExtensionConfirmation, PlaneStatus,
+    RecoveryState, ResolvedSetting, SecurityState, SettingKey, SettingScope, SettingSelection,
+    SettingSource, SettingValue,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, State};
@@ -32,6 +33,7 @@ use super::{
     channels::parse_resume_cursor,
     client::{NativeUpdate, PlaneClient},
     errors::PublicError,
+    extensions::ExtensionReviewView,
     planes,
     planes::{PlaneBinding, PlaneId},
     setup::project_name,
@@ -451,6 +453,9 @@ pub(crate) enum ReviewSubject {
     InstallCraft {
         preview: CraftPreviewView,
     },
+    ChangeExtension {
+        preview: ExtensionReviewView,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -498,6 +503,11 @@ pub(crate) enum AppliedDetail {
     CraftInstallQueued {
         craft_id: String,
         version: String,
+    },
+    /// The Craft applies it once running tasks finish; its status is read
+    /// with `load_extension_change`.
+    ExtensionChangeQueued {
+        change_id: String,
     },
 }
 
@@ -596,6 +606,11 @@ pub(crate) enum SettingsAction {
     InstallCraft {
         confirmation: CraftInstallationConfirmation,
     },
+    /// The exact inspection `jetd` and the Craft revalidate. Built natively
+    /// from an inspection grant; the webview only saw its facts.
+    ChangeExtension {
+        confirmation: ExtensionConfirmation,
+    },
 }
 
 impl SettingsAction {
@@ -609,6 +624,7 @@ impl SettingsAction {
             Self::Unbind { binding_id } => Slot::Account(*binding_id),
             Self::DisableCraft { craft_id, .. } => Slot::Craft(craft_id.clone()),
             Self::InstallCraft { .. } => Slot::CraftInstall,
+            Self::ChangeExtension { .. } => Slot::Extension,
         }
     }
 
@@ -630,6 +646,8 @@ pub(crate) enum Slot {
     Account(Uuid),
     Craft(String),
     CraftInstall,
+    /// Every extension change of a Plane: one uncertain change at a time.
+    Extension,
 }
 
 /// The value the user saw when the review was admitted. Checked again on
@@ -1031,7 +1049,7 @@ pub(crate) async fn apply_settings_change(
     apply_settings_change_for(&bridge, &plane_id, &review_id).await
 }
 
-async fn apply_settings_change_for(
+pub(crate) async fn apply_settings_change_for(
     bridge: &JetBridge,
     plane_id: &str,
     review_id: &str,
@@ -1102,7 +1120,20 @@ async fn send_reviewed(
     }
     bridge.settings.mark_attempted(id)?;
     let receipt = match send_action(&connection, id, &action).await {
-        Ok(Some(detail)) => SettingsReceipt::Applied { detail },
+        Ok(Some(detail)) => {
+            if let (
+                SettingsAction::ChangeExtension { confirmation },
+                AppliedDetail::ExtensionChangeQueued { change_id },
+            ) = (&action, &detail)
+            {
+                if let Ok(change_id) = Uuid::parse_str(change_id) {
+                    bridge
+                        .extensions
+                        .record_change(binding, change_id, confirmation);
+                }
+            }
+            SettingsReceipt::Applied { detail }
+        }
         // The daemon answered, but not with what was asked: a definite
         // outcome the shell refuses to trust.
         Ok(None) => SettingsReceipt::Refused {
@@ -1200,6 +1231,15 @@ async fn send_action(
                     craft_id: agents::bounded_label(&queued.craft_id, 128, "Craft"),
                     version: agents::bounded_label(&queued.version, 64, "Unknown"),
                 }
+            })
+        }
+        SettingsAction::ChangeExtension { confirmation } => {
+            let change_id = connection
+                .change_extension(id, confirmation.clone())
+                .await
+                .map_err(Box::new)?;
+            Some(AppliedDetail::ExtensionChangeQueued {
+                change_id: change_id.to_string(),
             })
         }
     })
@@ -1574,6 +1614,19 @@ fn request_limit() -> PublicError {
         "settings.request_limit",
         "Too many changes are waiting for an answer. Retry or finish them first.",
     )
+}
+
+#[cfg(test)]
+impl SettingsState {
+    /// The actions of every admitted review, for tests in other modules.
+    pub(crate) fn reviews_for_test(&self) -> Vec<SettingsAction> {
+        self.reviews
+            .lock()
+            .unwrap()
+            .values()
+            .map(|review| review.action.clone())
+            .collect()
+    }
 }
 
 #[cfg(test)]

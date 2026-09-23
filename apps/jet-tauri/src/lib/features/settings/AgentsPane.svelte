@@ -9,6 +9,7 @@
   import ConsentRow from "./ConsentRow.svelte";
   import CraftDisableDialog from "./CraftDisableDialog.svelte";
   import CraftInstallDialog from "./CraftInstallDialog.svelte";
+  import ExtensionsSection from "./ExtensionsSection.svelte";
   import { sectionData, withIssues } from "./model";
   import OperationStatus from "./OperationStatus.svelte";
   import SectionState from "./SectionState.svelte";
@@ -136,6 +137,8 @@
     {/snippet}
   </SectionState>
 </section>
+
+<ExtensionsSection {session} />
 
 <section class="settings-section" aria-labelledby="section-accounts">
   <h2 id="section-accounts" tabindex="-1">Accounts</h2>
