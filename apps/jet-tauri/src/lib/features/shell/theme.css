@@ -22,10 +22,26 @@
   --success: #59ca82;
   --warning: #efa94d;
   --danger: #f06a6a;
+  /* Status colors for small text, which needs 4.5:1 on the background. */
+  --success-text: #59ca82;
+  --danger-text: #ff9a9a;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Read by screen readers, not shown. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 html,
@@ -186,7 +202,7 @@ textarea:focus-visible {
 }
 
 .status-text.success {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .status-text.warning {
@@ -391,7 +407,7 @@ textarea:focus-visible {
 }
 
 .text-button.danger {
-  color: #ff9a9a;
+  color: var(--danger-text);
 }
 
 .danger-button {
@@ -769,7 +785,8 @@ textarea:focus-visible {
   width: auto;
   min-height: 0;
   padding: 2px 0;
-  color: var(--accent);
+  /* 11px text on the sidebar needs the stronger accent for 4.5:1. */
+  color: var(--accent-strong);
   font-size: 11px;
 }
 
@@ -1880,6 +1897,8 @@ kbd {
     --quiet: #52616a;
     --warning: #805000;
     --danger: #a12c35;
+    --success-text: #1d6f3f;
+    --danger-text: #a12c35;
   }
 
   .notice {
@@ -1892,7 +1911,9 @@ kbd {
     background: #fff1f2;
   }
 
-  .send-button {
+  .send-button,
+  .primary-button {
+    /* Dark text on the light accent is 4.1:1; white is 4.6:1. */
     color: #ffffff;
   }
 }

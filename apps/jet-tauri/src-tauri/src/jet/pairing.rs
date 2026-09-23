@@ -689,10 +689,14 @@ pub(crate) async fn load_pairing(
     bridge: State<'_, JetBridge>,
     plane_id: String,
 ) -> Result<PairingView, PublicError> {
-    let (binding, client) = bridge.plane(Some(&plane_id))?;
+    load(&bridge, &plane_id).await
+}
+
+pub(crate) async fn load(bridge: &JetBridge, plane_id: &str) -> Result<PairingView, PublicError> {
+    let (binding, client) = bridge.plane(Some(plane_id))?;
     async {
         let connection = connect(&client).await?;
-        read_pairing(&bridge, binding.plane, &connection).await
+        read_pairing(bridge, binding.plane, &connection).await
     }
     .await
     .map_err(|error| bridge.settle(&binding, error))
@@ -704,8 +708,16 @@ pub(crate) async fn set_pairing_gate(
     plane_id: String,
     gate: String,
 ) -> Result<PairingView, PublicError> {
-    let gate = Gate::parse(&gate)?;
-    let (binding, client) = bridge.plane(Some(&plane_id))?;
+    set_gate(&bridge, &plane_id, &gate).await
+}
+
+pub(crate) async fn set_gate(
+    bridge: &JetBridge,
+    plane_id: &str,
+    gate: &str,
+) -> Result<PairingView, PublicError> {
+    let gate = Gate::parse(gate)?;
+    let (binding, client) = bridge.plane(Some(plane_id))?;
     async {
         let key = (binding.plane, gate);
         let id = command_id(&bridge.pairing.gate_commands, key)?;
@@ -715,7 +727,7 @@ pub(crate) async fn set_pairing_gate(
         if outcome.map_err(|error| client_error(&error))? != gate.wire() {
             return Err(PublicError::internal());
         }
-        read_pairing(&bridge, binding.plane, &connection).await
+        read_pairing(bridge, binding.plane, &connection).await
     }
     .await
     .map_err(|error| bridge.settle(&binding, error))
@@ -729,7 +741,14 @@ pub(crate) async fn open_pairing_offer(
     bridge: State<'_, JetBridge>,
     plane_id: String,
 ) -> Result<OfferDisclosureView, PublicError> {
-    let (binding, client) = bridge.plane(Some(&plane_id))?;
+    open_offer(&bridge, &plane_id).await
+}
+
+pub(crate) async fn open_offer(
+    bridge: &JetBridge,
+    plane_id: &str,
+) -> Result<OfferDisclosureView, PublicError> {
+    let (binding, client) = bridge.plane(Some(plane_id))?;
     async {
         let id = command_id(&bridge.pairing.offer_commands, binding.plane)?;
         let connection = connect(&client).await?;
@@ -767,9 +786,18 @@ pub(crate) async fn confirm_pairing_request(
     offer_id: String,
     authentication_string: String,
 ) -> Result<PendingPairingView, PublicError> {
-    let offer_id = parse_id(&offer_id)?;
-    let typed = self::authentication_string(&authentication_string)?;
-    let (binding, client) = bridge.plane(Some(&plane_id))?;
+    confirm(&bridge, &plane_id, &offer_id, &authentication_string).await
+}
+
+pub(crate) async fn confirm(
+    bridge: &JetBridge,
+    plane_id: &str,
+    offer_id: &str,
+    authentication_string: &str,
+) -> Result<PendingPairingView, PublicError> {
+    let offer_id = parse_id(offer_id)?;
+    let typed = self::authentication_string(authentication_string)?;
+    let (binding, client) = bridge.plane(Some(plane_id))?;
     async {
         let key = ConfirmKey {
             plane: binding.plane,
@@ -798,9 +826,18 @@ pub(crate) async fn prepare_paired_client_change(
     client_id: String,
     change: String,
 ) -> Result<ClientChangeReview, PublicError> {
-    let target = parse_id(&client_id)?;
-    let change = Change::parse(&change)?;
-    let (binding, client) = bridge.plane(Some(&plane_id))?;
+    prepare_change(&bridge, &plane_id, &client_id, &change).await
+}
+
+pub(crate) async fn prepare_change(
+    bridge: &JetBridge,
+    plane_id: &str,
+    client_id: &str,
+    change: &str,
+) -> Result<ClientChangeReview, PublicError> {
+    let target = parse_id(client_id)?;
+    let change = Change::parse(change)?;
+    let (binding, client) = bridge.plane(Some(plane_id))?;
     async {
         let connection = connect(&client).await?;
         let snapshot = connection

@@ -6,6 +6,8 @@ pub(crate) mod enrollment;
 mod errors;
 mod identity;
 mod keystore;
+#[cfg(test)]
+mod live_e2e;
 pub(crate) mod notifications;
 pub(crate) mod pairing;
 mod pairing_transcript;

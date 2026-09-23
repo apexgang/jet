@@ -219,11 +219,9 @@
         {@const pending = wizard.enrollment}
         {@const deadline = confirmBy(pending.confirmByUnixMs)}
         <div class="add-plane-copy">
-          <p
-            class="add-plane-string"
-            aria-label={`Confirmation code ${spokenDigits(pending.authenticationString)}`}
-          >
-            {pending.authenticationString}
+          <p class="add-plane-string">
+            <span aria-hidden="true">{pending.authenticationString}</span>
+            <span class="visually-hidden">Confirmation code {spokenDigits(pending.authenticationString)}</span>
           </p>
           <p>On {pending.destination}, type this code to confirm. Then choose Finish here.</p>
           <p class="add-plane-muted">Plane identity: <code>{pending.planeIdentity}</code></p>
@@ -291,6 +289,11 @@
   .add-plane-copy {
     display: grid;
     gap: 8px;
+  }
+
+  /* The shared removal-dialog layout pulls inputs up under their label. */
+  .add-plane-dialog input:not([type="checkbox"]) {
+    margin-top: 0;
   }
 
   .add-plane-muted {

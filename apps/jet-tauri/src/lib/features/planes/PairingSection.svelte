@@ -173,7 +173,10 @@
     {:else if offer.kind === "shown"}
       <div class="pairing-offer">
         <div aria-live="polite">
-          <p class="pairing-code" aria-label={`Pairing code ${spokenDigits(offer.code)}`}>{offer.code}</p>
+          <p class="pairing-code">
+            <span aria-hidden="true">{offer.code}</span>
+            <span class="visually-hidden">Pairing code {spokenDigits(offer.code)}</span>
+          </p>
         </div>
         <p>
           On the other computer, open Jet, add a Plane with this computer's SSH address, then type this code. It works
@@ -369,7 +372,7 @@
   }
 
   .pairing-notice {
-    color: var(--success);
+    color: var(--success-text);
   }
 
   .pairing-callout,
@@ -465,8 +468,8 @@
   }
 
   .pairing-access.enabled {
-    border-color: var(--success);
-    color: var(--success);
+    border-color: var(--success-text);
+    color: var(--success-text);
   }
 
   .pairing-section [aria-disabled="true"] {
