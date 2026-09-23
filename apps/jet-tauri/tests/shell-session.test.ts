@@ -85,6 +85,7 @@ type Options = {
   rows?: ConversationRow[];
   /** Holds the first Recent page until the test releases it. */
   holdRecent?: boolean;
+  setup?: SetupSnapshot;
 };
 
 function harness(options: Options = {}) {
@@ -120,7 +121,7 @@ function harness(options: Options = {}) {
         if (options.reopenLastTask === "fails") throw failure("internal", "preferences.read_failed");
         return { reopenLastTask: options.reopenLastTask ?? true };
       case "load_setup":
-        return SETUP;
+        return options.setup ?? SETUP;
       case "load_conversations": {
         await held;
         const page: ConversationPage = { planeId: "local", cursor: "40", conversations: rows, nextPage: null };
@@ -308,7 +309,7 @@ describe("Run-control confirmation", () => {
     harness();
     const session = new DesktopSession();
     withActiveRun(session);
-    session.workPanelPresented = false;
+    session.hideWorkPanel();
     session.selectedWorkPanel = "delivery";
     const invoker = { focus: vi.fn(), isConnected: true };
 
@@ -328,7 +329,7 @@ describe("Run-control confirmation", () => {
   it("does nothing when the control is not available", () => {
     harness();
     const session = new DesktopSession();
-    session.workPanelPresented = false;
+    session.hideWorkPanel();
     session.requestRunControl("stop_run", { focus: vi.fn() });
     expect(session.runControlConfirmation).toBeNull();
     expect(session.workPanelPresented).toBe(false);
@@ -432,7 +433,7 @@ describe("handleShortcut", () => {
     session.handleShortcut(keyEvent({ key: "F9", code: "F9" }).event, linux);
     expect(session.sidebarPresented).toBe(true);
 
-    session.workPanelPresented = false;
+    session.hideWorkPanel();
     session.handleShortcut(keyEvent({ key: "3", code: "Digit3", ctrlKey: true, altKey: true }).event, linux);
     expect(session.selectedWorkPanel).toBe("terminal");
     expect(session.workPanelPresented).toBe(true);
@@ -454,5 +455,206 @@ describe("handleShortcut", () => {
     const { event, prevented } = keyEvent({ key: "q", code: "KeyQ", ctrlKey: true });
     session.handleShortcut(event, linux);
     expect(prevented.value).toBe(false);
+  });
+});
+
+describe("work panel presentation (layout model)", () => {
+  const closing = ["new-task", "search", "project", "schedules", "trash", "planes"] as const;
+
+  it("maps every destination in a regular window", () => {
+    harness();
+    const session = new DesktopSession();
+    for (const destination of closing) {
+      session.select("conversation");
+      expect(session.panel.presentation).toEqual({ kind: "column" });
+      session.select(destination);
+      expect(session.panel).toEqual({ mode: "regular", columnPreference: false, presentation: { kind: "hidden" } });
+    }
+    session.select("attention");
+    expect(session.panel.presentation).toEqual({ kind: "column" });
+    expect(session.selectedWorkPanel).toBe("run");
+  });
+
+  it("never opens the overlay on its own in a compact window (D12)", () => {
+    harness();
+    const session = new DesktopSession();
+    session.setLayoutMode("compact");
+    expect(session.workPanelPresented).toBe(false);
+    session.select("conversation");
+    expect(session.workPanelPresented).toBe(false);
+    for (const destination of closing) {
+      session.select(destination);
+      expect(session.workPanelPresented).toBe(false);
+    }
+    // Compact destinations leave the regular-window preference alone.
+    expect(session.panel.columnPreference).toBe(true);
+    session.setLayoutMode("regular");
+    expect(session.panel.presentation).toEqual({ kind: "column" });
+  });
+
+  it("Needs attention opens the overlay on the Run tab in a compact window", () => {
+    harness();
+    const session = new DesktopSession();
+    session.setLayoutMode("compact");
+    session.selectedWorkPanel = "files";
+    session.select("attention");
+    expect(session.panel.presentation).toEqual({ kind: "overlay", origin: "attention" });
+    expect(session.selectedWorkPanel).toBe("run");
+    expect(session.takeFocusRequest("work-panel")).toBe(true);
+    session.select("new-task");
+    expect(session.workPanelPresented).toBe(false);
+    // Moving elsewhere is not a close by the user: focus goes to the composer.
+    expect(session.takeFocusRequest("work-panel-return")).toBe(false);
+  });
+
+  it("the setup redirect and choosing a Project close the panel", async () => {
+    harness({ setup: { ...SETUP, projects: [] } });
+    const session = new DesktopSession();
+    expect(session.workPanelPresented).toBe(true);
+    await session.refreshSetup(true);
+    expect(session.sidebarSelection).toBe("project");
+    expect(session.panel.columnPreference).toBe(false);
+    expect(session.workPanelPresented).toBe(false);
+  });
+
+  it("choosing a Project closes the panel", async () => {
+    harness();
+    const session = new DesktopSession();
+    await session.refreshSetup();
+    session.selectProject("p1");
+    expect(session.panel).toEqual({ mode: "regular", columnPreference: false, presentation: { kind: "hidden" } });
+  });
+
+  it("opening a task shows the column, but not the overlay", async () => {
+    harness();
+    const session = new DesktopSession();
+    session.select("new-task");
+    await session.openConversation("l1", true, "local");
+    expect(session.panel.presentation).toEqual({ kind: "column" });
+
+    session.select("new-task");
+    session.setLayoutMode("compact");
+    await session.openConversation("l2", true, "local");
+    expect(session.workPanelPresented).toBe(false);
+  });
+
+  it("a tab chosen from code never covers the conversation; a user's choice does", () => {
+    harness();
+    const session = new DesktopSession();
+    session.setLayoutMode("compact");
+    session.showPanel("changes");
+    expect(session.workPanelPresented).toBe(false);
+    expect(session.selectedWorkPanel).toBe("changes");
+    session.handleShortcut(keyEvent({ key: "2", code: "Digit2", ctrlKey: true, altKey: true }).event, linux);
+    expect(session.panel.presentation).toEqual({ kind: "overlay", origin: "shortcut" });
+    expect(session.selectedWorkPanel).toBe("files");
+  });
+
+  it("the header toggle opens the overlay and closing it returns focus to the toggle", () => {
+    harness();
+    const session = new DesktopSession();
+    session.setLayoutMode("compact");
+    const toggle = { focus: vi.fn(), isConnected: true };
+    session.toggleWorkPanel("toggle", toggle);
+    expect(session.panel.presentation).toEqual({ kind: "overlay", origin: "toggle" });
+    expect(session.dismissible).toBe(true);
+    expect(session.takeFocusRequest("work-panel")).toBe(true);
+
+    session.toggleWorkPanel("toggle", toggle);
+    expect(session.workPanelPresented).toBe(false);
+    expect(session.takeFocusRequest("work-panel-return")).toBe(true);
+    expect(session.returnWorkPanelFocus()).toBe(true);
+    expect(toggle.focus).toHaveBeenCalledTimes(1);
+    // One return per close.
+    expect(session.returnWorkPanelFocus()).toBe(false);
+  });
+
+  it("Escape closes the overlay opened by Ctrl+Alt+0 and returns to where the key was pressed", () => {
+    harness();
+    const session = new DesktopSession();
+    session.setLayoutMode("compact");
+    const composer = { focus: vi.fn(), isConnected: true };
+    session.handleShortcut(keyEvent({ key: "0", code: "Digit0", ctrlKey: true, altKey: true, target: composer as unknown as EventTarget }).event, linux);
+    expect(session.workPanelOverlay).toBe(true);
+
+    const escape = keyEvent({ key: "Escape", code: "Escape" });
+    session.handleShortcut(escape.event, linux);
+    expect(escape.prevented.value).toBe(true);
+    expect(session.workPanelOverlay).toBe(false);
+    expect(session.panel.columnPreference).toBe(true);
+    expect(session.takeFocusRequest("work-panel-return")).toBe(true);
+    expect(session.returnWorkPanelFocus()).toBe(true);
+    expect(composer.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back when the control that opened the overlay left the page", () => {
+    harness();
+    const session = new DesktopSession();
+    session.setLayoutMode("compact");
+    session.toggleWorkPanel("toggle", { focus: vi.fn(), isConnected: false });
+    session.hideWorkPanel();
+    expect(session.takeFocusRequest("work-panel-return")).toBe(true);
+    expect(session.returnWorkPanelFocus()).toBe(false);
+  });
+
+  it("a Run control opens the overlay on Run; Escape closes the overlay before the confirmation", () => {
+    harness();
+    const session = new DesktopSession();
+    withActiveRun(session);
+    session.setLayoutMode("compact");
+    const card = { focus: vi.fn(), isConnected: true };
+    session.requestRunControl("interrupt_turn", card);
+    expect(session.panel.presentation).toEqual({ kind: "overlay", origin: "run-control" });
+    expect(session.selectedWorkPanel).toBe("run");
+    // Cancel takes focus, not the tab.
+    expect(session.takeFocusRequest("run-control")).toBe(true);
+    expect(session.takeFocusRequest("work-panel")).toBe(false);
+
+    session.dismiss();
+    expect(session.workPanelOverlay).toBe(false);
+    expect(session.runControlConfirmation).toBe("interrupt_turn");
+    expect(session.takeFocusRequest("work-panel-return")).toBe(true);
+    expect(session.returnWorkPanelFocus()).toBe(true);
+    expect(card.focus).toHaveBeenCalledTimes(1);
+
+    session.dismiss();
+    expect(session.runControlConfirmation).toBeNull();
+    expect(card.focus).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancelling a confirmation inside the overlay keeps focus in the overlay", () => {
+    harness();
+    const session = new DesktopSession();
+    withActiveRun(session);
+    session.setLayoutMode("compact");
+    const card = { focus: vi.fn(), isConnected: true };
+    session.requestRunControl("stop_run", card);
+    session.cancelRunControl();
+    expect(session.runControlConfirmation).toBeNull();
+    expect(session.workPanelOverlay).toBe(true);
+    expect(card.focus).not.toHaveBeenCalled();
+    expect(session.takeFocusRequest("work-panel")).toBe(true);
+    // The overlay still returns focus to the card when it closes.
+    session.hideWorkPanel();
+    expect(session.returnWorkPanelFocus()).toBe(true);
+    expect(card.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("the sidebar changes only through applySidebar", () => {
+    harness();
+    const session = new DesktopSession();
+    session.applySidebar(false);
+    expect(session.sidebarPresented).toBe(false);
+    session.toggleSidebar();
+    expect(session.sidebarPresented).toBe(true);
+  });
+
+  it("keeps requested column widths inside the Swift ranges", () => {
+    harness();
+    const session = new DesktopSession();
+    expect([session.sidebarWidth, session.workPanelWidth]).toEqual([244, 340]);
+    session.setColumnWidth("sidebar", 900);
+    session.setColumnWidth("work-panel", 12);
+    expect([session.sidebarWidth, session.workPanelWidth]).toEqual([300, 280]);
   });
 });

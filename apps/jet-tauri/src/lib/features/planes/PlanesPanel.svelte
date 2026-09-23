@@ -2,6 +2,7 @@
   import { tick, untrack } from "svelte";
 
   import type { DesktopSession } from "$lib/features/shell/session.svelte";
+  import SidebarToggle from "$lib/features/shell/SidebarToggle.svelte";
   import AddPlaneDialog from "./AddPlaneDialog.svelte";
   import { planeStatus } from "./model";
   import PlaneDetail from "./PlaneDetail.svelte";
@@ -44,6 +45,7 @@
 
 <section class="planes-panel" aria-labelledby="planes-title">
   <header class="setup-header">
+    <SidebarToggle {session} />
     <div>
       <h1 id="planes-title" tabindex="-1">Planes</h1>
       <p>Planes run your tasks. This computer is always listed; remote Planes you pair with appear here too.</p>

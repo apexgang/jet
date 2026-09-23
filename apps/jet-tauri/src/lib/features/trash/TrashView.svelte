@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { DesktopSession } from "$lib/features/shell/session.svelte";
+  import SidebarToggle from "$lib/features/shell/SidebarToggle.svelte";
   import TrashPlaneSection from "./TrashPlaneSection.svelte";
 
   let { session }: { session: DesktopSession } = $props();
@@ -7,6 +8,7 @@
 
 <section class="trash-destination" aria-labelledby="trash-title">
   <header class="setup-header">
+    <SidebarToggle {session} />
     <div>
       <h1 id="trash-title" tabindex="-1">Jet Trash</h1>
       <p>Tasks here are deleted on the date shown. Restore a task to keep it.</p>

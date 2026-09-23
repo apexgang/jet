@@ -21,7 +21,7 @@ export type ShellIntent =
   | { kind: "toggle-fullscreen" }
   | { kind: "close-window" }
   | { kind: "quit" }
-  /** Escape: closes the open Run-control confirmation. */
+  /** Escape: closes the work panel overlay, else the Run-control confirmation. */
   | { kind: "dismiss" };
 
 export type ShellIntentKind = ShellIntent["kind"];
@@ -63,7 +63,7 @@ export const SHORTCUTS: ReadonlyArray<{
   { intent: "toggle-sidebar", description: "Show or hide the sidebar", since: "S1" },
   { intent: "toggle-work-panel", description: "Show or hide the work panel", since: "S1" },
   { intent: "work-panel-tab", description: "Choose a work panel tab", since: "S1" },
-  { intent: "dismiss", description: "Cancel an Interrupt Turn or Stop Run confirmation", since: "S1" },
+  { intent: "dismiss", description: "Close the work panel overlay or cancel a Run confirmation", since: "S1" },
 ];
 
 /** Intents whose action ships in this build; `SHORTCUTS` lists exactly these. */

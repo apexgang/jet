@@ -4,6 +4,7 @@
   import SchedulesDestination from "$lib/features/schedules/SchedulesDestination.svelte";
   import type { DesktopSession } from "./session.svelte";
   import { currentPlatform, shortcutAria } from "./shortcuts";
+  import SidebarToggle from "./SidebarToggle.svelte";
   import SetupPanel from "$lib/features/setup/SetupPanel.svelte";
   import PlaneHealthNotice from "$lib/features/system/PlaneHealthNotice.svelte";
   import { retentionLine } from "$lib/features/system/model";
@@ -95,21 +96,13 @@
 {:else if session.sidebarSelection === "planes"}
   <PlanesPanel {session} />
 {:else if session.sidebarSelection === "schedules"}
-  <SchedulesDestination standalone />
+  <SchedulesDestination standalone {session} />
 {:else if session.sidebarSelection === "trash"}
   <TrashView {session} />
 {:else}
   <section class="conversation" aria-label="Current task">
     <header class="conversation-header">
-      <button
-        class="icon-button sidebar-toggle"
-        aria-label={session.sidebarPresented ? "Hide sidebar" : "Show sidebar"}
-        aria-keyshortcuts={shortcutAria("toggle-sidebar", platform)}
-        title={session.sidebarPresented ? "Hide sidebar" : "Show sidebar"}
-        onclick={() => session.toggleSidebar()}
-      >
-        Sidebar
-      </button>
+      <SidebarToggle {session} />
       <div class="conversation-title">
         <h1>{session.selectedConversationTitle}</h1>
         <p>
@@ -148,11 +141,12 @@
         Move to Trash…
       </button>
       <button
-        class="icon-button"
+        class="icon-button work-panel-toggle"
+        aria-expanded={session.workPanelPresented}
         aria-label={session.workPanelPresented ? "Hide work panel" : "Show work panel"}
         aria-keyshortcuts={shortcutAria("toggle-work-panel", platform)}
         title={session.workPanelPresented ? "Hide work panel" : "Show work panel"}
-        onclick={() => (session.workPanelPresented = !session.workPanelPresented)}
+        onclick={(event) => session.toggleWorkPanel("toggle", event.currentTarget)}
       >
         Work panel
       </button>

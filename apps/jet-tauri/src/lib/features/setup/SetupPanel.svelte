@@ -2,6 +2,7 @@
   import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
   import { tick } from "svelte";
   import type { DesktopSession } from "$lib/features/shell/session.svelte";
+  import SidebarToggle from "$lib/features/shell/SidebarToggle.svelte";
   import { landedTarget } from "$lib/features/settings/model";
   import { LOCAL_PLANE } from "$lib/jet/planes";
 
@@ -98,6 +99,7 @@
 
 <section class="setup-panel" aria-labelledby="setup-title">
   <header class="setup-header">
+    <SidebarToggle {session} />
     <div>
       <h1 id="setup-title">Set up this workspace</h1>
       <p>Connect the local Plane, choose a Project, and use a Harness login already available here.</p>

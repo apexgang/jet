@@ -5,7 +5,18 @@
   import { LOST_RUN_TEXT, needsRunRecovery } from "$lib/features/system/model";
   import { currentPlatform, shortcutAria } from "./shortcuts";
 
-  let { session }: { session: DesktopSession } = $props();
+  let {
+    session,
+    mode = "column",
+  }: {
+    session: DesktopSession;
+    /**
+     * A column beside the conversation, or the compact overlay (a modal
+     * dialog over it). Only the root's attributes change: the panel is
+     * never remounted, so its tab, file, draft and terminal survive.
+     */
+    mode?: "column" | "overlay";
+  } = $props();
   const platform = currentPlatform();
   const tabButtons: Record<string, HTMLButtonElement | undefined> = $state({});
   let runControlCancel = $state<HTMLButtonElement>();
@@ -47,9 +58,16 @@
     }
     event.preventDefault();
     const tab = tabs[next].id;
-    session.showPanel(tab);
+    session.showPanel(tab, "tab");
     tabButtons[tab]?.focus();
   }
+
+  // The overlay opened: its selected tab takes focus.
+  $effect(() => {
+    if (mode === "overlay" && session.takeFocusRequest("work-panel")) {
+      tabButtons[session.selectedWorkPanel]?.focus();
+    }
+  });
 
   // The Interrupt Turn / Stop Run confirmation opened: its Cancel takes focus.
   $effect(() => {
@@ -115,7 +133,14 @@
   }
 </script>
 
-<aside class="work-panel" class:hidden={!session.workPanelPresented} aria-label="Work panel">
+<div
+  class="work-panel"
+  class:hidden={!session.workPanelPresented}
+  class:overlay={mode === "overlay"}
+  role={mode === "overlay" ? "dialog" : "complementary"}
+  aria-modal={mode === "overlay" ? "true" : undefined}
+  aria-label="Work panel"
+>
   <div class="panel-navigation">
   <div class="panel-tabs" role="tablist" aria-label="Work panel views">
     {#each tabs as tab, index (tab.id)}
@@ -128,14 +153,14 @@
         aria-selected={session.selectedWorkPanel === tab.id}
         aria-keyshortcuts={shortcutAria("work-panel-tab", platform, tab.id)}
         class:active={session.selectedWorkPanel === tab.id}
-        onclick={() => session.showPanel(tab.id)}
+        onclick={() => session.showPanel(tab.id, "tab")}
         onkeydown={(event) => handleTabKey(event, index)}
       >
         {tab.label}
       </button>
     {/each}
   </div>
-  <button class="icon-button panel-close" aria-label="Hide work panel" onclick={() => (session.workPanelPresented = false)}>Hide</button>
+  <button class="icon-button panel-close" aria-label="Hide work panel" onclick={() => session.hideWorkPanel()}>Hide</button>
   </div>
 
   <div class="panel-content" aria-busy={session.workPanelBusy}>
@@ -418,4 +443,4 @@
     {/if}
     {/if}
   </div>
-</aside>
+</div>

@@ -57,6 +57,17 @@ import { PlanesSession, type FeedHandler, type PlanesFocus } from "$lib/features
 import { TerminalTranscriptDecoder } from "$lib/jet/terminal-text";
 import { shouldLoadNextWorkPage } from "$lib/jet/work-continuity";
 import {
+  INITIAL_PANEL,
+  SIDEBAR_WIDTH,
+  WORK_PANEL_WIDTH,
+  clampWidth,
+  reducePanel,
+  type LayoutMode,
+  type PanelIntent,
+  type PanelOrigin,
+  type PanelState,
+} from "./layout";
+import {
   resolveShortcut,
   type KeyInput,
   type ShellIntent,
@@ -97,11 +108,26 @@ export type LiveTimelineEntry = {
 
 export type RunControlChoice = "interrupt_turn" | "stop_run";
 
-/** One-shot focus moves a view performs once its target is rendered. */
-export type FocusRequest = "search" | "project-folder" | "run-control";
+/**
+ * One-shot focus moves a view performs once its target is rendered:
+ * `work-panel` is the selected tab of a just-opened overlay, and
+ * `work-panel-return` is the control that opened a just-closed overlay.
+ */
+export type FocusRequest = "search" | "project-folder" | "run-control" | "work-panel" | "work-panel-return";
+
+/** Something focus can return to; a detached element is skipped. */
+export type FocusTarget = { focus(): void; isConnected?: boolean };
 
 /** A key press the shell may claim; `preventDefault` is called when it does. */
-export type ShortcutEvent = KeyInput & Pick<KeyboardEvent, "defaultPrevented" | "preventDefault">;
+export type ShortcutEvent = KeyInput &
+  Pick<KeyboardEvent, "defaultPrevented" | "preventDefault"> & { target?: EventTarget | null };
+
+/** The focused element a key press came from; the page body is no control. */
+function focusTarget(value: unknown): FocusTarget | null {
+  if (typeof value !== "object" || value === null || typeof (value as FocusTarget).focus !== "function") return null;
+  if (typeof document !== "undefined" && (value === document.body || value === document.documentElement)) return null;
+  return value as FocusTarget;
+}
 
 export class DesktopSession implements FeedHandler {
   /** Per-Plane health conditions; the notice shows only the selected task's Plane. */
@@ -119,8 +145,13 @@ export class DesktopSession implements FeedHandler {
   });
   scenario = $state<DesktopFixtureScenario>(fixtureForState("active"));
   sidebarSelection = $state<SidebarDestination>("conversation");
+  /** Written only through `applySidebar`. */
   sidebarPresented = $state(true);
-  workPanelPresented = $state(true);
+  /** Work panel column preference and presentation; written only through `applyPanel`. */
+  panel = $state<PanelState>(INITIAL_PANEL);
+  /** Requested column widths in CSS pixels. The layout may narrow them to fit. */
+  sidebarWidth = $state<number>(SIDEBAR_WIDTH.ideal);
+  workPanelWidth = $state<number>(WORK_PANEL_WIDTH.ideal);
   selectedWorkPanel = $state<WorkPanelTab>("run");
   draft = $state("");
   actionNotice = $state<string | null>(null);
@@ -131,6 +162,10 @@ export class DesktopSession implements FeedHandler {
   projectFolderFocusRequest = $state(0);
   /** Bumped when a Run-control confirmation opens; its Cancel takes focus. */
   runControlFocusRequest = $state(0);
+  /** Bumped when the work panel opens as an overlay; its selected tab takes focus. */
+  workPanelFocusRequest = $state(0);
+  /** Bumped when the user closes the overlay; focus returns to what opened it. */
+  workPanelReturnRequest = $state(0);
   connectionState = $state<ConnectionViewState>("connecting");
   connection = $state<ConnectionSnapshot | null>(null);
   failure = $state<PublicError | null>(null);
@@ -176,9 +211,17 @@ export class DesktopSession implements FeedHandler {
   workPanelNoticeError = $state<PublicError | null>(null);
 
   /** The last focus request of each kind a view has carried out. */
-  private handledFocus: Record<FocusRequest, number> = { search: 0, "project-folder": 0, "run-control": 0 };
+  private handledFocus: Record<FocusRequest, number> = {
+    search: 0,
+    "project-folder": 0,
+    "run-control": 0,
+    "work-panel": 0,
+    "work-panel-return": 0,
+  };
   /** The control that opened the Run-control confirmation; focus returns to it. */
-  private runControlReturnFocus: { focus(): void; isConnected?: boolean } | null = null;
+  private runControlReturnFocus: FocusTarget | null = null;
+  /** The control that opened the work panel overlay; focus returns to it on close. */
+  private workPanelReturnFocus: FocusTarget | null = null;
   /**
    * "Reopen the last task" (Settings › General). Off means no task is
    * selected at launch; Jet starts on New task. Read once in `connect()`.
@@ -599,7 +642,7 @@ export class DesktopSession implements FeedHandler {
           (accountsAvailable && snapshot.accounts.length === 0))
       ) {
         this.sidebarSelection = "project";
-        this.workPanelPresented = false;
+        this.applyPanel({ kind: "auto-close" });
       }
     } catch (error: unknown) {
       if (request !== this.setupRequest) return;
@@ -611,7 +654,7 @@ export class DesktopSession implements FeedHandler {
     if (!this.setupSnapshot?.projects.some((project) => project.id === projectId)) return;
     this.selectedProjectId = projectId;
     this.sidebarSelection = "project";
-    this.workPanelPresented = false;
+    this.applyPanel({ kind: "auto-close" });
     this.setupNotice = null;
   }
 
@@ -732,7 +775,7 @@ export class DesktopSession implements FeedHandler {
     this.selectedPlaneId = planeId;
     if (show) {
       this.sidebarSelection = "conversation";
-      this.workPanelPresented = true;
+      this.applyPanel({ kind: "auto-open" });
     }
     await this.loadSelectedConversation(true);
   }
@@ -809,6 +852,10 @@ export class DesktopSession implements FeedHandler {
         return this.projectFolderFocusRequest;
       case "run-control":
         return this.runControlFocusRequest;
+      case "work-panel":
+        return this.workPanelFocusRequest;
+      case "work-panel-return":
+        return this.workPanelReturnRequest;
     }
   }
 
@@ -828,15 +875,17 @@ export class DesktopSession implements FeedHandler {
         this.conversationDetail = null;
         this.timeline = [];
         this.supervision = null;
-        this.workPanelPresented = false;
+        this.applyPanel({ kind: "auto-close" });
         this.composerFocusRequest += 1;
         break;
       case "search":
-        this.workPanelPresented = false;
+        this.applyPanel({ kind: "auto-close" });
         break;
       case "attention": {
-        this.workPanelPresented = true;
+        // A user request: in a narrow window the overlay shows the Run
+        // controls the notice points to.
         this.selectedWorkPanel = "run";
+        this.openWorkPanel("attention", null);
         const planeCondition = this.planeHealthNotice !== null;
         if (planeCondition) this.health.focusNotice();
         this.actionNotice =
@@ -848,21 +897,21 @@ export class DesktopSession implements FeedHandler {
         break;
       }
       case "project":
-        this.workPanelPresented = false;
+        this.applyPanel({ kind: "auto-close" });
         break;
       case "conversation":
-        this.workPanelPresented = true;
+        this.applyPanel({ kind: "auto-open" });
         break;
       case "schedules":
         // The destination states the backend dependency itself.
-        this.workPanelPresented = false;
+        this.applyPanel({ kind: "auto-close" });
         break;
       case "trash":
-        this.workPanelPresented = false;
+        this.applyPanel({ kind: "auto-close" });
         this.trash.show();
         break;
       case "planes":
-        this.workPanelPresented = false;
+        this.applyPanel({ kind: "auto-close" });
         void this.refreshPlanes();
         break;
     }
@@ -923,7 +972,7 @@ export class DesktopSession implements FeedHandler {
         conversationId = conversation.id;
         this.selectedConversationId = conversation.id;
         this.sidebarSelection = "conversation";
-        this.workPanelPresented = true;
+        this.applyPanel({ kind: "auto-open" });
         this.conversationDetail = await loadConversation(conversation.id, conversation.planeId);
       }
 
@@ -970,34 +1019,48 @@ export class DesktopSession implements FeedHandler {
    * tab, so the work panel opens on Run and the confirmation's Cancel takes
    * focus; cancelling returns focus to `invoker`.
    */
-  requestRunControl(
-    control: RunControlChoice,
-    invoker: { focus(): void; isConnected?: boolean } | null = null,
-  ): void {
+  requestRunControl(control: RunControlChoice, invoker: FocusTarget | null = null): void {
     if (control === "interrupt_turn" && !this.canInterruptTurn) return;
     if (control === "stop_run" && !this.canStopRun) return;
     this.runControlReturnFocus = invoker;
-    this.workPanelPresented = true;
     this.selectedWorkPanel = "run";
+    this.openWorkPanel("run-control", invoker);
     this.runControlConfirmation = control;
     this.runControlFocusRequest += 1;
   }
 
-  /** Closes the confirmation and returns focus to the control that opened it. */
+  /**
+   * Closes the confirmation and returns focus to the control that opened
+   * it. In the overlay that control sits behind the inert page, so focus
+   * stays in the panel on its selected tab and returns when the overlay
+   * closes.
+   */
   cancelRunControl(): void {
     this.runControlConfirmation = null;
     const invoker = this.runControlReturnFocus;
     this.runControlReturnFocus = null;
+    if (this.workPanelOverlay) {
+      this.workPanelFocusRequest += 1;
+      return;
+    }
     if (invoker && invoker.isConnected !== false) invoker.focus();
   }
 
   /** Whether Escape has something to close. */
   get dismissible(): boolean {
-    return this.runControlConfirmation !== null;
+    return this.workPanelOverlay || this.runControlConfirmation !== null;
   }
 
-  /** Escape: closes the open Run-control confirmation. */
+  /**
+   * Escape: closes the work panel overlay first, then the Run-control
+   * confirmation. A confirmation left open in a closed overlay is kept,
+   * like the rest of the panel's state, and shows again when it reopens.
+   */
   dismiss(): void {
+    if (this.workPanelOverlay) {
+      this.hideWorkPanel();
+      return;
+    }
     if (this.runControlConfirmation) this.cancelRunControl();
   }
 
@@ -1064,9 +1127,18 @@ export class DesktopSession implements FeedHandler {
     }
   }
 
-  showPanel(tab: WorkPanelTab): void {
+  /**
+   * Shows a work panel tab. `origin` says who asked: the tablist and
+   * shortcuts are user requests (an overlay in a narrow window); without
+   * one it is a code path, which never covers the conversation.
+   */
+  showPanel(tab: WorkPanelTab, origin: PanelOrigin | null = null, invoker: FocusTarget | null = null): void {
     this.selectedWorkPanel = tab;
-    this.workPanelPresented = true;
+    if (origin === null) {
+      this.applyPanel({ kind: "auto-open" });
+    } else if (!(origin === "tab" && this.workPanelOverlay)) {
+      this.openWorkPanel(origin, invoker);
+    }
     const conversationId = this.selectedConversationId;
     const runId = this.selectedRun?.id;
     if (conversationId && runId && this.workPanel?.runId !== runId) {
@@ -1604,11 +1676,14 @@ export class DesktopSession implements FeedHandler {
     const intent = resolveShortcut(event, { ...context, dismissible: this.dismissible });
     if (!intent) return;
     event.preventDefault();
-    this.perform(intent);
+    this.perform(intent, focusTarget(event.target));
   }
 
-  /** Carries out one shell intent from the keyboard. */
-  perform(intent: ShellIntent): void {
+  /**
+   * Carries out one shell intent from the keyboard. `invoker` is where the
+   * key was pressed; closing an overlay the shortcut opened returns there.
+   */
+  perform(intent: ShellIntent, invoker: FocusTarget | null = null): void {
     switch (intent.kind) {
       case "new-task":
         this.select("new-task");
@@ -1628,10 +1703,10 @@ export class DesktopSession implements FeedHandler {
         this.toggleSidebar();
         return;
       case "toggle-work-panel":
-        this.workPanelPresented = !this.workPanelPresented;
+        this.toggleWorkPanel("shortcut", invoker);
         return;
       case "work-panel-tab":
-        this.showPanel(intent.tab);
+        this.showPanel(intent.tab, "shortcut", invoker);
         return;
       case "dismiss":
         this.dismiss();
@@ -1644,8 +1719,94 @@ export class DesktopSession implements FeedHandler {
     }
   }
 
+  /** Whether the work panel is visible, as a column or as the overlay. */
+  get workPanelPresented(): boolean {
+    return this.panel.presentation.kind !== "hidden";
+  }
+
+  /** Whether the work panel is the compact overlay over the conversation. */
+  get workPanelOverlay(): boolean {
+    return this.panel.presentation.kind === "overlay";
+  }
+
+  get layoutMode(): LayoutMode {
+    return this.panel.mode;
+  }
+
+  /** The single write path for the work panel's presentation. */
+  applyPanel(intent: PanelIntent): void {
+    const next = reducePanel(this.panel, intent);
+    if (next === this.panel) return;
+    const wasOverlay = this.panel.presentation.kind === "overlay";
+    this.panel = next;
+    if (wasOverlay && next.presentation.kind !== "overlay") this.workPanelReturnFocus = null;
+  }
+
+  /** The single write path for the sidebar's presentation. */
+  applySidebar(presented: boolean): void {
+    this.sidebarPresented = presented;
+  }
+
+  /** The window crossed the overlay breakpoint. */
+  setLayoutMode(mode: LayoutMode): void {
+    this.applyPanel({ kind: "mode", mode });
+  }
+
   toggleSidebar(): void {
-    this.sidebarPresented = !this.sidebarPresented;
+    this.applySidebar(!this.sidebarPresented);
+  }
+
+  /** The header button and Ctrl+Alt+0: open or close the work panel. */
+  toggleWorkPanel(origin: PanelOrigin, invoker: FocusTarget | null = null): void {
+    if (this.workPanelPresented) {
+      this.hideWorkPanel();
+    } else {
+      this.openWorkPanel(origin, invoker);
+    }
+  }
+
+  /**
+   * The user closed the work panel (Hide, Escape, the scrim, a toggle).
+   * Closing the overlay asks for focus to go back to what opened it.
+   */
+  hideWorkPanel(): void {
+    const overlay = this.workPanelOverlay;
+    const invoker = this.workPanelReturnFocus;
+    this.applyPanel({ kind: "user-close" });
+    if (overlay) {
+      this.workPanelReturnFocus = invoker;
+      this.workPanelReturnRequest += 1;
+    }
+  }
+
+  /**
+   * Moves focus back to the control that opened the overlay, once the page
+   * behind it is interactive again. False when there is none (or it left the
+   * page), so the caller can fall back to the header's Work panel button.
+   */
+  returnWorkPanelFocus(): boolean {
+    const invoker = this.workPanelReturnFocus;
+    this.workPanelReturnFocus = null;
+    if (!invoker || invoker.isConnected === false) return false;
+    invoker.focus();
+    return true;
+  }
+
+  /** Sets a column's requested width, clamped to its range. */
+  setColumnWidth(column: "sidebar" | "work-panel", width: number): void {
+    if (column === "sidebar") {
+      this.sidebarWidth = clampWidth(width, SIDEBAR_WIDTH);
+    } else {
+      this.workPanelWidth = clampWidth(width, WORK_PANEL_WIDTH);
+    }
+  }
+
+  private openWorkPanel(origin: PanelOrigin, invoker: FocusTarget | null): void {
+    const wasOverlay = this.workPanelOverlay;
+    this.applyPanel({ kind: "user-open", origin });
+    if (!this.workPanelOverlay) return;
+    if (!wasOverlay) this.workPanelReturnFocus = invoker;
+    if (origin !== "run-control") this.workPanelFocusRequest += 1;
   }
 
   showFixture(state: FixtureState): void {

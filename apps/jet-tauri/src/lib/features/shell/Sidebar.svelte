@@ -2,7 +2,14 @@
   import type { DesktopSession, SidebarDestination } from "./session.svelte";
   import { currentPlatform, shortcutAria, shortcutLabel } from "./shortcuts";
 
-  let { session }: { session: DesktopSession } = $props();
+  let {
+    session,
+    inert = false,
+  }: {
+    session: DesktopSession;
+    /** The work panel overlay is open: the sidebar can't be reached behind it. */
+    inert?: boolean;
+  } = $props();
   const catalog = $derived(session.catalog);
   const planes = $derived(session.planes);
   const platform = currentPlatform();
@@ -18,7 +25,7 @@
   }
 </script>
 
-<aside class="sidebar" class:hidden={!session.sidebarPresented} aria-label="Jet navigation">
+<aside class="sidebar" class:hidden={!session.sidebarPresented} {inert} aria-label="Jet navigation">
   <div class="sidebar-brand">
     <span class="brand-mark" aria-hidden="true"></span>
     <strong>Jet</strong>

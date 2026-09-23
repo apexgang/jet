@@ -62,7 +62,7 @@ function button(name: string, root: ParentNode = document): HTMLButtonElement {
 describe("Run controls from the approval card (D6)", () => {
   it("Interrupt Turn… opens the Run tab, focuses Cancel, and Escape returns focus", async () => {
     const session = sessionWithApproval();
-    session.workPanelPresented = false;
+    session.hideWorkPanel();
     session.selectedWorkPanel = "changes";
     const stop = renderShell(session);
     try {

@@ -132,6 +132,12 @@ textarea:focus-visible {
   background: var(--background);
 }
 
+/* The sidebar toggle leads every destination header; the title takes the rest. */
+.setup-header > .sidebar-toggle + div {
+  flex: 1;
+  min-width: 0;
+}
+
 .setup-header h1 {
   margin: 0;
   font-size: 21px;
@@ -784,48 +790,6 @@ textarea:focus-visible {
   margin-top: 6px;
 }
 
-@media (max-width: 760px) {
-  .trash-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .trash-row > button {
-    justify-self: start;
-  }
-}
-
-@media (max-width: 760px) {
-  .setup-header,
-  .setup-failure,
-  .setup-row-heading,
-  .project-preview {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .setup-header {
-    position: static;
-  }
-
-  .setup-row {
-    grid-template-columns: 22px minmax(0, 1fr);
-  }
-
-  .service-row .status-text,
-  .setup-row > .text-button {
-    grid-column: 2;
-    justify-self: start;
-  }
-
-  .project-line {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .project-line > span {
-    display: none;
-  }
-}
-
 ::selection {
   color: var(--on-accent);
   background: var(--accent-strong);
@@ -843,25 +807,24 @@ textarea:focus-visible {
   background-clip: padding-box;
 }
 
+/* Three grid items: sidebar, main region (display: contents), work panel.
+   Column widths come from the layout model (layout.ts) as custom properties
+   set through CSSOM; a hidden column is 0. Resizers and the scrim are
+   positioned, so they add no tracks. */
 .app-shell {
   position: relative;
   display: grid;
-  grid-template-columns: 244px minmax(420px, 1fr) 340px;
+  grid-template-columns:
+    var(--sidebar-width, 244px)
+    minmax(420px, 1fr)
+    var(--work-panel-width, 340px);
   width: 100vw;
   height: 100vh;
   background: var(--background);
 }
 
-.app-shell.sidebar-hidden {
-  grid-template-columns: 0 minmax(420px, 1fr) 340px;
-}
-
-.app-shell.panel-hidden {
-  grid-template-columns: 244px minmax(420px, 1fr) 0;
-}
-
-.app-shell.sidebar-hidden.panel-hidden {
-  grid-template-columns: 0 minmax(420px, 1fr) 0;
+.main-region {
+  display: contents;
 }
 
 .sidebar,
@@ -869,12 +832,73 @@ textarea:focus-visible {
   min-width: 0;
   overflow: hidden;
   background: var(--panel);
-  transition: visibility 0s linear 180ms;
 }
 
+/* Hiding waits a moment; showing is immediate so focus can move in. */
 .sidebar.hidden,
 .work-panel.hidden {
   visibility: hidden;
+  transition: visibility 0s linear 180ms;
+}
+
+/* Compact windows: the work panel leaves the grid and opens on request as a
+   focused overlay with a scrim; the conversation is never compressed. */
+.app-shell[data-layout="compact"] .work-panel {
+  position: fixed;
+  z-index: 5;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(var(--work-panel-overlay-width, 340px), 88vw);
+  box-shadow: -12px 0 40px var(--shadow);
+}
+
+.work-panel-scrim {
+  position: fixed;
+  z-index: 4;
+  inset: 0;
+  background: var(--scrim);
+}
+
+/* A 6 px hit area over the column edge with a 1 px line. */
+.column-resizer {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.column-resizer.start {
+  left: calc(var(--sidebar-width) - 3px);
+}
+
+.column-resizer.end {
+  right: calc(var(--work-panel-width) - 3px);
+}
+
+.column-resizer::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 1px;
+  background: var(--border);
+  content: "";
+}
+
+.column-resizer:hover::after,
+.column-resizer.dragging::after {
+  left: 1px;
+  width: 3px;
+  background: var(--border-strong);
+}
+
+.column-resizer:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
 
 .sidebar {
@@ -2221,6 +2245,15 @@ kbd {
   .composer-box:focus-within {
     outline: 2px solid var(--focus);
   }
+
+  .column-resizer::after {
+    background: var(--border-strong);
+  }
+
+  .app-shell[data-layout="compact"] .work-panel {
+    border-left: 1px solid var(--border-strong);
+    box-shadow: none;
+  }
 }
 
 /* Forced colours (Windows High Contrast, forced palettes): the system palette
@@ -2280,61 +2313,35 @@ kbd {
   .removal-dialog .move-trash-mode:has(input:checked) {
     border: 2px solid Highlight;
   }
+
+  .column-resizer::after,
+  .column-resizer:hover::after,
+  .column-resizer.dragging::after {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+
+  .column-resizer:focus-visible {
+    outline-color: Highlight;
+  }
+
+  .app-shell[data-layout="compact"] .work-panel {
+    border-left: 1px solid CanvasText;
+  }
 }
 
 /* Nothing in Jet is translucent. Dimmed backdrops become near-opaque. */
 @media (prefers-reduced-transparency: reduce) {
-  .removal-dialog::backdrop {
+  .removal-dialog::backdrop,
+  .work-panel-scrim {
     background: var(--background);
     opacity: 0.92;
   }
 }
 
-@media (max-width: 1100px) {
-  .app-shell,
-  .app-shell.panel-hidden {
-    grid-template-columns: 224px minmax(420px, 1fr);
-  }
-
-  .app-shell.sidebar-hidden,
-  .app-shell.sidebar-hidden.panel-hidden {
-    grid-template-columns: 0 minmax(420px, 1fr);
-  }
-
-  .work-panel {
-    position: fixed;
-    z-index: 5;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(360px, 88vw);
-  }
-}
-
-@media (max-width: 760px) {
-  .app-shell,
-  .app-shell.panel-hidden,
-  .app-shell.sidebar-hidden,
-  .app-shell.sidebar-hidden.panel-hidden {
-    grid-template-columns: minmax(320px, 1fr);
-  }
-
-  .sidebar {
-    position: fixed;
-    z-index: 6;
-    inset: 0 auto 0 0;
-    width: min(280px, 88vw);
-  }
-
-  .conversation-title p,
-  .run-status {
-    display: none;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .sidebar,
-  .work-panel {
+  .sidebar.hidden,
+  .work-panel.hidden {
     transition: none;
   }
 }
