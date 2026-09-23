@@ -2,6 +2,7 @@
   import { tick, untrack } from "svelte";
 
   import type { DesktopSession } from "$lib/features/shell/session.svelte";
+  import PairingSection from "./PairingSection.svelte";
   import {
     featureLabel,
     featureName,
@@ -33,14 +34,23 @@
   let retrying = $state(false);
   let connectionHeading = $state<HTMLHeadingElement>();
 
-  // Pairing and client sections arrive with owner pairing; until then every
-  // detail deep link lands on the Connection heading.
+  // Deep links land on their section heading. "pairing" and "clients" live
+  // in PairingSection; "repair" waits for enrollment and lands on Connection.
   $effect(() => {
     const request = planes.focusRequest;
     if (!request || request.section === "add") return;
     untrack(() => {
       planes.focusRequest = null;
-      void tick().then(() => connectionHeading?.focus());
+      void tick().then(() => {
+        const id =
+          request.section === "pairing"
+            ? "plane-pairing-heading"
+            : request.section === "clients"
+              ? "plane-clients-heading"
+              : null;
+        const target = id ? document.getElementById(id) : null;
+        (target ?? connectionHeading)?.focus();
+      });
     });
   });
 
@@ -188,6 +198,10 @@
         {/if}
       {/if}
     </section>
+
+    {#key plane.planeId}
+      <PairingSection {session} {plane} />
+    {/key}
   </section>
 {/if}
 

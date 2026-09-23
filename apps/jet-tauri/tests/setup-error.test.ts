@@ -1,6 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 
+import { DesktopSession } from "../src/lib/features/shell/session.svelte";
 import { publicError } from "../src/lib/jet/errors";
+
+afterEach(() => {
+  if (typeof window !== "undefined") clearMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("setup error normalization", () => {
   it("preserves a structured stable error", () => {
@@ -49,5 +56,28 @@ describe("setup error normalization", () => {
       protocolLimit: null,
       planeId: null,
     });
+  });
+});
+
+describe("setup and Planes destinations", () => {
+  it("Planes opens the Planes destination instead of a placeholder, and Setup links to Add a Plane", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("window", { crypto: globalThis.crypto });
+    mockIPC((command) => {
+      calls.push(command);
+      throw { category: "offline", code: "transport.offline", message: "offline", retryable: true };
+    });
+    const session = new DesktopSession();
+
+    session.select("planes");
+    expect(session.sidebarSelection).toBe("planes");
+    expect(session.actionNotice ?? "").not.toMatch(/planned for Wave 3/);
+
+    session.select("project");
+    session.openAddPlane();
+    expect(session.sidebarSelection).toBe("planes");
+    expect(session.planes.focusRequest?.section).toBe("add");
+    await Promise.resolve();
+    expect(calls).toContain("list_planes");
   });
 });

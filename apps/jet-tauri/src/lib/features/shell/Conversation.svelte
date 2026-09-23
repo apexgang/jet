@@ -1,5 +1,6 @@
 <script lang="ts">
   import NotificationSettings from "$lib/features/notifications/NotificationSettings.svelte";
+  import ConnectionsSettings from "$lib/features/planes/ConnectionsSettings.svelte";
   import PlanesPanel from "$lib/features/planes/PlanesPanel.svelte";
   import type { DesktopSession } from "./session.svelte";
   import SetupPanel from "$lib/features/setup/SetupPanel.svelte";
@@ -48,7 +49,10 @@
 </script>
 
 {#if session.sidebarSelection === "settings"}
-  <NotificationSettings />
+  <div class="settings-page">
+    <ConnectionsSettings {session} />
+    <NotificationSettings />
+  </div>
 {:else if session.sidebarSelection === "project"}
   <SetupPanel {session} />
 {:else if session.sidebarSelection === "planes"}
@@ -211,3 +215,12 @@
     </footer>
   </section>
 {/if}
+
+<style>
+  .settings-page {
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    background: var(--background);
+  }
+</style>

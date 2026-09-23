@@ -18,6 +18,7 @@ import {
 } from "$lib/jet/planes";
 
 import { aggregateStatus, planeAttentionCount } from "./model";
+import { OwnerPairing } from "./pairing.svelte";
 
 /** Deep-link targets inside the Planes destination. */
 export type PlanesFocus = "add" | "repair" | "pairing" | "clients" | "detail";
@@ -48,6 +49,13 @@ export class PlanesSession {
   /** Bumped on every deep link so the panel can move focus even to the same section. */
   focusRequest = $state<{ section: PlanesFocus; serial: number } | null>(null);
   noticeDismissed = $state(false);
+  /**
+   * A Plane switch held back because a one-time code is on screen. The code
+   * stops working when the switch is confirmed (Stop closes the gate).
+   */
+  pendingSwitch = $state<{ planeId: PlaneId; focus: PlanesFocus | null } | null>(null);
+  /** Owner-side Pairing for the selected Plane. */
+  readonly pairing: OwnerPairing;
 
   private refreshRequest = 0;
   private detailRequest = 0;
@@ -60,6 +68,7 @@ export class PlanesSession {
 
   constructor(handler: FeedHandler) {
     this.handler = handler;
+    this.pairing = new OwnerPairing((planeId) => this.label(planeId));
   }
 
   get planes(): Plane[] {
@@ -83,7 +92,7 @@ export class PlanesSession {
   }
 
   get attentionCount(): number {
-    return planeAttentionCount(this.planes);
+    return planeAttentionCount(this.planes, this.pairing.awaiting);
   }
 
   get aggregate() {
@@ -119,10 +128,29 @@ export class PlanesSession {
   /** Selects a Plane in the Planes destination and reads its detail. */
   select(planeId: PlaneId, focus: PlanesFocus | null = null): void {
     const known = this.has(planeId) ? planeId : LOCAL_PLANE;
+    if (known !== this.selectedPlaneId && this.pairing.holdsCode) {
+      this.pendingSwitch = { planeId: known, focus };
+      return;
+    }
+    this.pendingSwitch = null;
     const changed = known !== this.selectedPlaneId || this.detail?.planeId !== known;
     this.selectedPlaneId = known;
     if (focus) this.focusRequest = { section: focus, serial: ++this.focusSerial };
     if (changed || this.detail?.kind === "failed") void this.loadDetail();
+  }
+
+  /** Confirms a held switch: Stop pairing (closes the gate), then switch. */
+  async confirmSwitch(): Promise<void> {
+    const target = this.pendingSwitch;
+    if (!target) return;
+    await this.pairing.stop();
+    if (this.pairing.holdsCode) return;
+    this.pendingSwitch = null;
+    this.select(target.planeId, target.focus);
+  }
+
+  cancelSwitch(): void {
+    this.pendingSwitch = null;
   }
 
   /** Status, capabilities and knowledge of the selected Plane. */

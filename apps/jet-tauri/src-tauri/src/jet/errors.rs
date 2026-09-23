@@ -164,6 +164,13 @@ impl PublicError {
         Self::new("conflict", code, message, false)
     }
 
+    /// A definite, non-retryable authorization failure the shell concludes
+    /// on its own, such as losing access after changing this computer's own
+    /// Pairing on a remote Plane.
+    pub(crate) fn unauthorized(code: &'static str, message: &'static str) -> Self {
+        Self::new("unauthorized", code, message, false)
+    }
+
     pub(crate) fn internal() -> Self {
         Self::new(
             "internal",

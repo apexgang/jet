@@ -286,7 +286,10 @@
         {:else if session.remotePairingSkipped}
           <span class="status-text">Skipped</span>
         {:else}
-          <button class="text-button" onclick={() => session.skipRemotePairing()}>Skip for now</button>
+          <div class="remote-actions">
+            <button class="text-button" onclick={() => session.openAddPlane()}>Add a Plane</button>
+            <button class="text-button" onclick={() => session.skipRemotePairing()}>Skip for now</button>
+          </div>
         {/if}
       </section>
 

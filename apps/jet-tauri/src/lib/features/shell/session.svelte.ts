@@ -366,6 +366,11 @@ export class DesktopSession implements FeedHandler {
     this.planes.select(target.planeId ?? this.planes.selectedPlaneId, target.focus ?? null);
   }
 
+  /** Setup's "Add a Plane": remote Planes are paired from the Planes destination. */
+  openAddPlane(): void {
+    this.openPlanes({ focus: "add" });
+  }
+
   /**
    * The user's Retry for one Plane: reopens its feed with `reset` and
    * re-walks its Recent chain when that is not current.
@@ -1390,6 +1395,7 @@ export class DesktopSession implements FeedHandler {
           this.scheduleDetailRefresh();
         }
         this.catalog.receiveEvent(planeId, update.kind);
+        if (update.kind.startsWith("pairing.")) this.planes.pairing.pairingEvent(planeId);
         break;
       case "reconnecting":
         void this.planes.refresh();

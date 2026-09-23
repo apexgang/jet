@@ -431,3 +431,81 @@ export function identityPrefix(identity: string | null): string | null {
   const hex = identity.replace(/-/g, "").slice(0, 8);
   return /^[0-9a-f]{8}$/i.test(hex) ? hex.toLowerCase() : null;
 }
+
+/**
+ * Display grouping for a typed authentication string: digits only, at most
+ * six, shown as `ddd-ddd`. Native code validates what is sent.
+ */
+export function normalizeAuthString(input: string): string {
+  const digits = input.replace(/[^0-9]/g, "").slice(0, 6);
+  return digits.length > 3 ? `${digits.slice(0, 3)}-${digits.slice(3)}` : digits;
+}
+
+/** A key fingerprint as four lowercase groups of four hex characters. */
+export function formatFingerprint(fingerprint: string): string {
+  const hex = fingerprint.toLowerCase().replace(/[^0-9a-f]/g, "").slice(0, 16);
+  return hex.match(/.{1,4}/g)?.join(" ") ?? "";
+}
+
+/** Digits spelled out one by one, for a code's accessible name. */
+export function spokenDigits(code: string): string {
+  return code.replace(/[^0-9]/g, "").split("").join(" ");
+}
+
+/** Whole milliseconds left until a decimal Unix-millisecond deadline. */
+export function millisecondsLeft(expiresAtUnixMs: string, nowUnixMs: number): number {
+  const deadline = Number(expiresAtUnixMs);
+  return Number.isFinite(deadline) ? Math.max(0, deadline - nowUnixMs) : 0;
+}
+
+/** Plain-text countdown; it never animates and is updated coarsely. */
+export function countdownText(expiresAtUnixMs: string, nowUnixMs: number): string {
+  const left = millisecondsLeft(expiresAtUnixMs, nowUnixMs);
+  if (left <= 0) return "Expired";
+  const seconds = Math.ceil(left / 1000);
+  if (seconds > 90) return `About ${Math.round(seconds / 60)} minutes left`;
+  if (seconds > 60) return "About a minute left";
+  return `About ${Math.max(10, Math.ceil(seconds / 10) * 10)} seconds left`;
+}
+
+export function formatClockTime(unixMs: string | number | null): string {
+  const value = typeof unixMs === "string" ? Number(unixMs) : unixMs;
+  if (value === null || !Number.isFinite(value)) return "soon";
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+export function formatPairedDate(unixMs: string): string {
+  const value = Number(unixMs);
+  if (!Number.isFinite(value)) return "Paired on an unknown date";
+  return `Paired ${new Date(value).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" })}`;
+}
+
+/** Copy for a Plane whose trust-changing Commands are paused. */
+export function pairingPausedCopy(
+  reason: "security_degraded" | "store_read_only" | null,
+  label: string,
+): string | null {
+  switch (reason) {
+    case "security_degraded":
+      return `${label} can't vouch for its security record, so pairing changes are paused. Existing paired computers keep working.`;
+    case "store_read_only":
+      return `${label} is in read-only recovery, so pairing changes are paused until its data is restored.`;
+    default:
+      return null;
+  }
+}
+
+export function pairingEndedCopy(
+  reason: "expired" | "too_many_attempts" | "gate_closed" | "claimed",
+): string {
+  switch (reason) {
+    case "expired":
+      return "Pairing ended: the code expired.";
+    case "too_many_attempts":
+      return "Pairing ended: too many wrong codes.";
+    case "gate_closed":
+      return "Pairing ended: pairing was closed.";
+    case "claimed":
+      return "The code was used by another computer.";
+  }
+}

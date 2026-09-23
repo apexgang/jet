@@ -11,7 +11,7 @@
   const addBlockedReason = $derived(
     planes.snapshot?.identity.key === "unsupported"
       ? "This computer has no supported secure storage for a pairing key."
-      : "Pairing with a remote Plane isn't available in this version of the app yet.",
+      : "Add a Plane arrives with remote Planes.",
   );
 
   let addButton = $state<HTMLButtonElement>();
@@ -38,7 +38,7 @@
       <h1 id="planes-title">Planes</h1>
       <p>Planes run your tasks. This computer is always listed; remote Planes you pair with appear here too.</p>
     </div>
-    <button class="secondary-button" onclick={() => { void session.refreshPlanes(); void planes.loadDetail(); }}>
+    <button class="secondary-button" onclick={() => { void session.refreshPlanes(); void planes.loadDetail(); void planes.pairing.load(); }}>
       Refresh
     </button>
   </header>

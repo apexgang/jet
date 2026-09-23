@@ -5,6 +5,7 @@ pub(crate) mod delivery;
 mod errors;
 mod identity;
 pub(crate) mod notifications;
+pub(crate) mod pairing;
 pub(crate) mod planes;
 mod run_control;
 mod setup;
@@ -27,6 +28,7 @@ pub(crate) struct JetBridge {
     planes: Arc<PlaneRegistry>,
     feeds: Arc<FeedRegistry>,
     delivery: delivery::DeliveryState,
+    pairing: pairing::PairingState,
     notifications: std::sync::Arc<notifications::NotificationState>,
     setup: setup::SetupState,
     conversations: conversations::ConversationState,
@@ -54,6 +56,7 @@ impl JetBridge {
             ))),
             feeds: Arc::new(FeedRegistry::default()),
             delivery: delivery::DeliveryState::default(),
+            pairing: pairing::PairingState::default(),
             notifications: std::sync::Arc::new(notifications::NotificationState::new(
                 app_data_directory,
             )),

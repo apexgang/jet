@@ -117,6 +117,24 @@ impl PlaneHealth {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn for_test(security: Security, store: Store) -> Self {
+        Self { security, store }
+    }
+
+    /// Why trust-changing Commands are paused on this Plane, if they are.
+    /// This only disables controls in the view; jetd still decides and its
+    /// refusal is surfaced as-is when the health read was stale.
+    pub(crate) fn mutations_paused(self) -> Option<&'static str> {
+        if self.security == Security::Degraded {
+            Some("security_degraded")
+        } else if self.store == Store::ReadOnly {
+            Some("store_read_only")
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn view(self) -> HealthView {
         HealthView {
             security: match self.security {
@@ -380,6 +398,14 @@ impl PlaneRegistry {
             .flatten()
             .and_then(|entry| entry.observed.lock().ok().map(|value| value.health))
             .unwrap_or_default()
+    }
+
+    /// The bounded label a Plane is presented with.
+    pub(crate) fn label(&self, plane: PlaneId) -> Option<String> {
+        self.entry(plane)
+            .ok()
+            .flatten()
+            .map(|entry| entry.label.clone())
     }
 
     pub(crate) fn contains(&self, plane: PlaneId) -> bool {
