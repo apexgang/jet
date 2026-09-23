@@ -24,7 +24,10 @@ export type SettingsSection =
   | "execution"
   | "permissions"
   | "storage"
-  | "audit";
+  | "recovery"
+  | "diagnostics"
+  | "audit"
+  | "versions";
 
 /**
  * A typed deep link. The shell validates it and drops a Plane it does not

@@ -1,12 +1,30 @@
 <script lang="ts">
+  import { untrack } from "svelte";
+
   import type { SettingsSnapshot } from "$lib/jet/settings";
   import type { SettingsSection } from "$lib/jet/settings-window";
+  import DiagnosticsSection from "$lib/features/system/DiagnosticsSection.svelte";
+  import StorageHealth from "$lib/features/system/StorageHealth.svelte";
+  import VersionsSection from "$lib/features/system/VersionsSection.svelte";
   import SectionState from "./SectionState.svelte";
   import SettingRow from "./SettingRow.svelte";
   import { planeRows } from "./model";
   import type { SettingsSession } from "./session.svelte";
 
-  let { session }: { session: SettingsSession } = $props();
+  let {
+    session,
+    onopen,
+  }: {
+    session: SettingsSession;
+    /** Shows another Settings section in this window. */
+    onopen: (section: SettingsSection) => void;
+  } = $props();
+
+  // Health loads once per Plane selection while this pane is shown.
+  $effect(() => {
+    void session.system.selection;
+    untrack(() => void session.system.ensureLoaded());
+  });
 
   const sections: ReadonlyArray<{ id: SettingsSection; title: string; help: string }> = [
     {
@@ -42,6 +60,9 @@
   <section class="settings-section" aria-labelledby={`section-${section.id}`}>
     <h2 id={`section-${section.id}`} tabindex="-1">{section.title}</h2>
     <p>{section.help}</p>
+    {#if section.id === "storage"}
+      <StorageHealth system={session.system} planeLabel={session.planeLabel} />
+    {/if}
     <SectionState
       state={session.plane}
       title={section.title}
@@ -58,6 +79,8 @@
     </SectionState>
   </section>
 {/each}
+
+<DiagnosticsSection system={session.system} planeLabel={session.planeLabel} />
 
 <section class="settings-section" aria-labelledby="section-audit">
   <h2 id="section-audit" tabindex="-1">Audit</h2>
@@ -77,6 +100,8 @@
     {/snippet}
   </SectionState>
 </section>
+
+<VersionsSection system={session.system} planeLabel={session.planeLabel} {onopen} />
 
 <style>
   .setting-rows {

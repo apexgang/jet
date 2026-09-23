@@ -57,7 +57,10 @@ pub(crate) enum SettingsSection {
     Execution,
     Permissions,
     Storage,
+    Recovery,
+    Diagnostics,
     Audit,
+    Versions,
 }
 
 impl SettingsSection {
@@ -71,9 +74,13 @@ impl SettingsSection {
                 SettingsPane::Work
             }
             Self::LocalService | Self::Planes => SettingsPane::Connections,
-            Self::Execution | Self::Permissions | Self::Storage | Self::Audit => {
-                SettingsPane::Safety
-            }
+            Self::Execution
+            | Self::Permissions
+            | Self::Storage
+            | Self::Recovery
+            | Self::Diagnostics
+            | Self::Audit
+            | Self::Versions => SettingsPane::Safety,
         }
     }
 }
@@ -390,7 +397,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const ALL_SECTIONS: [SettingsSection; 19] = [
+    const ALL_SECTIONS: [SettingsSection; 22] = [
         SettingsSection::Appearance,
         SettingsSection::Notifications,
         SettingsSection::Restoration,
@@ -409,7 +416,10 @@ mod tests {
         SettingsSection::Execution,
         SettingsSection::Permissions,
         SettingsSection::Storage,
+        SettingsSection::Recovery,
+        SettingsSection::Diagnostics,
         SettingsSection::Audit,
+        SettingsSection::Versions,
     ];
 
     #[test]
@@ -433,7 +443,10 @@ mod tests {
             ("execution", "safety"),
             ("permissions", "safety"),
             ("storage", "safety"),
+            ("recovery", "safety"),
+            ("diagnostics", "safety"),
             ("audit", "safety"),
+            ("versions", "safety"),
         ];
         for (section, (name, pane)) in ALL_SECTIONS.iter().zip(expected) {
             assert_eq!(serde_json::to_value(section).unwrap(), json!(name));

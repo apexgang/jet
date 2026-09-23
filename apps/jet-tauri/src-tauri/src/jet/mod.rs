@@ -500,15 +500,18 @@ mod manifest_tests {
         (granted, windows)
     }
 
-    /// Commands both windows may call: read-only, no agent content.
-    const SHARED: [&str; 3] = [
+    /// Commands both windows may call: no agent content, and nothing a
+    /// window could not undo. `collect_disposable_storage` only removes
+    /// unused temporary files the Plane chose (wave 3.3 §5).
+    const SHARED: [&str; 4] = [
         "load_desktop_preferences",
         "list_planes",
         "load_plane_detail",
+        "collect_disposable_storage",
     ];
 
     /// Commands only the Settings window may call.
-    const SETTINGS_ONLY: [&str; 24] = [
+    const SETTINGS_ONLY: [&str; 25] = [
         "watch_settings_navigation",
         "remember_settings_pane",
         "close_settings",
@@ -533,13 +536,13 @@ mod manifest_tests {
         "inspect_extension",
         "prepare_extension_change",
         "load_extension_change",
+        "load_system_health",
     ];
 
     /// Wave 3.3 commands granted to the main window only.
     /// `resolve_conversation_names` joins the Settings window with its first
     /// call site there (auto-delete candidates).
-    const WAVE_3_3_MAIN_ONLY: [&str; 7] = [
-        "collect_disposable_storage",
+    const WAVE_3_3_MAIN_ONLY: [&str; 6] = [
         "load_trash",
         "load_trash_status",
         "resolve_conversation_names",

@@ -103,6 +103,7 @@ pub fn run() {
             jet::resize_workspace_terminal,
             jet::detach_workspace_terminal,
             jet::system::collect_disposable_storage,
+            jet::system::load_system_health,
             jet::retention::load_trash,
             jet::retention::load_trash_status,
             jet::retention::resolve_conversation_names,

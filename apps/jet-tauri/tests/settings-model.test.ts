@@ -73,9 +73,12 @@ describe("settings targets", () => {
       execution: "safety",
       permissions: "safety",
       storage: "safety",
+      recovery: "safety",
+      diagnostics: "safety",
       audit: "safety",
+      versions: "safety",
     });
-    expect(sections).toHaveLength(19);
+    expect(sections).toHaveLength(22);
     expect(PANES.map((pane) => pane.title)).toEqual(["General", "Agents", "Work", "Connections", "Safety and system"]);
   });
 

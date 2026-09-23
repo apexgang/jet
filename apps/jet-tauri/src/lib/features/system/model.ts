@@ -1,6 +1,8 @@
 import type { PlaneConditionKind } from "$lib/jet/errors";
 import type { RunSummary } from "$lib/jet/bridge";
-import type { PlaneHealthSummary } from "$lib/jet/system";
+import type { PublicError } from "$lib/jet/bridge";
+import type { ProtocolKnowledge } from "$lib/jet/planes";
+import type { PlaneHealthSummary, SecurityView, SystemHealth } from "$lib/jet/system";
 import type { SettingsTarget } from "$lib/jet/settings-window";
 import { landedTarget } from "$lib/features/settings/model";
 
@@ -92,10 +94,11 @@ export function noticeLink(
       return target ? { label: "Review audit", target } : null;
     }
     case "read_only":
-    case "ledger_corrupt":
-      // "Open Recovery" needs the Safety › Recovery section, which a later
-      // Wave 3.3 slice adds. Until it lands the notice offers no link.
-      return null;
+    case "ledger_corrupt": {
+      // Null until the Safety › Recovery section lands.
+      const target = landedTarget("recovery", planeId);
+      return target ? { label: "Open Recovery", target } : null;
+    }
   }
 }
 
@@ -127,4 +130,158 @@ export const LOST_RUN_TEXT =
 /** The header line for a task Jet forgets on its own; null for Retain. */
 export function retentionLine(policy: "retain" | "forget_after_final_run" | null | undefined): string | null {
   return policy === "forget_after_final_run" ? "Jet forgets this task after its last activity ends." : null;
+}
+
+// ---------------------------------------------------------------------------
+// Settings › Safety and system: versions, storage and diagnostics
+// ---------------------------------------------------------------------------
+
+/** Stable error codes kept for the diagnostic summary. */
+export const RECENT_CODES_LIMIT = 20;
+
+const STABLE_CODE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/;
+
+/** Whether a string is a stable error code (no free text, no identifiers). */
+export function isStableCode(code: string): boolean {
+  return code.length <= 64 && STABLE_CODE.test(code);
+}
+
+/** Appends a code, keeping the newest `RECENT_CODES_LIMIT`, oldest first. */
+export function withRecentCode(codes: readonly string[], error: Pick<PublicError, "code">): string[] {
+  if (!isStableCode(error.code)) return [...codes];
+  return [...codes, error.code].slice(-RECENT_CODES_LIMIT);
+}
+
+/** The negotiated protocol as far as this app can prove it. */
+export function negotiatedLine(protocol: ProtocolKnowledge): string | null {
+  if (protocol.exact !== null) return `Connected with protocol 1.${protocol.exact}`;
+  return null;
+}
+
+export function credentialStoreText(store: SystemHealth["credentialStore"]): string {
+  if (store === null) return "Secure storage status unavailable";
+  switch (store.state) {
+    case "available":
+      return "Secure storage ready";
+    case "locked":
+      return "Secure storage locked. Unlock it in your desktop session.";
+    case "unavailable":
+      return "Secure storage unavailable";
+  }
+}
+
+export function toolText(tool: SystemHealth["tools"][number]): string {
+  return tool.version === null ? "Not installed" : tool.version;
+}
+
+/** "Started 12 times", counted by the Plane since its store was created. */
+export function startsText(daemonStarts: string): string {
+  return daemonStarts === "1" ? "Jet has started once on this Plane." : `Jet has started ${daemonStarts} times on this Plane.`;
+}
+
+/** Parses a decimal Unix-millisecond string the shell sent. */
+export function unixMs(value: string): number | null {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+/** The Storage section's line about the last low-disk refusal, if any. */
+export function diskPressureText(at: number | null): string | null {
+  return at === null
+    ? null
+    : `Jet refused new work for low disk space at ${formatWhen(at)}. Free up disk space, then try again.`;
+}
+
+export function budgetText(disposableMiB: number | null): string | null {
+  return disposableMiB === null ? null : `Temporary file budget: ${disposableMiB.toLocaleString("en-US")} MiB.`;
+}
+
+// Diagnostic summary --------------------------------------------------------
+
+const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,47}$/;
+const PLATFORM_PART = /^[a-z0-9_]{1,32}$/;
+
+function version(value: string): string {
+  return VERSION.test(value) ? value : "unrecognized";
+}
+
+function digits(value: string): string {
+  return /^[0-9]{1,20}$/.test(value) ? value : "unrecognized";
+}
+
+function platform(value: string | null): string {
+  if (value === null) return "not reported";
+  const parts = value.split(" · ");
+  return parts.length === 2 && parts.every((part) => PLATFORM_PART.test(part)) ? `${parts[0]} ${parts[1]}` : "unrecognized";
+}
+
+function protocolSummary(protocol: ProtocolKnowledge): string {
+  if (protocol.exact !== null) return `1.${protocol.exact}`;
+  const most = protocol.atMost === null ? "" : `, at most 1.${protocol.atMost}`;
+  return `at least 1.${protocol.atLeast}${most}`;
+}
+
+function securitySummary(security: SecurityView): string {
+  switch (security.kind) {
+    case "trusted":
+      return "trusted";
+    case "absent":
+      return "not reported";
+    case "degraded":
+      return `degraded (${security.breach}, epoch ${digits(security.epoch)})`;
+  }
+}
+
+function recoverySummary(health: SystemHealth): string[] {
+  const { recovery } = health;
+  switch (recovery.kind) {
+    case "unsupported":
+      return ["Store: recovery not reported"];
+    case "serving":
+    case "read_only": {
+      const state = recovery.kind === "serving" ? "serving" : `read-only (${recovery.reason})`;
+      const ledger = recovery.ledger.kind === "verified" ? `verified, ${digits(recovery.ledger.deletions)} deletions` : recovery.ledger.kind;
+      return [`Store: ${state}, ${recovery.snapshotCount} recovery snapshots`, `Deletion ledger: ${ledger}`];
+    }
+  }
+}
+
+/**
+ * A copyable summary for support. Every line comes from an allowlisted
+ * field or enum: no Plane label, ID, path, prompt, Craft name or native
+ * version line. Free-form versions that are not plain version numbers are
+ * replaced by "unrecognized".
+ */
+export function diagnosticSummary(health: SystemHealth | null, recentCodes: readonly string[]): string {
+  const lines = ["Jet for Linux diagnostic summary"];
+  if (health === null) {
+    lines.push("Plane health: not loaded");
+  } else {
+    lines.push(
+      `App version: ${version(health.app.version)}`,
+      `Supported protocol: ${version(health.app.supportedProtocol)}`,
+      `Negotiated protocol: ${protocolSummary(health.protocol)}`,
+      `Jet service version: ${version(health.service.coreVersion)}`,
+      `Jet service starts: ${digits(health.service.daemonStarts)}`,
+      `Platform: ${platform(health.platform)}`,
+    );
+    if (health.tools.length > 0) {
+      lines.push(`Tools: ${health.tools.map((tool) => `${tool.tool} ${tool.version === null ? "missing" : "present"}`).join(", ")}`);
+    }
+    lines.push(
+      `Crafts installed: ${health.crafts.length}`,
+      `Secure storage: ${health.credentialStore?.state ?? "not reported"}`,
+      `Degraded: ${health.degraded.length === 0 ? "none" : health.degraded.map((condition) => condition.kind).join(", ")}`,
+      ...recoverySummary(health),
+      `Security audit: ${securitySummary(health.security)}`,
+      `Temporary file budget: ${health.storage.disposableMiB === null ? "not read" : `${health.storage.disposableMiB} MiB`}`,
+      `Jet Trash grace period: ${health.retention.graceDays === null ? "not read" : `${health.retention.graceDays} days`}`,
+    );
+    for (const issue of health.issues) {
+      if (isStableCode(issue.error.code)) lines.push(`Not loaded: ${issue.section} (${issue.error.code})`);
+    }
+  }
+  const codes = recentCodes.filter(isStableCode).slice(-RECENT_CODES_LIMIT);
+  lines.push(`Recent error codes, oldest first: ${codes.length === 0 ? "none" : codes.join(", ")}`);
+  return lines.join("\n");
 }

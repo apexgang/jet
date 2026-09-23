@@ -80,6 +80,7 @@ fn main() {
             "resize_workspace_terminal",
             "detach_workspace_terminal",
             "collect_disposable_storage",
+            "load_system_health",
             "load_trash",
             "load_trash_status",
             "resolve_conversation_names",

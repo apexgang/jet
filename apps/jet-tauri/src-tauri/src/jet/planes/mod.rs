@@ -686,6 +686,16 @@ impl PlaneRegistry {
             .unwrap_or_default()
     }
 
+    /// What this client can prove about a Plane's negotiated minor.
+    pub(crate) fn protocol(&self, plane: PlaneId) -> ProtocolView {
+        self.entry(plane)
+            .ok()
+            .flatten()
+            .and_then(|entry| entry.observed.lock().ok().map(|value| value.knowledge))
+            .unwrap_or_default()
+            .view()
+    }
+
     /// The bounded label a Plane is presented with.
     pub(crate) fn label(&self, plane: PlaneId) -> Option<String> {
         self.entry(plane)

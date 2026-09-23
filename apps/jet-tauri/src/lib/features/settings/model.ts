@@ -55,7 +55,10 @@ export const PANES: ReadonlyArray<{
       { id: "execution", title: "Execution" },
       { id: "permissions", title: "Permissions" },
       { id: "storage", title: "Storage" },
+      { id: "recovery", title: "Recovery" },
+      { id: "diagnostics", title: "Diagnostics" },
       { id: "audit", title: "Audit" },
+      { id: "versions", title: "Versions and capabilities" },
     ],
   },
 ];
@@ -83,7 +86,9 @@ export const LANDED_SECTIONS: ReadonlySet<SettingsSection> = new Set<SettingsSec
   "execution",
   "permissions",
   "storage",
+  "diagnostics",
   "audit",
+  "versions",
 ]);
 
 export function paneOf(section: SettingsSection): SettingsPane {
@@ -136,7 +141,20 @@ const EXACT_TARGETS: ReadonlyArray<[readonly string[], SettingsPane, SettingsSec
   [["energy.budget_exhausted", "energy.policy_unreadable"], "safety", "execution"],
   [["storage.disk_pressure"], "safety", "storage"],
   [["craft.developer_mode_required"], "safety", "permissions"],
-  [["security.audit_degraded", "review.audit_degraded"], "safety", "audit"],
+  [["security.audit_degraded", "review.audit_degraded", "audit.export_required"], "safety", "audit"],
+  [
+    [
+      "recovery.read_only",
+      "recovery.deletion_ledger_corrupt",
+      "recovery.restore_failed",
+      "recovery.snapshot_gone",
+      "recovery.purge_unavailable",
+      "recovery.not_read_only_local",
+    ],
+    "safety",
+    "recovery",
+  ],
+  [["security.gap_unknown"], "safety", "diagnostics"],
   [
     [
       "account.not_found",

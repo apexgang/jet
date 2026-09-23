@@ -22,6 +22,7 @@
     LAST_WRITER_WINS,
     PLANE_PANES,
     landedPanes,
+    paneOf,
     paneTitle,
     resolveTarget,
     sectionHeadingId,
@@ -164,7 +165,7 @@
         {:else if pane === "work"}
           <WorkPane {session} />
         {:else}
-          <SafetyPane {session} />
+          <SafetyPane {session} onopen={(section) => void go(paneOf(section), section)} />
         {/if}
         <p class="disclosure">{LAST_WRITER_WINS}</p>
       {/if}

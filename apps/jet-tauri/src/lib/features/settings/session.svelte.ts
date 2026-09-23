@@ -16,6 +16,7 @@ import {
   type SettingValue,
   type WorkContext,
 } from "$lib/jet/settings";
+import { SystemSession } from "$lib/features/system/session.svelte";
 import { AgentsSession } from "./agents-session.svelte";
 import { ExtensionsSession } from "./extensions-session.svelte";
 import {
@@ -130,6 +131,8 @@ export class SettingsSession {
     planeStateStale: () => void this.loadPlane(),
     mutationBlock: () => this.agentsBlock(),
   });
+  /** Safety › Versions, Storage health and Diagnostics of the same Plane. */
+  readonly system = new SystemSession();
 
   private started = false;
   private disposed = false;
@@ -173,6 +176,7 @@ export class SettingsSession {
     this.schedulesChanged = false;
     this.agents.select(planeId);
     this.extensions.select(planeId);
+    this.system.select(planeId);
     void this.reload();
   }
 
@@ -184,6 +188,7 @@ export class SettingsSession {
     this.watch = "idle";
     this.agents.dispose();
     this.extensions.dispose();
+    this.system.dispose();
   }
 
   /** Reloads every section, then watches from the lowest section cursor. */
@@ -196,6 +201,7 @@ export class SettingsSession {
       this.loadWork(),
       this.agents.reloadIfLoaded(),
       this.extensions.reloadLoaded(),
+      this.system.reloadIfLoaded(),
     ]);
     if (generation !== this.generation) return;
     const projects = sectionData(this.work)?.projects ?? [];
@@ -232,7 +238,7 @@ export class SettingsSession {
       this.replayMissed("plane");
     } catch (error: unknown) {
       if (generation !== this.generation || request !== this.requests.plane) return;
-      this.plane = sectionStateFor(publicError(error), last);
+      this.plane = sectionStateFor(this.noted(error), last);
       this.missed.plane = { changes: [], overflow: false };
     }
   }
@@ -255,7 +261,7 @@ export class SettingsSession {
       this.replayMissed("work");
     } catch (error: unknown) {
       if (generation !== this.generation || request !== this.requests.work) return;
-      this.work = sectionStateFor(publicError(error), last);
+      this.work = sectionStateFor(this.noted(error), last);
       this.missed.work = { changes: [], overflow: false };
     }
   }
@@ -273,7 +279,7 @@ export class SettingsSession {
       this.replayMissed("project");
     } catch (error: unknown) {
       if (generation !== this.generation || request !== this.requests.project || projectId !== this.projectId) return;
-      this.project = sectionStateFor(publicError(error), last);
+      this.project = sectionStateFor(this.noted(error), last);
       this.missed.project = { changes: [], overflow: false };
     }
   }
@@ -404,7 +410,7 @@ export class SettingsSession {
       preparation = await prepareSettingChange(planeId, snapshotId, key, change);
     } catch (thrown: unknown) {
       if (generation !== this.generation) return;
-      const error = publicError(thrown);
+      const error = this.noted(thrown);
       if (error.code === "settings.snapshot_expired" && reloadIfExpired) {
         // Reload once; re-prepare only if the value is still the one shown.
         await this.loadSection(scope);
@@ -450,7 +456,7 @@ export class SettingsSession {
     try {
       receipt = await applySettingsChange(planeId, reviewId);
     } catch (thrown: unknown) {
-      const uncertain: SettingRowState = { kind: "uncertain", reviewId, draft, error: publicError(thrown) };
+      const uncertain: SettingRowState = { kind: "uncertain", reviewId, draft, error: this.noted(thrown) };
       if (this.owns(planeId, row, reviewId)) this.setRow(row, uncertain);
       // The user switched Planes; keep the uncertainty for when they return.
       else if (!this.disposed && planeId !== this.planeId) this.retained.set(`${planeId}#${row}`, uncertain);
@@ -472,6 +478,7 @@ export class SettingsSession {
         await this.loadSection(scope);
         return;
       case "refused":
+        this.system.observe(receipt.error);
         this.setRow(row, { kind: "refused", error: receipt.error });
         if (receipt.error.code === "security.audit_degraded" || receipt.error.code === "recovery.read_only") {
           void this.loadPlane();
@@ -603,6 +610,7 @@ export class SettingsSession {
     if (this.project) this.project = withFreshness(this.project, "stale");
     this.agents.markStale();
     this.extensions.markStale();
+    this.system.markStale();
   }
 
   /** Handles one watcher message. Exposed for the session tests. */
@@ -627,6 +635,7 @@ export class SettingsSession {
     switch (change.kind) {
       case "setting.changed":
       case "setting.cleared":
+        if (change.settingScope === "plane") void this.system.settingChanged(change.settingKey);
         await this.settingChanged(change);
         return;
       case "account.bound":
@@ -644,6 +653,7 @@ export class SettingsSession {
       case "audit.epoch_begun":
         // A new audit epoch may clear the degraded banner.
         void this.loadPlane();
+        void this.system.reloadIfLoaded();
         return;
       case "schedule.created":
       case "schedule.canceled":
@@ -655,6 +665,13 @@ export class SettingsSession {
         this.agents.noteChange(change.kind, change.sequence);
         return;
     }
+  }
+
+  /** A failure on this Plane, recorded for the diagnostic summary. */
+  private noted(thrown: unknown): PublicError {
+    const error = publicError(thrown);
+    this.system.observe(error);
+    return error;
   }
 
   private workChanged(change: Extract<SettingsChange, { type: "change" }>): void {
