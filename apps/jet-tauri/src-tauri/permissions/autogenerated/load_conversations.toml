@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-load-conversations"
+description = "Allows loading a bounded Conversation page."
+commands.allow = ["load_conversations"]
+
+[[permission]]
+identifier = "deny-load-conversations"
+description = "Denies loading Conversation pages."
+commands.deny = ["load_conversations"]

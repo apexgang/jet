@@ -1,0 +1,51 @@
+set shell := ["bash", "-cu"]
+
+manifest := "src-tauri/Cargo.toml"
+bundle_kind := if os() == "macos" { "app" } else { "appimage" }
+
+# Show the Tauri app's available tasks.
+default:
+	@just --justfile "{{justfile_directory()}}/justfile" --list
+
+# Install the locked frontend dependencies.
+install:
+	bun install --frozen-lockfile
+
+# Verify generated Jet protocol bindings are current.
+contracts:
+	../jet/scripts/check-generated-contracts.sh
+
+# Check Svelte and TypeScript without producing a bundle.
+frontend-check:
+	bun run check
+
+# Build the static webview assets.
+frontend-build:
+	bun run build
+
+# Run the fixture and browser-independent frontend tests.
+frontend-test:
+	bun run test
+
+# Verify Rust formatting.
+fmt:
+	cargo fmt --manifest-path "{{manifest}}" --check
+
+# Run the Rust lints used by CI.
+clippy:
+	cargo clippy --manifest-path "{{manifest}}" --all-targets -- -D warnings
+
+# Run the Rust shell tests.
+test:
+	cargo test --manifest-path "{{manifest}}"
+
+# Run the app-local contract, frontend, lint, and test checks.
+check: contracts frontend-check frontend-test frontend-build fmt clippy test
+
+# Build a debug app bundle on macOS or AppImage on Linux.
+bundle:
+	bun run tauri build --debug --bundles "{{bundle_kind}}"
+
+# Launch the desktop app in development mode.
+dev:
+	bun run tauri dev

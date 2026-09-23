@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-attach-workspace-terminal"
+description = "Enables the attach_workspace_terminal command without any pre-configured scope."
+commands.allow = ["attach_workspace_terminal"]
+
+[[permission]]
+identifier = "deny-attach-workspace-terminal"
+description = "Denies the attach_workspace_terminal command without any pre-configured scope."
+commands.deny = ["attach_workspace_terminal"]

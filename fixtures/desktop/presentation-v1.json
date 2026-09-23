@@ -1,0 +1,579 @@
+{
+  "format_version": 1,
+  "protocol_version": {
+    "major": 1,
+    "minor": 43
+  },
+  "scenarios": [
+    {
+      "id": "first-launch",
+      "state": "first_launch",
+      "summary": "The local Plane is connecting and initial setup is incomplete.",
+      "plane": {
+        "id": "00000000-0000-7000-8000-000000000001",
+        "name": "This Mac",
+        "connection": "connecting",
+        "cursor": "0"
+      },
+      "queue": [],
+      "timeline": [],
+      "capabilities": {
+        "harnesses": [],
+        "external_tools": [
+          { "tool": "git", "availability": "present" },
+          { "tool": "ssh", "availability": "present" }
+        ],
+        "missing_features": ["account_binding", "project_selection"]
+      },
+      "notice": {
+        "tone": "informational",
+        "title": "Connecting to Jet",
+        "message": "Jet is checking the local service before setup continues."
+      },
+      "contract": {
+        "queries": ["status", "capabilities", "projects", "account_bindings"],
+        "commands": [],
+        "error_categories": ["unavailable"],
+        "backend_dependencies": []
+      }
+    },
+    {
+      "id": "ready-new-task",
+      "state": "ready",
+      "summary": "The local Plane and Project are ready for a new task.",
+      "plane": {
+        "id": "00000000-0000-7000-8000-000000000001",
+        "name": "This Mac",
+        "connection": "online",
+        "cursor": "42"
+      },
+      "project": {
+        "id": "00000000-0000-7000-8000-000000000010",
+        "name": "Jet"
+      },
+      "queue": [],
+      "timeline": [],
+      "capabilities": {
+        "harnesses": ["codex"],
+        "external_tools": [
+          { "tool": "git", "availability": "present" },
+          { "tool": "ssh", "availability": "present" }
+        ],
+        "missing_features": []
+      },
+      "primary_action": {
+        "id": "start-task",
+        "label": "Start task",
+        "availability": "enabled"
+      },
+      "contract": {
+        "queries": ["status", "capabilities", "projects", "conversations"],
+        "commands": ["create_conversation", "start_run"],
+        "error_categories": ["invalid_input", "unavailable"],
+        "backend_dependencies": []
+      }
+    },
+    {
+      "id": "active-run",
+      "state": "active",
+      "summary": "A Run is working and meaningful progress is visible in the timeline.",
+      "plane": {
+        "id": "00000000-0000-7000-8000-000000000001",
+        "name": "This Mac",
+        "connection": "online",
+        "cursor": "108"
+      },
+      "project": {
+        "id": "00000000-0000-7000-8000-000000000010",
+        "name": "Jet"
+      },
+      "conversation": {
+        "id": "00000000-0000-7000-8000-000000000020",
+        "title": "Polish first-run flow"
+      },
+      "run": {
+        "id": "00000000-0000-7000-8000-000000000030",
+        "lifecycle": "active",
+        "activity": "working"
+      },
+      "queue": [],
+      "timeline": [
+        {
+          "id": "active-user",
+          "kind": "user",
+          "text": "Make first launch explain what Jet needs before it asks."
+        },
+        {
+          "id": "active-agent",
+          "kind": "agent",
+          "text": "I found the setup flow and am separating service status from account setup."
+        },
+        {
+          "id": "active-progress",
+          "kind": "activity",
+          "text": "3 files inspected"
+        }
+      ],
+      "capabilities": {
+        "harnesses": ["codex"],
+        "external_tools": [
+          { "tool": "git", "availability": "present" },
+          { "tool": "ssh", "availability": "present" }
+        ],
+        "missing_features": []
+      },
+      "primary_action": {
+        "id": "interrupt-turn",
+        "label": "Interrupt turn",
+        "availability": "enabled"
+      },
+      "contract": {
+        "queries": ["conversation", "run_execution", "events", "change_diff"],
+        "commands": ["submit_turn", "interrupt_turn", "stop_run"],
+        "error_categories": ["conflict", "unavailable", "outcome_unknown"],
+        "backend_dependencies": []
+      }
+    },
+    {
+      "id": "queued-turns",
+      "state": "queued",
+      "summary": "Two user turns wait behind the active turn in authoritative order.",
+      "plane": {
+        "id": "00000000-0000-7000-8000-000000000001",
+        "name": "This Mac",
+        "connection": "online",
+        "cursor": "126"
+      },
+      "project": {
+        "id": "00000000-0000-7000-8000-000000000010",
+        "name": "Jet"
+      },
+      "conversation": {
+        "id": "00000000-0000-7000-8000-000000000020",
+        "title": "Polish first-run flow"
+      },
+      "run": {
+        "id": "00000000-0000-7000-8000-000000000030",
+        "lifecycle": "active",
+        "activity": "working"
+      },
+      "queue": [
+        {
+          "id": "00000000-0000-7000-8000-000000000041",
+          "position": 1,
+          "state": "queued",
+          "summary": "Add a reconnect state after this change."
+        },
+        {
+          "id": "00000000-0000-7000-8000-000000000042",
+          "position": 2,
+          "state": "queued",
+          "summary": "Then check VoiceOver labels."
+        }
+      ],
+      "timeline": [
+        {
+          "id": "queued-active",
+          "kind": "activity",
+          "text": "Current turn is still working"
+        }
+      ],
+      "capabilities": {
+        "harnesses": ["codex"],
+        "external_tools": [
+          { "tool": "git", "availability": "present" }
+        ],
+        "missing_features": []
+      },
+      "primary_action": {
+        "id": "withdraw-turn",
+        "label": "Withdraw queued turn",
+        "availability": "enabled"
+      },
+      "contract": {
+        "queries": ["turn_queue", "events"],
+        "commands": ["submit_turn", "withdraw_turn"],
+        "error_categories": ["not_found", "conflict"],
+        "backend_dependencies": []
+      }
+    },
+    {
+      "id": "approval-needed",
+      "state": "approval",
+      "summary": "The Run is waiting for a structured Harness approval decision.",
+      "plane": {
+        "id": "00000000-0000-7000-8000-000000000001",
+        "name": "This Mac",
+        "connection": "online",
+        "cursor": "140"
+      },
+      "project": {
+        "id": "00000000-0000-7000-8000-000000000010",
+        "name": "Jet"
+      },
+      "conversation": {
+        "id": "00000000-0000-7000-8000-000000000020",
+        "title": "Polish first-run flow"
+      },
+      "run": {
+        "id": "00000000-0000-7000-8000-000000000030",
+        "lifecycle": "active",
+        "activity": "waiting_for_approval"
+      },
+      "queue": [],
+      "timeline": [
+        {
+          "id": "approval-request",
+          "kind": "approval",
+          "text": "Allow the agent to replace the onboarding copy in the Jet app target?"
+        }
+      ],
+      "capabilities": {
+        "harnesses": ["codex"],
+        "external_tools": [
+          { "tool": "git", "availability": "present" }
+        ],
+        "missing_features": ["approval_decision_command"]
+      },
+      "notice": {
+        "tone": "warning",
+        "title": "Approval needed",
+        "message": "Review the action, target, scope, and consequence before deciding.",
+        "action": "review_approval"
+      },
+      "primary_action": {
+        "id": "decide-approval",
+        "label": "Review approval",
+        "availability": "disabled",
+        "reason": "The client protocol has no generic Harness approval-decision command."
+      },
+      "contract": {
+        "queries": ["run_execution", "events"],
+        "commands": [],
+        "error_categories": [],
+        "backend_dependencies": ["approval_decision_command"]
+      }
+    },
+    {
+      "id": "completed-run",
+      "state": "completed",
+      "summary": "The result is complete and a bounded Change diff is available.",
+      "plane": {
+        "id": "00000000-0000-7000-8000-000000000001",
+        "name": "This Mac",
+        "connection": "online",
+        "cursor": "188"
+      },
+      "project": {
+        "id": "00000000-0000-7000-8000-000000000010",
+        "name": "Jet"
+      },
+      "conversation": {
+        "id": "00000000-0000-7000-8000-000000000020",
+        "title": "Polish first-run flow"
+      },
+      "run": {
+        "id": "00000000-0000-7000-8000-000000000030",
+        "lifecycle": "completed"
+      },
+      "queue": [],
+      "timeline": [
+        {
+          "id": "completed-result",
+          "kind": "result",
+          "text": "Updated the setup flow and added coverage for offline recovery."
+        }
+      ],
+      "capabilities": {
+        "harnesses": ["codex"],
+        "external_tools": [
+          { "tool": "git", "availability": "present" },
+          { "tool": "ssh", "availability": "present" }
+        ],
+        "missing_features": []
+      },
+      "primary_action": {
+        "id": "review-changes",
+        "label": "Review changes",
+        "availability": "enabled"
+      },
+      "contract": {
+        "queries": ["conversation", "run_execution", "change_diff", "git_deliveries"],
+        "commands": ["deliver_git"],
+        "error_categories": ["outcome_unknown", "unavailable"],
+        "backend_dependencies": []
+      }
+    },
+    {
+      "id": "offline-cached-conversation",
+      "state": "offline",
+      "summary": "The last trustworthy Conversation remains visible while the Plane is offline.",
+      "plane": {
+        "id": "00000000-0000-7000-8000-000000000001",
+        "name": "This Mac",
+        "connection": "offline",
+        "cursor": "188"
+      },
+      "project": {
+        "id": "00000000-0000-7000-8000-000000000010",
+        "name": "Jet"
+      },
+      "conversation": {
+        "id": "00000000-0000-7000-8000-000000000020",
+        "title": "Polish first-run flow"
+      },
+      "run": {
+        "id": "00000000-0000-7000-8000-000000000030",
+        "lifecycle": "active",
+        "activity": "reconnecting"
+      },
+      "queue": [],
+      "timeline": [
+        {
+          "id": "offline-last-result",
+          "kind": "agent",
+          "text": "Cached output from before the connection was lost."
+        }
+      ],
+      "capabilities": {
+        "harnesses": ["codex"],
+        "external_tools": [],
+        "missing_features": ["live_plane_state"]
+      },
+      "notice": {
+        "tone": "warning",
+        "title": "Jet is offline",
+        "message": "Showing the last confirmed state from this Mac.",
+        "action": "reconnect"
+      },
+      "primary_action": {
+        "id": "reconnect",
+        "label": "Reconnect",
+        "availability": "enabled"
+      },
+      "contract": {
+        "queries": [],
+        "commands": [],
+        "error_categories": ["unavailable"],
+        "backend_dependencies": []
+      }
+    },
+    {
+      "id": "expired-event-cursor",
+      "state": "stale_cursor",
+      "summary": "The Event cursor expired and the client must replace its snapshot before resuming.",
+      "plane": {
+        "id": "00000000-0000-7000-8000-000000000001",
+        "name": "This Mac",
+        "connection": "recovering",
+        "cursor": "188"
+      },
+      "project": {
+        "id": "00000000-0000-7000-8000-000000000010",
+        "name": "Jet"
+      },
+      "conversation": {
+        "id": "00000000-0000-7000-8000-000000000020",
+        "title": "Polish first-run flow"
+      },
+      "run": {
+        "id": "00000000-0000-7000-8000-000000000030",
+        "lifecycle": "active",
+        "activity": "reconnecting"
+      },
+      "queue": [],
+      "timeline": [
+        {
+          "id": "cursor-recovery",
+          "kind": "recovery",
+          "text": "Refreshing the Conversation because its Event history is no longer continuous."
+        }
+      ],
+      "capabilities": {
+        "harnesses": ["codex"],
+        "external_tools": [],
+        "missing_features": []
+      },
+      "notice": {
+        "tone": "informational",
+        "title": "Refreshing this task",
+        "message": "Jet is replacing stale cached state before it resumes updates.",
+        "action": "refresh_snapshot"
+      },
+      "contract": {
+        "queries": ["conversation", "events"],
+        "commands": [],
+        "error_categories": ["conflict"],
+        "restart": "cursor_expired",
+        "backend_dependencies": []
+      }
+    },
+    {
+      "id": "approval-denied",
+      "state": "denied",
+      "summary": "A stored automatic review denial blocks the exact action until the user authorizes one retry.",
+      "plane": {
+        "id": "00000000-0000-7000-8000-000000000001",
+        "name": "This Mac",
+        "connection": "online",
+        "cursor": "204"
+      },
+      "project": {
+        "id": "00000000-0000-7000-8000-000000000010",
+        "name": "Jet"
+      },
+      "conversation": {
+        "id": "00000000-0000-7000-8000-000000000020",
+        "title": "Polish first-run flow"
+      },
+      "run": {
+        "id": "00000000-0000-7000-8000-000000000030",
+        "lifecycle": "active",
+        "activity": "waiting_for_approval"
+      },
+      "queue": [],
+      "timeline": [
+        {
+          "id": "denied-result",
+          "kind": "approval",
+          "text": "The reviewer denied access outside the registered Project."
+        }
+      ],
+      "capabilities": {
+        "harnesses": ["codex"],
+        "external_tools": [
+          { "tool": "git", "availability": "present" }
+        ],
+        "missing_features": []
+      },
+      "notice": {
+        "tone": "critical",
+        "title": "Action denied",
+        "message": "Jet kept the original denied action. A retry cannot substitute a different action.",
+        "action": "review_approval"
+      },
+      "primary_action": {
+        "id": "authorize-one-retry",
+        "label": "Authorize one retry",
+        "availability": "enabled"
+      },
+      "contract": {
+        "queries": ["run_execution", "events"],
+        "commands": ["authorize_approval_retry"],
+        "error_categories": ["unauthorized"],
+        "backend_dependencies": []
+      }
+    },
+    {
+      "id": "unsupported-git-delivery",
+      "state": "unsupported",
+      "summary": "The Conversation is complete, but this Plane cannot deliver it through Git.",
+      "plane": {
+        "id": "00000000-0000-7000-8000-000000000001",
+        "name": "This Mac",
+        "connection": "online",
+        "cursor": "212"
+      },
+      "project": {
+        "id": "00000000-0000-7000-8000-000000000010",
+        "name": "Jet"
+      },
+      "conversation": {
+        "id": "00000000-0000-7000-8000-000000000020",
+        "title": "Polish first-run flow"
+      },
+      "run": {
+        "id": "00000000-0000-7000-8000-000000000030",
+        "lifecycle": "completed"
+      },
+      "queue": [],
+      "timeline": [
+        {
+          "id": "unsupported-result",
+          "kind": "result",
+          "text": "The work is complete and remains available for inspection."
+        }
+      ],
+      "capabilities": {
+        "harnesses": ["codex"],
+        "external_tools": [
+          { "tool": "git", "availability": "missing" }
+        ],
+        "missing_features": ["git_delivery"]
+      },
+      "notice": {
+        "tone": "warning",
+        "title": "Git is unavailable",
+        "message": "Install Git on this Mac before committing or pushing from Jet.",
+        "action": "open_settings"
+      },
+      "primary_action": {
+        "id": "deliver-git",
+        "label": "Commit",
+        "availability": "disabled",
+        "reason": "The Plane reports Git as missing."
+      },
+      "contract": {
+        "queries": ["capabilities", "change_diff", "git_deliveries"],
+        "commands": ["deliver_git"],
+        "error_categories": ["incompatible", "unavailable"],
+        "backend_dependencies": []
+      }
+    },
+    {
+      "id": "lost-run-recovery",
+      "state": "recovery",
+      "summary": "A lost Run remains attached to its Conversation and needs an explicit recovery choice.",
+      "plane": {
+        "id": "00000000-0000-7000-8000-000000000001",
+        "name": "This Mac",
+        "connection": "online",
+        "cursor": "240"
+      },
+      "project": {
+        "id": "00000000-0000-7000-8000-000000000010",
+        "name": "Jet"
+      },
+      "conversation": {
+        "id": "00000000-0000-7000-8000-000000000020",
+        "title": "Polish first-run flow"
+      },
+      "run": {
+        "id": "00000000-0000-7000-8000-000000000030",
+        "lifecycle": "lost"
+      },
+      "queue": [],
+      "timeline": [
+        {
+          "id": "recovery-needed",
+          "kind": "recovery",
+          "text": "Jet can no longer observe the previous process. Inspect the retained execution before deciding what to do."
+        }
+      ],
+      "capabilities": {
+        "harnesses": ["codex"],
+        "external_tools": [
+          { "tool": "git", "availability": "present" }
+        ],
+        "missing_features": []
+      },
+      "notice": {
+        "tone": "critical",
+        "title": "This Run needs attention",
+        "message": "Inspect the retained execution before adopting, leaving, or terminating it.",
+        "action": "inspect_recovery"
+      },
+      "primary_action": {
+        "id": "inspect-recovery",
+        "label": "Inspect recovery",
+        "availability": "enabled"
+      },
+      "contract": {
+        "queries": ["conversation", "run_execution", "orphaned_executions", "events"],
+        "commands": ["resolve_execution"],
+        "error_categories": ["conflict", "not_found", "unavailable"],
+        "backend_dependencies": []
+      }
+    }
+  ]
+}

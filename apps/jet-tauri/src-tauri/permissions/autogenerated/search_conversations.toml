@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-search-conversations"
+description = "Allows bounded Conversation search."
+commands.allow = ["search_conversations"]
+
+[[permission]]
+identifier = "deny-search-conversations"
+description = "Denies Conversation search."
+commands.deny = ["search_conversations"]

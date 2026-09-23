@@ -1,3 +1,33 @@
 fn main() {
-    tauri_build::build()
+    // ASVS 1.2.2: register only the app commands used by the main webview so
+    // Tauri generates explicit allow/deny permission pairs for each boundary.
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "open_plane_feed",
+            "load_setup",
+            "preview_project",
+            "register_project",
+            "preview_project_removal",
+            "remove_project",
+            "bind_harness_account",
+            "load_run_supervision",
+            "withdraw_turn",
+            "interrupt_turn",
+            "stop_run",
+            "authorize_approval_retry",
+            "load_work_panel",
+            "load_more_changes",
+            "load_patch_chunk",
+            "load_work_file",
+            "save_work_file",
+            "submit_file_review",
+            "open_workspace_terminal",
+            "close_workspace_terminal",
+            "attach_workspace_terminal",
+            "send_terminal_input",
+            "resize_workspace_terminal",
+            "detach_workspace_terminal",
+        ]),
+    ))
+    .expect("failed to build the Tauri command manifest");
 }

@@ -1,7 +1,27 @@
-# Tauri + SvelteKit + TypeScript
+# Jet desktop for Linux
 
-This template should help get you started developing with Tauri, SvelteKit and TypeScript in Vite.
+The Linux client uses Tauri 2, Svelte 5, and the shared Jet protocol. It is an
+independent application: its native Rust shell talks to `jetd` through
+`packages/jet-client`; it does not call or link the Swift application.
 
-## Recommended IDE Setup
+The cross-client architecture and frozen Wave 0 boundary are recorded in
+[ADR-0106](../../docs/adr/0106-freeze-independent-desktop-client-foundations.md).
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).
+## Foundation boundary
+
+- The webview has one read-only command, `open_plane_feed`.
+- The command returns a bounded Plane status and streams redacted event labels.
+- Socket paths, client identity, credentials, connection proofs, command bodies,
+  and Event payloads remain native.
+- The main window capability grants no opener, shell, filesystem, or broad core
+  permission.
+
+## Verify
+
+Run these commands from this directory:
+
+```sh
+just install
+just check
+just bundle
+```

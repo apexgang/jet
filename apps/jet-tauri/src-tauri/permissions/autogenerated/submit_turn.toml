@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-submit-turn"
+description = "Allows submitting one bounded Turn."
+commands.allow = ["submit_turn"]
+
+[[permission]]
+identifier = "deny-submit-turn"
+description = "Denies submitting Turns."
+commands.deny = ["submit_turn"]
