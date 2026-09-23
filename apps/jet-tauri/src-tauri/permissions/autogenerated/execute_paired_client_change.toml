@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-execute-paired-client-change"
+description = "Enables the execute_paired_client_change command without any pre-configured scope."
+commands.allow = ["execute_paired_client_change"]
+
+[[permission]]
+identifier = "deny-execute-paired-client-change"
+description = "Denies the execute_paired_client_change command without any pre-configured scope."
+commands.deny = ["execute_paired_client_change"]

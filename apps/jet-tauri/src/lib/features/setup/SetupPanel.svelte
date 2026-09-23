@@ -2,6 +2,9 @@
   import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
   import { tick } from "svelte";
   import type { DesktopSession } from "$lib/features/shell/session.svelte";
+  import SidebarToggle from "$lib/features/shell/SidebarToggle.svelte";
+  import { landedTarget } from "$lib/features/settings/model";
+  import { LOCAL_PLANE } from "$lib/jet/planes";
 
   let { session }: { session: DesktopSession } = $props();
   let removalName = $state("");
@@ -10,6 +13,15 @@
   let removalNameInput = $state<HTMLInputElement>();
   let removalCancelButton = $state<HTMLButtonElement>();
   let removalReturnFocus: HTMLElement | null = null;
+  let chooseFolderButton = $state<HTMLButtonElement>();
+
+  // Ctrl+Shift+O: "Choose Folder…" takes focus once Setup has loaded.
+  $effect(() => {
+    if (chooseFolderButton && session.takeFocusRequest("project-folder")) chooseFolderButton.focus();
+  });
+
+  /** Setup is this computer's Plane; its accounts are managed in Settings. */
+  const accountsTarget = landedTarget("accounts", LOCAL_PLANE);
 
   const removalReady = $derived(
     session.removalPreview !== null &&
@@ -17,13 +29,21 @@
       removalName === session.removalPreview.name,
   );
 
-  function closeRemoval(): void {
+  function closeRemoval(returnFocus = true): void {
     if (removalDialog?.open) removalDialog.close();
     removalName = "";
     permanentRemoval = false;
     session.cancelProjectRemoval();
-    removalReturnFocus?.focus();
+    if (returnFocus) removalReturnFocus?.focus();
     removalReturnFocus = null;
+  }
+
+  /** Leaves this panel for Schedules: its trigger goes away, so focus moves to the destination's heading. */
+  async function openSchedules(): Promise<void> {
+    closeRemoval(false);
+    session.select("schedules");
+    await tick();
+    document.getElementById("schedules-title")?.focus();
   }
 
   async function confirmRemoval(): Promise<void> {
@@ -79,6 +99,7 @@
 
 <section class="setup-panel" aria-labelledby="setup-title">
   <header class="setup-header">
+    <SidebarToggle {session} />
     <div>
       <h1 id="setup-title">Set up this workspace</h1>
       <p>Connect the local Plane, choose a Project, and use a Harness login already available here.</p>
@@ -170,6 +191,7 @@
           {/if}
 
           <button
+            bind:this={chooseFolderButton}
             class="secondary-button choose-folder"
             disabled={session.setupBusy !== null}
             onclick={chooseProjectFolder}
@@ -233,6 +255,11 @@
               {setup.capabilities.credentialStoreLabel}
             </span>
           </div>
+          {#if accountsTarget && (accountsIssue || setup.capabilities.credentialStore !== "available")}
+            <button class="text-button" onclick={() => void session.openSettings(accountsTarget)}>
+              Open Agents settings
+            </button>
+          {/if}
 
           {#if setup.accounts.length > 0}
             <div class="account-list">
@@ -286,7 +313,10 @@
         {:else if session.remotePairingSkipped}
           <span class="status-text">Skipped</span>
         {:else}
-          <button class="text-button" onclick={() => session.skipRemotePairing()}>Skip for now</button>
+          <div class="remote-actions">
+            <button class="text-button" onclick={() => session.openAddPlane()}>Add a Plane</button>
+            <button class="text-button" onclick={() => session.skipRemotePairing()}>Skip for now</button>
+          </div>
         {/if}
       </section>
 
@@ -324,7 +354,14 @@
           <strong>This Project cannot be removed yet.</strong>
           <ul>
             {#each removal.obstacles as obstacle}
-              <li>{obstacle}</li>
+              <li>
+                {obstacle}
+                {#if obstacle === "Disable scheduled tasks first"}
+                  <button class="text-button" type="button" onclick={() => void openSchedules()}>
+                    Open Schedules
+                  </button>
+                {/if}
+              </li>
             {/each}
           </ul>
         </div>
@@ -344,7 +381,7 @@
       {/if}
 
       <footer>
-        <button bind:this={removalCancelButton} class="secondary-button" type="button" onclick={closeRemoval}>Cancel</button>
+        <button bind:this={removalCancelButton} class="secondary-button" type="button" onclick={() => closeRemoval()}>Cancel</button>
         <button
           class="danger-button"
           disabled={!removalReady || session.setupBusy !== null}

@@ -12,7 +12,9 @@ const CLIENT_ID_FILE: &str = "client-id";
 
 pub(crate) fn load_or_create(app_data_directory: &Path) -> io::Result<Uuid> {
     // ASVS 3.1.1 and 3.5.1: native identity metadata is owner-only and never
-    // stored in browser storage or exposed by the IPC command.
+    // stored in browser storage. The client UUID is an identifier, not a
+    // credential: `list_planes` shows it so the user can tell which paired
+    // client is this computer.
     fs::create_dir_all(app_data_directory)?;
     #[cfg(unix)]
     fs::set_permissions(app_data_directory, fs::Permissions::from_mode(0o700))?;

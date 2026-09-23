@@ -15,7 +15,7 @@ use serde::Serialize;
 use tauri::State;
 use uuid::Uuid;
 
-use super::{errors::PublicError, JetBridge};
+use super::{agents::KnownHarness, errors::PublicError, JetBridge};
 
 const PREVIEW_LIFETIME: Duration = Duration::from_secs(10 * 60);
 
@@ -87,10 +87,10 @@ struct CraftView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AuthProviderView {
-    provider: &'static str,
-    harness: &'static str,
-    label: &'static str,
+pub(crate) struct AuthProviderView {
+    pub(crate) provider: &'static str,
+    pub(crate) harness: &'static str,
+    pub(crate) label: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -154,7 +154,7 @@ pub(crate) struct MutationResult {
 
 pub(crate) async fn load_setup(bridge: State<'_, JetBridge>) -> Result<SetupSnapshot, PublicError> {
     let client = bridge
-        .client
+        .local()
         .connect()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
@@ -162,6 +162,9 @@ pub(crate) async fn load_setup(bridge: State<'_, JetBridge>) -> Result<SetupSnap
         .status()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
+    bridge
+        .planes
+        .observe_status(super::planes::PlaneId::Local, &status);
     let mut issues = Vec::new();
     let capabilities = match client.capabilities(CapabilityObservation::Fresh).await {
         Ok(value) => Some(value),
@@ -211,7 +214,7 @@ pub(crate) async fn preview_project(
 ) -> Result<ProjectPreviewView, PublicError> {
     validate_absolute_path(&path)?;
     let client = bridge
-        .client
+        .local()
         .connect()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
@@ -269,7 +272,7 @@ pub(crate) async fn register_project(
     // ASVS 2.3.1 and 5.3.2: only a native-cached, Plane-canonical preview
     // can become a Path grant. The webview cannot replace the root.
     let project = bridge
-        .client
+        .local()
         .register_project(command_id, &root)
         .await
         .map_err(|error| PublicError::from_client(&error))?;
@@ -288,7 +291,7 @@ pub(crate) async fn preview_project_removal(
 ) -> Result<ProjectRemovalPreviewView, PublicError> {
     let project_id = parse_id(&project_id, "project.identifier_invalid")?;
     let client = bridge
-        .client
+        .local()
         .connect()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
@@ -354,7 +357,7 @@ pub(crate) async fn remove_project(
     // ASVS 2.3.1, 8.3.1, and 15.3.3: the trusted native layer supplies
     // the exact server-issued binding and accepts only the two intended fields.
     let removed = bridge
-        .client
+        .local()
         .remove_project(command_id, binding, &typed_name, disposal)
         .await
         .map_err(|error| PublicError::from_client(&error))?;
@@ -375,7 +378,7 @@ pub(crate) async fn bind_harness_account(
     provider: String,
 ) -> Result<MutationResult, PublicError> {
     let capabilities = bridge
-        .client
+        .local()
         .current_capabilities()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
@@ -402,7 +405,7 @@ pub(crate) async fn bind_harness_account(
     // ASVS 13.3.1 and 14.3.3: this command carries only non-secret
     // metadata. Authentication stays with the Harness environment.
     let binding = bridge
-        .client
+        .local()
         .bind_harness_account(command_id, option.provider, option.label)
         .await
         .map_err(|error| PublicError::from_client(&error))?;
@@ -617,36 +620,24 @@ fn registrability_view(registrability: &Registrability) -> (&'static str, String
     }
 }
 
-fn auth_provider_options(harnesses: &[String]) -> Vec<AuthProviderView> {
+/// Harness-native sign-in options for the Plane's first-party Harnesses,
+/// one per provider.
+pub(crate) fn auth_provider_options(harnesses: &[String]) -> Vec<AuthProviderView> {
     let mut providers = Vec::new();
     let mut seen = HashSet::new();
-    for harness in harnesses {
-        let normalized = harness.to_ascii_lowercase();
-        let option = if normalized.contains("codex") {
-            Some(AuthProviderView {
-                provider: "openai",
-                harness: "Codex",
-                label: "Codex login",
-            })
-        } else if normalized.contains("claude") {
-            Some(AuthProviderView {
-                provider: "anthropic",
-                harness: "Claude Code",
-                label: "Claude Code login",
-            })
-        } else {
-            None
-        };
-        if let Some(option) = option {
-            if seen.insert(option.provider) {
-                providers.push(option);
-            }
+    for harness in harnesses.iter().filter_map(|id| KnownHarness::of(id)) {
+        if seen.insert(harness.provider()) {
+            providers.push(AuthProviderView {
+                provider: harness.provider(),
+                harness: harness.name(),
+                label: harness.login_label(),
+            });
         }
     }
     providers
 }
 
-fn credential_state(state: &CredentialState) -> (&'static str, &'static str) {
+pub(crate) fn credential_state(state: &CredentialState) -> (&'static str, &'static str) {
     match state {
         CredentialState::Resolvable => ("ready", "Ready"),
         CredentialState::ResolvedAtUse => ("resolved_at_use", "Checked when used"),
@@ -656,7 +647,7 @@ fn credential_state(state: &CredentialState) -> (&'static str, &'static str) {
     }
 }
 
-fn degraded_label(condition: &DegradedCondition) -> String {
+pub(crate) fn degraded_label(condition: &DegradedCondition) -> String {
     match condition {
         DegradedCondition::MissingExternalTool { tool } => match tool {
             ExternalTool::Git => "Git is not available".into(),
@@ -724,7 +715,7 @@ fn expired_preview(code: &'static str) -> PublicError {
     PublicError::invalid_input(code, "This preview expired. Refresh it before continuing.")
 }
 
-fn project_name(root: &str) -> String {
+pub(crate) fn project_name(root: &str) -> String {
     Path::new(root)
         .file_name()
         .and_then(|name| name.to_str())
@@ -736,7 +727,7 @@ fn safe_path(value: &str) -> String {
     safe_text(value, 4096, "Path unavailable")
 }
 
-fn safe_text(value: &str, maximum_bytes: usize, fallback: &str) -> String {
+pub(super) fn safe_text(value: &str, maximum_bytes: usize, fallback: &str) -> String {
     if !value.is_empty()
         && value.len() <= maximum_bytes
         && value.chars().all(|character| !character.is_control())

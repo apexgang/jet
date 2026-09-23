@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-load-work-context"
+description = "Enables the load_work_context command without any pre-configured scope."
+commands.allow = ["load_work_context"]
+
+[[permission]]
+identifier = "deny-load-work-context"
+description = "Denies the load_work_context command without any pre-configured scope."
+commands.deny = ["load_work_context"]

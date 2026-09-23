@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-load-autodelete-rules"
+description = "Enables the load_autodelete_rules command without any pre-configured scope."
+commands.allow = ["load_autodelete_rules"]
+
+[[permission]]
+identifier = "deny-load-autodelete-rules"
+description = "Denies the load_autodelete_rules command without any pre-configured scope."
+commands.deny = ["load_autodelete_rules"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-load-usage-history"
+description = "Enables the load_usage_history command without any pre-configured scope."
+commands.allow = ["load_usage_history"]
+
+[[permission]]
+identifier = "deny-load-usage-history"
+description = "Denies the load_usage_history command without any pre-configured scope."
+commands.deny = ["load_usage_history"]

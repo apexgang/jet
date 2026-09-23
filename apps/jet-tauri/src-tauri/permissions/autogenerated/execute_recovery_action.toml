@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-execute-recovery-action"
+description = "Enables the execute_recovery_action command without any pre-configured scope."
+commands.allow = ["execute_recovery_action"]
+
+[[permission]]
+identifier = "deny-execute-recovery-action"
+description = "Denies the execute_recovery_action command without any pre-configured scope."
+commands.deny = ["execute_recovery_action"]

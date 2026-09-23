@@ -1,14 +1,85 @@
 <script lang="ts">
+  import DeliveryPanel from "$lib/features/delivery/DeliveryPanel.svelte";
   import type { PublicRecoveryAction } from "$lib/jet/bridge";
   import type { DesktopSession, WorkPanelTab } from "./session.svelte";
+  import { LOST_RUN_TEXT, needsRunRecovery } from "$lib/features/system/model";
+  import { currentPlatform, shortcutAria } from "./shortcuts";
 
-  let { session }: { session: DesktopSession } = $props();
+  let {
+    session,
+    mode = "column",
+  }: {
+    session: DesktopSession;
+    /**
+     * A column beside the conversation, or the compact overlay (a modal
+     * dialog over it). Only the root's attributes change: the panel is
+     * never remounted, so its tab, file, draft and terminal survive.
+     */
+    mode?: "column" | "overlay";
+  } = $props();
+  const platform = currentPlatform();
+  const tabButtons: Record<string, HTMLButtonElement | undefined> = $state({});
+  let runControlCancel = $state<HTMLButtonElement>();
+
+  /**
+   * What the panel body shows. Only Deliver and the Run views are real tab
+   * panels; a tab points at its panel (`aria-controls`) only while it exists.
+   */
+  const body = $derived.by(() => {
+    if (session.selectedWorkPanel === "delivery") return "delivery";
+    if (session.workPanelError && session.selectedWorkPanel !== "run") return "error";
+    if (session.workPanelBusy && !session.workPanel && session.selectedWorkPanel !== "run") return "loading";
+    if (!session.selectedRun) return "no-run";
+    return "views";
+  });
+
+  function panelExists(tab: WorkPanelTab): boolean {
+    return tab === "delivery" || body === "views";
+  }
+
+  /** APG tabs with automatic activation: arrows wrap, Home and End jump. */
+  function handleTabKey(event: KeyboardEvent, index: number) {
+    let next: number;
+    switch (event.key) {
+      case "ArrowRight":
+        next = (index + 1) % tabs.length;
+        break;
+      case "ArrowLeft":
+        next = (index - 1 + tabs.length) % tabs.length;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = tabs.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    const tab = tabs[next].id;
+    session.showPanel(tab, "tab");
+    tabButtons[tab]?.focus();
+  }
+
+  // The overlay opened, or a Run-control confirmation closed: the selected tab takes focus.
+  $effect(() => {
+    if (session.workPanelPresented && session.takeFocusRequest("work-panel")) {
+      tabButtons[session.selectedWorkPanel]?.focus();
+    }
+  });
+
+  // The Interrupt Turn / Stop Run confirmation opened: its Cancel takes focus.
+  $effect(() => {
+    if (runControlCancel && session.takeFocusRequest("run-control")) runControlCancel.focus();
+  });
 
   const tabs: Array<{ id: WorkPanelTab; label: string }> = [
     { id: "changes", label: "Changes" },
     { id: "files", label: "Files" },
     { id: "terminal", label: "Terminal" },
     { id: "run", label: "Run" },
+    { id: "delivery", label: "Deliver" },
   ];
 
   function formatBytes(value: string | null): string {
@@ -62,56 +133,79 @@
   }
 </script>
 
-<aside class="work-panel" class:hidden={!session.workPanelPresented} aria-label="Work panel">
+<div
+  class="work-panel"
+  class:hidden={!session.workPanelPresented}
+  class:overlay={mode === "overlay"}
+  role={mode === "overlay" ? "dialog" : "complementary"}
+  aria-modal={mode === "overlay" ? "true" : undefined}
+  aria-label="Work panel"
+>
+  <div class="panel-navigation">
   <div class="panel-tabs" role="tablist" aria-label="Work panel views">
-    {#each tabs as tab}
+    {#each tabs as tab, index (tab.id)}
       <button
+        bind:this={tabButtons[tab.id]}
+        id={`work-tab-${tab.id}`}
         role="tab"
-        aria-controls={`work-${tab.id}`}
+        tabindex={session.selectedWorkPanel === tab.id ? 0 : -1}
+        aria-controls={panelExists(tab.id) ? `work-${tab.id}` : undefined}
         aria-selected={session.selectedWorkPanel === tab.id}
+        aria-keyshortcuts={shortcutAria("work-panel-tab", platform, tab.id)}
         class:active={session.selectedWorkPanel === tab.id}
-        onclick={() => session.showPanel(tab.id)}
+        onclick={() => session.showPanel(tab.id, "tab")}
+        onkeydown={(event) => handleTabKey(event, index)}
       >
         {tab.label}
       </button>
     {/each}
   </div>
+  <button class="icon-button panel-close" aria-label="Hide work panel" onclick={() => session.hideWorkPanel()}>Hide</button>
+  </div>
 
   <div class="panel-content" aria-busy={session.workPanelBusy}>
-    {#if session.workPanelError && session.selectedWorkPanel !== "run"}
+    <div id="work-delivery" class="work-view" class:active={session.selectedWorkPanel === "delivery"} role="tabpanel" aria-labelledby="work-tab-delivery">
+      <DeliveryPanel {session} />
+    </div>
+    {#if body !== "delivery"}
+    {#if body === "error" && session.workPanelError}
       <div class="work-alert" role="alert">
         <strong>Work details unavailable</strong>
         <p>{session.workPanelError.message}</p>
         <div class="recovery-actions">
           {#each session.workPanelError.recoveryActions as action}
-            <button onclick={() => session.applyWorkRecovery(action)}>{recoveryLabel(action)}</button>
+            <button onclick={() => session.applyWorkRecovery(action, session.workPanelError?.planeId ?? null)}>{recoveryLabel(action)}</button>
           {/each}
+          {#if session.pairAgainTarget(session.workPanelError)}
+            {@const target = session.pairAgainTarget(session.workPanelError)}
+            <button onclick={() => target && session.pairAgain(target)}>Pair again</button>
+          {/if}
           {#if session.workPanelError.recoveryActions.length === 0 && session.workPanelError.retryable}
             <button onclick={() => session.refreshWorkPanel()}>Try Again</button>
           {/if}
         </div>
       </div>
-    {:else if session.workPanelBusy && !session.workPanel && session.selectedWorkPanel !== "run"}
+    {:else if body === "loading"}
       <div class="panel-empty" role="status">
         <h2>Loading work details</h2>
         <p>Reading the latest bounded snapshot from the Plane.</p>
       </div>
-    {:else if !session.selectedRun}
+    {:else if body === "no-run"}
       <div class="panel-empty">
         <h2>No Run selected</h2>
         <p>Start a task to inspect its changes, files, terminals, and recovery state.</p>
       </div>
     {:else}
-      <div id="work-changes" class="work-view" class:active={session.selectedWorkPanel === "changes"} role="tabpanel" aria-label="Changes">
-        <header class="work-heading">
+      <div id="work-changes" class="work-view" class:active={session.selectedWorkPanel === "changes"} role="tabpanel" aria-labelledby="work-tab-changes">
+        <div class="work-heading">
           <div>
             <h2>Changed files</h2>
             <p>{session.workPanel?.scope ?? "Current"} checkpoint · {session.workPanel?.totalFiles ?? 0} files</p>
           </div>
           <button disabled={session.workPanelBusy} onclick={() => session.refreshWorkPanel()}>Refresh</button>
-        </header>
+        </div>
 
-        <div class="checkpoint-controls" aria-label="Change checkpoint">
+        <div class="checkpoint-controls" role="group" aria-label="Change checkpoint">
           <label>
             Checkpoint
             <select bind:value={session.checkpointKind}>
@@ -182,13 +276,13 @@
         {/if}
       </div>
 
-      <div id="work-files" class="work-view" class:active={session.selectedWorkPanel === "files"} role="tabpanel" aria-label="Files">
-        <header class="work-heading">
+      <div id="work-files" class="work-view" class:active={session.selectedWorkPanel === "files"} role="tabpanel" aria-labelledby="work-tab-files">
+        <div class="work-heading">
           <div>
             <h2>Workspace file</h2>
             <p>{session.editableFile?.path ?? "Choose a changed file"}</p>
           </div>
-        </header>
+        </div>
 
         {#if !session.selectedWorkFileId}
           <div class="work-empty">
@@ -226,14 +320,14 @@
         {/if}
       </div>
 
-      <div id="work-terminal" class="work-view" class:active={session.selectedWorkPanel === "terminal"} role="tabpanel" aria-label="Terminal">
-        <header class="work-heading">
+      <div id="work-terminal" class="work-view" class:active={session.selectedWorkPanel === "terminal"} role="tabpanel" aria-labelledby="work-tab-terminal">
+        <div class="work-heading">
           <div>
             <h2>Workspace terminal</h2>
             <p>{session.workPanel?.workspaceId ? "Scoped to this managed Workspace" : "Requires a managed Workspace"}</p>
           </div>
           <button disabled={session.workPanelBusy || !session.workPanel?.workspaceId} onclick={() => session.createTerminal()}>New</button>
-        </header>
+        </div>
 
         {#if !session.workPanel?.workspaceId}
           <div class="work-empty"><strong>No managed Workspace</strong><p>This Run does not expose a terminal-capable Workspace.</p></div>
@@ -268,7 +362,7 @@
         {/if}
       </div>
 
-      <div id="work-run" class="work-view" class:active={session.selectedWorkPanel === "run"} role="tabpanel" aria-label="Run">
+      <div id="work-run" class="work-view" class:active={session.selectedWorkPanel === "run"} role="tabpanel" aria-labelledby="work-tab-run">
         <section class="run-summary">
           <div class="work-heading inline-heading">
             <div><h2>Current Run</h2><p>Authoritative lifecycle and recovery state</p></div>
@@ -277,19 +371,26 @@
           <dl>
             <div><dt>Lifecycle</dt><dd>{session.selectedRun?.lifecycle ?? "Not started"}</dd></div>
             <div><dt>Activity</dt><dd>{session.supervision?.execution?.activity?.replaceAll("_", " ") ?? (session.hasLiveRun ? "Starting" : "Idle")}</dd></div>
-            <div><dt>Runs on</dt><dd>{session.scenario.plane.name}</dd></div>
+            <div><dt>Runs on</dt><dd class="plane-label">{session.runsOnLabel}</dd></div>
             <div><dt>Checkpoint</dt><dd>{session.workPanel?.scope ?? "Unavailable"}</dd></div>
             <div><dt>Latest Turn</dt><dd>{session.workPanel?.latestTurn ?? "—"}</dd></div>
             <div><dt>Changed files</dt><dd>{session.workPanel?.totalFiles ?? 0}</dd></div>
-            <div><dt>Cursor</dt><dd>{session.conversationDetail?.cursor ?? session.conversationCursor}</dd></div>
+            <div><dt>Cursor</dt><dd>{session.conversationDetail?.cursor ?? session.selectedPlaneCursor ?? "Unknown"}</dd></div>
             <div><dt>Revision</dt><dd>{session.selectedRun?.revision ?? "Unavailable"}</dd></div>
           </dl>
 
           {#if session.supervision?.execution?.termination}<p class="termination-result" role="status">{session.supervision.execution.termination.summary}</p>{/if}
 
-          <div class="run-controls" aria-label="Run controls">
-            <button disabled={!session.canInterruptTurn || session.controlBusy !== null} onclick={() => session.requestRunControl("interrupt_turn")}>Interrupt Turn…</button>
-            <button class="danger-action" disabled={!session.canStopRun || session.controlBusy !== null} onclick={() => session.requestRunControl("stop_run")}>Stop Run…</button>
+          {#if needsRunRecovery(session.selectedRun?.lifecycle, session.supervision?.execution?.needsAttention)}
+            <section class="notice critical lost-run" aria-labelledby="lost-run-title">
+              <strong id="lost-run-title">Recovery needed</strong>
+              <p>{LOST_RUN_TEXT}</p>
+            </section>
+          {/if}
+
+          <div class="run-controls" role="group" aria-label="Run controls">
+            <button disabled={!session.canInterruptTurn || session.controlBusy !== null} onclick={(event) => session.requestRunControl("interrupt_turn", event.currentTarget)}>Interrupt Turn…</button>
+            <button class="danger-action" disabled={!session.canStopRun || session.controlBusy !== null} onclick={(event) => session.requestRunControl("stop_run", event.currentTarget)}>Stop Run…</button>
           </div>
 
           {#if session.runControlConfirmation}
@@ -297,7 +398,7 @@
               <h3 id="control-title">{session.runControlConfirmation === "interrupt_turn" ? "Interrupt this Turn?" : "Stop this Run?"}</h3>
               <p>{session.runControlConfirmation === "interrupt_turn" ? "Jet will end the active Turn. The Run stays available for the next queued Turn when native cancellation succeeds." : "Jet will end the whole Run and its native processes. Recorded output and Workspace changes remain available."}</p>
               <div>
-                <button onclick={() => session.cancelRunControl()}>Cancel</button>
+                <button bind:this={runControlCancel} onclick={() => session.cancelRunControl()}>Cancel</button>
                 <button class:danger-action={session.runControlConfirmation === "stop_run"} class:primary-action={session.runControlConfirmation === "interrupt_turn"} onclick={() => session.confirmRunControl()}>{session.runControlConfirmation === "interrupt_turn" ? "Interrupt Turn" : "Stop Run"}</button>
               </div>
             </section>
@@ -326,15 +427,20 @@
     {/if}
 
     {#if session.workPanelNotice}<p class="work-notice" role="status">{session.workPanelNotice}</p>{/if}
-    {#if session.workPanelNoticeError && session.workPanelNoticeError.recoveryActions.length > 0}
-      <div class="recovery-actions panel-recovery" aria-label="Recovery actions">
+    {#if session.workPanelNoticeError && (session.workPanelNoticeError.recoveryActions.length > 0 || session.pairAgainTarget(session.workPanelNoticeError))}
+      <div class="recovery-actions panel-recovery" role="group" aria-label="Recovery actions">
         {#each session.workPanelNoticeError.recoveryActions as action}
-          <button onclick={() => session.applyWorkRecovery(action)}>{recoveryLabel(action)}</button>
+          <button onclick={() => session.applyWorkRecovery(action, session.workPanelNoticeError?.planeId ?? null)}>{recoveryLabel(action)}</button>
         {/each}
+        {#if session.pairAgainTarget(session.workPanelNoticeError)}
+          {@const target = session.pairAgainTarget(session.workPanelNoticeError)}
+          <button onclick={() => target && session.pairAgain(target)}>Pair again</button>
+        {/if}
         {#if session.workPanelNoticeError.revisionConflict}
           <span>Current revision {session.workPanelNoticeError.revisionConflict.currentRevision}</span>
         {/if}
       </div>
     {/if}
+    {/if}
   </div>
-</aside>
+</div>

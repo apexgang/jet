@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-load-extension-change"
+description = "Enables the load_extension_change command without any pre-configured scope."
+commands.allow = ["load_extension_change"]
+
+[[permission]]
+identifier = "deny-load-extension-change"
+description = "Denies the load_extension_change command without any pre-configured scope."
+commands.deny = ["load_extension_change"]

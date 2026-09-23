@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-add-remote-plane"
+description = "Enables the add_remote_plane command without any pre-configured scope."
+commands.allow = ["add_remote_plane"]
+
+[[permission]]
+identifier = "deny-add-remote-plane"
+description = "Denies the add_remote_plane command without any pre-configured scope."
+commands.deny = ["add_remote_plane"]

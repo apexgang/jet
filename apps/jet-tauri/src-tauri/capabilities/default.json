@@ -1,11 +1,31 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-plane-setup",
-  "description": "Plane status and preview-gated local setup operations for the main window",
-  "windows": ["main"],
-  "platforms": ["linux", "macOS"],
+  "description": "Plane status, pairing, tasks, and preview-gated local setup operations for the main window. Settings mutations live in the settings-window capability.",
+  "windows": [
+    "main"
+  ],
+  "platforms": [
+    "linux",
+    "macOS"
+  ],
   "permissions": [
     "allow-open-plane-feed",
+    "allow-close-plane-feed",
+    "allow-list-planes",
+    "allow-load-plane-detail",
+    "allow-load-pairing",
+    "allow-set-pairing-gate",
+    "allow-open-pairing-offer",
+    "allow-confirm-pairing-request",
+    "allow-prepare-paired-client-change",
+    "allow-execute-paired-client-change",
+    "allow-add-remote-plane",
+    "allow-repair-remote-plane",
+    "allow-claim-remote-pairing",
+    "allow-complete-remote-pairing",
+    "allow-cancel-remote-pairing",
+    "allow-forget-remote-plane",
     "allow-load-setup",
     "allow-preview-project",
     "allow-register-project",
@@ -35,6 +55,24 @@
     "allow-send-terminal-input",
     "allow-resize-workspace-terminal",
     "allow-detach-workspace-terminal",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "allow-load-deliveries",
+    "allow-prepare-delivery",
+    "allow-execute-delivery",
+    "allow-prepare-delivery-acknowledgement",
+    "allow-open-settings",
+    "allow-load-desktop-preferences",
+    "allow-collect-disposable-storage",
+    "allow-load-trash",
+    "allow-load-trash-status",
+    "allow-resolve-conversation-names",
+    "allow-preview-trash",
+    "allow-trash-conversation",
+    "allow-restore-conversation",
+    "allow-load-shell-presentation",
+    "allow-save-shell-presentation",
+    "allow-toggle-main-window-fullscreen",
+    "allow-close-main-window",
+    "allow-quit-jet"
   ]
 }

@@ -14,9 +14,22 @@ pub(crate) struct PublicError {
     pub(crate) code: String,
     pub(crate) message: &'static str,
     pub(crate) retryable: bool,
-    pub(crate) recovery_actions: Vec<PublicRecoveryAction>,
+    pub(crate) recovery_actions: Box<[PublicRecoveryAction]>,
     pub(crate) restart: Option<Box<PublicRestart>>,
     pub(crate) revision_conflict: Option<Box<PublicRevisionConflict>>,
+    /// Set only from `ClientError::FeatureUnavailable`: the minor a request
+    /// needed and the minor the connection negotiated.
+    pub(crate) protocol_limit: Option<Box<ProtocolLimit>>,
+    /// The opaque native Plane handle of the command that failed, so the
+    /// webview binds recovery actions to that Plane only.
+    pub(crate) plane_id: Option<Box<str>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProtocolLimit {
+    pub(crate) required_minor: u32,
+    pub(crate) negotiated_minor: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -77,29 +90,60 @@ enum PublicSafeState {
     },
 }
 
+/// Anything that can fail a Plane request: a `jet_client` failure, or a
+/// failure the shell classified itself while reaching a remote Plane.
+pub(crate) trait ToPublic {
+    fn to_public(&self) -> PublicError;
+}
+
+impl ToPublic for ClientError {
+    fn to_public(&self) -> PublicError {
+        PublicError::from_client_error(self)
+    }
+}
+
+impl<T: ToPublic + ?Sized> ToPublic for Box<T> {
+    fn to_public(&self) -> PublicError {
+        (**self).to_public()
+    }
+}
+
+impl ToPublic for PublicError {
+    fn to_public(&self) -> PublicError {
+        self.clone()
+    }
+}
+
 impl PublicError {
-    pub(crate) fn from_client(error: &ClientError) -> Self {
+    pub(crate) fn from_client<E: ToPublic + ?Sized>(error: &E) -> Self {
+        error.to_public()
+    }
+
+    fn from_client_error(error: &ClientError) -> Self {
         match error {
             ClientError::Rejected(error)
             | ClientError::Remote(error)
             | ClientError::Disconnected(error) => Self::from_wire(error),
-            ClientError::Incompatible { .. } => Self {
-                category: "incompatible",
-                code: "protocol.incompatible".into(),
-                message: "This Plane uses an incompatible Jet protocol.",
-                retryable: false,
-                recovery_actions: Vec::new(),
-                restart: None,
-                revision_conflict: None,
-            },
-            ClientError::FeatureUnavailable { .. } => Self {
-                category: "incompatible",
-                code: "protocol.feature_unavailable".into(),
-                message: "This feature is unavailable on the connected Plane.",
-                retryable: false,
-                recovery_actions: Vec::new(),
-                restart: None,
-                revision_conflict: None,
+            ClientError::Incompatible { .. } => Self::new(
+                "incompatible",
+                "protocol.incompatible",
+                "This Plane uses an incompatible Jet protocol.",
+                false,
+            ),
+            ClientError::FeatureUnavailable {
+                required_minor,
+                negotiated_minor,
+            } => Self {
+                protocol_limit: Some(Box::new(ProtocolLimit {
+                    required_minor: *required_minor,
+                    negotiated_minor: *negotiated_minor,
+                })),
+                ..Self::new(
+                    "incompatible",
+                    "protocol.feature_unavailable",
+                    "This feature is unavailable on the connected Plane.",
+                    false,
+                )
             },
             ClientError::Io(_)
             | ClientError::Frame(FrameError::Io(_) | FrameError::Closed)
@@ -110,64 +154,112 @@ impl PublicError {
         }
     }
 
-    pub(crate) fn invalid_event_order() -> Self {
+    fn new(
+        category: &'static str,
+        code: &'static str,
+        message: &'static str,
+        retryable: bool,
+    ) -> Self {
         Self {
-            category: "invalid_response",
-            code: "protocol.invalid_event_order".into(),
-            message: "The Plane returned events out of order.",
-            retryable: false,
-            recovery_actions: Vec::new(),
+            category,
+            code: code.into(),
+            message,
+            retryable,
+            recovery_actions: Box::default(),
             restart: None,
             revision_conflict: None,
+            protocol_limit: None,
+            plane_id: None,
         }
+    }
+
+    pub(crate) fn invalid_event_order() -> Self {
+        Self::new(
+            "invalid_response",
+            "protocol.invalid_event_order",
+            "The Plane returned events out of order.",
+            false,
+        )
     }
 
     pub(crate) fn invalid_input(code: &'static str, message: &'static str) -> Self {
-        Self {
-            category: "invalid_input",
-            code: code.into(),
-            message,
-            retryable: false,
-            recovery_actions: Vec::new(),
-            restart: None,
-            revision_conflict: None,
-        }
+        Self::new("invalid_input", code, message, false)
+    }
+
+    /// A definite, non-retryable conflict with native or Plane state, such
+    /// as `plane.review_moved`.
+    pub(crate) fn conflict(code: &'static str, message: &'static str) -> Self {
+        Self::new("conflict", code, message, false)
+    }
+
+    /// A definite, non-retryable authorization failure the shell concludes
+    /// on its own, such as losing access after changing this computer's own
+    /// Pairing on a remote Plane.
+    pub(crate) fn unauthorized(code: &'static str, message: &'static str) -> Self {
+        Self::new("unauthorized", code, message, false)
+    }
+
+    /// A Plane or local facility that cannot serve the request right now.
+    pub(crate) fn unavailable(code: &'static str, message: &'static str, retryable: bool) -> Self {
+        Self::new("unavailable", code, message, retryable)
+    }
+
+    /// A reply the shell refuses to trust, classified by call site.
+    pub(crate) fn invalid_response_code(code: &'static str, message: &'static str) -> Self {
+        Self::new("invalid_response", code, message, false)
+    }
+
+    /// A local facility of this app failed in a way a retry may fix, such
+    /// as writing an exported file (`audit.export_failed`). Unlike
+    /// `internal()`, the code names what failed.
+    pub(crate) fn local_internal(code: &'static str, message: &'static str) -> Self {
+        Self::new("internal", code, message, true)
+    }
+
+    /// A client-local facility of this app (a window, a local file) that
+    /// could not do what was asked. The code names what failed, so the UI
+    /// keys its copy on it; `retryable` says whether trying again may help.
+    pub(crate) fn local_unavailable(
+        code: &'static str,
+        message: &'static str,
+        retryable: bool,
+    ) -> Self {
+        Self::new("internal", code, message, retryable)
     }
 
     pub(crate) fn internal() -> Self {
-        Self {
-            category: "internal",
-            code: "client.state_unavailable".into(),
-            message: "Jet could not complete the request.",
-            retryable: true,
-            recovery_actions: Vec::new(),
-            restart: None,
-            revision_conflict: None,
+        Self::new(
+            "internal",
+            "client.state_unavailable",
+            "Jet could not complete the request.",
+            true,
+        )
+    }
+
+    /// Names the Plane a command resolved, unless an inner step already did.
+    pub(crate) fn with_plane(mut self, plane_id: String) -> Self {
+        if self.plane_id.is_none() {
+            self.plane_id = Some(plane_id.into_boxed_str());
         }
+        self
     }
 
     fn invalid_response() -> Self {
-        Self {
-            category: "invalid_response",
-            code: "protocol.invalid_response".into(),
-            message: "The Plane returned an invalid response.",
-            retryable: false,
-            recovery_actions: Vec::new(),
-            restart: None,
-            revision_conflict: None,
-        }
+        Self::new(
+            "invalid_response",
+            "protocol.invalid_response",
+            "The Plane returned an invalid response.",
+            false,
+        )
     }
 
-    fn offline() -> Self {
-        Self {
-            category: "offline",
-            code: "transport.offline".into(),
-            message: "Jet could not reach this Plane.",
-            retryable: true,
-            recovery_actions: Vec::new(),
-            restart: None,
-            revision_conflict: None,
-        }
+    pub(crate) fn offline() -> Self {
+        Self::new(
+            "offline",
+            "transport.offline",
+            "Jet could not reach this Plane.",
+            true,
+        )
     }
 
     fn from_wire(error: &WireError) -> Self {
@@ -204,6 +296,8 @@ impl PublicError {
                     },
                 })
             }),
+            protocol_limit: None,
+            plane_id: None,
         }
     }
 }
@@ -254,7 +348,9 @@ fn lifecycle_name(lifecycle: RunLifecycle) -> &'static str {
     }
 }
 
-fn safe_code(value: &str) -> Option<String> {
+/// A daemon code that may cross to the webview: dotted lowercase ASCII,
+/// at most 96 bytes.
+pub(crate) fn safe_code(value: &str) -> Option<String> {
     (value.len() <= 96
         && !value.is_empty()
         && value.bytes().all(|byte| {
@@ -293,10 +389,130 @@ fn category_message(category: ErrorCategory) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{safe_code, PublicError};
+    use super::{safe_code, ProtocolLimit, PublicError};
     use jet_client::ClientError;
-    use jet_protocol::FrameError;
+    use jet_protocol::{ErrorCategory, FrameError, WireError};
     use std::io;
+
+    #[test]
+    fn local_unavailable_keeps_code_and_retryable() {
+        let error = PublicError::local_unavailable(
+            "presentation.write_failed",
+            "Jet couldn't save the window layout.",
+            true,
+        );
+        assert_eq!(error.category, "internal");
+        assert_eq!(error.code, "presentation.write_failed");
+        assert!(error.retryable);
+        let fixed = PublicError::local_unavailable(
+            "window.mode_unavailable",
+            "Full screen isn't available in this window.",
+            false,
+        );
+        assert_eq!(fixed.code, "window.mode_unavailable");
+        assert!(!fixed.retryable);
+        assert!(fixed.recovery_actions.is_empty());
+        assert_eq!(fixed.restart, None);
+    }
+
+    #[test]
+    fn feature_unavailable_keeps_both_protocol_minors() {
+        let error = PublicError::from_client(&ClientError::FeatureUnavailable {
+            required_minor: 12,
+            negotiated_minor: 9,
+        });
+        assert_eq!(error.code, "protocol.feature_unavailable");
+        assert_eq!(
+            error.protocol_limit.as_deref(),
+            Some(&ProtocolLimit {
+                required_minor: 12,
+                negotiated_minor: 9,
+            })
+        );
+        let json = serde_json::to_value(&error).unwrap();
+        assert_eq!(json["protocolLimit"]["requiredMinor"], 12);
+        assert_eq!(json["protocolLimit"]["negotiatedMinor"], 9);
+        assert!(json["planeId"].is_null());
+    }
+
+    #[test]
+    fn rejected_login_is_unauthorized_and_not_retryable() {
+        let error = PublicError::from_client(&ClientError::Rejected(WireError {
+            category: ErrorCategory::Unauthorized,
+            code: "connection.unauthorized".into(),
+            retryable: false,
+            message: "daemon text never crosses".into(),
+            revision_conflict: None,
+            restart: None,
+            recovery_actions: Vec::new(),
+        }));
+        assert_eq!(error.category, "unauthorized");
+        assert_eq!(error.code, "connection.unauthorized");
+        assert!(!error.retryable);
+        assert_eq!(error.protocol_limit, None);
+    }
+
+    #[test]
+    fn the_first_resolved_plane_names_the_error() {
+        let error = PublicError::internal()
+            .with_plane("local".into())
+            .with_plane("00000000-0000-0000-0000-000000000002".into());
+        assert_eq!(error.plane_id.as_deref(), Some("local"));
+        let json = serde_json::to_value(&error).unwrap();
+        assert_eq!(json["planeId"], "local");
+    }
+
+    /// Wave 3.3 local stable codes (§4.6): each passes the allowlist and
+    /// keeps the category its constructor gives it.
+    #[test]
+    fn wave_3_3_local_codes_are_safe_and_categorized() {
+        let invalid_input = [
+            "retention.review_expired",
+            "recovery.review_expired",
+            "client.review_limit",
+            "client.review_used",
+            "client.review_plane_mismatch",
+            "retention.names_invalid",
+            "retention.stop_unacknowledged",
+            "autodelete.rule_unknown",
+            "autodelete.prompt_invalid",
+            "autodelete.days_invalid",
+            "audit.export_too_large",
+        ];
+        let conflict = [
+            "retention.request_unresolved",
+            "retention.mode_locked",
+            "retention.review_stale",
+            "retention.trash_unknown",
+            "autodelete.retry_mismatch",
+            "autodelete.token_expired",
+            "recovery.snapshot_gone",
+            "recovery.not_read_only_local",
+            "recovery.purge_unavailable",
+            "recovery.request_unresolved",
+            "audit.export_required",
+            "audit.export_busy",
+            "storage.collect_busy",
+        ];
+        for code in invalid_input {
+            assert_eq!(safe_code(code).as_deref(), Some(code));
+            let error = PublicError::invalid_input(code, "m");
+            assert_eq!((error.category, error.retryable), ("invalid_input", false));
+        }
+        for code in conflict {
+            assert_eq!(safe_code(code).as_deref(), Some(code));
+            let error = PublicError::conflict(code, "m");
+            assert_eq!((error.category, error.retryable), ("conflict", false));
+        }
+        let failed = PublicError::local_internal("audit.export_failed", "m");
+        assert_eq!(
+            safe_code(&failed.code).as_deref(),
+            Some("audit.export_failed")
+        );
+        assert_eq!((failed.category, failed.retryable), ("internal", true));
+        // `internal()` keeps its own code.
+        assert_eq!(PublicError::internal().code, "client.state_unavailable");
+    }
 
     #[test]
     fn stable_error_codes_are_allowlisted_and_bounded() {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prepare-account-unbind"
+description = "Enables the prepare_account_unbind command without any pre-configured scope."
+commands.allow = ["prepare_account_unbind"]
+
+[[permission]]
+identifier = "deny-prepare-account-unbind"
+description = "Denies the prepare_account_unbind command without any pre-configured scope."
+commands.deny = ["prepare_account_unbind"]

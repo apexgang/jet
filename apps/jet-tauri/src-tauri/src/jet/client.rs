@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{future::Future, path::PathBuf, sync::Arc, time::Duration};
 
 use jet_client::{Client, ClientError};
 use jet_protocol::{
@@ -7,14 +7,49 @@ use jet_protocol::{
 };
 use uuid::Uuid;
 
-#[cfg(test)]
 use jet_protocol::{SettingKey, SettingScope};
+use serde::Deserialize;
 
-use super::errors::PublicError;
+use super::{
+    errors::{PublicError, ToPublic},
+    planes::remote::RemoteConnector,
+};
+
+/// How a Plane is reached. `Remote` wraps only a `RemoteConnector`, whose
+/// sole constructor takes an `SshEndpoint`: there is no other transport to
+/// fall back to.
+#[derive(Clone)]
+enum Transport {
+    Local { socket: Arc<PathBuf> },
+    Remote(Arc<RemoteConnector>),
+}
+
+/// A failed attempt to reach a Plane or to complete a request on it.
+#[derive(Debug)]
+pub(crate) enum ConnectError {
+    Client(ClientError),
+    /// Classified by the shell while reaching a remote Plane.
+    Plane(PublicError),
+}
+
+impl ToPublic for ConnectError {
+    fn to_public(&self) -> PublicError {
+        match self {
+            Self::Client(error) => PublicError::from_client(error),
+            Self::Plane(error) => error.clone(),
+        }
+    }
+}
+
+impl From<ClientError> for Box<ConnectError> {
+    fn from(error: ClientError) -> Self {
+        Box::new(ConnectError::Client(error))
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct PlaneClient {
-    socket: Arc<PathBuf>,
+    transport: Transport,
     client_id: Uuid,
     reconnect_delays: Arc<[Duration]>,
     event_poll_delay: Duration,
@@ -28,10 +63,23 @@ impl PlaneClient {
         event_poll_delay: Duration,
     ) -> Self {
         Self {
-            socket: Arc::new(socket),
+            transport: Transport::Local {
+                socket: Arc::new(socket),
+            },
             client_id,
             reconnect_delays: reconnect_delays.into(),
             event_poll_delay,
+        }
+    }
+
+    /// A remote Plane: one cached session, one retry after a stale session,
+    /// and a slower event poll than the local socket.
+    pub(crate) fn remote(connector: Arc<RemoteConnector>, client_id: Uuid) -> Self {
+        Self {
+            transport: Transport::Remote(connector),
+            client_id,
+            reconnect_delays: Arc::new([Duration::from_secs(1)]),
+            event_poll_delay: Duration::from_secs(1),
         }
     }
 
@@ -39,47 +87,67 @@ impl PlaneClient {
         self.client_id
     }
 
-    pub(crate) async fn status(&self) -> Result<PlaneStatus, Box<ClientError>> {
+    pub(crate) fn connector(&self) -> Option<&Arc<RemoteConnector>> {
+        match &self.transport {
+            Transport::Local { .. } => None,
+            Transport::Remote(connector) => Some(connector),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn socket_for_test(&self) -> &str {
+        match &self.transport {
+            Transport::Local { socket } => socket.to_str().unwrap_or_default(),
+            Transport::Remote(_) => "",
+        }
+    }
+
+    /// Runs `call` on a connection, reconnecting after a lost transport with
+    /// the same arguments (so a mutation keeps its command ID). A stale
+    /// remote session is invalidated before the reconnect.
+    async fn with_reconnect<T, F, Fut>(&self, mut call: F) -> Result<T, Box<ConnectError>>
+    where
+        F: FnMut(Arc<Client>) -> Fut,
+        Fut: Future<Output = Result<T, ClientError>>,
+    {
         let mut attempt = 0;
         loop {
-            let result = match self.connect().await {
-                Ok(client) => client.status().await.map_err(Box::new),
-                Err(error) => Err(error),
+            let (client, error) = match self.connect().await {
+                Ok(client) => match call(Arc::clone(&client)).await {
+                    Ok(value) => return Ok(value),
+                    Err(error) => (Some(client), Box::new(ConnectError::Client(error))),
+                },
+                Err(error) => (None, error),
             };
-            match result {
-                Ok(status) => return Ok(status),
-                Err(error) if reconnectable(&error) && attempt < self.reconnect_delays.len() => {
-                    tokio::time::sleep(self.reconnect_delays[attempt]).await;
-                    attempt += 1;
+            let retry = reconnectable(&error);
+            if retry {
+                if let Some(client) = &client {
+                    self.invalidate(client).await;
                 }
-                Err(error) => return Err(error),
             }
+            if !retry || attempt >= self.reconnect_delays.len() {
+                return Err(error);
+            }
+            self.wait_to_reconnect(attempt).await;
+            attempt += 1;
         }
+    }
+
+    pub(crate) async fn status(&self) -> Result<PlaneStatus, Box<ConnectError>> {
+        self.with_reconnect(|client| async move { client.status().await })
+            .await
     }
 
     pub(crate) async fn register_project(
         &self,
         command_id: Uuid,
         path: &str,
-    ) -> Result<Project, Box<ClientError>> {
-        let mut attempt = 0;
-        loop {
-            let result = match self.connect().await {
-                Ok(client) => client
-                    .register_project(command_id, path)
-                    .await
-                    .map_err(Box::new),
-                Err(error) => Err(error),
-            };
-            match result {
-                Ok(project) => return Ok(project),
-                Err(error) if reconnectable(&error) && attempt < self.reconnect_delays.len() => {
-                    self.wait_to_reconnect(attempt).await;
-                    attempt += 1;
-                }
-                Err(error) => return Err(error),
-            }
-        }
+    ) -> Result<Project, Box<ConnectError>> {
+        self.with_reconnect(|client| {
+            let path = path.to_owned();
+            async move { client.register_project(command_id, &path).await }
+        })
+        .await
     }
 
     pub(crate) async fn bind_harness_account(
@@ -87,31 +155,22 @@ impl PlaneClient {
         command_id: Uuid,
         provider: &str,
         label: &str,
-    ) -> Result<AccountBinding, Box<ClientError>> {
-        let mut attempt = 0;
-        loop {
-            let result = match self.connect().await {
-                Ok(client) => client
+    ) -> Result<AccountBinding, Box<ConnectError>> {
+        self.with_reconnect(|client| {
+            let (provider, label) = (provider.to_owned(), label.to_owned());
+            async move {
+                client
                     .bind_account(
                         command_id,
-                        provider,
-                        label,
+                        &provider,
+                        &label,
                         None,
                         CredentialSource::HarnessNative,
                     )
                     .await
-                    .map_err(Box::new),
-                Err(error) => Err(error),
-            };
-            match result {
-                Ok(binding) => return Ok(binding),
-                Err(error) if reconnectable(&error) && attempt < self.reconnect_delays.len() => {
-                    self.wait_to_reconnect(attempt).await;
-                    attempt += 1;
-                }
-                Err(error) => return Err(error),
             }
-        }
+        })
+        .await
     }
 
     pub(crate) async fn remove_project(
@@ -120,35 +179,24 @@ impl PlaneClient {
         binding: ProjectRemovalBinding,
         typed_name: &str,
         disposal: ProjectDisposal,
-    ) -> Result<ProjectRemoved, Box<ClientError>> {
-        let mut attempt = 0;
-        loop {
-            let result = match self.connect().await {
-                Ok(client) => client
-                    .remove_project(command_id, binding.clone(), typed_name, disposal.clone())
+    ) -> Result<ProjectRemoved, Box<ConnectError>> {
+        self.with_reconnect(|client| {
+            let (binding, disposal) = (binding.clone(), disposal.clone());
+            let typed_name = typed_name.to_owned();
+            async move {
+                client
+                    .remove_project(command_id, binding, &typed_name, disposal)
                     .await
-                    .map_err(Box::new),
-                Err(error) => Err(error),
-            };
-            match result {
-                Ok(removed) => return Ok(removed),
-                Err(error) if reconnectable(&error) && attempt < self.reconnect_delays.len() => {
-                    self.wait_to_reconnect(attempt).await;
-                    attempt += 1;
-                }
-                Err(error) => return Err(error),
             }
-        }
+        })
+        .await
     }
 
     pub(crate) async fn current_capabilities(
         &self,
-    ) -> Result<jet_protocol::CapabilitySnapshot, Box<ClientError>> {
+    ) -> Result<jet_protocol::CapabilitySnapshot, Box<ConnectError>> {
         let client = self.connect().await?;
-        client
-            .capabilities(CapabilityObservation::Fresh)
-            .await
-            .map_err(Box::new)
+        Ok(client.capabilities(CapabilityObservation::Fresh).await?)
     }
 
     #[cfg(test)]
@@ -157,25 +205,11 @@ impl PlaneClient {
         command_id: Uuid,
         key: SettingKey,
         scope: SettingScope,
-    ) -> Result<(), Box<ClientError>> {
-        let mut attempt = 0;
-        loop {
-            let result = match self.connect().await {
-                Ok(client) => client
-                    .clear_setting(command_id, key, scope)
-                    .await
-                    .map_err(Box::new),
-                Err(error) => Err(error),
-            };
-            match result {
-                Ok(()) => return Ok(()),
-                Err(error) if reconnectable(&error) && attempt < self.reconnect_delays.len() => {
-                    tokio::time::sleep(self.reconnect_delays[attempt]).await;
-                    attempt += 1;
-                }
-                Err(error) => return Err(error),
-            }
-        }
+    ) -> Result<(), Box<ConnectError>> {
+        self.with_reconnect(
+            |client| async move { client.clear_setting(command_id, key, scope).await },
+        )
+        .await
     }
 
     pub(crate) async fn stream_updates<F>(&self, mut cursor: u64, mut send: F)
@@ -198,10 +232,12 @@ impl PlaneClient {
             };
 
             let mut resumed = false;
+            let mut replay_through = 0;
             loop {
                 match client.events_after(cursor).await {
                     Ok(page) => {
                         if !resumed {
+                            replay_through = page.cursor;
                             if !send(NativeUpdate::Resumed { after: cursor }) {
                                 return;
                             }
@@ -215,7 +251,11 @@ impl PlaneClient {
                                 return;
                             }
                             cursor = event.sequence;
-                            if !send(NativeUpdate::Event(EventSummary::from_event(event))) {
+                            let mut summary = EventSummary::from_event(event);
+                            if summary.sequence <= replay_through {
+                                summary.notification = None;
+                            }
+                            if !send(NativeUpdate::Event(summary)) {
                                 return;
                             }
                         }
@@ -225,10 +265,11 @@ impl PlaneClient {
                     }
                     Err(error) => {
                         let public = PublicError::from_client(&error);
-                        if !reconnectable(&error) {
+                        if !reconnectable_client(&error) {
                             let _ = send(NativeUpdate::Failed { error: public });
                             return;
                         }
+                        self.invalidate(&client).await;
                         if !send(NativeUpdate::Reconnecting { error: public }) {
                             return;
                         }
@@ -241,24 +282,70 @@ impl PlaneClient {
         }
     }
 
-    pub(crate) async fn connect(&self) -> Result<Client, Box<ClientError>> {
-        Client::connect_local(self.socket.as_ref(), self.client_id)
-            .await
-            .map_err(Box::new)
+    /// A handshaken connection. Local Planes connect per request; a remote
+    /// Plane returns its cached session or makes one single-flight login.
+    pub(crate) async fn connect(&self) -> Result<Arc<Client>, Box<ConnectError>> {
+        match &self.transport {
+            Transport::Local { socket } => Client::connect_local(socket.as_ref(), self.client_id)
+                .await
+                .map(Arc::new)
+                .map_err(Into::into),
+            Transport::Remote(connector) => connector
+                .connect()
+                .await
+                .map_err(|error| Box::new(ConnectError::Plane(error))),
+        }
     }
 
-    async fn wait_to_reconnect(&self, attempt: usize) {
-        let delay = self
+    /// Drops a remote session that failed underneath a request. Local
+    /// connections are per request, so there is nothing to drop.
+    pub(crate) async fn invalidate(&self, client: &Arc<Client>) {
+        if let Transport::Remote(connector) = &self.transport {
+            connector.invalidate(client).await;
+        }
+    }
+
+    /// The user's Retry: clears a remote Plane's sticky or backed-off
+    /// failure. The local Plane has no such state.
+    pub(crate) async fn reset(&self) {
+        if let Transport::Remote(connector) = &self.transport {
+            connector.reset().await;
+        }
+    }
+
+    /// Waits before the next reconnect. A remote Plane also waits out its
+    /// connector's backoff, so a feed never polls a stored failure.
+    pub(crate) async fn wait_to_reconnect(&self, attempt: usize) {
+        let mut delay = self
             .reconnect_delays
             .get(attempt)
             .or_else(|| self.reconnect_delays.last())
             .copied()
             .unwrap_or(Duration::from_millis(100));
+        if let Transport::Remote(connector) = &self.transport {
+            delay = delay.max(connector.retry_in().unwrap_or_default());
+        }
         tokio::time::sleep(delay).await;
+    }
+
+    /// Pacing for loops that retry `status()` themselves: remote Planes wait
+    /// for their backoff; the local status helper already waits internally.
+    pub(crate) async fn pace(&self) {
+        if matches!(self.transport, Transport::Remote(_)) {
+            self.wait_to_reconnect(0).await;
+        }
     }
 }
 
-fn reconnectable(error: &ClientError) -> bool {
+fn reconnectable(error: &ConnectError) -> bool {
+    match error {
+        ConnectError::Client(error) => reconnectable_client(error),
+        // The connector already applied its own retry and backoff policy.
+        ConnectError::Plane(_) => false,
+    }
+}
+
+fn reconnectable_client(error: &ClientError) -> bool {
     matches!(
         error,
         ClientError::Io(_)
@@ -285,12 +372,25 @@ pub(crate) enum NativeUpdate {
 }
 
 pub(crate) struct EventSummary {
+    pub(crate) notification: Option<super::notifications::NotificationSignal>,
     pub(crate) sequence: u64,
     pub(crate) recorded_at_unix_ms: i64,
     pub(crate) kind: String,
     pub(crate) conversation_id: Option<Uuid>,
     pub(crate) run_id: Option<Uuid>,
     pub(crate) timeline: Vec<TimelineProjection>,
+    /// Which Setting a `setting.changed` or `setting.cleared` event names.
+    /// Only the Settings change watcher reads it; the main feed never does.
+    pub(crate) setting: Option<SettingEventProjection>,
+}
+
+/// The identifiers of a Setting event. The value never crosses: the
+/// Settings window reloads the section instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SettingEventProjection {
+    pub(crate) key: &'static str,
+    pub(crate) scope: &'static str,
+    pub(crate) project_id: Option<Uuid>,
 }
 
 pub(crate) struct TimelineProjection {
@@ -315,17 +415,46 @@ pub(crate) struct ApprovalProjection {
 }
 
 impl EventSummary {
-    fn from_event(event: Event) -> Self {
+    pub(crate) fn from_event(event: Event) -> Self {
         let timeline = timeline_projection(&event);
+        let notification = super::notifications::NotificationSignal::from_event(&event);
+        let setting = setting_projection(&event);
         Self {
+            notification,
             sequence: event.sequence,
             recorded_at_unix_ms: event.recorded_at_unix_ms,
             kind: safe_event_kind(&event.kind),
             conversation_id: event.conversation_id,
             run_id: event.run_id,
             timeline,
+            setting,
         }
     }
+}
+
+/// ASVS 1.5.2: typed, allowlisted identifiers only. The payload is parsed
+/// into `SettingKey`/`SettingScope`, extra fields (including the value) are
+/// ignored, and anything else projects to nothing.
+fn setting_projection(event: &Event) -> Option<SettingEventProjection> {
+    #[derive(serde::Deserialize)]
+    struct Named {
+        key: SettingKey,
+        scope: SettingScope,
+    }
+    if !matches!(event.kind.as_str(), "setting.changed" | "setting.cleared") {
+        return None;
+    }
+    let named = Named::deserialize(&event.payload).ok()?;
+    let (scope, project_id) = match named.scope {
+        SettingScope::Plane => ("plane", None),
+        SettingScope::Project { project_id } => ("project", Some(project_id)),
+        SettingScope::Conversation { .. } => ("conversation", None),
+    };
+    Some(SettingEventProjection {
+        key: super::settings::key_spelling(named.key),
+        scope,
+        project_id,
+    })
 }
 
 fn timeline_projection(event: &Event) -> Vec<TimelineProjection> {
@@ -648,7 +777,7 @@ fn safe_event_kind(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod unit_tests {
+pub(crate) mod unit_tests {
     use std::time::Duration;
 
     use jet_protocol::{
@@ -875,7 +1004,7 @@ mod unit_tests {
         server.await.unwrap();
     }
 
-    async fn accept(
+    pub(crate) async fn accept(
         listener: &UnixListener,
         expected_client_id: Uuid,
     ) -> (FrameReader<OwnedReadHalf>, FrameWriter<OwnedWriteHalf>) {
@@ -910,14 +1039,16 @@ mod unit_tests {
         (reader, writer)
     }
 
-    async fn next_message(reader: &mut FrameReader<OwnedReadHalf>) -> (StreamId, ClientMessage) {
+    pub(crate) async fn next_message(
+        reader: &mut FrameReader<OwnedReadHalf>,
+    ) -> (StreamId, ClientMessage) {
         let Frame::Control { stream_id, payload } = reader.read().await.unwrap() else {
             panic!("expected a control-frame request");
         };
         (stream_id, decode_control(&payload).unwrap())
     }
 
-    async fn reply(
+    pub(crate) async fn reply(
         writer: &mut FrameWriter<OwnedWriteHalf>,
         stream: StreamId,
         message: ServerMessage,
@@ -931,7 +1062,7 @@ mod unit_tests {
             .unwrap();
     }
 
-    fn request_id(message: &ClientMessage) -> u64 {
+    pub(crate) fn request_id(message: &ClientMessage) -> u64 {
         match message {
             ClientMessage::Query { id, .. } | ClientMessage::Command { id, .. } => *id,
             other => panic!("unexpected request: {other:?}"),
@@ -962,7 +1093,7 @@ mod unit_tests {
         ));
     }
 
-    fn status(cursor: u64) -> PlaneStatus {
+    pub(crate) fn status(cursor: u64) -> PlaneStatus {
         PlaneStatus {
             cursor: Some(cursor),
             plane_id: Uuid::from_u128(1),

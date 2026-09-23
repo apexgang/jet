@@ -1,0 +1,97 @@
+import type { PublicError, PublicRecoveryAction } from "./bridge";
+
+/** A Plane-wide condition the main window reports once, above the timeline. */
+export type PlaneConditionKind = "disk_pressure" | "read_only" | "security_degraded" | "ledger_corrupt";
+
+const PLANE_CONDITIONS: Readonly<Record<string, PlaneConditionKind>> = {
+  "storage.disk_pressure": "disk_pressure",
+  "recovery.read_only": "read_only",
+  "security.audit_degraded": "security_degraded",
+  "recovery.deletion_ledger_corrupt": "ledger_corrupt",
+};
+
+/**
+ * The Plane-wide condition a refusal proves, or null. Only these four stable
+ * codes are Plane-wide; every other failure belongs to the request.
+ */
+export function planeConditionFor(error: Pick<PublicError, "code">): PlaneConditionKind | null {
+  return Object.hasOwn(PLANE_CONDITIONS, error.code) ? PLANE_CONDITIONS[error.code] : null;
+}
+
+export function publicError(error: unknown): PublicError {
+  const candidate = publicErrorCandidate(error);
+  return {
+    category: typeof candidate.category === "string" ? candidate.category : "internal",
+    code: typeof candidate.code === "string" ? candidate.code : "client.request_failed",
+    message:
+      typeof candidate.message === "string"
+        ? candidate.message
+        : "Jet could not complete the request.",
+    retryable: candidate.retryable === true,
+    recoveryActions: Array.isArray(candidate.recoveryActions)
+      ? candidate.recoveryActions.filter(isPublicRecoveryAction)
+      : [],
+    restart: candidate.restart && typeof candidate.restart === "object"
+      ? candidate.restart
+      : null,
+    revisionConflict:
+      candidate.revisionConflict && typeof candidate.revisionConflict === "object"
+        ? candidate.revisionConflict
+        : null,
+    protocolLimit: protocolLimit(candidate.protocolLimit),
+    planeId: planeId(candidate.planeId),
+  };
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Only "local" or a canonical native UUID names a Plane. */
+function planeId(value: unknown): string | null {
+  return typeof value === "string" && (value === "local" || UUID.test(value)) ? value : null;
+}
+
+function protocolLimit(value: unknown): PublicError["protocolLimit"] {
+  if (!value || typeof value !== "object") return null;
+  const { requiredMinor, negotiatedMinor } = value as Record<string, unknown>;
+  return isMinor(requiredMinor) && isMinor(negotiatedMinor)
+    ? { requiredMinor, negotiatedMinor }
+    : null;
+}
+
+function isMinor(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isPublicRecoveryAction(value: unknown): value is PublicRecoveryAction {
+  if (!value || typeof value !== "object" || !("type" in value)) return false;
+  const type = (value as { type?: unknown }).type;
+  if (type === "refresh_file" || type === "refresh_conversation" || type === "refresh_run") {
+    return true;
+  }
+  return type === "resume_events" && typeof (value as { after?: unknown }).after === "string";
+}
+
+function publicErrorCandidate(error: unknown): Partial<PublicError> {
+  let candidate = error;
+  if (typeof candidate === "string") {
+    try {
+      candidate = JSON.parse(candidate) as unknown;
+    } catch {
+      return {};
+    }
+  }
+
+  if (candidate && typeof candidate === "object") {
+    const record = candidate as Record<string, unknown>;
+    if ("category" in record || "code" in record || "retryable" in record) {
+      return record as Partial<PublicError>;
+    }
+    for (const key of ["error", "data", "cause"] as const) {
+      if (key in record && record[key] !== candidate) {
+        const nested = publicErrorCandidate(record[key]);
+        if (nested.code || nested.category) return nested;
+      }
+    }
+  }
+  return {};
+}
