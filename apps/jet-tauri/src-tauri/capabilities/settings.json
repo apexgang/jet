@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings-window",
+  "description": "Device preferences, navigation, and read-only Plane summaries for the Settings window. It never receives Plane feeds or agent content, and grants no pairing, Plane, dialog, or window-core permission.",
+  "windows": [
+    "settings"
+  ],
+  "platforms": [
+    "linux",
+    "macOS"
+  ],
+  "permissions": [
+    "allow-watch-settings-navigation",
+    "allow-remember-settings-pane",
+    "allow-close-settings",
+    "allow-load-desktop-preferences",
+    "allow-set-desktop-preferences",
+    "allow-load-notification-settings",
+    "allow-set-notification-settings",
+    "allow-list-planes",
+    "allow-load-plane-detail"
+  ]
+}

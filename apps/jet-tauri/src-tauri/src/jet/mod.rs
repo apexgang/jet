@@ -12,7 +12,10 @@ pub(crate) mod notifications;
 pub(crate) mod pairing;
 mod pairing_transcript;
 pub(crate) mod planes;
+pub(crate) mod preferences;
 mod run_control;
+pub(crate) mod settings;
+pub(crate) mod settings_window;
 mod setup;
 mod work_panel;
 
@@ -40,6 +43,8 @@ pub(crate) struct JetBridge {
     conversations: conversations::ConversationState,
     run_control: run_control::RunControlState,
     work_panel: work_panel::WorkPanelState,
+    settings_window: settings_window::SettingsWindowState,
+    preferences: preferences::PreferencesState,
 }
 
 impl JetBridge {
@@ -82,6 +87,8 @@ impl JetBridge {
             conversations: conversations::ConversationState::new(app_data_directory),
             run_control: run_control::RunControlState::default(),
             work_panel: work_panel::WorkPanelState::default(),
+            settings_window: settings_window::SettingsWindowState::new(app_data_directory),
+            preferences: preferences::PreferencesState::new(app_data_directory),
         }
     }
 
@@ -117,6 +124,20 @@ impl JetBridge {
     /// The client for a stored binding, or `plane.review_moved`.
     fn bound(&self, binding: &PlaneBinding) -> Result<PlaneClient, PublicError> {
         self.planes.bound(binding)
+    }
+
+    /// The task to reopen at launch, unless this computer's desktop
+    /// preferences say not to. The selection file is still kept current.
+    fn restorable_selection(&self) -> Result<Option<(uuid::Uuid, planes::PlaneId)>, PublicError> {
+        if !self.preferences.reopen_last_task()? {
+            return Ok(None);
+        }
+        self.conversations.restored_selection()
+    }
+
+    /// The Settings window was destroyed: drop what only it could receive.
+    pub(crate) fn settings_window_closed(&self) {
+        self.settings_window.window_destroyed();
     }
 
     /// Records what a failure proves about its Plane and names the Plane.
@@ -435,9 +456,53 @@ mod manifest_tests {
         &source[from..from + length]
     }
 
-    /// `generate_handler!` names, the `build.rs` manifest and the capability
-    /// grants must be the same set, and every command must have a generated
-    /// permission file (tauri-conventions §3.1).
+    /// The app commands a capability grants, and the windows it applies to.
+    fn capability(source: &str) -> (BTreeSet<String>, Vec<String>) {
+        let capability: serde_json::Value = serde_json::from_str(source).unwrap();
+        let granted = capability["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|permission| permission.as_str())
+            .filter(|permission| !permission.contains(':'))
+            .map(|permission| {
+                assert!(
+                    permission.starts_with("allow-"),
+                    "unexpected app permission {permission}"
+                );
+                permission["allow-".len()..].replace('-', "_")
+            })
+            .collect();
+        let windows = capability["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|window| window.as_str().unwrap().to_owned())
+            .collect();
+        (granted, windows)
+    }
+
+    /// Commands both windows may call: read-only, no agent content.
+    const SHARED: [&str; 3] = [
+        "load_desktop_preferences",
+        "list_planes",
+        "load_plane_detail",
+    ];
+
+    /// Commands only the Settings window may call.
+    const SETTINGS_ONLY: [&str; 6] = [
+        "watch_settings_navigation",
+        "remember_settings_pane",
+        "close_settings",
+        "set_desktop_preferences",
+        "load_notification_settings",
+        "set_notification_settings",
+    ];
+
+    /// `generate_handler!` names, the `build.rs` manifest and the union of
+    /// the capability grants must be the same set, every command must have
+    /// a generated permission file (tauri-conventions §3.1), and each command
+    /// is granted to exactly the window that uses it (wave 3.2 §5).
     #[test]
     fn handlers_manifest_and_capability_grants_are_the_same_set() {
         let handlers: BTreeSet<String> =
@@ -456,25 +521,41 @@ mod manifest_tests {
                 .map(str::to_owned)
                 .collect();
 
-        let capability: serde_json::Value =
-            serde_json::from_str(include_str!("../../capabilities/default.json")).unwrap();
-        let granted: BTreeSet<String> = capability["permissions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|permission| permission.as_str())
-            .filter(|permission| !permission.contains(':'))
-            .map(|permission| {
-                assert!(
-                    permission.starts_with("allow-"),
-                    "unexpected app permission {permission}"
-                );
-                permission["allow-".len()..].replace('-', "_")
-            })
-            .collect();
+        let (main, main_windows) = capability(include_str!("../../capabilities/default.json"));
+        let (settings, settings_windows) =
+            capability(include_str!("../../capabilities/settings.json"));
+        assert_eq!(main_windows, ["main"]);
+        assert_eq!(settings_windows, ["settings"]);
 
+        let configuration: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        assert_eq!(
+            configuration["app"]["security"]["capabilities"],
+            serde_json::json!(["main-plane-setup", "settings-window"])
+        );
+
+        let granted: BTreeSet<String> = main.union(&settings).cloned().collect();
         assert_eq!(handlers, manifest);
         assert_eq!(handlers, granted);
+
+        let both: BTreeSet<String> = main.intersection(&settings).cloned().collect();
+        let shared: BTreeSet<String> = SHARED.iter().map(|name| (*name).to_owned()).collect();
+        assert_eq!(both, shared, "only read-only commands are shared");
+        let settings_only: BTreeSet<String> = SETTINGS_ONLY
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect();
+        assert_eq!(
+            settings
+                .difference(&shared)
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            settings_only
+        );
+        for main_only in ["open_settings", "open_plane_feed", "bind_harness_account"] {
+            assert!(main.contains(main_only), "{main_only}");
+            assert!(!settings.contains(main_only), "{main_only}");
+        }
 
         let generated = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("permissions")
@@ -487,5 +568,75 @@ mod manifest_tests {
                 "{command}.toml was not generated by tauri-build"
             );
         }
+    }
+
+    /// The Settings window receives no feed, no dialog and no window-core
+    /// permission (wave 3.2 §5).
+    #[test]
+    fn settings_window_grants_no_plugin_or_core_permission() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../../capabilities/settings.json")).unwrap();
+        for permission in capability["permissions"].as_array().unwrap() {
+            let permission = permission.as_str().unwrap();
+            assert!(!permission.contains(':'), "{permission}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod restoration_tests {
+    use std::sync::Arc;
+
+    use uuid::Uuid;
+
+    use super::{
+        keystore::{
+            tests::{CountingStore, Fail},
+            IdentityKeys,
+        },
+        planes::{spawner::fake::FakeSpawner, PlaneId},
+        JetBridge,
+    };
+
+    fn bridge(directory: &std::path::Path) -> JetBridge {
+        JetBridge::for_test(
+            directory,
+            Uuid::from_u128(1),
+            Arc::new(FakeSpawner::default()),
+            Arc::new(IdentityKeys::new(Arc::new(CountingStore::new(
+                Fail::Nothing,
+            )))),
+        )
+    }
+
+    /// Turning off "Reopen the last task" hides the saved selection from the
+    /// Plane registry snapshot without deleting it.
+    #[test]
+    fn restoration_follows_the_desktop_preference() {
+        let directory = tempfile::tempdir().unwrap();
+        let conversation = Uuid::from_u128(9);
+        std::fs::write(
+            directory.path().join("last-conversation"),
+            format!("{conversation}\nlocal\n"),
+        )
+        .unwrap();
+
+        let restoring = bridge(directory.path());
+        assert_eq!(
+            restoring.restorable_selection().unwrap(),
+            Some((conversation, PlaneId::Local))
+        );
+
+        std::fs::write(
+            directory.path().join("desktop-preferences.json"),
+            r#"{"reopenLastTask":false}"#,
+        )
+        .unwrap();
+        let declining = bridge(directory.path());
+        assert_eq!(declining.restorable_selection().unwrap(), None);
+        assert_eq!(
+            declining.conversations.restored_selection().unwrap(),
+            Some((conversation, PlaneId::Local))
+        );
     }
 }

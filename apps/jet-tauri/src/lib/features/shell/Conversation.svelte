@@ -1,6 +1,5 @@
 <script lang="ts">
-  import NotificationSettings from "$lib/features/notifications/NotificationSettings.svelte";
-  import ConnectionsSettings from "$lib/features/planes/ConnectionsSettings.svelte";
+  import { paneTitle, settingsTargetForError } from "$lib/features/settings/model";
   import PlanesPanel from "$lib/features/planes/PlanesPanel.svelte";
   import type { DesktopSession } from "./session.svelte";
   import SetupPanel from "$lib/features/setup/SetupPanel.svelte";
@@ -48,12 +47,7 @@
   }
 </script>
 
-{#if session.sidebarSelection === "settings"}
-  <div class="settings-page">
-    <ConnectionsSettings {session} />
-    <NotificationSettings />
-  </div>
-{:else if session.sidebarSelection === "project"}
+{#if session.sidebarSelection === "project"}
   <SetupPanel {session} />
 {:else if session.sidebarSelection === "planes"}
   <PlanesPanel {session} />
@@ -104,6 +98,14 @@
             <button class="text-button" onclick={() => session.openPlanes({ planeId: session.selectedPlaneId, focus: "detail" })}>
               Open Planes
             </button>
+            {#if session.selectedPlaneError}
+              {@const target = settingsTargetForError(session.selectedPlaneError)}
+              {#if target}
+                <button class="text-button" onclick={() => void session.openSettings(target)}>
+                  Open {paneTitle(target.pane)} settings
+                </button>
+              {/if}
+            {/if}
           </div>
         {:else if session.conversationFreshness === "cached"}
           <div class="notice">
@@ -218,11 +220,3 @@
   </section>
 {/if}
 
-<style>
-  .settings-page {
-    min-width: 0;
-    min-height: 0;
-    overflow: auto;
-    background: var(--background);
-  }
-</style>

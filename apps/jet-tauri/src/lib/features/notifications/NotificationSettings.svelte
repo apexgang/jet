@@ -31,8 +31,8 @@
     } finally { if (mounted) busy = false; }
   }
 </script>
-<section class="notification-settings" aria-label="Desktop notifications">
-  <h1>Notifications</h1>
+<section class="notification-settings settings-section" aria-labelledby="section-notifications">
+  <h2 id="section-notifications" tabindex="-1">Notifications</h2>
   <p>Choose what Jet sends to this desktop while the app is open. Notifications use generic text without task content.</p>
   <form onsubmit={(event) => { event.preventDefault(); void save(); }}>
     <fieldset disabled={busy || !loaded}>
@@ -48,8 +48,7 @@
   {#if notice}<p role="status">{notice}</p>{/if}
 </section>
 <style>
-  .notification-settings { padding: 32px; overflow: auto; max-width: 720px; line-height: 1.6; }
-  h1 { font-size: 24px; }
+  .notification-settings { line-height: 1.6; }
   p { color: var(--muted); }
   fieldset { display: grid; gap: 18px; border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
   legend { padding: 0 8px; }

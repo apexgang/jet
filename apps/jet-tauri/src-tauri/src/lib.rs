@@ -1,7 +1,7 @@
 mod jet;
 
 use jet::JetBridge;
-use tauri::Manager;
+use tauri::{Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -16,6 +16,15 @@ pub fn run() {
                 &app_data_directory,
             )?);
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, WindowEvent::Destroyed)
+                && window.label() == jet::settings_window::SETTINGS_LABEL
+            {
+                if let Some(bridge) = window.try_state::<JetBridge>() {
+                    bridge.settings_window_closed();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             jet::open_plane_feed,
@@ -40,6 +49,12 @@ pub fn run() {
             jet::delivery::prepare_delivery_acknowledgement,
             jet::notifications::load_notification_settings,
             jet::notifications::set_notification_settings,
+            jet::settings_window::open_settings,
+            jet::settings_window::watch_settings_navigation,
+            jet::settings_window::remember_settings_pane,
+            jet::settings_window::close_settings,
+            jet::preferences::load_desktop_preferences,
+            jet::preferences::set_desktop_preferences,
             jet::load_setup,
             jet::preview_project,
             jet::register_project,

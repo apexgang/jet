@@ -1048,9 +1048,7 @@ pub(crate) fn unknown_plane() -> PublicError {
 /// never touches the secret store.
 #[tauri::command]
 pub(crate) fn list_planes(bridge: State<'_, JetBridge>) -> Result<PlanesView, PublicError> {
-    bridge
-        .planes
-        .snapshot(bridge.conversations.restored_selection()?)
+    bridge.planes.snapshot(bridge.restorable_selection()?)
 }
 
 /// Status, capabilities and protocol knowledge for one Plane. Each part fails

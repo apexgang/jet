@@ -20,11 +20,11 @@
     <div class="nav-group primary-actions">
       <button class:active={selected("new-task")} onclick={() => session.select("new-task")}>
         New task
-        <kbd>⌘N</kbd>
+        <kbd>Ctrl+N</kbd>
       </button>
       <button class:active={selected("search")} onclick={() => session.select("search")}>
         Search
-        <kbd>⌘K</kbd>
+        <kbd>Ctrl+K</kbd>
       </button>
       {#if selected("search")}
         <form class="sidebar-search" onsubmit={(event) => { event.preventDefault(); void catalog.search(); }}>
@@ -161,8 +161,9 @@
           >{planes.attentionCount}</span>
         {/if}
       </button>
-      <button class:active={selected("settings")} onclick={() => session.select("settings")}>
+      <button onclick={() => void session.openSettings()}>
         Settings
+        <kbd>Ctrl+,</kbd>
       </button>
     </div>
   </nav>

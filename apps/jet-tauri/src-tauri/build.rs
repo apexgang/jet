@@ -1,6 +1,7 @@
 fn main() {
-    // ASVS 1.2.2: register only the app commands used by the main webview so
-    // Tauri generates explicit allow/deny permission pairs for each boundary.
+    // ASVS 1.2.2: register every app command so Tauri generates explicit
+    // allow/deny permission pairs; each capability then grants its window
+    // only the commands that window uses.
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "open_plane_feed",
@@ -25,6 +26,12 @@ fn main() {
             "prepare_delivery_acknowledgement",
             "load_notification_settings",
             "set_notification_settings",
+            "open_settings",
+            "watch_settings_navigation",
+            "remember_settings_pane",
+            "close_settings",
+            "load_desktop_preferences",
+            "set_desktop_preferences",
             "load_setup",
             "preview_project",
             "register_project",

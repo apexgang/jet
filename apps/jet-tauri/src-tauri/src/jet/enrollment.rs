@@ -715,9 +715,7 @@ pub(crate) async fn forget(bridge: &JetBridge, plane_id: &str) -> Result<PlanesV
     bridge.notifications.forget(plane);
     bridge.pairing.forget_plane(plane);
     bridge.enrollment.forget_plane(plane);
-    bridge
-        .planes
-        .snapshot(bridge.conversations.restored_selection()?)
+    bridge.planes.snapshot(bridge.restorable_selection()?)
 }
 
 // ---------------------------------------------------------------------------

@@ -46,6 +46,7 @@ import {
   type WorkPanelSnapshot,
 } from "$lib/jet/bridge";
 import { LOCAL_PLANE, type PlaneId, type PlaneSelection } from "$lib/jet/planes";
+import { openSettings, type SettingsTarget } from "$lib/jet/settings-window";
 import { PlaneCatalog } from "$lib/features/planes/catalog.svelte";
 import { needsPairing } from "$lib/features/planes/model";
 import { PlanesSession, type FeedHandler, type PlanesFocus } from "$lib/features/planes/session.svelte";
@@ -64,8 +65,7 @@ export type SidebarDestination =
   | "project"
   | "conversation"
   | "schedules"
-  | "planes"
-  | "settings";
+  | "planes";
 
 export type WorkPanelTab = "changes" | "files" | "terminal" | "run" | "delivery";
 export type ConnectionViewState = "connecting" | "online" | "reconnecting" | "failed";
@@ -736,10 +736,18 @@ export class DesktopSession implements FeedHandler {
         this.workPanelPresented = false;
         void this.refreshPlanes();
         break;
-      case "settings":
-        this.workPanelPresented = false;
-        this.actionNotice = null;
-        break;
+    }
+  }
+
+  /**
+   * Opens the separate Settings window, optionally at a typed deep link.
+   * The main window never shows preference controls itself.
+   */
+  async openSettings(target: SettingsTarget | null = null): Promise<void> {
+    try {
+      await openSettings(target);
+    } catch (error: unknown) {
+      this.actionNotice = publicError(error).message;
     }
   }
 
@@ -1402,6 +1410,9 @@ export class DesktopSession implements FeedHandler {
     } else if (event.key.toLowerCase() === "k") {
       event.preventDefault();
       this.select("search");
+    } else if (event.key === "," && !event.altKey && !event.shiftKey) {
+      event.preventDefault();
+      void this.openSettings();
     } else if (event.altKey && event.key === "0") {
       event.preventDefault();
       this.workPanelPresented = !this.workPanelPresented;
