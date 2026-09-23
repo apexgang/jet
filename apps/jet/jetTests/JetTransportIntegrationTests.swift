@@ -4,6 +4,44 @@ import Testing
 @testable import jet
 
 struct JetTransportIntegrationTests {
+    @Test("Recovery and retention use the negotiated, schema-checked wire forms")
+    func recoveryAndRetentionWire() async throws {
+        let server = HermeticJetd()
+        let client = JetClient(
+            configuration: JetClientConfiguration(clientID: UUID(), reconnectDelays: [.zero]),
+            schema: try JetWireSchema.bundled(),
+            makeTransport: { HermeticJetdTransport(server: server) }
+        )
+        try await client.connect()
+        defer { Task { await client.disconnect() } }
+
+        let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000020")!
+        let health = try await client.systemHealth()
+        #expect(health.recoveryState == "serving")
+        #expect(health.snapshots.map(\.reason) == ["daily"])
+        #expect(health.auditIntegrity == .trusted)
+
+        let trash = try await client.conversationTrash()
+        #expect(trash.entries.first?.conversationID == conversationID)
+        let preview = try await client.retentionPreview(conversationID: conversationID)
+        #expect(preview.protections == ["dirty_workspace"])
+        #expect(preview.auditRecords == 2)
+        let rule = try #require(try await client.autodeleteRules().rules.first)
+        #expect(rule.state == .draft(days: 30))
+        #expect(rule.candidates.first?.protections == ["unpushed_work"])
+        let audit = try await client.securityAudit(after: 0)
+        #expect(audit.entries.first?.decision == "conversation.forgotten")
+
+        let staged = try await client.stageConversation(conversationID, action: .forget, commandID: UUID())
+        #expect(staged.reason == "manual_forget")
+        try await client.restoreConversation(conversationID, commandID: UUID())
+        try await client.approveAutodelete(ruleID: rule.id, days: 30, commandID: UUID())
+        #expect(try await client.purgeRecoverySnapshots(commandID: UUID()) == ["older.sqlite3"])
+        #expect(await server.recoveryCommandTypes == [
+            "forget_conversation", "restore_conversation", "approve_autodelete_rule", "purge_recovery_snapshots",
+        ])
+    }
+
     @Test("The client retries a durable command and resumes ordered events")
     func commandReconnectAndEventResume() async throws {
         let server = HermeticJetd()
@@ -390,6 +428,7 @@ private actor HermeticJetd {
     private(set) var connectionCount = 0
     private var commandBodies: [Data] = []
     private(set) var gitCommandTypes: [String] = []
+    private(set) var recoveryCommandTypes: [String] = []
     private var disconnectedEventPage = false
     private var shouldHoldStatus = false
     private var shouldRejectStatus = false
@@ -466,7 +505,82 @@ private actor HermeticJetd {
                             "daemon_starts": 1,
                             "started_at_unix_ms": 0,
                             "core_version": "0.2.0-test",
+                            "security": ["state": "trusted"],
+                            "recovery": [
+                                "state": "serving",
+                                "snapshots": [[
+                                    "name": "plane-1-daily.sqlite3",
+                                    "taken_at_unix_ms": 1,
+                                    "reason": "daily",
+                                    "bytes": 1_024,
+                                ]],
+                                "deletion_ledger": ["state": "verified", "deletions": 1],
+                            ],
                         ],
+                    ]
+                ))
+            case "capabilities":
+                return .reply(try replyFrame(
+                    streamID: frame.streamID,
+                    object: [
+                        "kind": "query_result", "id": NSNumber(value: requestID),
+                        "result": [
+                            "type": "capabilities", "observed_at_unix_ms": 1,
+                            "core_version": "0.2.0-test",
+                            "platform": ["operating_system": "macos", "architecture": "aarch64"],
+                            "external_tools": [], "credential_store": ["status": "available", "kind": "apple_keychain"],
+                            "crafts": [], "harnesses": [], "degraded": [],
+                        ],
+                    ]
+                ))
+            case "conversation_trash":
+                return .reply(try replyFrame(
+                    streamID: frame.streamID,
+                    object: [
+                        "kind": "query_result", "id": NSNumber(value: requestID),
+                        "result": ["type": "conversation_trash", "cursor": "4", "entries": [trashEntry()]],
+                    ]
+                ))
+            case "retention_preview":
+                return .reply(try replyFrame(
+                    streamID: frame.streamID,
+                    object: [
+                        "kind": "query_result", "id": NSNumber(value: requestID),
+                        "result": [
+                            "type": "retention_preview", "conversation_id": query["conversation_id"]!,
+                            "protections": ["dirty_workspace"], "audit_records": 2,
+                            "trash": NSNull(),
+                        ],
+                    ]
+                ))
+            case "autodelete_rules":
+                return .reply(try replyFrame(
+                    streamID: frame.streamID,
+                    object: [
+                        "kind": "query_result", "id": NSNumber(value: requestID),
+                        "result": [
+                            "type": "autodelete_rules", "cursor": "4",
+                            "rules": [["rule": autodeleteRule(), "candidates": [[
+                                "conversation_id": "00000000-0000-0000-0000-000000000020",
+                                "last_active_at_unix_ms": 1, "protections": ["unpushed_work"],
+                            ]]]],
+                        ],
+                    ]
+                ))
+            case "security_audit":
+                return .reply(try replyFrame(
+                    streamID: frame.streamID,
+                    object: [
+                        "kind": "query_result", "id": NSNumber(value: requestID),
+                        "result": ["type": "security_audit", "cursor": "1", "entries": [[
+                            "sequence": "1", "epoch": "1",
+                            "record_id": "00000000-0000-0000-0000-000000000050",
+                            "recorded_at_unix_ms": 1,
+                            "plane_id": "00000000-0000-0000-0000-000000000001",
+                            "actor": ["type": "retention"],
+                            "target": ["kind": "conversation", "reference": String(repeating: "a", count: 64)],
+                            "decision": "conversation.forgotten", "risk": "destructive", "outcome": "succeeded",
+                        ]]],
                     ]
                 ))
             case "events":
@@ -632,12 +746,48 @@ private actor HermeticJetd {
                         ],
                     ]
                 ))
+            case "forget_conversation", "restore_conversation", "approve_autodelete_rule", "purge_recovery_snapshots":
+                recoveryCommandTypes.append(commandType)
+                let result: [String: Any]
+                switch commandType {
+                case "forget_conversation":
+                    result = ["type": "conversation_trashed", "entry": trashEntry()]
+                case "restore_conversation":
+                    result = ["type": "conversation_restored", "conversation_id": command["conversation_id"]!]
+                case "approve_autodelete_rule":
+                    var rule = autodeleteRule()
+                    rule["state"] = ["state": "approved", "inactive_days": 30, "approved_at_unix_ms": 2]
+                    result = ["type": "autodelete_rule_recorded", "rule": rule]
+                default:
+                    result = ["type": "recovery_snapshots_purged", "snapshot": "new.sqlite3", "removed": ["older.sqlite3"]]
+                }
+                return .reply(try replyFrame(
+                    streamID: frame.streamID,
+                    object: ["kind": "command_result", "id": NSNumber(value: requestID), "result": result]
+                ))
             default:
                 throw JetClientFailure.presentation(.invalidResponse)
             }
         default:
             throw JetClientFailure.presentation(.invalidResponse)
         }
+    }
+
+    private func trashEntry() -> [String: Any] {
+        [
+            "conversation_id": "00000000-0000-0000-0000-000000000020",
+            "reason": "manual_forget", "trashed_at_unix_ms": 1,
+            "expires_at_unix_ms": 1_000,
+        ]
+    }
+
+    private func autodeleteRule() -> [String: Any] {
+        [
+            "rule_id": "00000000-0000-0000-0000-000000000060",
+            "prompt": "Forget after a month", "utility_job_id": "00000000-0000-0000-0000-000000000061",
+            "state": ["state": "draft", "inactive_days": 30], "scope": "forget",
+            "created_at_unix_ms": 1, "updated_at_unix_ms": 1,
+        ]
     }
 
     private func eventReply(

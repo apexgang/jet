@@ -223,6 +223,15 @@ private struct SidebarView: View {
                     .accessibilityValue(
                         session.selectedConversationID == conversation.id ? "Selected" : ""
                     )
+#if os(macOS)
+                    .contextMenu {
+                        Button("Review Retention…") {
+                            session.selectConversation(conversation.id)
+                            session.requestSettings(.work)
+                            openSettings()
+                        }
+                    }
+#endif
                 }
 
                 if session.conversations.isEmpty, session.conversationFreshness != .loading {

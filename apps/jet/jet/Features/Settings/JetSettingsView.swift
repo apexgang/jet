@@ -34,7 +34,7 @@ enum JetSettingsPane: String, CaseIterable, Identifiable, Sendable {
         return switch prefix {
         case "notification": .general
         case "account", "credential", "extension", "craft", "usage": .agents
-        case "schedule", "git", "retention": .work
+        case "schedule", "git", "retention", "autodelete": .work
         case "pairing", "remote", "ssh": .connections
         case "setting", "review", "audit", "storage", "energy", "recovery": .safety
         default: nil
@@ -45,12 +45,21 @@ enum JetSettingsPane: String, CaseIterable, Identifiable, Sendable {
 struct JetSettingsView: View {
     let session: DesktopSession
     @State private var model: JetSettingsModel
+    @State private var recoveryModel: JetRecoveryModel
     @AppStorage("jet.settings.last-pane") private var selectedPane = JetSettingsPane.general.rawValue
     @AppStorage("jet.settings.restore-last-task") private var restoresLastTask = true
 
     init(session: DesktopSession) {
         self.session = session
         _model = State(initialValue: JetSettingsModel(makeAccess: session.settingsAccess))
+        _recoveryModel = State(initialValue: JetRecoveryModel(
+            makeAccess: session.recoveryAccess(for:),
+            onConversationChange: { staged in
+                if staged { session.beginNewTask() }
+                await session.loadConversations()
+                if staged { session.beginNewTask() }
+            }
+        ))
     }
 
     var body: some View {
@@ -63,7 +72,7 @@ struct JetSettingsView: View {
                 .tabItem { Label(JetSettingsPane.agents.title, systemImage: JetSettingsPane.agents.symbol) }
                 .tag(JetSettingsPane.agents)
 
-            WorkSettingsPane(model: model)
+            WorkSettingsPane(session: session, model: model, recovery: recoveryModel)
                 .tabItem { Label(JetSettingsPane.work.title, systemImage: JetSettingsPane.work.symbol) }
                 .tag(JetSettingsPane.work)
 
@@ -71,7 +80,7 @@ struct JetSettingsView: View {
                 .tabItem { Label(JetSettingsPane.connections.title, systemImage: JetSettingsPane.connections.symbol) }
                 .tag(JetSettingsPane.connections)
 
-            SafetySettingsPane(model: model)
+            SafetySettingsPane(session: session, model: model, recovery: recoveryModel)
                 .tabItem { Label(JetSettingsPane.safety.title, systemImage: JetSettingsPane.safety.symbol) }
                 .tag(JetSettingsPane.safety)
         }
@@ -82,6 +91,12 @@ struct JetSettingsView: View {
                 projectID: selectedProjectID,
                 crafts: session.selectedSetupSnapshot?.capabilities.crafts ?? [],
                 authProviders: session.selectedSetupSnapshot?.capabilities.authProviders ?? []
+            )
+        }
+        .task(id: loadID) {
+            await recoveryModel.load(
+                planeRegistryID: session.selectedPlaneRegistryID,
+                conversationID: session.selectedConversationID
             )
         }
         .onAppear(perform: applyRequestedPane)
@@ -384,7 +399,9 @@ private enum WorkSettingScope: String, CaseIterable, Identifiable {
 }
 
 private struct WorkSettingsPane: View {
+    let session: DesktopSession
     @Bindable var model: JetSettingsModel
+    @Bindable var recovery: JetRecoveryModel
     @State private var selectedScope = WorkSettingScope.project
 
     var body: some View {
@@ -485,6 +502,27 @@ private struct WorkSettingsPane: View {
                 SettingsIssueView(error: model.issues[.plane])
             }
 
+            JetTrashSection(
+                model: recovery,
+                planeName: session.selectedPlane?.name ?? "Local Plane",
+                selectedTitle: session.selectedConversation?.title
+            ).selectedTask
+            JetTrashSection(
+                model: recovery,
+                planeName: session.selectedPlane?.name ?? "Local Plane",
+                selectedTitle: session.selectedConversation?.title
+            )
+            JetAutodeleteSection(
+                model: recovery,
+                planeName: session.selectedPlane?.name ?? "Local Plane"
+            )
+
+            Section {
+                Button("Refresh Retention and Trash") { Task { await recovery.refresh() } }
+                    .disabled(recovery.operation != nil)
+                if let notice = recovery.notice { Text(notice).font(.caption).foregroundStyle(.secondary) }
+            }
+
             SettingsNotice(model: model)
         }
         .onChange(of: availableScopes) { _, scopes in
@@ -527,7 +565,9 @@ private struct WorkSettingsPane: View {
 }
 
 private struct SafetySettingsPane: View {
+    let session: DesktopSession
     @Bindable var model: JetSettingsModel
+    @Bindable var recovery: JetRecoveryModel
 
     var body: some View {
         SettingsForm {
@@ -584,6 +624,20 @@ private struct SafetySettingsPane: View {
                 Text("Policy, authorization, resource admission, and revision checks remain authoritative in jetd. This window sends typed Commands and reloads the resulting snapshot.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            JetSystemSection(
+                model: recovery,
+                planeName: session.selectedPlane?.name ?? "Local Plane",
+                diskPressure: [session.actionError, session.workError, session.workNoticeError, session.gitDeliveryError, session.selectedPlane?.failure]
+                    .contains(where: { $0?.code == "storage.disk_pressure" }),
+                diagnosticErrors: [session.actionError, session.workError, session.workNoticeError, session.gitDeliveryError, session.selectedPlane?.failure]
+                    .compactMap { $0 }
+            )
+            JetAuditSection(model: recovery)
+
+            if let notice = recovery.notice {
+                Section { Text(notice).font(.caption).foregroundStyle(.secondary) }
             }
 
             SettingsNotice(model: model)

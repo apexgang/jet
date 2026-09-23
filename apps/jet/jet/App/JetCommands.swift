@@ -3,6 +3,7 @@ import SwiftUI
 #if os(macOS)
 struct JetCommands: Commands {
     let session: DesktopSession
+    @Environment(\.openSettings) private var openSettings
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -42,6 +43,12 @@ struct JetCommands: Commands {
                 .disabled(true)
             Button("Archive") {}
                 .disabled(true)
+            Divider()
+            Button("Review Retention…") {
+                session.requestSettings(.work)
+                openSettings()
+            }
+            .disabled(session.selectedConversationID == nil)
         }
 
         CommandMenu("Delivery") {

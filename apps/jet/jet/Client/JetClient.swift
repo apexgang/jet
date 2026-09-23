@@ -1300,6 +1300,340 @@ actor JetClient {
         )
     }
 
+    func systemHealth() async throws -> JetSystemHealth {
+        let status = try await status()
+        let observedCapabilities: JetCapabilitySummary?
+        do {
+            observedCapabilities = try await capabilities(.fresh)
+        } catch {
+            if Task.isCancelled { throw error }
+            observedCapabilities = nil
+        }
+        let capabilities = observedCapabilities ?? JetCapabilitySummary(
+            coreVersion: status.coreVersion,
+            platform: "Unavailable",
+            externalTools: [],
+            harnesses: [],
+            crafts: [],
+            credentialStore: .unavailable,
+            degraded: []
+        )
+        let recovery = try recoveryObject(status.recovery)
+        let security = try recoveryObject(status.security)
+        let snapshots = try (recovery?["snapshots"] as? [[String: Any]] ?? []).map { value in
+            guard let name = value["name"] as? String,
+                  let reason = value["reason"] as? String,
+                  let takenAt = signed64(value["taken_at_unix_ms"]),
+                  let bytes = unsigned64(value["bytes"])
+            else { throw JetClientFailure.presentation(.invalidResponse) }
+            return JetRecoverySnapshot(
+                name: name,
+                reason: reason,
+                takenAt: Date(timeIntervalSince1970: Double(takenAt) / 1_000),
+                bytes: bytes
+            )
+        }
+        let auditIntegrity: JetAuditIntegrity
+        switch security?["state"] as? String {
+        case "trusted": auditIntegrity = .trusted
+        case "degraded":
+            guard let breach = security?["breach"] as? [String: Any],
+                  let reason = breach["breach"] as? String
+            else { throw JetClientFailure.presentation(.invalidResponse) }
+            auditIntegrity = .degraded(reason)
+        case nil: auditIntegrity = .unavailable
+        default: throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let ledger = recovery?["deletion_ledger"] as? [String: Any]
+        return JetSystemHealth(
+            planeID: status.planeID,
+            daemonVersion: status.coreVersion,
+            daemonStarts: status.daemonStarts,
+            daemonStartedAt: Date(timeIntervalSince1970: Double(status.startedAtUnixMilliseconds) / 1_000),
+            platform: capabilities.platform,
+            capabilitiesAvailable: observedCapabilities != nil,
+            externalTools: capabilities.externalTools,
+            crafts: capabilities.crafts,
+            degradedCapabilities: capabilities.degraded,
+            credentialStore: capabilities.credentialStore,
+            recoveryState: recovery?["state"] as? String,
+            recoveryReason: recovery?["reason"] as? String,
+            snapshots: snapshots,
+            deletionLedger: ledger?["state"] as? String,
+            auditIntegrity: auditIntegrity
+        )
+    }
+
+    func conversationTrash() async throws -> JetTrashSnapshot {
+        try await requireProtocolMinor(39, feature: "Jet Trash")
+        let (data, id) = try await sendQuery(["type": "conversation_trash"])
+        let (_, result, _) = try responseResult(data, requestID: id, kind: "query_result", type: "conversation_trash")
+        guard let cursor = UInt64(result["cursor"] as? String ?? ""),
+              let entries = result["entries"] as? [[String: Any]]
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+        return try JetTrashSnapshot(cursor: cursor, entries: entries.map(decodeTrashEntry))
+    }
+
+    func retentionPreview(conversationID: UUID) async throws -> JetRetentionPreview {
+        try await requireProtocolMinor(39, feature: "Retention preview")
+        let (data, id) = try await sendQuery([
+            "type": "retention_preview", "conversation_id": conversationID.uuidString.lowercased(),
+        ])
+        let (_, result, _) = try responseResult(data, requestID: id, kind: "query_result", type: "retention_preview")
+        guard uuid(result["conversation_id"]) == conversationID,
+              let protections = result["protections"] as? [String],
+              let auditRecords = unsigned64(result["audit_records"])
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+        let trash = try (result["trash"] as? [String: Any]).map(decodeTrashEntry)
+        return JetRetentionPreview(
+            conversationID: conversationID,
+            protections: protections,
+            auditRecords: auditRecords,
+            trash: trash
+        )
+    }
+
+    func stageConversation(
+        _ conversationID: UUID,
+        action: JetRetentionAction,
+        commandID: UUID
+    ) async throws -> JetTrashEntry {
+        try await requireProtocolMinor(39, feature: "Conversation retention")
+        let (data, id) = try await sendCommand([
+            "type": action.rawValue, "conversation_id": conversationID.uuidString.lowercased(),
+        ], commandID: commandID)
+        let (_, result, _) = try responseResult(data, requestID: id, kind: "command_result", type: "conversation_trashed")
+        guard let value = result["entry"] as? [String: Any] else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let entry = try decodeTrashEntry(value)
+        guard entry.conversationID == conversationID else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return entry
+    }
+
+    func restoreConversation(_ conversationID: UUID, commandID: UUID) async throws {
+        try await requireProtocolMinor(39, feature: "Jet Trash restore")
+        let (data, id) = try await sendCommand([
+            "type": "restore_conversation", "conversation_id": conversationID.uuidString.lowercased(),
+        ], commandID: commandID)
+        let (_, result, _) = try responseResult(data, requestID: id, kind: "command_result", type: "conversation_restored")
+        guard uuid(result["conversation_id"]) == conversationID else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+    }
+
+    func autodeleteRules() async throws -> JetAutodeleteSnapshot {
+        try await requireProtocolMinor(40, feature: "Auto-delete rules")
+        let (data, id) = try await sendQuery(["type": "autodelete_rules"])
+        let (_, result, _) = try responseResult(data, requestID: id, kind: "query_result", type: "autodelete_rules")
+        guard let cursor = UInt64(result["cursor"] as? String ?? ""),
+              let rules = result["rules"] as? [[String: Any]]
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+        return try JetAutodeleteSnapshot(cursor: cursor, rules: rules.map(decodeAutodeleteRule))
+    }
+
+    func compileAutodeleteRule(
+        ruleID: UUID,
+        prompt: String,
+        commandID: UUID
+    ) async throws {
+        try await requireProtocolMinor(40, feature: "Auto-delete rules")
+        guard !prompt.isEmpty, prompt.utf8.count <= 4_096 else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "utility.input_limit", message: "Enter up to 4,096 bytes for the rule."
+            ))
+        }
+        let (data, id) = try await sendCommand([
+            "type": "compile_autodelete_rule",
+            "rule_id": ruleID.uuidString.lowercased(),
+            "prompt": prompt,
+        ], commandID: commandID)
+        let (_, result, _) = try responseResult(data, requestID: id, kind: "command_result", type: "autodelete_rule_recorded")
+        guard let rule = result["rule"] as? [String: Any],
+              uuid(rule["rule_id"]) == ruleID
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+    }
+
+    func setAutodeleteDays(ruleID: UUID, days: UInt32, commandID: UUID) async throws {
+        try await autodeleteCommand("set_autodelete_rule_inactive_days", ruleID: ruleID, days: days, commandID: commandID)
+    }
+
+    func approveAutodelete(ruleID: UUID, days: UInt32, commandID: UUID) async throws {
+        try await autodeleteCommand("approve_autodelete_rule", ruleID: ruleID, days: days, commandID: commandID)
+    }
+
+    func authorizeAutodeleteEverywhere(ruleID: UUID, commandID: UUID) async throws {
+        try await autodeleteCommand("authorize_autodelete_everywhere", ruleID: ruleID, days: nil, commandID: commandID)
+    }
+
+    func deleteAutodeleteRule(ruleID: UUID, commandID: UUID) async throws {
+        try await requireProtocolMinor(40, feature: "Auto-delete rules")
+        let (data, id) = try await sendCommand([
+            "type": "delete_autodelete_rule", "rule_id": ruleID.uuidString.lowercased(),
+        ], commandID: commandID)
+        let (_, result, _) = try responseResult(data, requestID: id, kind: "command_result", type: "autodelete_rule_deleted")
+        guard uuid(result["rule_id"]) == ruleID else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+    }
+
+    func securityAudit(after sequence: UInt64) async throws -> JetAuditPage {
+        try await requireProtocolMinor(5, feature: "Security audit")
+        let (data, id) = try await sendQuery([
+            "type": "security_audit", "after": String(sequence),
+        ])
+        let (_, result, _) = try responseResult(data, requestID: id, kind: "query_result", type: "security_audit")
+        guard let cursor = UInt64(result["cursor"] as? String ?? ""), cursor >= sequence,
+              let entries = result["entries"] as? [[String: Any]]
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+        var previous = sequence
+        let decoded = try entries.map { value -> JetAuditEntry in
+            let entry = try decodeAuditEntry(value)
+            guard entry.sequence > previous, entry.sequence <= cursor else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            previous = entry.sequence
+            return entry
+        }
+        return JetAuditPage(cursor: cursor, entries: decoded)
+    }
+
+    func restoreRecoverySnapshot(_ name: String, commandID: UUID) async throws {
+        try await requireProtocolMinor(37, feature: "Recovery snapshots")
+        let (data, id) = try await sendCommand([
+            "type": "restore_recovery_snapshot", "snapshot": name,
+        ], commandID: commandID)
+        let (_, result, _) = try responseResult(data, requestID: id, kind: "command_result", type: "recovery_snapshot_restored")
+        guard result["snapshot"] as? String == name,
+              result["replaced"] as? String != nil
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+    }
+
+    func purgeRecoverySnapshots(commandID: UUID) async throws -> [String] {
+        try await requireProtocolMinor(38, feature: "Recovery snapshot purge")
+        let (data, id) = try await sendCommand(["type": "purge_recovery_snapshots"], commandID: commandID)
+        let (_, result, _) = try responseResult(data, requestID: id, kind: "command_result", type: "recovery_snapshots_purged")
+        guard result["snapshot"] as? String != nil,
+              let removed = result["removed"] as? [String]
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+        return removed
+    }
+
+    private func recoveryObject(_ raw: JetRawJSON?) throws -> [String: Any]? {
+        guard let raw else { return nil }
+        guard let data = raw.source.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+        return object
+    }
+
+    private func decodeTrashEntry(_ value: [String: Any]) throws -> JetTrashEntry {
+        guard let conversationID = uuid(value["conversation_id"]),
+              let reason = value["reason"] as? String,
+              let trashedAt = signed64(value["trashed_at_unix_ms"]),
+              let expiresAt = signed64(value["expires_at_unix_ms"])
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+        return JetTrashEntry(
+            conversationID: conversationID,
+            reason: reason,
+            trashedAt: Date(timeIntervalSince1970: Double(trashedAt) / 1_000),
+            expiresAt: Date(timeIntervalSince1970: Double(expiresAt) / 1_000)
+        )
+    }
+
+    private func decodeAutodeleteRule(_ value: [String: Any]) throws -> JetAutodeleteRule {
+        guard let rule = value["rule"] as? [String: Any],
+              let id = uuid(rule["rule_id"]),
+              let prompt = rule["prompt"] as? String,
+              let scope = rule["scope"] as? String,
+              let rawState = rule["state"] as? [String: Any],
+              let stateName = rawState["state"] as? String,
+              let candidates = value["candidates"] as? [[String: Any]]
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+        let state: JetAutodeleteState
+        switch stateName {
+        case "compiling": state = .compiling
+        case "refused":
+            guard let reason = rawState["reason"] as? String else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            state = .refused(reason)
+        case "draft":
+            guard let days = unsigned32(rawState["inactive_days"]) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            state = .draft(days: days)
+        case "approved":
+            guard let days = unsigned32(rawState["inactive_days"]),
+                  let at = signed64(rawState["approved_at_unix_ms"])
+            else { throw JetClientFailure.presentation(.invalidResponse) }
+            state = .approved(days: days, at: Date(timeIntervalSince1970: Double(at) / 1_000))
+        default: throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return try JetAutodeleteRule(
+            id: id, prompt: prompt, scope: scope, state: state,
+            candidates: candidates.map { candidate in
+                guard let conversationID = uuid(candidate["conversation_id"]),
+                      let lastActive = signed64(candidate["last_active_at_unix_ms"]),
+                      let protections = candidate["protections"] as? [String]
+                else { throw JetClientFailure.presentation(.invalidResponse) }
+                return JetAutodeleteCandidate(
+                    conversationID: conversationID,
+                    lastActiveAt: Date(timeIntervalSince1970: Double(lastActive) / 1_000),
+                    protections: protections
+                )
+            }
+        )
+    }
+
+    private func autodeleteCommand(
+        _ type: String,
+        ruleID: UUID,
+        days: UInt32?,
+        commandID: UUID
+    ) async throws {
+        try await requireProtocolMinor(40, feature: "Auto-delete rules")
+        if let days, !(1 ... 36_500).contains(days) {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "autodelete.inactive_days_out_of_range",
+                message: "Choose 1 to 36,500 days."
+            ))
+        }
+        var command: [String: Any] = ["type": type, "rule_id": ruleID.uuidString.lowercased()]
+        if let days { command["inactive_days"] = days }
+        let (data, id) = try await sendCommand(command, commandID: commandID)
+        let (_, result, _) = try responseResult(data, requestID: id, kind: "command_result", type: "autodelete_rule_recorded")
+        guard let rule = result["rule"] as? [String: Any],
+              uuid(rule["rule_id"]) == ruleID
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+    }
+
+    private func decodeAuditEntry(_ value: [String: Any]) throws -> JetAuditEntry {
+        guard let id = uuid(value["record_id"]),
+              let sequence = UInt64(value["sequence"] as? String ?? ""),
+              let epoch = UInt64(value["epoch"] as? String ?? ""),
+              let recordedAt = signed64(value["recorded_at_unix_ms"]),
+              let planeID = uuid(value["plane_id"]),
+              let actor = value["actor"] as? [String: Any],
+              let actorName = actor["type"] as? String,
+              let decision = value["decision"] as? String,
+              let target = value["target"] as? [String: Any],
+              let targetKind = target["kind"] as? String,
+              let targetReference = target["reference"] as? String,
+              let risk = value["risk"] as? String,
+              let outcome = value["outcome"] as? String
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+        return JetAuditEntry(
+            id: id, sequence: sequence, epoch: epoch,
+            recordedAt: Date(timeIntervalSince1970: Double(recordedAt) / 1_000),
+            planeID: planeID, actor: actorName, decision: decision,
+            targetKind: targetKind, targetReference: targetReference,
+            risk: risk, outcome: outcome
+        )
+    }
+
     func setSetting(
         _ key: SettingKey,
         value: JetSettingValue,

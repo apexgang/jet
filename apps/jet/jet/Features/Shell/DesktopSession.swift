@@ -237,6 +237,7 @@ final class DesktopSession {
     var draft = ""
     var composerFocusRequest = 0
     var actionNotice: String?
+    var actionError: JetPresentationError?
     var setupState: SetupState = .idle
     var connectionState: JetConnectionState = .disconnected
     var selectedProjectID: UUID?
@@ -604,6 +605,10 @@ final class DesktopSession {
 
     func settingsAccess() async throws -> any JetSettingsAccess {
         try await activeClient()
+    }
+
+    func recoveryAccess(for planeRegistryID: UUID) async throws -> any JetRecoveryAccess {
+        try await client(for: planeRegistryID)
     }
 
     func requestSettings(_ pane: JetSettingsPane) {
@@ -2412,6 +2417,7 @@ final class DesktopSession {
 
         conversationOperation = "send"
         actionNotice = nil
+        actionError = nil
         let prompt = draft
         do {
             var conversationID = selectedConversationID
@@ -2473,7 +2479,9 @@ final class DesktopSession {
             actionNotice = "Sent to the Plane."
             await loadSelectedConversation()
         } catch {
-            actionNotice = presentationError(error).message
+            let failure = presentationError(error)
+            actionError = failure
+            actionNotice = failure.message
             await loadConversations()
         }
         conversationOperation = nil
