@@ -80,10 +80,17 @@ struct JetAuthProvider: Sendable, Equatable, Identifiable {
 struct JetCapabilitySummary: Sendable, Equatable {
     let coreVersion: String
     let platform: String
+    let externalTools: [JetExternalToolSummary]
     let harnesses: [String]
     let crafts: [JetInstalledCraft]
     let credentialStore: JetCredentialStoreState
     let degraded: [String]
+
+    var gitIsAvailable: Bool {
+        externalTools.contains {
+            $0.tool == "git" && $0.availability.isPresent
+        }
+    }
 
     var authProviders: [JetAuthProvider] {
         var providers: [JetAuthProvider] = []
@@ -111,6 +118,23 @@ struct JetCapabilitySummary: Sendable, Equatable {
         }
         return providers
     }
+}
+
+enum JetExternalToolAvailability: Sendable, Equatable {
+    case present(version: String)
+    case missing
+
+    var isPresent: Bool {
+        if case .present = self { return true }
+        return false
+    }
+}
+
+struct JetExternalToolSummary: Sendable, Equatable, Identifiable {
+    let tool: String
+    let availability: JetExternalToolAvailability
+
+    var id: String { tool }
 }
 
 struct JetInstalledCraft: Sendable, Equatable, Identifiable {
@@ -248,6 +272,123 @@ struct JetChangeArtifactChunk: Sendable, Equatable {
     let artifact: JetChangeArtifact
     let offset: UInt64
     let bytes: Data
+}
+
+struct JetGitCheckpoint: Sendable, Equatable {
+    let runID: UUID
+    let turn: UInt32
+
+    var label: String { "Turn \(turn)" }
+}
+
+enum JetGitOperation: Sendable, Equatable, Hashable {
+    case branch(name: String)
+    case commit
+    case push(remote: String)
+    case draftPullRequest(remote: String, base: String?)
+
+    var title: String {
+        switch self {
+        case .branch: "Create Branch"
+        case .commit: "Commit"
+        case .push: "Push"
+        case .draftPullRequest: "GitHub Draft Pull Request"
+        }
+    }
+
+    var destinationLabel: String {
+        switch self {
+        case let .branch(name): name
+        case .commit: "Current Conversation branch"
+        case let .push(remote): remote
+        case let .draftPullRequest(remote, base):
+            base.map { "\(remote) into \($0)" } ?? "\(remote) default branch"
+        }
+    }
+}
+
+enum JetGitDeliveryChoice: String, CaseIterable, Sendable, Hashable {
+    case branch
+    case commit
+    case push
+    case draftPullRequest
+
+    var title: String {
+        switch self {
+        case .branch: "Branch"
+        case .commit: "Commit"
+        case .push: "Push"
+        case .draftPullRequest: "GitHub Draft PR"
+        }
+    }
+}
+
+struct JetGitDeliveryRequest: Sendable, Equatable {
+    let conversationID: UUID
+    let checkpoint: JetGitCheckpoint?
+    let operation: JetGitOperation
+
+    var reviewSummary: String {
+        var parts = [operation.destinationLabel]
+        if let checkpoint { parts.append(checkpoint.label) }
+        return parts.joined(separator: " · ")
+    }
+}
+
+struct JetGitMessage: Sendable, Equatable {
+    let title: String
+    let body: String
+    let fallbackReason: String?
+}
+
+struct JetGitDeliveryPolicy: Sendable, Equatable {
+    let automatic: Bool
+    let branch: Bool
+    let commit: Bool
+    let push: Bool
+    let draftPullRequest: Bool
+    let branchPrefix: String
+}
+
+enum JetGitDeliveryOutcome: Sendable, Equatable {
+    case pending
+    case completed(head: String, branch: String?, pullRequest: String?)
+    case failed(code: String)
+    case outcomeUnknown
+
+    var title: String {
+        switch self {
+        case .pending: "Pending"
+        case .completed: "Completed"
+        case .failed: "Failed"
+        case .outcomeUnknown: "Outcome unknown"
+        }
+    }
+}
+
+struct JetGitDelivery: Sendable, Equatable, Identifiable {
+    let id: UUID
+    let conversationID: UUID
+    let checkpoint: JetGitCheckpoint?
+    let operation: JetGitOperation
+    let policy: JetGitDeliveryPolicy
+    let utilityJobID: UUID?
+    let message: JetGitMessage?
+    let acknowledgedBy: UUID?
+    let outcome: JetGitDeliveryOutcome
+
+    var canRetry: Bool {
+        if case .failed = outcome { return true }
+        return false
+    }
+
+    var needsAcknowledgement: Bool {
+        outcome == .outcomeUnknown && acknowledgedBy == nil
+    }
+}
+
+struct JetGitDeliveryQueued: Sendable, Equatable {
+    let deliveryID: UUID
 }
 
 struct JetEditableFile: Sendable, Equatable {

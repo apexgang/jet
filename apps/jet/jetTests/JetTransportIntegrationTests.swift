@@ -69,6 +69,57 @@ struct JetTransportIntegrationTests {
         #expect(await client.currentState() == .disconnected)
     }
 
+    @Test("Git delivery exposes every durable outcome and explicit commands")
+    func gitDeliveryOutboxAndCommands() async throws {
+        let server = HermeticJetd()
+        let client = JetClient(
+            configuration: JetClientConfiguration(
+                clientID: UUID(),
+                reconnectDelays: [.zero],
+                eventPollDelay: .seconds(60)
+            ),
+            schema: try JetWireSchema.bundled(),
+            makeTransport: { HermeticJetdTransport(server: server) }
+        )
+        try await client.connect()
+
+        let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000020")!
+        let deliveries = try await client.gitDeliveries(conversationID: conversationID)
+        #expect(deliveries.count == 4)
+        #expect(deliveries[0].outcome == .pending)
+        #expect(deliveries[1].outcome == .completed(
+            head: String(repeating: "a", count: 40),
+            branch: "work/reviewed",
+            pullRequest: "https://github.com/example/jet/pull/7"
+        ))
+        #expect(deliveries[2].outcome == .failed(code: "git.policy_changed"))
+        #expect(deliveries[2].canRetry)
+        #expect(deliveries[3].outcome == .outcomeUnknown)
+        #expect(deliveries[3].needsAcknowledgement)
+
+        let queued = try await client.deliverGit(
+            JetGitDeliveryRequest(
+                conversationID: conversationID,
+                checkpoint: JetGitCheckpoint(
+                    runID: UUID(uuidString: "00000000-0000-0000-0000-000000000010")!,
+                    turn: 2
+                ),
+                operation: .draftPullRequest(remote: "origin", base: "main")
+            ),
+            commandID: UUID()
+        )
+        #expect(queued.deliveryID == deliveries[0].id)
+
+        let acknowledged = try await client.acknowledgeGitDelivery(
+            deliveryID: deliveries[3].id,
+            commandID: UUID()
+        )
+        #expect(acknowledged == deliveries[3].id)
+        #expect(await server.gitCommandTypes == ["deliver_git", "acknowledge_git_delivery"])
+
+        await client.disconnect()
+    }
+
     @Test("The production validator accepts the shared valid corpus concurrently")
     func sharedSchemaValidatorIsConcurrencySafe() async throws {
         let schema = try JetWireSchema.bundled()
@@ -338,6 +389,7 @@ private actor HermeticJetd {
 
     private(set) var connectionCount = 0
     private var commandBodies: [Data] = []
+    private(set) var gitCommandTypes: [String] = []
     private var disconnectedEventPage = false
     private var shouldHoldStatus = false
     private var shouldRejectStatus = false
@@ -494,6 +546,19 @@ private actor HermeticJetd {
                         ],
                     ]
                 ))
+            case "git_deliveries":
+                let conversationID = query["conversation_id"] as! String
+                return .reply(try replyFrame(
+                    streamID: frame.streamID,
+                    object: [
+                        "kind": "query_result",
+                        "id": NSNumber(value: requestID),
+                        "result": [
+                            "type": "git_deliveries",
+                            "deliveries": gitDeliveries(conversationID: conversationID),
+                        ],
+                    ]
+                ))
             default:
                 throw JetClientFailure.presentation(.invalidResponse)
             }
@@ -521,23 +586,55 @@ private actor HermeticJetd {
             return .reply(frames)
         case "command":
             let command = request["command"] as! [String: Any]
-            commandBodies.append(try JSONSerialization.data(
-                withJSONObject: command,
-                options: [.sortedKeys, .withoutEscapingSlashes]
-            ))
-            if commandBodies.count == 1 { return .disconnect }
-            return .reply(try replyFrame(
-                streamID: frame.streamID,
-                object: [
-                    "kind": "command_result",
-                    "id": NSNumber(value: requestID),
-                    "result": [
-                        "type": "setting_cleared",
-                        "key": "energy.concurrency",
-                        "scope": ["type": "plane"],
-                    ],
-                ]
-            ))
+            let commandType = command["type"] as! String
+            switch commandType {
+            case "clear_setting":
+                commandBodies.append(try JSONSerialization.data(
+                    withJSONObject: command,
+                    options: [.sortedKeys, .withoutEscapingSlashes]
+                ))
+                if commandBodies.count == 1 { return .disconnect }
+                return .reply(try replyFrame(
+                    streamID: frame.streamID,
+                    object: [
+                        "kind": "command_result",
+                        "id": NSNumber(value: requestID),
+                        "result": [
+                            "type": "setting_cleared",
+                            "key": "energy.concurrency",
+                            "scope": ["type": "plane"],
+                        ],
+                    ]
+                ))
+            case "deliver_git":
+                gitCommandTypes.append(commandType)
+                return .reply(try replyFrame(
+                    streamID: frame.streamID,
+                    object: [
+                        "kind": "command_result",
+                        "id": NSNumber(value: requestID),
+                        "result": [
+                            "type": "git_delivery_queued",
+                            "delivery_id": "00000000-0000-0000-0000-000000000040",
+                        ],
+                    ]
+                ))
+            case "acknowledge_git_delivery":
+                gitCommandTypes.append(commandType)
+                return .reply(try replyFrame(
+                    streamID: frame.streamID,
+                    object: [
+                        "kind": "command_result",
+                        "id": NSNumber(value: requestID),
+                        "result": [
+                            "type": "git_delivery_acknowledged",
+                            "delivery_id": command["delivery_id"] as! String,
+                        ],
+                    ]
+                ))
+            default:
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
         default:
             throw JetClientFailure.presentation(.invalidResponse)
         }
@@ -564,6 +661,65 @@ private actor HermeticJetd {
             multiplexed: true,
             limits: .protocolMaximum
         )
+    }
+
+    private func gitDeliveries(conversationID: String) -> [[String: Any]] {
+        let checkpoint: [String: Any] = [
+            "run_id": "00000000-0000-0000-0000-000000000010",
+            "turn": 2,
+        ]
+        let policy: [String: Any] = [
+            "automatic": false,
+            "branch": true,
+            "commit": true,
+            "push": true,
+            "draft_pull_request": true,
+            "branch_prefix": "jet/",
+        ]
+        func delivery(
+            id: String,
+            operation: [String: Any],
+            outcome: [String: Any]
+        ) -> [String: Any] {
+            [
+                "delivery_id": id,
+                "conversation_id": conversationID,
+                "checkpoint": checkpoint,
+                "operation": operation,
+                "policy": policy,
+                "utility_job": NSNull(),
+                "message": NSNull(),
+                "acknowledged_by": NSNull(),
+                "outcome": outcome,
+            ]
+        }
+        return [
+            delivery(
+                id: "00000000-0000-0000-0000-000000000040",
+                operation: ["operation": "branch", "name": "work/reviewed"],
+                outcome: ["status": "pending"]
+            ),
+            delivery(
+                id: "00000000-0000-0000-0000-000000000041",
+                operation: ["operation": "draft_pull_request", "remote": "origin", "base": "main"],
+                outcome: [
+                    "status": "completed",
+                    "head": String(repeating: "a", count: 40),
+                    "branch": "work/reviewed",
+                    "pull_request": "https://github.com/example/jet/pull/7",
+                ]
+            ),
+            delivery(
+                id: "00000000-0000-0000-0000-000000000042",
+                operation: ["operation": "commit"],
+                outcome: ["status": "failed", "code": "git.policy_changed"]
+            ),
+            delivery(
+                id: "00000000-0000-0000-0000-000000000043",
+                operation: ["operation": "push", "remote": "origin"],
+                outcome: ["status": "outcome_unknown"]
+            ),
+        ]
     }
 
     private func replyFrame(

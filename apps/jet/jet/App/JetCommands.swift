@@ -44,6 +44,15 @@ struct JetCommands: Commands {
                 .disabled(true)
         }
 
+        CommandMenu("Delivery") {
+            Button("Review Branch…") { session.showGitDelivery(.branch) }
+            Button("Review Commit…") { session.showGitDelivery(.commit) }
+            Button("Review Push…") { session.showGitDelivery(.push) }
+            Button("Review GitHub Draft Pull Request…") {
+                session.showGitDelivery(.draftPullRequest)
+            }
+        }
+
         SidebarCommands()
 
         CommandGroup(after: .sidebar) {

@@ -140,6 +140,7 @@ actor JetClient {
             capabilities = JetCapabilitySummary(
                 coreVersion: status.coreVersion,
                 platform: "Platform unavailable",
+                externalTools: [],
                 harnesses: [],
                 crafts: [],
                 credentialStore: .unavailable,
@@ -569,6 +570,61 @@ actor JetClient {
             "offset": String(offset),
         ])
         return try decodeChangeArtifactChunk(data, requestID: requestID)
+    }
+
+    func gitDeliveries(conversationID: UUID) async throws -> [JetGitDelivery] {
+        try await requireProtocolMinor(35, feature: "Git delivery")
+        let (data, requestID) = try await sendQuery([
+            "type": "git_deliveries",
+            "conversation_id": conversationID.uuidString.lowercased(),
+        ])
+        let deliveries = try decodeGitDeliveries(data, requestID: requestID)
+        guard deliveries.allSatisfy({ $0.conversationID == conversationID }) else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return deliveries
+    }
+
+    func deliverGit(
+        _ request: JetGitDeliveryRequest,
+        commandID: UUID
+    ) async throws -> JetGitDeliveryQueued {
+        try await requireProtocolMinor(35, feature: "Git delivery")
+        try validateGitDelivery(request)
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "deliver_git",
+                "conversation_id": request.conversationID.uuidString.lowercased(),
+                "checkpoint": request.checkpoint.map(wireGitCheckpoint) ?? NSNull(),
+                "operation": wireGitOperation(request.operation),
+            ],
+            commandID: commandID
+        )
+        return try decodeGitDeliveryQueued(data, requestID: requestID)
+    }
+
+    func acknowledgeGitDelivery(
+        deliveryID: UUID,
+        commandID: UUID
+    ) async throws -> UUID {
+        try await requireProtocolMinor(35, feature: "Git delivery")
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "acknowledge_git_delivery",
+                "delivery_id": deliveryID.uuidString.lowercased(),
+            ],
+            commandID: commandID
+        )
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "git_delivery_acknowledged"
+        )
+        guard let acknowledged = uuid(result["delivery_id"]), acknowledged == deliveryID else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return acknowledged
     }
 
     func editableFile(target: JetFileTarget, path: String) async throws -> JetEditableFile {
@@ -1502,6 +1558,7 @@ actor JetClient {
               let platform = result["platform"] as? [String: Any],
               let operatingSystem = platform["operating_system"] as? String,
               let architecture = platform["architecture"] as? String,
+              let externalTools = result["external_tools"] as? [[String: Any]],
               let harnesses = result["harnesses"] as? [String],
               let crafts = result["crafts"] as? [[String: Any]],
               let credentialStore = result["credential_store"] as? [String: Any],
@@ -1514,6 +1571,7 @@ actor JetClient {
         return JetCapabilitySummary(
             coreVersion: coreVersion,
             platform: "\(operatingSystem) · \(architecture)",
+            externalTools: try externalTools.map(decodeExternalTool),
             harnesses: harnesses,
             crafts: try crafts.map { craft in
                 guard let id = craft["craft_id"] as? String,
@@ -2393,6 +2451,191 @@ actor JetClient {
         )
     }
 
+    private func decodeGitDeliveries(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> [JetGitDelivery] {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "query_result",
+            type: "git_deliveries"
+        )
+        guard let values = result["deliveries"] as? [[String: Any]], values.count <= 100 else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return try values.map(decodeGitDelivery)
+    }
+
+    private func decodeGitDelivery(_ value: [String: Any]) throws -> JetGitDelivery {
+        guard let deliveryID = uuid(value["delivery_id"]),
+              let conversationID = uuid(value["conversation_id"]),
+              let operationValue = value["operation"] as? [String: Any],
+              let policyValue = value["policy"] as? [String: Any],
+              let outcomeValue = value["outcome"] as? [String: Any]
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetGitDelivery(
+            id: deliveryID,
+            conversationID: conversationID,
+            checkpoint: try decodeGitCheckpoint(value["checkpoint"]),
+            operation: try decodeGitOperation(operationValue),
+            policy: try decodeGitDeliveryPolicy(policyValue),
+            utilityJobID: try optionalUUID(value["utility_job"]),
+            message: try decodeGitMessage(value["message"]),
+            acknowledgedBy: try optionalUUID(value["acknowledged_by"]),
+            outcome: try decodeGitDeliveryOutcome(outcomeValue)
+        )
+    }
+
+    private func decodeGitCheckpoint(_ value: Any?) throws -> JetGitCheckpoint? {
+        guard let value, !(value is NSNull) else { return nil }
+        guard let checkpoint = value as? [String: Any],
+              let runID = uuid(checkpoint["run_id"]),
+              let turn = unsigned32(checkpoint["turn"]),
+              turn > 0
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetGitCheckpoint(runID: runID, turn: turn)
+    }
+
+    private func decodeGitOperation(_ value: [String: Any]) throws -> JetGitOperation {
+        guard let operation = value["operation"] as? String else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        switch operation {
+        case "branch":
+            guard let name = validGitInput(value["name"], maximumBytes: 255) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return .branch(name: name)
+        case "commit":
+            return .commit
+        case "push":
+            guard let remote = validGitInput(value["remote"], maximumBytes: 255) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return .push(remote: remote)
+        case "draft_pull_request":
+            guard let remote = validGitInput(value["remote"], maximumBytes: 255) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            let base: String?
+            if value["base"] == nil || value["base"] is NSNull {
+                base = nil
+            } else {
+                guard let decoded = validGitInput(value["base"], maximumBytes: 255) else {
+                    throw JetClientFailure.presentation(.invalidResponse)
+                }
+                base = decoded
+            }
+            return .draftPullRequest(remote: remote, base: base)
+        default:
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+    }
+
+    private func decodeGitDeliveryPolicy(
+        _ value: [String: Any]
+    ) throws -> JetGitDeliveryPolicy {
+        guard let automatic = value["automatic"] as? Bool,
+              let branch = value["branch"] as? Bool,
+              let commit = value["commit"] as? Bool,
+              let push = value["push"] as? Bool,
+              let draftPullRequest = value["draft_pull_request"] as? Bool,
+              let branchPrefix = value["branch_prefix"] as? String,
+              branchPrefix.utf8.count <= 255,
+              !branchPrefix.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetGitDeliveryPolicy(
+            automatic: automatic,
+            branch: branch,
+            commit: commit,
+            push: push,
+            draftPullRequest: draftPullRequest,
+            branchPrefix: branchPrefix
+        )
+    }
+
+    private func decodeGitMessage(_ value: Any?) throws -> JetGitMessage? {
+        guard let value, !(value is NSNull) else { return nil }
+        guard let message = value as? [String: Any],
+              let title = message["title"] as? String,
+              let body = message["body"] as? String,
+              title.utf8.count <= 1_024,
+              body.utf8.count <= 32_768
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let fallbackReason: String?
+        if message["fallback_reason"] == nil || message["fallback_reason"] is NSNull {
+            fallbackReason = nil
+        } else {
+            guard let reason = message["fallback_reason"] as? String,
+                  reason.utf8.count <= 256,
+                  !reason.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+            else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            fallbackReason = reason
+        }
+        return JetGitMessage(title: title, body: body, fallbackReason: fallbackReason)
+    }
+
+    private func decodeGitDeliveryOutcome(
+        _ value: [String: Any]
+    ) throws -> JetGitDeliveryOutcome {
+        guard let status = value["status"] as? String else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        switch status {
+        case "pending":
+            return .pending
+        case "completed":
+            guard let head = value["head"] as? String,
+                  (40 ... 64).contains(head.count),
+                  head.utf8.allSatisfy({ (48 ... 57).contains($0) || (97 ... 102).contains($0) })
+            else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            let branch = try optionalBoundedText(value["branch"], maximumBytes: 255)
+            let pullRequest = try optionalBoundedText(
+                value["pull_request"],
+                maximumBytes: 2_048
+            )
+            return .completed(head: head, branch: branch, pullRequest: pullRequest)
+        case "failed":
+            guard let code = validGitInput(value["code"], maximumBytes: 256) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            return .failed(code: code)
+        case "outcome_unknown":
+            return .outcomeUnknown
+        default:
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+    }
+
+    private func decodeGitDeliveryQueued(
+        _ data: Data,
+        requestID: UInt64
+    ) throws -> JetGitDeliveryQueued {
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "git_delivery_queued"
+        )
+        guard let deliveryID = uuid(result["delivery_id"]) else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetGitDeliveryQueued(deliveryID: deliveryID)
+    }
+
     private func decodeRemovedProject(
         _ data: Data,
         requestID: UInt64
@@ -2489,6 +2732,35 @@ actor JetClient {
         case "credential_store_locked": "Secure storage is locked"
         default: nil
         }
+    }
+
+    private func decodeExternalTool(
+        _ value: [String: Any]
+    ) throws -> JetExternalToolSummary {
+        guard let tool = value["tool"] as? String,
+              ["git", "git-lfs", "ssh", "tailscale"].contains(tool),
+              let availability = value["availability"] as? [String: Any],
+              let status = availability["status"] as? String
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let decoded: JetExternalToolAvailability
+        switch status {
+        case "present":
+            guard let version = availability["version"] as? String,
+                  !version.isEmpty,
+                  version.utf8.count <= 1_024,
+                  !version.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+            else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            decoded = .present(version: version)
+        case "missing":
+            decoded = .missing
+        default:
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetExternalToolSummary(tool: tool, availability: decoded)
     }
 
     private func removalObstacleLabel(_ value: String) -> String {
@@ -2839,6 +3111,30 @@ actor JetClient {
         ["object": revision.object, "mode": revision.mode]
     }
 
+    private func wireGitCheckpoint(_ checkpoint: JetGitCheckpoint) -> [String: Any] {
+        [
+            "run_id": checkpoint.runID.uuidString.lowercased(),
+            "turn": NSNumber(value: checkpoint.turn),
+        ]
+    }
+
+    private func wireGitOperation(_ operation: JetGitOperation) -> [String: Any] {
+        switch operation {
+        case let .branch(name):
+            ["operation": "branch", "name": name]
+        case .commit:
+            ["operation": "commit"]
+        case let .push(remote):
+            ["operation": "push", "remote": remote]
+        case let .draftPullRequest(remote, base):
+            [
+                "operation": "draft_pull_request",
+                "remote": remote,
+                "base": base ?? NSNull(),
+            ]
+        }
+    }
+
     private func wireObservation(
         _ observation: JetCapabilityObservation
     ) -> [String: Any] {
@@ -2872,6 +3168,66 @@ actor JetClient {
                 )
             )
         }
+    }
+
+    private func validateGitDelivery(_ request: JetGitDeliveryRequest) throws {
+        if let checkpoint = request.checkpoint, checkpoint.turn == 0 {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "git.checkpoint_invalid",
+                message: "Choose a retained Turn checkpoint before delivery."
+            ))
+        }
+        // ASVS 2.2.1, 2.2.2, and 8.3.1: the client accepts only the four
+        // typed protocol operations and bounds their display inputs. jetd
+        // revalidates Git names, capability, policy, and Actor authority.
+        let values: [String] = switch request.operation {
+        case let .branch(name): [name]
+        case .commit: []
+        case let .push(remote): [remote]
+        case let .draftPullRequest(remote, base): [remote] + (base.map { [$0] } ?? [])
+        }
+        guard values.allSatisfy({ validGitInput($0, maximumBytes: 255) != nil }) else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "git.destination_invalid",
+                message: "Branch, remote, and base names must use 1 to 255 UTF-8 bytes without whitespace or control characters."
+            ))
+        }
+    }
+
+    private func requireProtocolMinor(_ minimum: UInt32, feature: String) async throws {
+        try await ensureConnected()
+        guard let negotiation, negotiation.minorVersion >= minimum else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "protocol.feature_unavailable",
+                message: "This Plane does not support \(feature)."
+            ))
+        }
+    }
+
+    private func validGitInput(_ value: Any?, maximumBytes: Int) -> String? {
+        guard let value = value as? String,
+              !value.isEmpty,
+              value.utf8.count <= maximumBytes,
+              !value.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.contains),
+              !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else {
+            return nil
+        }
+        return value
+    }
+
+    private func optionalBoundedText(
+        _ value: Any?,
+        maximumBytes: Int
+    ) throws -> String? {
+        guard let value, !(value is NSNull) else { return nil }
+        guard let text = value as? String,
+              text.utf8.count <= maximumBytes,
+              !text.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return text
     }
 
     private func validateRelativePath(_ path: String) throws {

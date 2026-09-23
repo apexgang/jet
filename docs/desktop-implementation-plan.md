@@ -1,6 +1,6 @@
 # Jet desktop implementation plan
 
-Status: Wave 0, Wave 1, and Waves 2.1–2.2 were completed on 2026-09-22. Wave 2.3 is next; generic Harness approval decisions remain a backend dependency.
+Status: Wave 0, Wave 1, and Waves 2.1–2.2 were completed on 2026-09-22. The Swift app completed Wave 2.3 on 2026-09-23; Tauri Wave 2.3 remains unimplemented. Generic Harness approval decisions remain a backend dependency.
 
 This plan turns `docs/design-language.md` into a staged desktop product for macOS and Linux. It is repository-specific and preserves the boundaries in `apps/jet/AGENTS.md`, `apps/jet-tauri/AGENTS.md`, and the Jet protocol ADRs.
 
@@ -188,6 +188,8 @@ Verification: the Swift macOS unit suite and iOS Simulator build passed; the Tau
 - Preserve selection and scroll position across streaming updates and panel collapse.
 
 ### 2.3 Delivery and completion
+
+Swift app status: implemented on 2026-09-23. The native client gates delivery on the observed Git capability, requires review of the operation, destination, branch, and retained checkpoint before admission, and renders the durable outbox's pending, completed, confirmed-failure, and unknown-outcome states. Confirmed failures can be reviewed for a new attempt; unknown outcomes can only be acknowledged after review and are never presented as safe automatic retries. Approval, completion, and failure notifications are individually opt-in, device-local, deduplicated, and use generic lock-screen-safe content. The Tauri client remains out of scope for this implementation and is not complete.
 
 - Implement supported commit, push, and GitHub pull-request delivery paths with explicit destination and branch review.
 - Show partial success and retry states from the transactional outbox rather than presenting optimistic completion.

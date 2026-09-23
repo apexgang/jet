@@ -37,7 +37,7 @@ struct JetSettingsView: View {
 
     var body: some View {
         TabView(selection: paneBinding) {
-            GeneralSettingsPane(restoresLastTask: $restoresLastTask)
+            GeneralSettingsPane(session: session, restoresLastTask: $restoresLastTask)
                 .tabItem { Label(Pane.general.title, systemImage: Pane.general.symbol) }
                 .tag(Pane.general)
 
@@ -131,7 +131,11 @@ private struct SetupSettingsPane: View {
 }
 
 private struct GeneralSettingsPane: View {
+    let session: DesktopSession
     @Binding var restoresLastTask: Bool
+    @AppStorage(JetNotificationPreferences.approvalsKey) private var approvalNotifications = false
+    @AppStorage(JetNotificationPreferences.completionsKey) private var completionNotifications = false
+    @AppStorage(JetNotificationPreferences.failuresKey) private var failureNotifications = false
 
     var body: some View {
         Form {
@@ -145,9 +149,51 @@ private struct GeneralSettingsPane: View {
                 LabeledContent("Theme", value: "Use system setting")
                 LabeledContent("Accent", value: "Jet Blue")
             }
+
+            Section("Notifications") {
+                Toggle("Approval requests", isOn: $approvalNotifications)
+                    .accessibilityIdentifier("notifications-approvals")
+                Toggle("Completed tasks", isOn: $completionNotifications)
+                    .accessibilityIdentifier("notifications-completions")
+                Toggle("Failed tasks", isOn: $failureNotifications)
+                    .accessibilityIdentifier("notifications-failures")
+                LabeledContent("System permission", value: authorizationLabel)
+                Text("Jet notifications omit task names, prompts, paths, and tool details. Jet does not request notification sounds.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let error = session.notificationError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
         }
         .formStyle(.grouped)
         .padding()
+        .task { await session.refreshNotificationAuthorization() }
+        .onChange(of: approvalNotifications) { _, enabled in
+            requestNotificationAccess(if: enabled)
+        }
+        .onChange(of: completionNotifications) { _, enabled in
+            requestNotificationAccess(if: enabled)
+        }
+        .onChange(of: failureNotifications) { _, enabled in
+            requestNotificationAccess(if: enabled)
+        }
+    }
+
+    private var authorizationLabel: String {
+        switch session.notificationAuthorization {
+        case .notDetermined: "Not requested"
+        case .denied: "Blocked in System Settings"
+        case .authorized: "Allowed"
+        case .provisional: "Delivered quietly"
+        }
+    }
+
+    private func requestNotificationAccess(if enabled: Bool) {
+        guard enabled, !session.notificationAuthorization.permitsDelivery else { return }
+        Task { _ = await session.requestNotificationAuthorization() }
     }
 }
 

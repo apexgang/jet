@@ -3,6 +3,7 @@ import Foundation
 import Observation
 
 typealias JetClientFactory = @Sendable () async throws -> JetClient
+typealias JetNotificationPreference = @MainActor (JetNotificationKind) -> Bool
 
 enum SidebarDestination: String, CaseIterable, Hashable, Sendable {
     case newTask
@@ -166,6 +167,11 @@ final class DesktopSession {
         let commandID: UUID
     }
 
+    private struct PendingGitDelivery {
+        let request: JetGitDeliveryRequest
+        let commandID: UUID
+    }
+
     enum ContentState {
         case loading
         case ready(DesktopFixtureScenario)
@@ -242,10 +248,25 @@ final class DesktopSession {
     var terminalRows: UInt16 = 24
     var terminalColumns: UInt16 = 80
     var workScrollAnchors: [WorkPanelTab: String] = [:]
+    var gitDeliveries: [JetGitDelivery] = []
+    var gitDeliveryChoice: JetGitDeliveryChoice = .commit
+    var gitBranchName = ""
+    var gitRemoteName = "origin"
+    var gitBaseBranch = ""
+    var gitDeliveryOperation: String?
+    var gitDeliveryNotice: String?
+    var gitDeliveryError: JetPresentationError?
+    var gitDeliveryConfirmation: JetGitDeliveryRequest?
+    var gitDeliveryAcknowledgementConfirmation: JetGitDelivery?
+    var gitDeliveryAdmissionUncertain: JetGitDeliveryRequest?
+    var notificationAuthorization: JetNotificationAuthorization = .notDetermined
+    var notificationError: String?
 
     private var scenarios: [DesktopFixtureState: DesktopFixtureScenario] = [:]
     private var didLoadFixtures = false
     private let makeJetClient: JetClientFactory?
+    private let notifications: (any JetNotificationDelivering)?
+    private let notificationPreference: JetNotificationPreference
     private var client: JetClient?
     private var connectionObservationTask: Task<Void, Never>?
     private var registrationCommandID = UUID()
@@ -274,9 +295,20 @@ final class DesktopSession {
     private var lastTerminalSize: (terminalID: UUID, rows: UInt16, columns: UInt16)?
     private var terminalStreamTerminalID: UUID?
     private var terminalObservationTask: Task<Void, Never>?
+    private var gitDeliveryObservationTask: Task<Void, Never>?
+    private var pendingGitDelivery: PendingGitDelivery?
+    private var gitDeliveryAcknowledgementCommandIDs: [UUID: UUID] = [:]
 
-    init(makeJetClient: JetClientFactory? = nil) {
+    init(
+        makeJetClient: JetClientFactory? = nil,
+        notifications: (any JetNotificationDelivering)? = nil,
+        notificationPreference: @escaping JetNotificationPreference = {
+            JetNotificationPreferences.isEnabled($0)
+        }
+    ) {
         self.makeJetClient = makeJetClient
+        self.notifications = notifications
+        self.notificationPreference = notificationPreference
     }
 
     var scenario: DesktopFixtureScenario? {
@@ -384,6 +416,20 @@ final class DesktopSession {
     }
 
     var workPatchBytesLoaded: UInt64 { UInt64(workArtifactBytes.count) }
+
+    var gitDeliveryUnavailableReason: String? {
+        guard usesLivePlane else { return "Connect to a Plane to deliver this work." }
+        guard planeIsConnected else { return "Reconnect to the Plane to deliver this work." }
+        guard setupSnapshot?.capabilities.gitIsAvailable == true else {
+            return "The Plane reports Git as unavailable."
+        }
+        guard workDiff != nil else { return "Load a retained Change checkpoint first." }
+        return nil
+    }
+
+    var canPrepareGitDelivery: Bool {
+        gitDeliveryUnavailableReason == nil && gitDeliveryOperation == nil
+    }
 
     var hasLiveRun: Bool {
         selectedRun?.lifecycle.isLive == true
@@ -766,7 +812,254 @@ final class DesktopSession {
             workError = failure
             applyRevisionConflict(failure)
         }
-        if request == workRequest { workOperation = nil }
+        if request == workRequest {
+            workOperation = nil
+            await loadGitDeliveries()
+        }
+    }
+
+    func loadGitDeliveries(startObservation: Bool = true) async {
+        guard usesLivePlane, let conversationID = selectedConversationID else {
+            gitDeliveries = []
+            gitDeliveryError = nil
+            return
+        }
+        gitDeliveryOperation = "refresh"
+        gitDeliveryError = nil
+        do {
+            let deliveries = try await activeClient().gitDeliveries(
+                conversationID: conversationID
+            )
+            guard selectedConversationID == conversationID else { return }
+            gitDeliveries = deliveries
+        } catch {
+            guard selectedConversationID == conversationID else { return }
+            gitDeliveryError = presentationError(error)
+        }
+        if selectedConversationID == conversationID {
+            gitDeliveryOperation = nil
+            if startObservation { startGitDeliveryObservationIfNeeded() }
+        }
+    }
+
+    func showGitDelivery(_ choice: JetGitDeliveryChoice) {
+        gitDeliveryChoice = choice
+        selectedWorkPanel = .changes
+        isWorkPanelPresented = true
+        workScrollAnchors[.changes] = "delivery-heading"
+    }
+
+    func prepareGitDelivery() {
+        gitDeliveryNotice = nil
+        gitDeliveryError = nil
+        guard canPrepareGitDelivery else {
+            gitDeliveryNotice = gitDeliveryUnavailableReason
+            return
+        }
+        do {
+            gitDeliveryConfirmation = try makeGitDeliveryRequest()
+        } catch let error as JetPresentationError {
+            gitDeliveryError = error
+            gitDeliveryNotice = error.message
+        } catch {
+            gitDeliveryError = .invalidResponse
+            gitDeliveryNotice = JetPresentationError.invalidResponse.message
+        }
+    }
+
+    func cancelGitDeliveryConfirmation() {
+        gitDeliveryConfirmation = nil
+    }
+
+    func confirmGitDelivery() async {
+        guard let request = gitDeliveryConfirmation else { return }
+        gitDeliveryConfirmation = nil
+        if pendingGitDelivery?.request != request {
+            pendingGitDelivery = PendingGitDelivery(request: request, commandID: UUID())
+        }
+        await submitPendingGitDelivery()
+    }
+
+    func retryGitDeliveryAdmission() async {
+        guard pendingGitDelivery != nil else { return }
+        await submitPendingGitDelivery()
+    }
+
+    func reviewRetry(_ delivery: JetGitDelivery) {
+        guard delivery.canRetry else { return }
+        gitDeliveryConfirmation = JetGitDeliveryRequest(
+            conversationID: delivery.conversationID,
+            checkpoint: delivery.checkpoint,
+            operation: delivery.operation
+        )
+    }
+
+    func reviewGitDeliveryAcknowledgement(_ delivery: JetGitDelivery) {
+        guard delivery.needsAcknowledgement else { return }
+        gitDeliveryAcknowledgementConfirmation = delivery
+    }
+
+    func cancelGitDeliveryAcknowledgement() {
+        gitDeliveryAcknowledgementConfirmation = nil
+    }
+
+    func confirmGitDeliveryAcknowledgement() async {
+        guard let delivery = gitDeliveryAcknowledgementConfirmation,
+              delivery.needsAcknowledgement
+        else { return }
+        gitDeliveryAcknowledgementConfirmation = nil
+        gitDeliveryOperation = "acknowledge"
+        gitDeliveryNotice = nil
+        gitDeliveryError = nil
+        let commandID = gitDeliveryAcknowledgementCommandIDs[delivery.id] ?? UUID()
+        gitDeliveryAcknowledgementCommandIDs[delivery.id] = commandID
+        do {
+            _ = try await activeClient().acknowledgeGitDelivery(
+                deliveryID: delivery.id,
+                commandID: commandID
+            )
+            gitDeliveryAcknowledgementCommandIDs[delivery.id] = nil
+            gitDeliveryNotice = "The uncertain outcome was marked as reviewed. Jet did not repeat the Git operation."
+            await loadGitDeliveries()
+        } catch {
+            gitDeliveryError = presentationError(error)
+            gitDeliveryNotice = gitDeliveryError?.message
+        }
+        gitDeliveryOperation = nil
+    }
+
+    func refreshNotificationAuthorization() async {
+        guard let notifications else { return }
+        notificationAuthorization = await notifications.authorizationStatus()
+    }
+
+    func requestNotificationAuthorization() async -> Bool {
+        guard let notifications else { return false }
+        notificationError = nil
+        do {
+            notificationAuthorization = try await notifications.requestAuthorization()
+            if notificationAuthorization == .denied {
+                notificationError = "Notifications are denied in System Settings."
+            }
+        } catch {
+            notificationError = "Jet could not update notification permission."
+        }
+        return notificationAuthorization.permitsDelivery
+    }
+
+    private func makeGitDeliveryRequest() throws -> JetGitDeliveryRequest {
+        guard let conversationID = selectedConversationID, let diff = workDiff else {
+            throw JetPresentationError.invalidInput(
+                code: "git.checkpoint_unavailable",
+                message: "Load a retained Change checkpoint before delivery."
+            )
+        }
+        let operation: JetGitOperation
+        let checkpoint: JetGitCheckpoint?
+        switch gitDeliveryChoice {
+        case .branch:
+            operation = .branch(name: try validatedGitInput(gitBranchName, label: "branch"))
+            checkpoint = nil
+        case .commit:
+            guard diff.latestTurn > 0 else {
+                throw JetPresentationError.invalidInput(
+                    code: "git.checkpoint_unavailable",
+                    message: "This Run has no retained Turn checkpoint to commit."
+                )
+            }
+            operation = .commit
+            checkpoint = JetGitCheckpoint(runID: diff.runID, turn: diff.latestTurn)
+        case .push:
+            operation = .push(remote: try validatedGitInput(gitRemoteName, label: "remote"))
+            checkpoint = nil
+        case .draftPullRequest:
+            guard diff.latestTurn > 0 else {
+                throw JetPresentationError.invalidInput(
+                    code: "git.checkpoint_unavailable",
+                    message: "This Run has no retained Turn checkpoint for a pull request."
+                )
+            }
+            let remote = try validatedGitInput(gitRemoteName, label: "remote")
+            let base = gitBaseBranch.isEmpty
+                ? nil
+                : try validatedGitInput(gitBaseBranch, label: "base branch")
+            operation = .draftPullRequest(remote: remote, base: base)
+            checkpoint = JetGitCheckpoint(runID: diff.runID, turn: diff.latestTurn)
+        }
+        return JetGitDeliveryRequest(
+            conversationID: conversationID,
+            checkpoint: checkpoint,
+            operation: operation
+        )
+    }
+
+    private func validatedGitInput(_ value: String, label: String) throws -> String {
+        guard !value.isEmpty,
+              value.utf8.count <= 255,
+              !value.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.contains),
+              !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else {
+            throw JetPresentationError.invalidInput(
+                code: "git.\(label.replacingOccurrences(of: " ", with: "_"))_invalid",
+                message: "Enter a \(label) using 1 to 255 UTF-8 bytes without whitespace or control characters."
+            )
+        }
+        return value
+    }
+
+    private func submitPendingGitDelivery() async {
+        guard let pendingGitDelivery else { return }
+        gitDeliveryOperation = "submit"
+        gitDeliveryNotice = nil
+        gitDeliveryError = nil
+        do {
+            let queued = try await activeClient().deliverGit(
+                pendingGitDelivery.request,
+                commandID: pendingGitDelivery.commandID
+            )
+            self.pendingGitDelivery = nil
+            gitDeliveryAdmissionUncertain = nil
+            gitDeliveryNotice = "Delivery \(queued.deliveryID.uuidString.prefix(8)) was queued. Its durable outcome appears below."
+            await loadGitDeliveries()
+        } catch let failure as JetClientFailure {
+            guard case .commandOutcomeUnknown = failure else {
+                self.pendingGitDelivery = nil
+                gitDeliveryError = presentationError(failure)
+                gitDeliveryNotice = gitDeliveryError?.message
+                gitDeliveryOperation = nil
+                return
+            }
+            gitDeliveryAdmissionUncertain = pendingGitDelivery.request
+            gitDeliveryError = presentationError(failure)
+            gitDeliveryNotice = "Jet could not confirm whether the Plane admitted this request. Check delivery history before retrying the same request."
+        } catch {
+            self.pendingGitDelivery = nil
+            gitDeliveryError = presentationError(error)
+            gitDeliveryNotice = gitDeliveryError?.message
+        }
+        gitDeliveryOperation = nil
+    }
+
+    private func startGitDeliveryObservationIfNeeded() {
+        gitDeliveryObservationTask?.cancel()
+        guard gitDeliveries.contains(where: { $0.outcome == .pending }),
+              let conversationID = selectedConversationID
+        else {
+            gitDeliveryObservationTask = nil
+            return
+        }
+        gitDeliveryObservationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await ContinuousClock().sleep(for: .seconds(2))
+                guard !Task.isCancelled, self?.selectedConversationID == conversationID else {
+                    return
+                }
+                await self?.loadGitDeliveries(startObservation: false)
+                guard self?.gitDeliveries.contains(where: { $0.outcome == .pending }) == true else {
+                    return
+                }
+            }
+        }
     }
 
     func applyWorkCheckpoint() async {
@@ -1565,6 +1858,17 @@ final class DesktopSession {
         terminalInput = ""
         terminalOutput = [:]
         workScrollAnchors = [:]
+        gitDeliveries = []
+        gitDeliveryOperation = nil
+        gitDeliveryNotice = nil
+        gitDeliveryError = nil
+        gitDeliveryConfirmation = nil
+        gitDeliveryAcknowledgementConfirmation = nil
+        gitDeliveryAdmissionUncertain = nil
+        pendingGitDelivery = nil
+        gitDeliveryAcknowledgementCommandIDs = [:]
+        gitDeliveryObservationTask?.cancel()
+        gitDeliveryObservationTask = nil
         terminalOffsets = [:]
         terminalDecoders = [:]
         lastTerminalSize = nil
@@ -1722,6 +2026,7 @@ final class DesktopSession {
     }
 
     private func receive(_ event: JetEvent) async {
+        await deliverNotificationIfNeeded(for: event)
         if event.conversationID == selectedConversationID {
             let projections = event.timelineProjections()
             if projections.isEmpty {
@@ -1747,6 +2052,25 @@ final class DesktopSession {
             .contains(event.kind)
         {
             await loadConversations()
+        }
+    }
+
+    private func deliverNotificationIfNeeded(for event: JetEvent) async {
+        guard let notifications,
+              let kind = event.notificationKind(),
+              notificationPreference(kind),
+              let conversationID = event.conversationID
+        else { return }
+        do {
+            try await notifications.deliver(
+                JetUserNotification(
+                    eventID: event.eventID,
+                    conversationID: conversationID,
+                    kind: kind
+                )
+            )
+        } catch {
+            notificationError = "Jet could not deliver a desktop notification."
         }
     }
 

@@ -53,6 +53,7 @@ struct DesktopSessionTests {
         let capabilities = JetCapabilitySummary(
             coreVersion: "test",
             platform: "macos",
+            externalTools: [],
             harnesses: ["codex", "unknown", "claude-code", "Codex CLI"],
             crafts: [],
             credentialStore: .available,
@@ -80,6 +81,7 @@ struct DesktopSessionTests {
                 capabilities: JetCapabilitySummary(
                     coreVersion: "test",
                     platform: "macos",
+                    externalTools: [],
                     harnesses: [],
                     crafts: [],
                     credentialStore: .available,
@@ -244,6 +246,105 @@ struct DesktopSessionTests {
             JetRunTermination(control: .stopRun, stage: .kill)
                 .summary.contains("Run stopped")
         )
+    }
+
+    @Test
+    func gitDeliveryAvailabilityRequiresAnObservedGitCapability() {
+        let unavailable = JetCapabilitySummary(
+            coreVersion: "test",
+            platform: "macos",
+            externalTools: [JetExternalToolSummary(tool: "git", availability: .missing)],
+            harnesses: [],
+            crafts: [],
+            credentialStore: .available,
+            degraded: []
+        )
+        let available = JetCapabilitySummary(
+            coreVersion: "test",
+            platform: "macos",
+            externalTools: [
+                JetExternalToolSummary(tool: "git", availability: .present(version: "2.51")),
+            ],
+            harnesses: [],
+            crafts: [],
+            credentialStore: .available,
+            degraded: []
+        )
+
+        #expect(!unavailable.gitIsAvailable)
+        #expect(available.gitIsAvailable)
+    }
+
+    @Test
+    func notificationProjectionUsesOnlyApprovalAndTerminalRunEvents() {
+        let conversationID = UUID()
+        #expect(event(
+            sequence: 1,
+            conversationID: conversationID,
+            kind: "approval.requested",
+            payload: #"{"request":{}}"#
+        ).notificationKind() == .approval)
+        #expect(event(
+            sequence: 2,
+            conversationID: conversationID,
+            kind: "run.lifecycle_changed",
+            payload: #"{"to":"completed"}"#
+        ).notificationKind() == .completion)
+        #expect(event(
+            sequence: 3,
+            conversationID: conversationID,
+            kind: "run.lifecycle_changed",
+            payload: #"{"to":"failed"}"#
+        ).notificationKind() == .failure)
+        #expect(event(
+            sequence: 4,
+            conversationID: conversationID,
+            kind: "run.output",
+            payload: #"{"text":"private task output"}"#
+        ).notificationKind() == nil)
+    }
+
+    @Test
+    func unknownGitOutcomesRequireReviewAndConfirmedFailuresCanRetry() {
+        let policy = JetGitDeliveryPolicy(
+            automatic: false,
+            branch: true,
+            commit: true,
+            push: true,
+            draftPullRequest: true,
+            branchPrefix: "jet/"
+        )
+        let base = (
+            conversationID: UUID(),
+            checkpoint: JetGitCheckpoint(runID: UUID(), turn: 2)
+        )
+        let failed = JetGitDelivery(
+            id: UUID(),
+            conversationID: base.conversationID,
+            checkpoint: base.checkpoint,
+            operation: .commit,
+            policy: policy,
+            utilityJobID: nil,
+            message: nil,
+            acknowledgedBy: nil,
+            outcome: .failed(code: "git.policy_changed")
+        )
+        let unknown = JetGitDelivery(
+            id: UUID(),
+            conversationID: base.conversationID,
+            checkpoint: base.checkpoint,
+            operation: .draftPullRequest(remote: "origin", base: "main"),
+            policy: policy,
+            utilityJobID: nil,
+            message: nil,
+            acknowledgedBy: nil,
+            outcome: .outcomeUnknown
+        )
+
+        #expect(failed.canRetry)
+        #expect(!failed.needsAcknowledgement)
+        #expect(!unknown.canRetry)
+        #expect(unknown.needsAcknowledgement)
     }
 
     @Test

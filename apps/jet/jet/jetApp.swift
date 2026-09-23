@@ -11,12 +11,15 @@ struct jetApp: App {
         )
         let configuration = JetClientConfiguration(clientID: JetClientIdentity.load())
         _session = State(
-            initialValue: DesktopSession {
-                try await JetClient.connectLocal(
-                    socketURL: socketURL,
-                    configuration: configuration
-                )
-            }
+            initialValue: DesktopSession(
+                makeJetClient: {
+                    try await JetClient.connectLocal(
+                        socketURL: socketURL,
+                        configuration: configuration
+                    )
+                },
+                notifications: SystemJetNotificationCenter()
+            )
         )
 #else
         _session = State(initialValue: DesktopSession())
