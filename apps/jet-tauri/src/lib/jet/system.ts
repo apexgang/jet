@@ -33,14 +33,31 @@ export type DegradedKind =
 
 export type LedgerView = { kind: "verified"; deletions: string } | { kind: "corrupt" } | { kind: "unsupported" };
 
-/** The store's Recovery state; the snapshot list belongs to the Recovery section. */
+export type SnapshotReason = "daily" | "migration" | "maintenance";
+
+/**
+ * One verified Recovery snapshot. `snapshotId` is an opaque token the shell
+ * issued for this read; the snapshot's file name never reaches the webview.
+ */
+export type RecoverySnapshot = {
+  snapshotId: string;
+  takenAtUnixMs: string;
+  reason: SnapshotReason;
+  bytes: string;
+};
+
+/**
+ * The store's Recovery state. `snapshotCount` counts every snapshot the Plane
+ * reported; `snapshots` lists at most the newest 64, newest first.
+ */
 export type RecoveryView =
   | { kind: "unsupported" }
-  | { kind: "serving"; snapshotCount: number; ledger: LedgerView }
+  | { kind: "serving"; snapshotCount: number; snapshots: RecoverySnapshot[]; ledger: LedgerView }
   | {
       kind: "read_only";
       reason: "integrity_check_failed" | "migration_failed" | "unknown";
       snapshotCount: number;
+      snapshots: RecoverySnapshot[];
       ledger: LedgerView;
     };
 
@@ -87,3 +104,45 @@ export type SystemHealth = {
  */
 export const loadSystemHealth = (planeId: PlaneId, fresh = false) =>
   invoke<SystemHealth>("load_system_health", { planeId, fresh });
+
+/** What the Recovery section asks the shell to review. Snake_case inner fields, as the shell reads them. */
+export type RecoveryAction = { kind: "restore_snapshot"; snapshot_id: string } | { kind: "purge_snapshots" };
+
+/** A native review of a restore or purge, valid for 10 minutes and usable once. */
+export type RecoveryReview =
+  | {
+      kind: "restore_snapshot";
+      reviewId: string;
+      planeLabel: string;
+      takenAtUnixMs: string;
+      reason: SnapshotReason;
+      bytes: string;
+    }
+  | {
+      kind: "purge_snapshots";
+      reviewId: string;
+      planeLabel: string;
+      snapshotCount: number;
+      totalBytes: string;
+      deletionsRecorded: string;
+      /** A rollback copy for the previous Jet release may be removed too. */
+      includesRollback: boolean;
+    };
+
+/**
+ * What a reviewed restore or purge did. `unconfirmed`: it may or may not have
+ * run; re-read the Plane and never resend.
+ */
+export type RecoveryOutcome =
+  | { kind: "restored"; takenAtUnixMs: string; reason: SnapshotReason; replacedName: string | null }
+  | { kind: "purged"; removedCount: number }
+  | { kind: "refused"; error: PublicError }
+  | { kind: "unconfirmed"; error: PublicError };
+
+/** Reviews a restore (read-only Recovery only) or a purge after a fresh status read. */
+export const prepareRecoveryAction = (planeId: PlaneId, action: RecoveryAction) =>
+  invoke<RecoveryReview>("prepare_recovery_action", { planeId, action });
+
+/** Sends a reviewed restore or purge at most once. */
+export const executeRecoveryAction = (planeId: PlaneId, reviewId: string) =>
+  invoke<RecoveryOutcome>("execute_recovery_action", { planeId, reviewId });

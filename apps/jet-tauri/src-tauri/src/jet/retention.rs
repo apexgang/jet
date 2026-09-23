@@ -118,6 +118,21 @@ fn lock_mode(
 }
 
 impl RetentionState {
+    /// A Recovery snapshot replaced the Plane's store with an older one:
+    /// everything read from the old store, every open Trash review and every
+    /// pending Command ID of that Plane is dropped, so nothing is replayed
+    /// against state that moved backwards (wave 3.3 §4.4).
+    pub(crate) fn plane_restored(&self, plane: PlaneId) {
+        if let Ok(mut index) = self.trash_index.lock() {
+            index.remove(&plane);
+        }
+        if let Ok(mut restores) = self.restores.lock() {
+            restores.retain(|(held, _, _), _| *held != plane);
+        }
+        self.trash_reviews.clear_plane(plane);
+        self.rules.plane_restored(plane);
+    }
+
     /// Replaces a Plane's index with a full Trash list.
     fn replace_index(&self, plane: PlaneId, entries: &[TrashEntry]) -> Result<(), PublicError> {
         let index: HashMap<Uuid, i64> = entries
@@ -805,7 +820,7 @@ fn record(bridge: &JetBridge, id: Uuid, outcome: TrashOutcome) -> TrashOutcome {
 /// Whether a failure proves the Plane did not apply the request: a daemon
 /// refusal other than `outcome_unknown`, or a request the client never sent
 /// because the Plane's protocol cannot carry it.
-fn definite(error: &ClientError, public: &PublicError) -> bool {
+pub(crate) fn definite(error: &ClientError, public: &PublicError) -> bool {
     match error {
         ClientError::Remote(_) => public.category != "outcome_unknown",
         ClientError::FeatureUnavailable { .. } | ClientError::Incompatible { .. } => true,

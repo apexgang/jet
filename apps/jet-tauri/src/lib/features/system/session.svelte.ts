@@ -1,9 +1,18 @@
 import type { PublicError } from "$lib/jet/bridge";
 import { publicError } from "$lib/jet/errors";
 import { LOCAL_PLANE, type PlaneId } from "$lib/jet/planes";
-import { collectDisposableStorage, loadSystemHealth, type SystemHealth } from "$lib/jet/system";
+import {
+  collectDisposableStorage,
+  executeRecoveryAction,
+  loadSystemHealth,
+  prepareRecoveryAction,
+  type RecoveryAction,
+  type RecoveryOutcome,
+  type RecoveryReview,
+  type SystemHealth,
+} from "$lib/jet/system";
 import { sectionData, sectionStateFor, withFreshness, type SectionState } from "$lib/features/settings/model";
-import { withRecentCode } from "./model";
+import { isStaleRecoveryError, withRecentCode, type UnconfirmedCheck } from "./model";
 
 /** "Free disposable space" in Settings › Safety › Storage. */
 export type CollectState =
@@ -11,6 +20,22 @@ export type CollectState =
   | { kind: "collecting" }
   | { kind: "done"; removed: number }
   | { kind: "failed"; error: PublicError };
+
+/**
+ * The Recovery section's review dialog (wave 3.3 §7.2). A restore or purge is
+ * sent at most once: `unconfirmed` re-reads the Plane and never resends.
+ */
+export type RecoveryDialog =
+  | { kind: "closed" }
+  | { kind: "preparing"; action: RecoveryAction["kind"] }
+  | { kind: "review"; review: RecoveryReview }
+  | { kind: "sending"; review: RecoveryReview }
+  | { kind: "done"; outcome: Extract<RecoveryOutcome, { kind: "restored" | "purged" }>; planeLabel: string }
+  | { kind: "unconfirmed"; review: RecoveryReview; error: PublicError; check: UnconfirmedCheck }
+  | { kind: "stale"; error: PublicError }
+  | { kind: "refused"; error: PublicError }
+  /** Jet on the Plane started again while a review was open; review again. */
+  | { kind: "restarted" };
 
 /** Setting keys whose value the health read discloses. */
 const DISCLOSED_KEYS: ReadonlySet<string> = new Set(["storage.disposable_mib", "retention.trash_grace_days"]);
@@ -32,6 +57,8 @@ export class SystemSession {
   recentCodes = $state<string[]>([]);
   /** Counts Plane selections, so a shown pane loads again after each one. */
   selection = $state(0);
+  /** Restore or purge review in Settings › Safety › Recovery. */
+  recovery = $state<RecoveryDialog>({ kind: "closed" });
 
   private started = false;
   private loaded = false;
@@ -44,10 +71,19 @@ export class SystemSession {
   private now: () => number;
   /** Told when a health read shows the Plane's Jet service started again. */
   private onRestart: () => void;
+  /** Told after a restore replaced the Plane's store: reload everything shown. */
+  private onRestored: () => void;
+  /** Bumped when the recovery dialog closes or the Plane changes. */
+  private dialogRequest = 0;
 
-  constructor(now: () => number = Date.now, onRestart: () => void = () => undefined) {
+  constructor(
+    now: () => number = Date.now,
+    onRestart: () => void = () => undefined,
+    onRestored: () => void = () => undefined,
+  ) {
     this.now = now;
     this.onRestart = onRestart;
+    this.onRestored = onRestored;
   }
 
   /** Shows one Plane. Nothing is loaded until the Safety pane asks. */
@@ -61,6 +97,8 @@ export class SystemSession {
     this.collect = { kind: "idle" };
     this.diskPressureAt = null;
     this.daemonStarts = null;
+    this.dialogRequest++;
+    this.recovery = { kind: "closed" };
     this.selection++;
   }
 
@@ -68,6 +106,7 @@ export class SystemSession {
   dispose(): void {
     this.disposed = true;
     this.generation++;
+    this.dialogRequest++;
   }
 
   /** The Settings change watcher is reconnecting or stopped. */
@@ -155,10 +194,118 @@ export class SystemSession {
     if (error.code === "storage.disk_pressure") this.diskPressureAt = this.now();
   }
 
+  // Recovery ------------------------------------------------------------------
+
+  /**
+   * Asks the shell to review a restore of one listed snapshot, or a purge.
+   * The shell re-reads the Plane first; a local precondition that no longer
+   * holds comes back as `stale`.
+   */
+  async prepareRecovery(action: RecoveryAction): Promise<void> {
+    if (this.recovery.kind === "preparing" || this.recovery.kind === "sending") return;
+    const { planeId } = this;
+    const request = ++this.dialogRequest;
+    this.recovery = { kind: "preparing", action: action.kind };
+    try {
+      const review = await prepareRecoveryAction(planeId, action);
+      if (!this.current(request, planeId)) return;
+      this.recovery = { kind: "review", review };
+    } catch (thrown: unknown) {
+      if (!this.current(request, planeId)) return;
+      const error = publicError(thrown);
+      this.observe(error);
+      this.recovery = isStaleRecoveryError(error) ? { kind: "stale", error } : { kind: "refused", error };
+    }
+  }
+
+  /** Sends the reviewed restore or purge once. */
+  async confirmRecovery(): Promise<void> {
+    if (this.recovery.kind !== "review") return;
+    const { review } = this.recovery;
+    const { planeId } = this;
+    const request = this.dialogRequest;
+    this.recovery = { kind: "sending", review };
+    let outcome: RecoveryOutcome;
+    try {
+      outcome = await executeRecoveryAction(planeId, review.reviewId);
+    } catch (thrown: unknown) {
+      // The shell records every outcome it reaches; a thrown error means it
+      // could not say what happened, which is the same as unconfirmed.
+      outcome = { kind: "unconfirmed", error: publicError(thrown) };
+    }
+    if (!this.current(request, planeId)) return;
+    switch (outcome.kind) {
+      case "restored":
+        // The store moved backwards: nothing read from the old one is kept.
+        this.daemonStarts = null;
+        this.restarted();
+        this.recovery = { kind: "done", outcome, planeLabel: review.planeLabel };
+        this.onRestored();
+        await this.load();
+        return;
+      case "purged":
+        this.recovery = { kind: "done", outcome, planeLabel: review.planeLabel };
+        await this.load();
+        return;
+      case "refused":
+        this.observe(outcome.error);
+        this.recovery = isStaleRecoveryError(outcome.error)
+          ? { kind: "stale", error: outcome.error }
+          : { kind: "refused", error: outcome.error };
+        await this.load();
+        return;
+      case "unconfirmed": {
+        this.observe(outcome.error);
+        this.recovery = { kind: "unconfirmed", review, error: outcome.error, check: "checking" };
+        await this.load();
+        if (!this.current(request, planeId) || this.recovery.kind !== "unconfirmed") return;
+        const check = this.unconfirmedCheck();
+        this.recovery = { ...this.recovery, check };
+        // The restore most likely replaced the store: reload everything shown.
+        if (review.kind === "restore_snapshot" && check === "serving") this.onRestored();
+        return;
+      }
+    }
+  }
+
+  /** Closes the dialog; a review being sent stays until its outcome. */
+  closeRecovery(): void {
+    if (this.recovery.kind === "sending") return;
+    this.dialogRequest++;
+    this.recovery = { kind: "closed" };
+  }
+
+  /** Reload from a stale or refused dialog: close it and read the Plane again. */
+  async reloadRecovery(): Promise<void> {
+    this.closeRecovery();
+    await this.load();
+  }
+
+  private current(request: number, planeId: PlaneId): boolean {
+    return !this.disposed && request === this.dialogRequest && planeId === this.planeId;
+  }
+
+  private unconfirmedCheck(): UnconfirmedCheck {
+    if (this.health.kind !== "ready") return "unknown";
+    switch (this.health.data.recovery.kind) {
+      case "serving":
+        return "serving";
+      case "read_only":
+        return "read_only";
+      case "unsupported":
+        return "unknown";
+    }
+  }
+
   /** A new Jet service start: drop what the old one reported. */
   private restarted(): number {
     this.generation++;
     this.collect = { kind: "idle" };
+    // A review read before the start may name a store that is gone.
+    if (this.recovery.kind === "review" || this.recovery.kind === "preparing") {
+      this.dialogRequest++;
+      this.recovery = { kind: "restarted" };
+    }
     this.onRestart();
     return this.generation;
   }

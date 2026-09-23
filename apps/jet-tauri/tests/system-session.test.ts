@@ -3,9 +3,27 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 
 import { withIssues } from "../src/lib/features/settings/model";
 import { SettingsSession } from "../src/lib/features/settings/session.svelte";
+import {
+  bytesText,
+  isStaleRecoveryError,
+  purgeBlock,
+  purgeReviewText,
+  recoveryHeadline,
+  recoveryRefusalText,
+  restoreBlock,
+  unconfirmedText,
+} from "../src/lib/features/system/model";
 import { SystemSession } from "../src/lib/features/system/session.svelte";
 import type { PublicError } from "../src/lib/jet/bridge";
-import { collectDisposableStorage, loadSystemHealth, type SystemHealth } from "../src/lib/jet/system";
+import {
+  collectDisposableStorage,
+  executeRecoveryAction,
+  loadSystemHealth,
+  prepareRecoveryAction,
+  type RecoveryReview,
+  type RecoveryView,
+  type SystemHealth,
+} from "../src/lib/jet/system";
 
 const REMOTE = "0000000a-0000-4000-8000-000000000002";
 
@@ -40,7 +58,7 @@ function health(planeId: string, daemonStarts = "3", issues: SystemHealth["issue
     crafts: [],
     credentialStore: { state: "available", kind: "secret_service" },
     degraded: [],
-    recovery: { kind: "serving", snapshotCount: 2, ledger: { kind: "verified", deletions: "0" } },
+    recovery: { kind: "serving", snapshotCount: 2, snapshots: [], ledger: { kind: "verified", deletions: "0" } },
     security: { kind: "trusted" },
     storage: { disposableMiB: 2048 },
     retention: { graceDays: 30 },
@@ -319,5 +337,288 @@ describe("Settings session wiring", () => {
     await settle();
     expect(session.system.recentCodes).toContain("client.state_unavailable");
     session.dispose();
+  });
+});
+
+const TOKEN = "5a1f0000-0000-4000-8000-000000000001";
+const REVIEW = "5a1f0000-0000-4000-8000-0000000000aa";
+
+function readOnly(): RecoveryView {
+  return {
+    kind: "read_only",
+    reason: "integrity_check_failed",
+    snapshotCount: 1,
+    snapshots: [{ snapshotId: TOKEN, takenAtUnixMs: "1700000000000", reason: "daily", bytes: "4096" }],
+    ledger: { kind: "verified", deletions: "2" },
+  };
+}
+
+function restoreReview(reviewId = REVIEW): RecoveryReview {
+  return {
+    kind: "restore_snapshot",
+    reviewId,
+    planeLabel: "Build box",
+    takenAtUnixMs: "1700000000000",
+    reason: "daily",
+    bytes: "4096",
+  };
+}
+
+describe("recovery adapter", () => {
+  it("names snapshots only by token and sends only the review ID", async () => {
+    const fake = new Fake();
+    fake.install();
+    fake.answers.set("prepare_recovery_action", () => restoreReview());
+    fake.answers.set("execute_recovery_action", () => ({ kind: "purged", removedCount: 0 }));
+    await prepareRecoveryAction(REMOTE, { kind: "restore_snapshot", snapshot_id: TOKEN });
+    await prepareRecoveryAction("local", { kind: "purge_snapshots" });
+    await executeRecoveryAction(REMOTE, REVIEW);
+    expect(fake.calls).toEqual([
+      {
+        command: "prepare_recovery_action",
+        args: { planeId: REMOTE, action: { kind: "restore_snapshot", snapshot_id: TOKEN } },
+      },
+      { command: "prepare_recovery_action", args: { planeId: "local", action: { kind: "purge_snapshots" } } },
+      { command: "execute_recovery_action", args: { planeId: REMOTE, reviewId: REVIEW } },
+    ]);
+  });
+});
+
+describe("system session recovery", () => {
+  function readOnlyHealth(starts = "3"): SystemHealth {
+    return { ...health(REMOTE, starts), recovery: readOnly(), security: { kind: "absent" } };
+  }
+
+  it("reviews, restores, then drops everything read before and reloads", async () => {
+    const fake = new Fake();
+    fake.install();
+    let current = readOnlyHealth("3");
+    fake.answers.set("load_system_health", () => current);
+    fake.answers.set("prepare_recovery_action", () => restoreReview());
+    fake.answers.set("execute_recovery_action", () => {
+      current = health(REMOTE, "4");
+      return { kind: "restored", takenAtUnixMs: "1700000000000", reason: "daily", replacedName: "plane.sqlite3.damaged-1" };
+    });
+    let restarts = 0;
+    let restored = 0;
+    const system = new SystemSession(
+      Date.now,
+      () => restarts++,
+      () => restored++,
+    );
+    system.select(REMOTE);
+    await system.ensureLoaded();
+
+    await system.prepareRecovery({ kind: "restore_snapshot", snapshot_id: TOKEN });
+    expect(system.recovery).toEqual({ kind: "review", review: restoreReview() });
+    await system.confirmRecovery();
+
+    expect(system.recovery.kind === "done" && system.recovery.outcome.kind).toBe("restored");
+    // One restart for the restore itself; the reload's new start count is not a second one.
+    expect(restarts).toBe(1);
+    expect(restored).toBe(1);
+    expect(fake.count("load_system_health")).toBe(2);
+    expect(system.health.kind === "ready" && system.health.data.recovery.kind).toBe("serving");
+    // A second confirm has nothing to send.
+    await system.confirmRecovery();
+    expect(fake.count("execute_recovery_action")).toBe(1);
+  });
+
+  it("an unconfirmed restore re-reads the Plane and never resends", async () => {
+    const fake = new Fake();
+    fake.install();
+    let current = readOnlyHealth("3");
+    fake.answers.set("load_system_health", () => current);
+    fake.answers.set("prepare_recovery_action", () => restoreReview());
+    fake.answers.set("execute_recovery_action", () => ({
+      kind: "unconfirmed",
+      error: failure("transport.offline", "offline", true, REMOTE),
+    }));
+    let restored = 0;
+    const system = new SystemSession(Date.now, () => undefined, () => restored++);
+    system.select(REMOTE);
+    await system.ensureLoaded();
+
+    await system.prepareRecovery({ kind: "restore_snapshot", snapshot_id: TOKEN });
+    await system.confirmRecovery();
+    expect(system.recovery).toMatchObject({ kind: "unconfirmed", check: "read_only" });
+    expect(fake.count("load_system_health")).toBe(2);
+    expect(fake.count("execute_recovery_action")).toBe(1);
+    expect(system.recentCodes).toContain("transport.offline");
+    expect(restored).toBe(0);
+
+    // Retrying means a new review, prepared from a fresh read.
+    system.closeRecovery();
+    fake.answers.set("prepare_recovery_action", () => restoreReview("5a1f0000-0000-4000-8000-0000000000bb"));
+    current = health(REMOTE, "4");
+    await system.prepareRecovery({ kind: "restore_snapshot", snapshot_id: TOKEN });
+    fake.answers.set("execute_recovery_action", () => {
+      throw failure("client.state_unavailable", "internal", true, REMOTE);
+    });
+    await system.confirmRecovery();
+    // A thrown error is unconfirmed too; this read shows the store serving.
+    expect(system.recovery).toMatchObject({ kind: "unconfirmed", check: "serving" });
+    expect(restored).toBe(1);
+    const sent = fake.calls.filter((call) => call.command === "execute_recovery_action").map((call) => call.args.reviewId);
+    expect(sent).toEqual([REVIEW, "5a1f0000-0000-4000-8000-0000000000bb"]);
+  });
+
+  it("a local precondition that no longer holds is stale with Reload; a Plane refusal is refused", async () => {
+    const fake = new Fake();
+    fake.install();
+    fake.answers.set("load_system_health", () => readOnlyHealth());
+    fake.answers.set("prepare_recovery_action", () => {
+      throw failure("recovery.snapshot_gone", "conflict", false, REMOTE);
+    });
+    const system = new SystemSession();
+    system.select(REMOTE);
+    await system.ensureLoaded();
+
+    await system.prepareRecovery({ kind: "restore_snapshot", snapshot_id: TOKEN });
+    expect(system.recovery.kind === "stale" && system.recovery.error.code).toBe("recovery.snapshot_gone");
+    await system.reloadRecovery();
+    expect(system.recovery.kind).toBe("closed");
+    expect(fake.count("load_system_health")).toBe(2);
+
+    fake.answers.set("prepare_recovery_action", () => restoreReview());
+    fake.answers.set("execute_recovery_action", () => ({
+      kind: "refused",
+      error: failure("recovery.restore_failed", "unavailable", false, REMOTE),
+    }));
+    await system.prepareRecovery({ kind: "restore_snapshot", snapshot_id: TOKEN });
+    await system.confirmRecovery();
+    expect(system.recovery.kind === "refused" && system.recovery.error.code).toBe("recovery.restore_failed");
+    expect(fake.count("load_system_health")).toBe(3);
+
+    fake.answers.set("execute_recovery_action", () => ({
+      kind: "refused",
+      error: failure("client.review_used", "invalid_input", false, REMOTE),
+    }));
+    await system.prepareRecovery({ kind: "restore_snapshot", snapshot_id: TOKEN });
+    await system.confirmRecovery();
+    expect(system.recovery.kind).toBe("stale");
+  });
+
+  it("drops a review that finishes after the Plane changed or the dialog closed", async () => {
+    const fake = new Fake();
+    fake.install();
+    fake.answers.set("load_system_health", (args) => health(args.planeId as string));
+    fake.answers.set("prepare_recovery_action", () => restoreReview());
+    fake.hold.add("prepare_recovery_action");
+    const system = new SystemSession();
+    system.select(REMOTE);
+
+    const late = system.prepareRecovery({ kind: "purge_snapshots" });
+    await settle();
+    expect(system.recovery).toEqual({ kind: "preparing", action: "purge_snapshots" });
+    // A second click while preparing sends nothing.
+    await system.prepareRecovery({ kind: "purge_snapshots" });
+    expect(fake.count("prepare_recovery_action")).toBe(1);
+    system.closeRecovery();
+    fake.release("prepare_recovery_action");
+    await late;
+    expect(system.recovery.kind).toBe("closed");
+
+    const other = system.prepareRecovery({ kind: "purge_snapshots" });
+    await settle();
+    system.select("local");
+    fake.release("prepare_recovery_action");
+    await other;
+    expect(system.recovery.kind).toBe("closed");
+  });
+
+  it("a sending review cannot be closed and a restart only replaces an open review", async () => {
+    const fake = new Fake();
+    fake.install();
+    let starts = "3";
+    fake.answers.set("load_system_health", () => ({ ...health(REMOTE, starts), recovery: readOnly() }));
+    fake.answers.set("prepare_recovery_action", () => restoreReview());
+    fake.answers.set("execute_recovery_action", () => ({ kind: "purged", removedCount: 2 }));
+    const system = new SystemSession();
+    system.select(REMOTE);
+    await system.ensureLoaded();
+
+    await system.prepareRecovery({ kind: "restore_snapshot", snapshot_id: TOKEN });
+    starts = "4";
+    await system.load();
+    expect(system.recovery.kind).toBe("restarted");
+    await system.confirmRecovery();
+    expect(fake.count("execute_recovery_action")).toBe(0);
+
+    system.closeRecovery();
+    await system.prepareRecovery({ kind: "purge_snapshots" });
+    fake.hold.add("execute_recovery_action");
+    const sending = system.confirmRecovery();
+    await settle();
+    system.closeRecovery();
+    expect(system.recovery.kind).toBe("sending");
+    fake.release("execute_recovery_action");
+    await sending;
+    expect(system.recovery).toMatchObject({ kind: "done", outcome: { kind: "purged", removedCount: 2 } });
+  });
+});
+
+describe("recovery copy", () => {
+  it("states the store, the snapshots and why an action is unavailable", () => {
+    const serving: RecoveryView = {
+      kind: "serving",
+      snapshotCount: 1,
+      snapshots: [{ snapshotId: TOKEN, takenAtUnixMs: "1700000000000", reason: "daily", bytes: "4096" }],
+      ledger: { kind: "verified", deletions: "2" },
+    };
+    expect(recoveryHeadline(serving, "Build box")).toBe(
+      "Your Jet data on Build box is healthy. Jet keeps 1 verified recovery snapshot.",
+    );
+    expect(recoveryHeadline(readOnly(), "Build box")).toBe(
+      "Jet found a problem with its data on Build box (the data check failed). You can read tasks, but nothing can change until you restore a snapshot.",
+    );
+    expect(recoveryHeadline({ kind: "unsupported" }, "Build box")).toMatch(/doesn't report recovery snapshots/);
+
+    expect(restoreBlock(readOnly())).toBeNull();
+    expect(restoreBlock({ ...readOnly(), ledger: { kind: "corrupt" } } as RecoveryView)).toMatch(/won't restore a snapshot/);
+    expect(restoreBlock(serving)).toBeNull();
+
+    expect(purgeBlock(serving, { kind: "trusted" }, "Build box")).toBeNull();
+    expect(purgeBlock(serving, { kind: "absent" }, "Build box")).toMatch(/security audit/);
+    expect(purgeBlock({ ...serving, ledger: { kind: "unsupported" } }, { kind: "trusted" }, "Build box")).toMatch(
+      /Update Jet on that Plane/,
+    );
+    expect(purgeBlock(readOnly(), { kind: "trusted" }, "Build box")).toBeNull();
+  });
+
+  it("words sizes, the purge consequence and the unconfirmed checks", () => {
+    expect(bytesText("1")).toBe("1 byte");
+    expect(bytesText("512")).toBe("512 bytes");
+    expect(bytesText("4096")).toBe("4.1 KB");
+    expect(bytesText("405504000")).toBe("406 MB");
+    expect(bytesText("-1")).toBe("Size unknown");
+    expect(
+      purgeReviewText({
+        kind: "purge_snapshots",
+        reviewId: REVIEW,
+        planeLabel: "Build box",
+        snapshotCount: 3,
+        totalBytes: "3000000",
+        deletionsRecorded: "2",
+        includesRollback: true,
+      }),
+    ).toBe(
+      "Remove snapshots that may still contain deleted tasks? Jet takes a new snapshot now and then removes older ones, possibly all 3 (3 MB), including rollback copies for the previous version. Removed snapshots can't be recovered.",
+    );
+    expect(unconfirmedText(restoreReview(), "serving")).toBe("The store is serving again. The restore likely completed.");
+    expect(unconfirmedText(restoreReview(), "read_only")).toBe("The Plane is still read-only. Review a snapshot again to retry.");
+  });
+
+  it("treats local preconditions as stale and explains refusals without native text", () => {
+    for (const code of ["recovery.snapshot_gone", "recovery.not_read_only_local", "recovery.purge_unavailable", "client.review_used"]) {
+      expect(isStaleRecoveryError({ code }), code).toBe(true);
+    }
+    expect(isStaleRecoveryError({ code: "recovery.restore_failed" })).toBe(false);
+    expect(recoveryRefusalText({ code: "recovery.not_read_only", message: "m" }, "Build box")).toBe(
+      "Build box isn't in read-only recovery now. Reload to see its current state.",
+    );
+    expect(recoveryRefusalText({ code: "unknown.code", message: "Fixed shell message." }, "Build box")).toBe(
+      "Fixed shell message.",
+    );
   });
 });

@@ -35,14 +35,11 @@ const RECOVERY_CODES = [
 ];
 
 describe("Wave 3.3 rows in the Settings target table", () => {
-  it("lands Diagnostics and Versions in Safety and system; Recovery waits for its section", () => {
-    expect(LANDED_SECTIONS.has("diagnostics")).toBe(true);
-    expect(LANDED_SECTIONS.has("versions")).toBe(true);
-    expect(LANDED_SECTIONS.has("recovery")).toBe(false);
-    expect(resolveTarget({ pane: "safety", section: "versions" })).toEqual({ pane: "safety", section: "versions" });
-    expect(resolveTarget({ pane: "safety", section: "diagnostics" })).toEqual({ pane: "safety", section: "diagnostics" });
-    // A link to a section that has not landed opens the pane at its top.
-    expect(resolveTarget({ pane: "safety", section: "recovery" })).toEqual({ pane: "safety", section: null });
+  it("lands Recovery, Diagnostics and Versions in Safety and system", () => {
+    for (const section of ["recovery", "diagnostics", "versions"] as const) {
+      expect(LANDED_SECTIONS.has(section)).toBe(true);
+      expect(resolveTarget({ pane: "safety", section })).toEqual({ pane: "safety", section });
+    }
     expect(landedTarget("versions", REMOTE)).toEqual({ pane: "safety", section: "versions", plane_id: REMOTE });
   });
 
@@ -60,13 +57,20 @@ describe("Wave 3.3 rows in the Settings target table", () => {
     });
   });
 
-  it("has a Recovery row for every recovery code, rendered only once the section lands", () => {
+  it("links every recovery code to the Recovery section of its Plane", () => {
     for (const code of RECOVERY_CODES) {
-      // Filtered by LANDED_SECTIONS: no link to a section that does not exist.
-      expect(settingsTargetForError(error(code, REMOTE)), code).toBeNull();
+      expect(settingsTargetForError(error(code, REMOTE)), code).toEqual({
+        pane: "safety",
+        section: "recovery",
+        plane_id: REMOTE,
+      });
     }
-    expect(noticeLink("read_only", REMOTE)).toBeNull();
-    expect(noticeLink("ledger_corrupt", REMOTE)).toBeNull();
+    for (const kind of ["read_only", "ledger_corrupt"] as const) {
+      expect(noticeLink(kind, REMOTE)).toEqual({
+        label: "Open Recovery",
+        target: { pane: "safety", section: "recovery", plane_id: REMOTE },
+      });
+    }
   });
 
   it("keeps 3.2's rows for the codes 3.3 surfaces", () => {

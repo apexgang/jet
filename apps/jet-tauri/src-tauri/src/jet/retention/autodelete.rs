@@ -196,6 +196,17 @@ fn rule_unknown() -> PublicError {
 }
 
 impl RuleState {
+    /// The Plane's store was replaced by a Recovery snapshot: approval
+    /// tokens and unconfirmed changes read from the old store are dropped.
+    pub(super) fn plane_restored(&self, plane: PlaneId) {
+        if let Ok(mut tokens) = self.tokens.lock() {
+            tokens.remove(&plane);
+        }
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.retain(|(binding, _), _| binding.plane != plane);
+        }
+    }
+
     /// Binds a change to its rule slot: the Command ID of the same change
     /// still unconfirmed, or a new one when the slot is free.
     fn claim(&self, binding: PlaneBinding, change: ParsedChange) -> Result<Claim, PublicError> {

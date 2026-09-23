@@ -8,6 +8,8 @@ import {
 } from "../src/lib/features/system/model";
 import type { SystemHealth } from "../src/lib/jet/system";
 
+const SNAPSHOT_TOKEN = "5a1f0000-0000-4000-8000-00000000c0de";
+
 const PLANE = "0000000a-0000-4000-8000-000000000002";
 
 function health(overrides: Partial<SystemHealth> = {}): SystemHealth {
@@ -25,7 +27,12 @@ function health(overrides: Partial<SystemHealth> = {}): SystemHealth {
     crafts: [{ id: "/home/alex/crafts/private-craft", version: "1.0.0", harnesses: ["codex"] }],
     credentialStore: { state: "locked", kind: "secret_service" },
     degraded: [{ kind: "credential_store_locked", label: "Secure storage is locked", target: null }],
-    recovery: { kind: "serving", snapshotCount: 4, ledger: { kind: "verified", deletions: "12" } },
+    recovery: {
+      kind: "serving",
+      snapshotCount: 4,
+      snapshots: [{ snapshotId: SNAPSHOT_TOKEN, takenAtUnixMs: "1700000000000", reason: "daily", bytes: "4096" }],
+      ledger: { kind: "verified", deletions: "12" },
+    },
     security: { kind: "degraded", breach: "record_altered", breachSequence: "41", epoch: "2" },
     storage: { disposableMiB: 2048 },
     retention: { graceDays: 30 },
@@ -56,6 +63,8 @@ describe("diagnostic summary", () => {
       "Jet Trash grace period: 30 days",
       "Recent error codes, oldest first: storage.disk_pressure, recovery.read_only",
     ]);
+    // Snapshot tokens are identifiers: counted, never listed.
+    expect(summary).not.toContain(SNAPSHOT_TOKEN);
   });
 
   it("leaves out identifiers, paths, labels and native text", () => {
@@ -65,7 +74,7 @@ describe("diagnostic summary", () => {
         service: { coreVersion: "1.43.0 built in /home/alex/src", daemonStarts: "3", startedAtUnixMs: "1" },
         platform: "linux /etc/os-release · x86_64",
         protocol: { exact: 43, atLeast: 43, atMost: 43 },
-        recovery: { kind: "read_only", reason: "integrity_check_failed", snapshotCount: 0, ledger: { kind: "corrupt" } },
+        recovery: { kind: "read_only", reason: "integrity_check_failed", snapshotCount: 0, snapshots: [], ledger: { kind: "corrupt" } },
         issues: [
           {
             section: "capabilities",

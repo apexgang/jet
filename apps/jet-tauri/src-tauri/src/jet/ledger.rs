@@ -6,9 +6,8 @@
 //! resent with the same ID. While a review for a scope is attempted and
 //! unresolved, no other review for that scope can be issued or attempted.
 //!
-//! The Jet Trash and Recovery slices of Wave 3.3 build on this primitive; the
-//! first slice ships it with its tests only.
-#![cfg_attr(not(test), allow(dead_code))]
+//! Jet Trash reviews (`retention.rs`) and Recovery restore and purge reviews
+//! (`system/recovery.rs`) build on this primitive.
 
 use std::{
     collections::HashMap,

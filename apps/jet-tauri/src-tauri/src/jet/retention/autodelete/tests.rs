@@ -178,6 +178,68 @@ fn tokens_survive_a_read_of_the_same_interpretation_and_expire_when_it_changes()
 }
 
 #[test]
+fn a_restored_store_drops_that_planes_tokens_and_unconfirmed_changes_only() {
+    let state = RuleState::default();
+    let remote = PlaneBinding {
+        plane: PlaneId::Remote(Uuid::from_u128(0xad9)),
+        identity: Some(Uuid::from_u128(0xada)),
+    };
+    let local_token = state
+        .refresh_tokens(local(), &[&rule(draft(30), 5)])
+        .unwrap()[&RULE]
+        .approve
+        .unwrap();
+    let remote_token = state
+        .refresh_tokens(remote, &[&rule(draft(30), 5)])
+        .unwrap()[&RULE]
+        .approve
+        .unwrap();
+    // An unconfirmed change holds the local rule's slot.
+    state
+        .claim(
+            local(),
+            ParsedChange::SetDays {
+                rule: RULE,
+                days: 40,
+            },
+        )
+        .unwrap();
+
+    state.plane_restored(PlaneId::Local);
+
+    assert_eq!(
+        state
+            .claim(local(), ParsedChange::Approve { token: local_token })
+            .unwrap_err()
+            .code,
+        "autodelete.token_expired"
+    );
+    // The slot is free again, and the rule must be read anew first.
+    assert_eq!(
+        state
+            .claim(
+                local(),
+                ParsedChange::SetDays {
+                    rule: RULE,
+                    days: 50
+                }
+            )
+            .unwrap_err()
+            .code,
+        "autodelete.rule_unknown"
+    );
+    assert!(state.pending_views(local()).unwrap().is_empty());
+    assert!(state
+        .claim(
+            remote,
+            ParsedChange::Approve {
+                token: remote_token
+            }
+        )
+        .is_ok());
+}
+
+#[test]
 fn rule_views_carry_tokens_safe_reasons_and_attribution_only_for_the_drafted_days() {
     let tokens = RuleTokens::issue(RuleBinding::of(&rule(draft(30), 5)));
     let candidates: Vec<AutodeleteCandidate> = (0..32)

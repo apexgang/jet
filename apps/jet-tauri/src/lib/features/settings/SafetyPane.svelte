@@ -4,6 +4,7 @@
   import type { SettingsSnapshot } from "$lib/jet/settings";
   import type { SettingsSection } from "$lib/jet/settings-window";
   import DiagnosticsSection from "$lib/features/system/DiagnosticsSection.svelte";
+  import RecoverySection from "$lib/features/system/RecoverySection.svelte";
   import StorageHealth from "$lib/features/system/StorageHealth.svelte";
   import VersionsSection from "$lib/features/system/VersionsSection.svelte";
   import SectionState from "./SectionState.svelte";
@@ -79,6 +80,8 @@
     </SectionState>
   </section>
 {/each}
+
+<RecoverySection system={session.system} planeLabel={session.planeLabel} />
 
 <DiagnosticsSection system={session.system} planeLabel={session.planeLabel} />
 

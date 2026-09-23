@@ -107,9 +107,12 @@ describe("Plane-health model", () => {
       label: "Review audit",
       target: { pane: "safety", section: "audit", plane_id: "local" },
     });
-    // The Recovery section has not landed yet.
-    expect(noticeLink("read_only", "local")).toBeNull();
-    expect(noticeLink("ledger_corrupt", "local")).toBeNull();
+    for (const kind of ["read_only", "ledger_corrupt"] as const) {
+      expect(noticeLink(kind, "local")).toEqual({
+        label: "Open Recovery",
+        target: { pane: "safety", section: "recovery", plane_id: "local" },
+      });
+    }
   });
 
   it("words the collect result and the retention policy", () => {

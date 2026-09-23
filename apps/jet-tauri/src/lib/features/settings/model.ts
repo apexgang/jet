@@ -86,6 +86,7 @@ export const LANDED_SECTIONS: ReadonlySet<SettingsSection> = new Set<SettingsSec
   "execution",
   "permissions",
   "storage",
+  "recovery",
   "diagnostics",
   "audit",
   "versions",

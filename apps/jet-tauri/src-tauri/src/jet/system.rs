@@ -7,6 +7,8 @@
 //! then capabilities and two Setting reads whose failures are reported per
 //! section. Every Plane string is bounded here; nothing native crosses as a
 //! path or identifier.
+//!
+//! Recovery snapshot restore and the Recovery purge live in [`recovery`].
 use std::{collections::HashSet, sync::Mutex};
 
 use jet_client::Client;
@@ -29,6 +31,8 @@ use super::{
     JetBridge,
 };
 
+pub(crate) mod recovery;
+
 /// Crafts listed in one health read; a Plane reporting more is not trusted.
 const MAX_CRAFTS: usize = 64;
 /// Harnesses named per Craft.
@@ -37,6 +41,8 @@ const MAX_CRAFT_HARNESSES: usize = 16;
 #[derive(Default)]
 pub(crate) struct SystemState {
     collect_in_flight: Mutex<HashSet<PlaneId>>,
+    /// Restore and purge reviews, and the snapshot tokens they name.
+    recovery: recovery::RecoveryState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -143,8 +149,9 @@ enum LedgerView {
     Unsupported,
 }
 
-/// The store's Recovery state. The snapshot list itself belongs to the
-/// Recovery section; health reports only how many there are.
+/// The store's Recovery state. `snapshotCount` is every snapshot the Plane
+/// reported; `snapshots` lists at most the newest
+/// [`recovery::MAX_LISTED_SNAPSHOTS`], each named by an opaque token.
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(
     tag = "kind",
@@ -156,11 +163,13 @@ enum RecoveryView {
     Unsupported,
     Serving {
         snapshot_count: usize,
+        snapshots: Vec<recovery::SnapshotView>,
         ledger: LedgerView,
     },
     ReadOnly {
         reason: &'static str,
         snapshot_count: usize,
+        snapshots: Vec<recovery::SnapshotView>,
         ledger: LedgerView,
     },
 }
@@ -226,6 +235,15 @@ async fn load_health(
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         bridge.planes.observe_status(plane, &status);
+        let snapshots = match status.recovery.as_ref() {
+            Some(recovery) => {
+                bridge
+                    .system
+                    .recovery
+                    .refresh(plane, status.plane_id, &recovery.snapshots)?
+            }
+            None => Vec::new(),
+        };
 
         let mut issues = Vec::new();
         let observation = if fresh {
@@ -270,6 +288,7 @@ async fn load_health(
             bridge.planes.label(plane).unwrap_or_default(),
             bridge.planes.protocol(plane),
             &status,
+            snapshots,
             capabilities.as_ref(),
             disposable,
             grace,
@@ -315,6 +334,7 @@ fn health_view(
     plane_label: String,
     protocol: ProtocolView,
     status: &PlaneStatus,
+    snapshots: Vec<recovery::SnapshotView>,
     capabilities: Option<&CapabilitySnapshot>,
     disposable_mib: Option<u32>,
     grace_days: Option<u32>,
@@ -377,7 +397,7 @@ fn health_view(
         degraded: capabilities
             .map(|capabilities| capabilities.degraded.iter().map(degraded_view).collect())
             .unwrap_or_default(),
-        recovery: recovery_view(status.recovery.as_ref()),
+        recovery: recovery_view(status.recovery.as_ref(), snapshots),
         security: security_view(status.security.as_ref()),
         storage: StorageView { disposable_mib },
         retention: RetentionView { grace_days },
@@ -448,7 +468,10 @@ fn degraded_view(condition: &DegradedCondition) -> DegradedView {
     }
 }
 
-fn recovery_view(recovery: Option<&RecoveryStatus>) -> RecoveryView {
+fn recovery_view(
+    recovery: Option<&RecoveryStatus>,
+    snapshots: Vec<recovery::SnapshotView>,
+) -> RecoveryView {
     let Some(recovery) = recovery else {
         return RecoveryView::Unsupported;
     };
@@ -463,6 +486,7 @@ fn recovery_view(recovery: Option<&RecoveryStatus>) -> RecoveryView {
     match recovery.state {
         RecoveryState::Serving => RecoveryView::Serving {
             snapshot_count,
+            snapshots,
             ledger,
         },
         RecoveryState::ReadOnly => RecoveryView::ReadOnly {
@@ -472,6 +496,7 @@ fn recovery_view(recovery: Option<&RecoveryStatus>) -> RecoveryView {
                 None => "unknown",
             },
             snapshot_count,
+            snapshots,
             ledger,
         },
     }
@@ -728,7 +753,7 @@ mod tests {
     #[test]
     fn recovery_and_security_map_every_state_without_snapshot_names() {
         assert_eq!(
-            serde_json::to_value(recovery_view(None)).unwrap(),
+            serde_json::to_value(recovery_view(None, Vec::new())).unwrap(),
             json!({"kind": "unsupported"})
         );
         let serving = RecoveryStatus {
@@ -738,8 +763,8 @@ mod tests {
             deletion_ledger: Some(DeletionLedgerStatus::Verified { deletions: 7 }),
         };
         assert_eq!(
-            serde_json::to_value(recovery_view(Some(&serving))).unwrap(),
-            json!({"kind": "serving", "snapshotCount": 1, "ledger": {"kind": "verified", "deletions": "7"}})
+            serde_json::to_value(recovery_view(Some(&serving), Vec::new())).unwrap(),
+            json!({"kind": "serving", "snapshotCount": 1, "snapshots": [], "ledger": {"kind": "verified", "deletions": "7"}})
         );
         let read_only = RecoveryStatus {
             state: RecoveryState::ReadOnly,
@@ -748,8 +773,8 @@ mod tests {
             deletion_ledger: Some(DeletionLedgerStatus::Corrupt),
         };
         assert_eq!(
-            serde_json::to_value(recovery_view(Some(&read_only))).unwrap(),
-            json!({"kind": "read_only", "reason": "migration_failed", "snapshotCount": 0, "ledger": {"kind": "corrupt"}})
+            serde_json::to_value(recovery_view(Some(&read_only), Vec::new())).unwrap(),
+            json!({"kind": "read_only", "reason": "migration_failed", "snapshotCount": 0, "snapshots": [], "ledger": {"kind": "corrupt"}})
         );
         let old_minor = RecoveryStatus {
             state: RecoveryState::ReadOnly,
@@ -758,7 +783,7 @@ mod tests {
             deletion_ledger: None,
         };
         assert_eq!(
-            serde_json::to_value(recovery_view(Some(&old_minor))).unwrap()["ledger"],
+            serde_json::to_value(recovery_view(Some(&old_minor), Vec::new())).unwrap()["ledger"],
             json!({"kind": "unsupported"})
         );
 
@@ -801,6 +826,7 @@ mod tests {
             "This computer".into(),
             ProtocolKnowledge::default().view(),
             &status(None, Some(SecurityState::Trusted)),
+            Vec::new(),
             Some(&snapshot),
             Some(512),
             None,
@@ -853,6 +879,7 @@ mod tests {
             String::new(),
             ProtocolKnowledge::default().view(),
             &status(None, None),
+            Vec::new(),
             None,
             None,
             None,
@@ -1014,6 +1041,13 @@ mod tests {
         let value = serde_json::to_value(view.unwrap()).unwrap();
         assert_eq!(value["planeLabel"], "Build box");
         assert_eq!(value["recovery"]["snapshotCount"], 2);
+        // Snapshots cross as opaque tokens, never as their file names.
+        let listed = value["recovery"]["snapshots"].as_array().unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(!value.to_string().contains("a.sqlite3"));
+        assert!(Uuid::parse_str(listed[0]["snapshotId"].as_str().unwrap()).is_ok());
+        assert_eq!(listed[0]["reason"], "daily");
+        assert_eq!(listed[0]["bytes"], "4096");
         assert_eq!(value["security"]["breach"], "head_diverged");
         assert_eq!(value["platform"], json!(null));
         assert_eq!(value["storage"]["disposableMiB"], 2048);

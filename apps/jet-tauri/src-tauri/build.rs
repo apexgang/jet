@@ -89,6 +89,8 @@ fn main() {
             "restore_conversation",
             "load_autodelete_rules",
             "change_autodelete_rule",
+            "prepare_recovery_action",
+            "execute_recovery_action",
         ]),
     ))
     .expect("failed to build the Tauri command manifest");

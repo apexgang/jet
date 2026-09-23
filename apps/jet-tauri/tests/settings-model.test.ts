@@ -170,7 +170,7 @@ describe("settings targets", () => {
 
   it("returns null for unknown codes and for sections that have not landed", () => {
     expect(settingsTargetForError(error("conversation.not_found"))).toBeNull();
-    for (const code of ["recovery.read_only", "extensions.catalog_unreadable"]) {
+    for (const code of ["extensions.catalog_unreadable"]) {
       expect(settingsTargetForError(error(code)), code).toBeNull();
     }
   });

@@ -133,10 +133,15 @@ export class SettingsSession {
     mutationBlock: () => this.agentsBlock(),
   });
   /**
-   * Safety › Versions, Storage health and Diagnostics of the same Plane. A
-   * new Jet service start it detects invalidates the auto-delete rules too.
+   * Safety › Versions, Storage health, Recovery and Diagnostics of the same
+   * Plane. A new Jet service start it detects invalidates the auto-delete
+   * rules too, and a restored snapshot reloads every section.
    */
-  readonly system = new SystemSession(Date.now, () => this.autodelete.planeRestarted());
+  readonly system = new SystemSession(
+    Date.now,
+    () => this.autodelete.planeRestarted(),
+    () => void this.reload(),
+  );
   /** Work › Retention › Auto-delete of the same Plane. */
   readonly autodelete = new AutodeleteSession({
     mutationBlock: () => this.autodeleteBlock(),

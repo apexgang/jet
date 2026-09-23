@@ -2,7 +2,14 @@ import type { PlaneConditionKind } from "$lib/jet/errors";
 import type { RunSummary } from "$lib/jet/bridge";
 import type { PublicError } from "$lib/jet/bridge";
 import type { ProtocolKnowledge } from "$lib/jet/planes";
-import type { PlaneHealthSummary, SecurityView, SystemHealth } from "$lib/jet/system";
+import type {
+  PlaneHealthSummary,
+  RecoveryReview,
+  RecoveryView,
+  SecurityView,
+  SnapshotReason,
+  SystemHealth,
+} from "$lib/jet/system";
 import type { SettingsTarget } from "$lib/jet/settings-window";
 import { landedTarget } from "$lib/features/settings/model";
 
@@ -284,4 +291,194 @@ export function diagnosticSummary(health: SystemHealth | null, recentCodes: read
   const codes = recentCodes.filter(isStableCode).slice(-RECENT_CODES_LIMIT);
   lines.push(`Recent error codes, oldest first: ${codes.length === 0 ? "none" : codes.join(", ")}`);
   return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Settings › Safety and system › Recovery
+// ---------------------------------------------------------------------------
+
+const SNAPSHOT_REASONS: Record<SnapshotReason, string> = {
+  daily: "Daily",
+  migration: "Before an update",
+  maintenance: "Before maintenance",
+};
+
+export function snapshotReasonLabel(reason: SnapshotReason): string {
+  return SNAPSHOT_REASONS[reason];
+}
+
+const BYTE_UNITS = ["bytes", "KB", "MB", "GB", "TB"] as const;
+
+/** A decimal byte count the shell sent, in the largest fitting unit. */
+export function bytesText(bytes: string): string {
+  const value = Number(bytes);
+  if (!/^[0-9]{1,20}$/.test(bytes) || !Number.isFinite(value)) return "Size unknown";
+  let scaled = value;
+  let unit = 0;
+  while (scaled >= 1000 && unit < BYTE_UNITS.length - 1) {
+    scaled /= 1000;
+    unit++;
+  }
+  if (unit === 0) return value === 1 ? "1 byte" : `${value.toLocaleString("en-US")} bytes`;
+  return `${scaled.toLocaleString("en-US", { maximumFractionDigits: scaled < 10 ? 1 : 0 })} ${BYTE_UNITS[unit]}`;
+}
+
+/** A snapshot's date from its decimal Unix-millisecond stamp. */
+export function snapshotWhen(takenAtUnixMs: string): string {
+  const at = unixMs(takenAtUnixMs);
+  return at === null ? "an unknown date" : formatWhen(at);
+}
+
+export const LEDGER_CORRUPT_TEXT =
+  "Jet can't verify its record of deleted data, so it won't restore a snapshot. Deleted tasks could come back. " +
+  "Contact support with a diagnostic summary.";
+
+export const EXPORT_BUNDLE_TEXT = "Exporting a portable Recovery bundle isn't available in this app yet.";
+
+function snapshotsCount(count: number): string {
+  return count === 1 ? "1 verified recovery snapshot" : `${count.toLocaleString("en-US")} verified recovery snapshots`;
+}
+
+/** The Recovery section's first line for a Plane. */
+export function recoveryHeadline(recovery: RecoveryView, planeLabel: string): string {
+  switch (recovery.kind) {
+    case "unsupported":
+      return `${planeLabel} doesn't report recovery snapshots to this app. Update Jet on that Plane.`;
+    case "serving":
+      return `Your Jet data on ${planeLabel} is healthy. Jet keeps ${snapshotsCount(recovery.snapshotCount)}.`;
+    case "read_only": {
+      const reason =
+        recovery.reason === "integrity_check_failed"
+          ? " (the data check failed)"
+          : recovery.reason === "migration_failed"
+            ? " (an update couldn't finish)"
+            : "";
+      return (
+        `Jet found a problem with its data on ${planeLabel}${reason}. ` +
+        "You can read tasks, but nothing can change until you restore a snapshot."
+      );
+    }
+  }
+}
+
+/** Why a restore can't be offered for a read-only Plane, or null when it can. */
+export function restoreBlock(recovery: RecoveryView): string | null {
+  if (recovery.kind !== "read_only") return null;
+  if (recovery.ledger.kind === "corrupt") return LEDGER_CORRUPT_TEXT;
+  if (recovery.snapshots.length === 0) {
+    return "Jet has no verified snapshot to restore. Contact support with a diagnostic summary.";
+  }
+  return null;
+}
+
+/** Why a purge can't be offered, or null when it can. */
+export function purgeBlock(recovery: RecoveryView, security: SecurityView, planeLabel: string): string | null {
+  if (recovery.kind !== "serving") return null;
+  if (recovery.ledger.kind === "corrupt") return LEDGER_CORRUPT_TEXT;
+  if (recovery.ledger.kind === "unsupported") {
+    return `${planeLabel} can't remove old snapshots from this app. Update Jet on that Plane.`;
+  }
+  if (security.kind !== "trusted") {
+    return "Removing old snapshots waits until the security audit on this Plane is checked.";
+  }
+  if (recovery.snapshotCount === 0) return "There are no snapshots to remove.";
+  return null;
+}
+
+/** The lines of a restore review, in reading order. */
+export function restoreReviewLines(review: Extract<RecoveryReview, { kind: "restore_snapshot" }>): string[] {
+  const when = snapshotWhen(review.takenAtUnixMs);
+  return [
+    `Changes made on ${review.planeLabel} after ${when} are replaced.`,
+    "Jet keeps the damaged data beside the store as a file. It isn't deleted.",
+    "Tasks and accounts deleted after the snapshot stay deleted.",
+  ];
+}
+
+/** The consequence line of a purge review. */
+export function purgeReviewText(review: Extract<RecoveryReview, { kind: "purge_snapshots" }>): string {
+  const count = review.snapshotCount === 1 ? "the 1 snapshot" : `all ${review.snapshotCount.toLocaleString("en-US")}`;
+  const rollback = review.includesRollback ? ", including rollback copies for the previous version" : "";
+  return (
+    "Remove snapshots that may still contain deleted tasks? Jet takes a new snapshot now and then removes older " +
+    `ones, possibly ${count} (${bytesText(review.totalBytes)})${rollback}. Removed snapshots can't be recovered.`
+  );
+}
+
+export function purgedText(removedCount: number): string {
+  if (removedCount === 0) return "Jet took a new snapshot. No older snapshot needed removing.";
+  return removedCount === 1
+    ? "Jet took a new snapshot and removed 1 older one."
+    : `Jet took a new snapshot and removed ${removedCount.toLocaleString("en-US")} older ones.`;
+}
+
+/**
+ * Local preconditions and review-state refusals: the view the dialog was
+ * opened from is out of date, and Reload is the way on.
+ */
+const STALE_RECOVERY_CODES: ReadonlySet<string> = new Set([
+  "recovery.snapshot_gone",
+  "recovery.not_read_only_local",
+  "recovery.not_read_only",
+  "recovery.purge_unavailable",
+  "recovery.deletion_ledger_corrupt",
+  "recovery.request_unresolved",
+  "recovery.review_expired",
+  "client.review_used",
+  "client.review_plane_mismatch",
+  "plane.review_moved",
+]);
+
+export function isStaleRecoveryError(error: Pick<PublicError, "code">): boolean {
+  return STALE_RECOVERY_CODES.has(error.code);
+}
+
+/** Plain copy for a refused or stale restore or purge. */
+export function recoveryRefusalText(error: Pick<PublicError, "code" | "message">, planeLabel: string): string {
+  switch (error.code) {
+    case "recovery.not_read_only":
+    case "recovery.not_read_only_local":
+      return `${planeLabel} isn't in read-only recovery now. Reload to see its current state.`;
+    case "recovery.snapshot_gone":
+      return "This snapshot is no longer listed. Reload to see the current snapshots.";
+    case "recovery.deletion_ledger_corrupt":
+      return LEDGER_CORRUPT_TEXT;
+    case "recovery.restore_failed":
+      return `The restored snapshot didn't pass Jet's checks, so ${planeLabel} is still in read-only recovery. Try another snapshot.`;
+    case "recovery.purge_unavailable":
+      return "Old snapshots can't be removed right now. Reload to check the data, its record of deleted data and the security audit.";
+    case "recovery.read_only":
+      return `${planeLabel} is in read-only recovery. Restore a snapshot first.`;
+    case "security.audit_degraded":
+      return "Jet can't remove snapshots until the security audit is checked.";
+    case "recovery.request_unresolved":
+      return "Jet is still confirming an earlier recovery request. Reload to check its state.";
+    case "recovery.review_expired":
+      return "This review expired. Review again.";
+    case "client.review_used":
+      return "This review was already used. Reload to see what happened, then review again.";
+    default:
+      return error.message;
+  }
+}
+
+/** After an unconfirmed restore or purge, what the re-read Plane shows. */
+export type UnconfirmedCheck = "checking" | "serving" | "read_only" | "unknown";
+
+export function unconfirmedText(review: RecoveryReview, check: UnconfirmedCheck): string {
+  if (review.kind === "purge_snapshots") {
+    return check === "checking"
+      ? "Jet couldn't confirm whether old snapshots were removed. Checking the current state…"
+      : "Jet couldn't confirm whether old snapshots were removed. The list shows what the Plane reports now.";
+  }
+  switch (check) {
+    case "checking":
+      return "Jet couldn't confirm the restore. Checking the current state…";
+    case "serving":
+      return "The store is serving again. The restore likely completed.";
+    case "read_only":
+      return "The Plane is still read-only. Review a snapshot again to retry.";
+    case "unknown":
+      return "Jet couldn't check the Plane's current state. Reload Recovery when it's reachable.";
+  }
 }

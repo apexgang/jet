@@ -133,6 +133,61 @@ fn the_first_attempt_locks_the_mode_and_stopping_work_needs_an_acknowledgement()
 }
 
 #[test]
+fn a_restored_store_drops_that_planes_trash_index_restores_and_reviews() {
+    let state = RetentionState::default();
+    let remote = PlaneId::Remote(Uuid::from_u128(0x7a5f));
+    let binding = |plane| PlaneBinding {
+        plane,
+        identity: None,
+    };
+    for plane in [PlaneId::Local, remote] {
+        state.remember(plane, TASK, Some(40)).unwrap();
+        state.restore_id((plane, TASK, 40)).unwrap();
+    }
+    let local_review = state
+        .trash_reviews
+        .issue(binding(PlaneId::Local), TASK, review(false, false))
+        .unwrap();
+    // Even a review whose outcome is unknown: it was about the old store.
+    state
+        .trash_reviews
+        .attempt(local_review, PlaneId::Local, |_| Ok(()))
+        .unwrap();
+    let remote_review = state
+        .trash_reviews
+        .issue(binding(remote), TASK, review(false, false))
+        .unwrap();
+
+    state.plane_restored(PlaneId::Local);
+
+    assert_eq!(state.trashed_at(PlaneId::Local, TASK).unwrap(), None);
+    assert_eq!(state.trashed_at(remote, TASK).unwrap(), Some(40));
+    let restores = state.restores.lock().unwrap();
+    assert_eq!(
+        restores.keys().copied().collect::<Vec<_>>(),
+        vec![(remote, TASK, 40)]
+    );
+    drop(restores);
+    assert_eq!(
+        state
+            .trash_reviews
+            .attempt(local_review, PlaneId::Local, |_| Ok(()))
+            .unwrap_err()
+            .code,
+        "retention.review_expired"
+    );
+    assert!(state
+        .trash_reviews
+        .attempt(remote_review, remote, |_| Ok(()))
+        .is_ok());
+    // A new review of the same task can be issued at once.
+    assert!(state
+        .trash_reviews
+        .issue(binding(PlaneId::Local), TASK, review(false, false))
+        .is_ok());
+}
+
+#[test]
 fn names_are_bounded_distinct_uuids() {
     let id = |n: u128| Uuid::from_u128(n).to_string();
     assert!(parse_names(&[id(1), id(2)]).is_ok());

@@ -513,7 +513,7 @@ mod manifest_tests {
     ];
 
     /// Commands only the Settings window may call.
-    const SETTINGS_ONLY: [&str; 27] = [
+    const SETTINGS_ONLY: [&str; 29] = [
         "watch_settings_navigation",
         "remember_settings_pane",
         "close_settings",
@@ -541,6 +541,8 @@ mod manifest_tests {
         "load_system_health",
         "load_autodelete_rules",
         "change_autodelete_rule",
+        "prepare_recovery_action",
+        "execute_recovery_action",
     ];
 
     /// Wave 3.3 commands granted to the main window only.
