@@ -16,6 +16,7 @@ pub(crate) mod pairing;
 mod pairing_transcript;
 pub(crate) mod planes;
 pub(crate) mod preferences;
+pub(crate) mod retention;
 mod run_control;
 pub(crate) mod settings;
 pub(crate) mod settings_window;
@@ -53,6 +54,7 @@ pub(crate) struct JetBridge {
     extensions: extensions::ExtensionsState,
     preferences: preferences::PreferencesState,
     system: system::SystemState,
+    retention: retention::RetentionState,
 }
 
 impl JetBridge {
@@ -103,6 +105,7 @@ impl JetBridge {
             extensions: extensions::ExtensionsState::default(),
             preferences: preferences::PreferencesState::new(app_data_directory),
             system: system::SystemState::default(),
+            retention: retention::RetentionState::default(),
         }
     }
 
@@ -533,7 +536,17 @@ mod manifest_tests {
     ];
 
     /// Wave 3.3 commands granted to the main window only.
-    const WAVE_3_3_MAIN_ONLY: [&str; 1] = ["collect_disposable_storage"];
+    /// `resolve_conversation_names` joins the Settings window with its first
+    /// call site there (auto-delete candidates).
+    const WAVE_3_3_MAIN_ONLY: [&str; 7] = [
+        "collect_disposable_storage",
+        "load_trash",
+        "load_trash_status",
+        "resolve_conversation_names",
+        "preview_trash",
+        "trash_conversation",
+        "restore_conversation",
+    ];
 
     /// `generate_handler!` names, the `build.rs` manifest and the union of
     /// the capability grants must be the same set, every command must have

@@ -80,6 +80,12 @@ fn main() {
             "resize_workspace_terminal",
             "detach_workspace_terminal",
             "collect_disposable_storage",
+            "load_trash",
+            "load_trash_status",
+            "resolve_conversation_names",
+            "preview_trash",
+            "trash_conversation",
+            "restore_conversation",
         ]),
     ))
     .expect("failed to build the Tauri command manifest");

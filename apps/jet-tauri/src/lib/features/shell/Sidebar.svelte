@@ -152,6 +152,9 @@
       <button class:active={selected("schedules")} onclick={() => session.select("schedules")}>
         Schedules
       </button>
+      <button class:active={selected("trash")} onclick={() => session.select("trash")}>
+        Jet Trash
+      </button>
       <button class:active={selected("planes")} onclick={() => session.openPlanes()}>
         <span>Planes</span>
         {#if planes.attentionCount > 0}

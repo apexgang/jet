@@ -6,9 +6,18 @@
   import SetupPanel from "$lib/features/setup/SetupPanel.svelte";
   import PlaneHealthNotice from "$lib/features/system/PlaneHealthNotice.svelte";
   import { retentionLine } from "$lib/features/system/model";
+  import MoveToTrashDialog from "$lib/features/trash/MoveToTrashDialog.svelte";
+  import TrashView from "$lib/features/trash/TrashView.svelte";
+  import { TOMBSTONE_TEXT, bannerText, refusalLinkLabel, restoreActionText } from "$lib/features/trash/model";
 
   let { session }: { session: DesktopSession } = $props();
   let composer = $state<HTMLTextAreaElement>();
+  let moveTrigger = $state<HTMLElement | null>(null);
+
+  /** The selected task's own Jet Trash state; never inferred from the list. */
+  const trashBanner = $derived(
+    session.trash.bannerFor(session.selectedPlaneId, session.selectedConversationId),
+  );
 
   const retention = $derived(
     session.selectedConversationId &&
@@ -63,6 +72,8 @@
   <PlanesPanel {session} />
 {:else if session.sidebarSelection === "schedules"}
   <SchedulesDestination standalone />
+{:else if session.sidebarSelection === "trash"}
+  <TrashView {session} />
 {:else}
   <section class="conversation" aria-label="Current task">
     <header class="conversation-header">
@@ -100,6 +111,19 @@
       {/if}
       <button
         class="icon-button"
+        disabled={!session.canMoveToTrash}
+        title={session.selectedConversationId && !session.selectedPlaneOnline
+          ? `Reconnect to ${session.selectedPlaneLabel} to move this task to Jet Trash`
+          : undefined}
+        onclick={(event) => {
+          moveTrigger = event.currentTarget;
+          void session.openMoveToTrash();
+        }}
+      >
+        Move to Trash…
+      </button>
+      <button
+        class="icon-button"
         aria-label={session.workPanelPresented ? "Hide work panel" : "Show work panel"}
         title={session.workPanelPresented ? "Hide work panel" : "Show work panel"}
         onclick={() => (session.workPanelPresented = !session.workPanelPresented)}
@@ -116,6 +140,38 @@
           planeLabel={session.selectedPlaneLabel}
           openSettings={(target) => void session.openSettings(target)}
         />
+        {#if trashBanner.kind === "trashed" && session.selectedConversationId}
+          {@const conversationId = session.selectedConversationId}
+          {@const action = session.trash.rowAction(session.selectedPlaneId, conversationId)}
+          {@const actionText = restoreActionText(action, session.selectedPlaneLabel)}
+          <section class="notice trash-banner" aria-label="In Jet Trash">
+            <p role="status">{bannerText(trashBanner.entry, Date.now())}</p>
+            {#if !trashBanner.entry.restorable}
+              <p>{TOMBSTONE_TEXT}</p>
+            {/if}
+            {#if actionText}
+              <p role={action.kind === "refused" || action.kind === "uncertain" ? "alert" : "status"}>{actionText}</p>
+            {/if}
+            <div class="trash-banner-actions">
+              {#if trashBanner.entry.restorable}
+                <button
+                  class="text-button"
+                  disabled={!session.selectedPlaneOnline || action.kind === "restoring" || action.kind === "restored"}
+                  onclick={() => void session.trash.restore(session.selectedPlaneId, conversationId)}
+                >{action.kind === "uncertain" ? "Try again" : "Restore"}</button>
+              {/if}
+              {#if action.kind === "refused"}
+                {@const target = settingsTargetForError(action.error)}
+                {#if target}
+                  <button class="text-button" onclick={() => void session.openSettings(target)}>
+                    {refusalLinkLabel(target.section, paneTitle(target.pane))}
+                  </button>
+                {/if}
+              {/if}
+              <button class="text-button" onclick={() => session.select("trash")}>Open Jet Trash</button>
+            </div>
+          </section>
+        {/if}
         {#if session.selectionUnavailable}
           <div class="notice" role="status">
             <p>{session.selectedPlaneLabel} is unavailable. This task will load when it reconnects.</p>
@@ -244,6 +300,7 @@
         </div>
       </div>
     </footer>
+    <MoveToTrashDialog {session} returnFocus={moveTrigger} />
   </section>
 {/if}
 

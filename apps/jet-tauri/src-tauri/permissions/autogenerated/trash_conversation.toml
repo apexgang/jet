@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-trash-conversation"
+description = "Enables the trash_conversation command without any pre-configured scope."
+commands.allow = ["trash_conversation"]
+
+[[permission]]
+identifier = "deny-trash-conversation"
+description = "Denies the trash_conversation command without any pre-configured scope."
+commands.deny = ["trash_conversation"]

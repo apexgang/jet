@@ -460,11 +460,7 @@ fn row_view(plane: PlaneId, conversation: &Conversation) -> ConversationRowView 
         plane_id: plane.to_string(),
         id: conversation.conversation_id.to_string(),
         revision: conversation.revision.map(|value| value.to_string()),
-        title: conversation
-            .name
-            .as_ref()
-            .map(|name| bounded_text(&name.value, 256, "Untitled task"))
-            .unwrap_or_else(|| "Untitled task".into()),
+        title: conversation_title(conversation),
         created_at_unix_ms: conversation.created_at_unix_ms.to_string(),
         project_id: match conversation.working_tree {
             Some(
@@ -473,6 +469,15 @@ fn row_view(plane: PlaneId, conversation: &Conversation) -> ConversationRowView 
             Some(WorkingTree::NoProject) | None => None,
         },
     }
+}
+
+/// The bounded title a Conversation is presented with, as in Recent.
+pub(super) fn conversation_title(conversation: &Conversation) -> String {
+    conversation
+        .name
+        .as_ref()
+        .map(|name| bounded_text(&name.value, 256, "Untitled task"))
+        .unwrap_or_else(|| "Untitled task".into())
 }
 
 pub(crate) fn run_view(run: &Run) -> RunView {

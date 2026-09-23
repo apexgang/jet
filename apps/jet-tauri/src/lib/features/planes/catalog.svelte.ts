@@ -32,7 +32,11 @@ export type SearchState = {
 };
 
 /** Events that change existing rows, so the whole chain is re-walked. */
-const REWALK_EVENTS = new Set(["conversation.name_changed", "conversation.trashed"]);
+const REWALK_EVENTS = new Set([
+  "conversation.name_changed",
+  "conversation.trashed",
+  "conversation.restored",
+]);
 
 /** A new task only appends, so the chain is re-read from its tail page. */
 const TAIL_EVENT = "conversation.created";

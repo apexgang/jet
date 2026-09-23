@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-conversation-names"
+description = "Enables the resolve_conversation_names command without any pre-configured scope."
+commands.allow = ["resolve_conversation_names"]
+
+[[permission]]
+identifier = "deny-resolve-conversation-names"
+description = "Denies the resolve_conversation_names command without any pre-configured scope."
+commands.deny = ["resolve_conversation_names"]

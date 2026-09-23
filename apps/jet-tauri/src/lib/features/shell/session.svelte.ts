@@ -49,6 +49,7 @@ import { LOCAL_PLANE, type PlaneId, type PlaneSelection } from "$lib/jet/planes"
 import { openSettings, type SettingsTarget } from "$lib/jet/settings-window";
 import { PlaneCatalog } from "$lib/features/planes/catalog.svelte";
 import { PlaneHealth } from "$lib/features/system/health.svelte";
+import { TrashSession } from "$lib/features/trash/session.svelte";
 import type { PlaneNotice } from "$lib/features/system/model";
 import { needsPairing } from "$lib/features/planes/model";
 import { PlanesSession, type FeedHandler, type PlanesFocus } from "$lib/features/planes/session.svelte";
@@ -67,6 +68,7 @@ export type SidebarDestination =
   | "project"
   | "conversation"
   | "schedules"
+  | "trash"
   | "planes";
 
 export type WorkPanelTab = "changes" | "files" | "terminal" | "run" | "delivery";
@@ -96,6 +98,12 @@ export class DesktopSession implements FeedHandler {
   planes = new PlanesSession(this);
   /** Per-Plane Recent chains and Search, merged for display. */
   catalog = new PlaneCatalog(this.planes);
+  /** Jet Trash: per-Plane sections, the selected task's banner, Move to Trash. */
+  trash = new TrashSession({
+    planeIds: () => this.planes.planes.map((plane) => plane.planeId),
+    knownTitle: (planeId, conversationId) => this.catalog.find(planeId, conversationId)?.title ?? null,
+    observe: (planeId, error) => this.observeOutcome(planeId, error),
+  });
   scenario = $state<DesktopFixtureScenario>(fixtureForState("active"));
   sidebarSelection = $state<SidebarDestination>("conversation");
   sidebarPresented = $state(true);
@@ -489,6 +497,7 @@ export class DesktopSession implements FeedHandler {
   /** FeedHandler: a Plane was forgotten here; its tasks leave Recent. */
   planeForgotten(planeId: PlaneId): void {
     this.catalog.sync();
+    this.trash.forget(planeId);
     if (this.selectedPlaneId !== planeId) return;
     this.selectedConversationId = null;
     this.selectedPlaneId = LOCAL_PLANE;
@@ -658,6 +667,7 @@ export class DesktopSession implements FeedHandler {
   ): Promise<void> {
     this.restoreRequest += 1;
     if (!this.isSelected(planeId, conversationId)) {
+      this.trash.clearBanner();
       this.detachCurrentTerminal();
       this.timeline = [];
       this.conversationDetail = null;
@@ -689,6 +699,9 @@ export class DesktopSession implements FeedHandler {
       this.conversationDetail = detail;
       this.conversationFreshness = "live";
       this.catalog.upsert(detail.conversation);
+      if (this.trash.banner?.planeId !== planeId || this.trash.banner.conversationId !== id) {
+        void this.trash.loadBanner(planeId, id);
+      }
       await this.refreshSupervision(id, detail.runs.at(-1)?.id ?? null);
     } catch (error: unknown) {
       const failure = publicError(error);
@@ -726,9 +739,11 @@ export class DesktopSession implements FeedHandler {
   select(destination: SidebarDestination): void {
     this.sidebarSelection = destination;
     this.actionNotice = null;
+    if (destination !== "trash") this.trash.hide();
 
     switch (destination) {
       case "new-task":
+        this.trash.clearBanner();
         this.selectedConversationId = null;
         this.selectedPlaneId = LOCAL_PLANE;
         this.conversationDetail = null;
@@ -763,11 +778,27 @@ export class DesktopSession implements FeedHandler {
         // The destination states the backend dependency itself.
         this.workPanelPresented = false;
         break;
+      case "trash":
+        this.workPanelPresented = false;
+        this.trash.show();
+        break;
       case "planes":
         this.workPanelPresented = false;
         void this.refreshPlanes();
         break;
     }
+  }
+
+  /** Whether the selected task can be moved to Jet Trash from its header. */
+  get canMoveToTrash(): boolean {
+    return this.selectedConversationId !== null && this.selectedPlaneOnline;
+  }
+
+  /** "Move to Trash…": opens the reviewed dialog for the selected task. */
+  async openMoveToTrash(): Promise<void> {
+    const conversationId = this.selectedConversationId;
+    if (!conversationId || !this.canMoveToTrash) return;
+    await this.trash.openMove(this.selectedPlaneId, conversationId);
   }
 
   /**
@@ -1480,6 +1511,10 @@ export class DesktopSession implements FeedHandler {
         this.applyConnection(planeId, update.connection);
         void this.planes.refresh();
         this.catalog.reconnected(planeId);
+        this.trash.reconnected(planeId);
+        if (selectedPlane && this.selectedConversationId) {
+          void this.trash.loadBanner(planeId, this.selectedConversationId);
+        }
         if (selectedPlane && this.selectedConversationId && this.conversationFreshness !== "live") {
           void this.loadSelectedConversation(false);
         }
@@ -1506,9 +1541,11 @@ export class DesktopSession implements FeedHandler {
         this.catalog.receiveEvent(planeId, update.kind);
         if (update.kind.startsWith("pairing.")) this.planes.pairing.pairingEvent(planeId);
         if (update.kind === "audit.epoch_begun") this.health.clearSecurity(planeId);
+        this.receiveTrashEvent(planeId, update.kind, update.conversation_id);
         break;
       case "reconnecting":
         this.health.offline(planeId);
+        this.trash.offline(planeId);
         void this.planes.refresh();
         this.catalog.markUnavailable(planeId, update.error);
         if (local) {
@@ -1526,6 +1563,7 @@ export class DesktopSession implements FeedHandler {
           break;
         }
         this.health.offline(planeId);
+        this.trash.offline(planeId);
         void this.planes.refresh();
         this.catalog.markUnavailable(planeId, update.error);
         if (local) {
@@ -1548,12 +1586,35 @@ export class DesktopSession implements FeedHandler {
 
   /**
    * The Plane's daemon started again (a restart, or a restored snapshot):
-   * state can move backwards, so what is shown for it is read again. Later
-   * Wave 3.3 views drop their per-Plane caches here too.
+   * state can move backwards, so what is shown for it is read again, and
+   * Wave 3.3 views drop their per-Plane caches.
    */
   private planeRestarted(planeId: PlaneId): void {
+    this.trash.reset(planeId);
     if (planeId === this.selectedPlaneId && this.selectedConversationId) {
       void this.loadSelectedConversation(false);
+    }
+  }
+
+  /**
+   * Jet Trash follows its Events per Plane: a trash or restore (D4: restore
+   * now refreshes too), a Transfer tombstone, and setting changes that may
+   * move the grace days.
+   */
+  private receiveTrashEvent(planeId: PlaneId, kind: string, conversationId: string | null): void {
+    switch (kind) {
+      case "conversation.trashed":
+      case "conversation.restored":
+        this.trash.markStale(planeId);
+        if (planeId === this.selectedPlaneId) this.trash.refreshBanner(planeId, conversationId);
+        break;
+      case "conversation.transfer_relinquished":
+        this.trash.markStale(planeId);
+        break;
+      case "setting.changed":
+      case "setting.cleared":
+        this.trash.markGraceStale(planeId);
+        break;
     }
   }
 

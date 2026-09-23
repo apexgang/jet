@@ -103,6 +103,12 @@ pub fn run() {
             jet::resize_workspace_terminal,
             jet::detach_workspace_terminal,
             jet::system::collect_disposable_storage,
+            jet::retention::load_trash,
+            jet::retention::load_trash_status,
+            jet::retention::resolve_conversation_names,
+            jet::retention::preview_trash,
+            jet::retention::trash_conversation,
+            jet::retention::restore_conversation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Jet desktop application");
