@@ -9,12 +9,13 @@
 //! definite refusal, so a retry after a lost reply resends the exact same
 //! body and a later attempt after a refusal is a new request.
 //!
-//! Enrollment (this computer pairing itself with a remote Plane) arrives with
-//! the SSH transport.
+//! Enrollment (this computer pairing itself with a remote Plane) lives in
+//! `enrollment.rs`.
 use std::{
     collections::HashMap,
+    fmt,
     hash::Hash,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -24,10 +25,10 @@ use jet_protocol::{
     PairingMethod, PairingProgress, PairingSnapshot, PendingPairing, PAIRING_MINOR,
 };
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use tauri::State;
 use uuid::Uuid;
 
+pub(crate) use super::keystore::fingerprint;
 use super::{
     client::PlaneClient,
     errors::PublicError,
@@ -165,7 +166,36 @@ pub(crate) struct PairingState {
     reviews: Mutex<HashMap<Uuid, Review>>,
 }
 
+impl fmt::Debug for PairingState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let reviews = self
+            .reviews
+            .lock()
+            .map(|reviews| reviews.len())
+            .unwrap_or(0);
+        formatter
+            .debug_struct("PairingState")
+            .field("reviews", &reviews)
+            .finish_non_exhaustive()
+    }
+}
+
 impl PairingState {
+    /// Drops the command IDs kept for a forgotten Plane. Its reviews stay
+    /// (bounded and expiring) so that executing one answers a receipt with
+    /// `plane.review_moved` instead of silently disappearing.
+    pub(crate) fn forget_plane(&self, plane: PlaneId) {
+        if let Ok(mut commands) = self.gate_commands.lock() {
+            commands.retain(|(owner, _), _| *owner != plane);
+        }
+        if let Ok(mut commands) = self.offer_commands.lock() {
+            commands.remove(&plane);
+        }
+        if let Ok(mut commands) = self.confirm_commands.lock() {
+            commands.retain(|key, _| key.plane != plane);
+        }
+    }
+
     fn prepare(
         &self,
         binding: PlaneBinding,
@@ -460,6 +490,12 @@ pub(crate) enum ClientChangeReceipt {
         client: Option<PairedClientView>,
         revoked: bool,
     },
+    /// This computer changed its own access over the connection the change
+    /// ended. The reconnect was refused, so the change almost certainly
+    /// committed, but it cannot be read back from here.
+    AppliedUnverified {
+        change: &'static str,
+    },
     Refused {
         error: PublicError,
     },
@@ -485,17 +521,6 @@ fn end_reason(reason: PairingEnd) -> &'static str {
         PairingEnd::TooManyAttempts => "too_many_attempts",
         PairingEnd::GateClosed => "gate_closed",
     }
-}
-
-/// First 16 hex characters of SHA-256 over the public key, grouped in fours.
-/// Only public bytes are hashed.
-fn fingerprint(key: &[u8; 32]) -> String {
-    let digest = Sha256::digest(key);
-    digest[..8]
-        .chunks(2)
-        .map(|pair| format!("{:02x}{:02x}", pair[0], pair[1]))
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 /// A Pairing protocol name such as `jet.pairing.v1`, bounded and allowlisted.
@@ -652,8 +677,11 @@ async fn read_pairing(
     ))
 }
 
-async fn connect(client: &PlaneClient) -> Result<Client, PublicError> {
-    client.connect().await.map_err(|error| client_error(&error))
+async fn connect(client: &PlaneClient) -> Result<Arc<Client>, PublicError> {
+    client
+        .connect()
+        .await
+        .map_err(|error| PublicError::from_client(&error))
 }
 
 #[tauri::command]
@@ -832,12 +860,11 @@ enum Changed {
 }
 
 async fn send_change(
-    client: &PlaneClient,
+    connection: &Client,
     id: Uuid,
     target: Uuid,
     change: Change,
 ) -> Result<Changed, Box<ClientError>> {
-    let connection = client.connect().await?;
     let result = match change.access() {
         Some(access) => connection
             .set_paired_client_access(id, target, access)
@@ -851,6 +878,19 @@ async fn send_change(
     result.map_err(Box::new)
 }
 
+/// The connection went away underneath a request that may have been sent.
+fn transport_lost(error: &ClientError) -> bool {
+    matches!(
+        error,
+        ClientError::Io(_)
+            | ClientError::Closed
+            | ClientError::Disconnected(_)
+            | ClientError::Frame(
+                jet_protocol::FrameError::Io(_) | jet_protocol::FrameError::Closed
+            )
+    )
+}
+
 /// Executes a reviewed change on the Plane it was reviewed against, and
 /// nowhere else. An attempted review answers with its cached receipt.
 #[tauri::command]
@@ -859,6 +899,13 @@ pub(crate) async fn execute_paired_client_change(
     review_id: String,
 ) -> Result<ClientChangeReceipt, PublicError> {
     let id = parse_id(&review_id)?;
+    execute_change(&bridge, id).await
+}
+
+pub(crate) async fn execute_change(
+    bridge: &JetBridge,
+    id: Uuid,
+) -> Result<ClientChangeReceipt, PublicError> {
     let attempt = match bridge.pairing.attempt(id, Instant::now()) {
         Ok(attempt) => attempt,
         Err(error) => return Ok(ClientChangeReceipt::Refused { error }),
@@ -875,8 +922,43 @@ pub(crate) async fn execute_paired_client_change(
             return Ok(receipt);
         }
     };
+    // Nothing was sent if the Plane cannot be reached; the review stays
+    // retryable with the same ID.
+    let connection = connect(&client)
+        .await
+        .map_err(|error| bridge.settle(&binding, error))?;
+    let mut outcome = send_change(&connection, id, attempt.client_id, attempt.change).await;
+    let ends_own_access = attempt.via_this_plane_connection && attempt.change != Change::Enable;
+    if ends_own_access
+        && outcome
+            .as_ref()
+            .err()
+            .is_some_and(|error| transport_lost(error))
+    {
+        // The Plane ends this computer's sessions right after the change
+        // commits, which races the reply. Make exactly one fresh attempt.
+        client.invalidate(&connection).await;
+        match client.connect().await {
+            Ok(again) => {
+                // The same command ID returns the durable answer (ADR-0093).
+                outcome = send_change(&again, id, attempt.client_id, attempt.change).await;
+            }
+            Err(error) => {
+                let public = PublicError::from_client(&error);
+                if public.code == "connection.unauthorized" {
+                    let receipt = ClientChangeReceipt::AppliedUnverified {
+                        change: attempt.change.name(),
+                    };
+                    bridge.pairing.record(id, receipt.clone())?;
+                    bridge.planes.fail(binding.plane, lost_access()).await;
+                    return Ok(receipt);
+                }
+                return Err(bridge.settle(&binding, public));
+            }
+        }
+    }
     let this_client = bridge.planes.local().client_id();
-    match send_change(&client, id, attempt.client_id, attempt.change).await {
+    match outcome {
         Ok(changed) => {
             let receipt = match changed {
                 Changed::Access(row)
@@ -900,14 +982,9 @@ pub(crate) async fn execute_paired_client_change(
             };
             bridge.planes.observe_success(binding.plane, PAIRING_MINOR);
             bridge.pairing.record(id, receipt.clone())?;
-            if attempt.via_this_plane_connection && attempt.change != Change::Enable {
+            if ends_own_access {
                 // This computer just lost access to the Plane it spoke over.
-                bridge.planes.set_connection(
-                    binding.plane,
-                    super::planes::ConnectionView::Failed {
-                        error: lost_access().with_plane(binding.plane.to_string()),
-                    },
-                );
+                bridge.planes.fail(binding.plane, lost_access()).await;
             }
             Ok(receipt)
         }
@@ -1301,6 +1378,136 @@ mod tests {
             "command.outcome_unknown"
         )));
         assert!(!definite(&ClientError::Closed));
+    }
+
+    #[tokio::test]
+    async fn a_self_revoke_over_the_planes_own_connection_is_applied_unverified() {
+        use jet_protocol::{
+            ClientMessage, CommandRequest, QueryRequest, QueryResponse, ServerMessage,
+        };
+
+        use crate::jet::{
+            enrollment::{
+                self,
+                tests::{setup, unauthorized_script},
+            },
+            keystore::Credential,
+            planes::remote::tests::{
+                next_message, open, reply, request_id, status, welcome, CLIENT, PLANE,
+            },
+        };
+
+        let setup = setup();
+        let key = setup
+            .keys
+            .ensure_public(CLIENT, Credential::Durable)
+            .await
+            .unwrap();
+        let sent = Arc::new(Mutex::new(None));
+        let record = sent.clone();
+        setup.spawner.push(move |stream| async move {
+            let (mut reader, mut writer) = welcome(open(stream).await, &key).await;
+            let (stream, message) = next_message(&mut reader).await.unwrap();
+            assert!(matches!(
+                message,
+                ClientMessage::Query {
+                    query: QueryRequest::Status,
+                    ..
+                }
+            ));
+            let id = request_id(&message);
+            reply(
+                &mut writer,
+                stream,
+                ServerMessage::QueryResult {
+                    id,
+                    result: QueryResponse::Status(status(PLANE)),
+                },
+            )
+            .await;
+            // The revoke commits and the Plane ends this session before the
+            // reply reaches the client.
+            let (_, message) = next_message(&mut reader).await.unwrap();
+            if let ClientMessage::Command {
+                command_id,
+                command: CommandRequest::RevokePairedClient { client_id },
+                ..
+            } = message
+            {
+                *record.lock().unwrap() = Some((command_id, client_id));
+            }
+            Some(0)
+        });
+        let added = enrollment::add(&setup.bridge, "build-box", None, Instant::now())
+            .await
+            .unwrap();
+        let plane_id = serde_json::to_value(&added).unwrap()["plane"]["planeId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let (binding, _) = setup.bridge.plane(Some(&plane_id)).unwrap();
+        let id = setup
+            .bridge
+            .pairing
+            .prepare(binding, CLIENT, Change::Revoke, true, Instant::now())
+            .unwrap();
+        // The one reconnect is refused: this computer is no longer paired.
+        unauthorized_script(&setup.spawner);
+        let receipt = execute_change(&setup.bridge, id).await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&receipt).unwrap(),
+            serde_json::json!({"kind": "applied_unverified", "change": "revoke"})
+        );
+        assert_eq!(*sent.lock().unwrap(), Some((id, CLIENT)));
+        assert_eq!(setup.spawner.spawns(), 2, "exactly one reconnect attempt");
+        let view = serde_json::to_value(setup.bridge.planes.view(binding.plane).unwrap()).unwrap();
+        assert_eq!(view["connection"]["state"], "failed");
+        assert_eq!(
+            view["connection"]["error"]["code"],
+            "connection.unauthorized"
+        );
+        // Sticky: nothing is spawned until the user acts, and the receipt
+        // is replayed without resending.
+        let (_, client) = setup.bridge.plane(Some(&plane_id)).unwrap();
+        assert!(client.connect().await.is_err());
+        assert!(matches!(
+            execute_change(&setup.bridge, id).await.unwrap(),
+            ClientChangeReceipt::AppliedUnverified { change: "revoke" }
+        ));
+        assert_eq!(setup.spawner.spawns(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_review_for_a_forgotten_plane_is_refused_without_sending() {
+        use crate::jet::enrollment::{self, tests::setup};
+
+        let setup = setup();
+        let plane_id = enrollment::tests::pair(
+            &setup,
+            "build-box",
+            crate::jet::planes::remote::tests::PLANE,
+        )
+        .await;
+        let (binding, _) = setup.bridge.plane(Some(&plane_id)).unwrap();
+        let id = setup
+            .bridge
+            .pairing
+            .prepare(
+                binding,
+                Uuid::from_u128(5),
+                Change::Disable,
+                false,
+                Instant::now(),
+            )
+            .unwrap();
+        enrollment::forget(&setup.bridge, &plane_id).await.unwrap();
+        let spawns = setup.spawner.spawns();
+        let receipt = execute_change(&setup.bridge, id).await.unwrap();
+        assert!(matches!(
+            receipt,
+            ClientChangeReceipt::Refused { ref error } if error.code == "plane.review_moved"
+        ));
+        assert_eq!(setup.spawner.spawns(), spawns, "nothing is sent");
     }
 
     #[test]

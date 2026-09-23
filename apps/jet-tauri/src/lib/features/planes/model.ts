@@ -179,6 +179,22 @@ export function planeErrorCopy(error: PublicError, label: string): string {
       return `This computer paired with ${label} for one session only. Pair again to reconnect.`;
     case "plane.review_moved":
       return `${label} changed since this was prepared. Review it again.`;
+    case "identity.key_missing":
+      return `This computer's pairing key for ${label} is missing. Pair again.`;
+    case "plane.duplicates_local":
+      return `${label} is this computer's own Plane. Forget it.`;
+    case "plane.identity_changed":
+      return `${label} now reaches a different Plane. Forget it and add it again if that's expected.`;
+    case "ssh.connection_failed":
+      return `Jet couldn't connect to ${label} over SSH. Check that \`ssh ${label}\` works in a terminal without asking questions.`;
+    case "ssh.client_missing":
+      return "OpenSSH isn't installed on this computer.";
+    case "plane.jetd_missing":
+      return `Jet isn't installed on ${label}, or \`jetd\` isn't on the \`PATH\` that SSH uses for commands.`;
+    case "plane.jetd_unavailable":
+      return `Jet isn't running on ${label}.`;
+    case "plane.handshake_refused":
+      return `${label} answered in a way Jet doesn't trust, so Jet stopped.`;
     case "security.audit_degraded":
       return `${label} can't vouch for its security record. Changes to trust are paused.`;
     case "recovery.read_only":
@@ -368,6 +384,7 @@ export function planeStatus(plane: Pick<Plane, "connection" | "security" | "stor
   if (connection.state === "failed") {
     switch (connection.error.code) {
       case "connection.unauthorized":
+      case "identity.key_missing":
         return { text: "Needs pairing", tone: "danger", attention: true };
       case "identity.session_ended":
         return { text: "Session ended", tone: "danger", attention: true };
@@ -508,4 +525,102 @@ export function pairingEndedCopy(
     case "claimed":
       return "The code was used by another computer.";
   }
+}
+
+/**
+ * Display grouping for a typed one-time code: digits only, at most eight,
+ * shown as `xxxx-yyyy`. Native code validates what is sent.
+ */
+export function normalizeManualCode(input: string): string {
+  const digits = input.replace(/[^0-9]/g, "").slice(0, 8);
+  return digits.length > 4 ? `${digits.slice(0, 4)}-${digits.slice(4)}` : digits;
+}
+
+/** A refused login that pairing again can fix, so the UI offers Pair again. */
+export function needsPairing(error: PublicError | null): boolean {
+  return (
+    error?.code === "connection.unauthorized" ||
+    error?.code === "identity.key_missing" ||
+    error?.code === "identity.session_ended"
+  );
+}
+
+/** Only Forget helps: the entry is not a separate Plane it can reach. */
+export function onlyForget(error: PublicError | null): boolean {
+  return error?.code === "plane.duplicates_local" || error?.code === "plane.identity_changed";
+}
+
+/** Secure-storage problems handled by the wizard's own step (ADR-0076). */
+export function secureStorageProblem(error: PublicError): boolean {
+  return error.code === "identity.secret_store_unavailable" || error.code === "identity.secret_store_locked";
+}
+
+/** The Plane's code has lapsed: the wizard returns to the code step. */
+export function offerLapsed(error: PublicError): boolean {
+  return (
+    error.code === "pairing.offer_expired" ||
+    error.code === "pairing.offer_ended" ||
+    error.code === "pairing.offer_superseded" ||
+    error.code === "enrollment.ticket_expired"
+  );
+}
+
+/** Enrollment failure copy, chosen by stable code (§7.4). */
+export function enrollmentFailureCopy(error: PublicError, destination: string): string {
+  switch (error.code) {
+    case "ssh.connection_failed":
+      return `Jet couldn't connect over SSH. Check the address, and that \`ssh ${destination}\` works in a terminal without asking questions.`;
+    case "ssh.client_missing":
+      return "OpenSSH isn't installed on this computer.";
+    case "plane.jetd_missing":
+      return `Jet isn't installed on ${destination}, or \`jetd\` isn't on the \`PATH\` that SSH uses for commands. Non-interactive SSH sessions often skip your shell profile.`;
+    case "plane.jetd_unavailable":
+      return `Jet isn't running on ${destination}.`;
+    case "plane.handshake_refused":
+      return `${destination} answered in a way Jet doesn't trust, so Jet stopped. Nothing was sent.`;
+    case "pairing.secret_rejected":
+      return `That code is wrong. Check it on ${destination}. After several wrong codes it stops working.`;
+    case "pairing.offer_expired":
+    case "pairing.offer_ended":
+    case "pairing.offer_superseded":
+    case "enrollment.ticket_expired":
+      return `This pairing request expired. Get a new code on ${destination}.`;
+    case "pairing.none_offered":
+    case "pairing.gate_closed":
+      return `That code is no longer valid. Get a new one on ${destination}.`;
+    case "pairing.not_confirmed":
+      return `${destination} hasn't confirmed yet.`;
+    case "enrollment.transcript_invalid":
+      return `Jet stopped pairing because ${destination}'s reply didn't check out. Nothing was paired.`;
+    case "enrollment.code_invalid":
+      return "Type the 8-digit code shown on the other computer.";
+    case "enrollment.draft_expired":
+      return "This pairing request expired. Start adding the Plane again.";
+    case "plane.already_registered":
+      return "This is the same Plane as one already on this computer.";
+    case "plane.identity_changed":
+      return `${destination} now reaches a different Plane. Forget it and add it again if that's expected.`;
+    case "plane.destination_invalid":
+      return "Enter an SSH address such as user@host, or a host alias from your SSH config.";
+    case "plane.limit_reached":
+      return "This computer already has the maximum of 16 remote Planes. Forget one first.";
+    case "connection.limit":
+      return `${destination} has too many connections right now. Try again shortly.`;
+    case "security.audit_degraded":
+      return `${destination} isn't accepting pairing changes right now: its security record needs attention.`;
+    case "recovery.read_only":
+      return `${destination} isn't accepting pairing changes right now: it is in read-only recovery.`;
+    case "protocol.remote_auth_required":
+    case "protocol.incompatible":
+    case "protocol.feature_unavailable":
+      return `${destination} runs a Jet version that can't pair remotely. Update Jet there.`;
+    case "identity.key_missing":
+      return "This computer's pairing key is missing. Pair again.";
+    case "identity.unsupported_platform":
+      return "This computer has no supported secure storage for a pairing key.";
+  }
+  if (error.category === "incompatible") {
+    return `${destination} runs a Jet version that can't pair remotely. Update Jet there.`;
+  }
+  return planeErrorCopy(error, destination);
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-remote-pairing"
+description = "Enables the cancel_remote_pairing command without any pre-configured scope."
+commands.allow = ["cancel_remote_pairing"]
+
+[[permission]]
+identifier = "deny-cancel-remote-pairing"
+description = "Denies the cancel_remote_pairing command without any pre-configured scope."
+commands.deny = ["cancel_remote_pairing"]

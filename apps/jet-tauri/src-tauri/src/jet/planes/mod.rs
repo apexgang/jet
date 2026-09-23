@@ -1,11 +1,16 @@
 //! The Plane registry: opaque native Plane handles, what each Plane last
 //! reported, and the bindings that tie prepared native authority to the Plane
-//! it was prepared against. Slice 1 registers only the local Plane; remote
-//! entries arrive with the SSH transport.
+//! it was prepared against. Remote Planes are reached only over SSH
+//! (`remote`, `spawner`) and persisted in `planes.json` (`registry_file`)
+//! once their identity is proven.
 pub(crate) mod knowledge;
+pub(crate) mod registry_file;
+pub(crate) mod remote;
+pub(crate) mod spawner;
 
 use std::{
     fmt,
+    path::Path,
     sync::{Arc, Mutex, RwLock},
 };
 
@@ -17,13 +22,27 @@ use serde::Serialize;
 use tauri::State;
 use uuid::Uuid;
 
-use self::knowledge::{FeatureView, ProtocolKnowledge, ProtocolView};
-use super::{client::PlaneClient, errors::PublicError, JetBridge};
+use jet_client::SshEndpoint;
+
+use self::{
+    knowledge::{FeatureView, ProtocolKnowledge, ProtocolView},
+    registry_file::{
+        validate_destination, DestinationKey, RegistryFile, Stored, StoredPlane,
+        MAXIMUM_REMOTE_PLANES,
+    },
+    remote::{ConnectorParts, RemoteConnector, RemoteSession},
+    spawner::SshSpawner,
+};
+use super::{
+    client::PlaneClient,
+    errors::PublicError,
+    keystore::{session_ended, Credential, IdentityKeys},
+    JetBridge,
+};
 
 /// Linux counterpart of the design language's "This Mac".
 pub(crate) const LOCAL_LABEL: &str = "This computer";
 const LOCAL_ID: &str = "local";
-const MAXIMUM_REMOTE_PLANES: u32 = 16;
 
 /// Opaque native Plane handle. The webview never learns sockets, paths or SSH
 /// arguments through it: it is the literal `local` or a native-issued UUID.
@@ -238,9 +257,10 @@ pub(crate) struct PlaneDetailView {
 }
 
 /// Everything the shell last learned about one Plane. Only Plane-reported,
-/// bounded facts live here; nothing is authority on its own.
+/// bounded facts live here; nothing is authority on its own. A remote
+/// Plane's connector shares this record and writes its connection state.
 #[derive(Default)]
-struct Observed {
+pub(crate) struct Observed {
     identity: Option<Uuid>,
     core_version: Option<String>,
     knowledge: ProtocolKnowledge,
@@ -248,36 +268,218 @@ struct Observed {
     connection: ConnectionView,
 }
 
+impl Observed {
+    /// Seeds identity, health, core version and protocol knowledge from a
+    /// status read.
+    pub(crate) fn apply_status(&mut self, status: &PlaneStatus) {
+        self.identity = Some(status.plane_id);
+        self.core_version = Some(bounded_text(&status.core_version, 48, "Unknown"));
+        self.knowledge.observe_status(status);
+        self.health = PlaneHealth::from_status(status);
+    }
+}
+
+/// What the shell keeps about a remote Plane. The SSH endpoint stays
+/// native; the webview sees only the destination text as the label.
+struct RemoteMeta {
+    endpoint: SshEndpoint,
+    key: DestinationKey,
+    /// Proven by a login or a completed pairing; checked on every login.
+    plane_identity: Uuid,
+    added_at_unix_ms: i64,
+    connector: Arc<RemoteConnector>,
+}
+
 struct PlaneEntry {
     id: PlaneId,
     label: String,
     client: PlaneClient,
-    observed: Mutex<Observed>,
+    observed: Arc<Mutex<Observed>>,
+    remote: Option<RemoteMeta>,
 }
 
-/// Native registry of reachable Planes. The local Plane is always first.
+/// Everything needed to pair a registered remote Plane again in place.
+pub(crate) struct RemoteTarget {
+    pub(crate) binding: PlaneBinding,
+    pub(crate) destination: String,
+    pub(crate) endpoint: SshEndpoint,
+    pub(crate) client: PlaneClient,
+    pub(crate) credential: Credential,
+}
+
+/// A remote Plane to register once its identity is proven.
+pub(crate) struct NewRemote {
+    pub(crate) id: Uuid,
+    pub(crate) destination: String,
+    pub(crate) endpoint: SshEndpoint,
+    pub(crate) plane_identity: Uuid,
+    pub(crate) credential: Credential,
+    /// A login made while adding, adopted so ssh is not spawned twice.
+    pub(crate) session: Option<(RemoteSession, PlaneStatus)>,
+}
+
+/// Native registry of reachable Planes. The local Plane is always first,
+/// then remote Planes in the order they were added.
 pub(crate) struct PlaneRegistry {
     local: PlaneClient,
     entries: RwLock<Vec<Arc<PlaneEntry>>>,
+    file: Option<RegistryFile>,
+    /// The local Plane identity as last persisted, for the duplicate check
+    /// while local jetd is offline.
+    local_identity: Mutex<Option<Uuid>>,
+    notice: Option<&'static str>,
+    spawner: Arc<dyn SshSpawner>,
+    keys: Arc<IdentityKeys>,
+    /// Serializes registry changes with their file writes.
+    changes: Mutex<()>,
+}
+
+impl fmt::Debug for PlaneRegistry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let planes: Vec<String> = self
+            .all()
+            .unwrap_or_default()
+            .iter()
+            .map(|entry| entry.id.to_string())
+            .collect();
+        formatter
+            .debug_struct("PlaneRegistry")
+            .field("planes", &planes)
+            .finish_non_exhaustive()
+    }
 }
 
 impl PlaneRegistry {
-    pub(crate) fn new(local: PlaneClient) -> Self {
+    /// Loads the persisted remote Planes. Without `directory` nothing is
+    /// persisted (tests).
+    pub(crate) fn open(
+        local: PlaneClient,
+        directory: Option<&Path>,
+        spawner: Arc<dyn SshSpawner>,
+        keys: Arc<IdentityKeys>,
+    ) -> Self {
+        let file = directory.map(RegistryFile::new);
+        let (stored, notice) = file.as_ref().map(RegistryFile::load).unwrap_or_default();
         let entry = Arc::new(PlaneEntry {
             id: PlaneId::Local,
             label: LOCAL_LABEL.into(),
             client: local.clone(),
-            observed: Mutex::new(Observed::default()),
+            observed: Arc::new(Mutex::new(Observed::default())),
+            remote: None,
         });
-        Self {
+        let registry = Self {
             local,
             entries: RwLock::new(vec![entry]),
+            file,
+            local_identity: Mutex::new(stored.local_identity),
+            notice,
+            spawner,
+            keys,
+            changes: Mutex::new(()),
+        };
+        for plane in stored.planes {
+            let Ok((destination, endpoint)) = validate_destination(&plane.destination) else {
+                continue;
+            };
+            let entry = registry.remote_entry(
+                plane.id,
+                destination,
+                endpoint,
+                plane.plane_identity,
+                plane.credential,
+                plane.added_at_unix_ms,
+                None,
+            );
+            if plane.credential == Credential::Session {
+                // The session key died with the previous process.
+                if let Some(meta) = &entry.remote {
+                    // No login can be in flight before the registry exists.
+                    let _ = meta.connector.fail_now(session_ended());
+                }
+            }
+            if let Ok(mut entries) = registry.entries.write() {
+                entries.push(entry);
+            }
         }
+        if let Some(identity) = stored.local_identity {
+            registry.mark_local_duplicates(identity);
+        }
+        registry
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new(local: PlaneClient) -> Self {
+        Self::open(
+            local,
+            None,
+            Arc::new(spawner::SystemSsh),
+            Arc::new(IdentityKeys::new(Arc::new(
+                crate::jet::keystore::SessionKeyStore::default(),
+            ))),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn remote_entry(
+        &self,
+        id: Uuid,
+        destination: String,
+        endpoint: SshEndpoint,
+        plane_identity: Uuid,
+        credential: Credential,
+        added_at_unix_ms: i64,
+        session: Option<(RemoteSession, PlaneStatus)>,
+    ) -> Arc<PlaneEntry> {
+        let plane = PlaneId::Remote(id);
+        let mut observed = Observed {
+            identity: Some(plane_identity),
+            ..Observed::default()
+        };
+        let session = session.map(|(session, status)| {
+            observed.apply_status(&status);
+            observed.connection = ConnectionView::Online;
+            session
+        });
+        let observed = Arc::new(Mutex::new(observed));
+        let connector = Arc::new(RemoteConnector::new(
+            ConnectorParts {
+                plane,
+                endpoint: endpoint.clone(),
+                client_id: self.local.client_id(),
+                expected_identity: plane_identity,
+                credential,
+                spawner: Arc::clone(&self.spawner),
+                keys: Arc::clone(&self.keys),
+                observed: Arc::clone(&observed),
+            },
+            session,
+        ));
+        Arc::new(PlaneEntry {
+            id: plane,
+            label: destination.clone(),
+            client: PlaneClient::remote(Arc::clone(&connector), self.local.client_id()),
+            observed,
+            remote: Some(RemoteMeta {
+                key: DestinationKey::of(&destination),
+                endpoint,
+                plane_identity,
+                added_at_unix_ms,
+                connector,
+            }),
+        })
     }
 
     /// The local Plane. Project setup and new tasks stay local in Wave 3.1.
     pub(crate) fn local(&self) -> &PlaneClient {
         &self.local
+    }
+
+    pub(crate) fn keys(&self) -> &Arc<IdentityKeys> {
+        &self.keys
+    }
+
+    pub(crate) fn spawner(&self) -> &Arc<dyn SshSpawner> {
+        &self.spawner
     }
 
     fn entry(&self, plane: PlaneId) -> Result<Option<Arc<PlaneEntry>>, PublicError> {
@@ -321,14 +523,9 @@ impl PlaneRegistry {
     /// `plane.review_moved` when that Plane is gone or is now a different
     /// Plane. No bytes are sent to any Plane on refusal.
     pub(crate) fn bound(&self, binding: &PlaneBinding) -> Result<PlaneClient, PublicError> {
-        let moved = || {
-            PublicError::conflict(
-                "plane.review_moved",
-                "This Plane changed since the request was prepared. Review it again.",
-            )
-            .with_plane(binding.plane.to_string())
-        };
-        let entry = self.entry(binding.plane)?.ok_or_else(moved)?;
+        let entry = self
+            .entry(binding.plane)?
+            .ok_or_else(|| review_moved(binding.plane))?;
         let current = entry
             .observed
             .lock()
@@ -336,7 +533,7 @@ impl PlaneRegistry {
             .identity;
         if let (Some(prepared), Some(current)) = (binding.identity, current) {
             if prepared != current {
-                return Err(moved());
+                return Err(review_moved(binding.plane));
             }
         }
         Ok(entry.client.clone())
@@ -351,14 +548,44 @@ impl PlaneRegistry {
     }
 
     /// Seeds identity, health, core version and protocol knowledge from a
-    /// status read. Every status read in the shell goes through here.
+    /// status read. Every status read in the shell goes through here. When
+    /// the local identity is learned, remote entries that are really this
+    /// computer's own Plane are failed.
     pub(crate) fn observe_status(&self, plane: PlaneId, status: &PlaneStatus) {
-        self.update(plane, |observed| {
-            observed.identity = Some(status.plane_id);
-            observed.core_version = Some(bounded_text(&status.core_version, 48, "Unknown"));
-            observed.knowledge.observe_status(status);
-            observed.health = PlaneHealth::from_status(status);
-        });
+        self.update(plane, |observed| observed.apply_status(status));
+        if plane == PlaneId::Local {
+            self.learn_local_identity(status.plane_id);
+        }
+    }
+
+    fn learn_local_identity(&self, identity: Uuid) {
+        let changed = match self.local_identity.lock() {
+            Ok(mut known) if *known != Some(identity) => {
+                *known = Some(identity);
+                true
+            }
+            _ => false,
+        };
+        if changed {
+            if let Ok(_guard) = self.changes.lock() {
+                let _ = self.persist();
+            }
+            self.mark_local_duplicates(identity);
+        }
+    }
+
+    fn mark_local_duplicates(&self, identity: Uuid) {
+        for entry in self.all().unwrap_or_default() {
+            if let Some(meta) = &entry.remote {
+                if meta.plane_identity == identity && !meta.connector.fail_now(duplicates_local()) {
+                    // A login is in flight; record the failure once it ends.
+                    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                        let connector = Arc::clone(&meta.connector);
+                        runtime.spawn(async move { connector.fail(duplicates_local()).await });
+                    }
+                }
+            }
+        }
     }
 
     /// A gated call succeeded, so the Plane speaks at least `required`.
@@ -370,6 +597,23 @@ impl PlaneRegistry {
 
     pub(crate) fn set_connection(&self, plane: PlaneId, connection: ConnectionView) {
         self.update(plane, |observed| observed.connection = connection);
+    }
+
+    /// Records a failure the shell concluded itself (for example this
+    /// computer lost access after changing its own Pairing). On a remote
+    /// Plane it is sticky until Retry, Pair again or Forget.
+    pub(crate) async fn fail(&self, plane: PlaneId, error: PublicError) {
+        if let Some(entry) = self.entry(plane).ok().flatten() {
+            match &entry.remote {
+                Some(meta) => meta.connector.fail(error).await,
+                None => self.set_connection(
+                    plane,
+                    ConnectionView::Failed {
+                        error: error.with_plane(plane.to_string()),
+                    },
+                ),
+            }
+        }
     }
 
     /// Records what a failure proves about the Plane and names the Plane on
@@ -444,6 +688,222 @@ impl PlaneRegistry {
             .collect()
     }
 
+    // -- Remote entries ----------------------------------------------------
+
+    pub(crate) fn remote_count(&self) -> usize {
+        self.all()
+            .unwrap_or_default()
+            .iter()
+            .filter(|entry| entry.remote.is_some())
+            .count()
+    }
+
+    /// Refuses an SSH address another entry already uses. `skip` is the
+    /// entry being paired again, and only that entry.
+    pub(crate) fn check_destination(
+        &self,
+        destination: &str,
+        skip: Option<Uuid>,
+    ) -> Result<(), PublicError> {
+        let key = DestinationKey::of(destination);
+        let taken = self.all()?.iter().any(|entry| {
+            entry.id != skip.map_or(PlaneId::Local, PlaneId::Remote)
+                && entry.remote.as_ref().is_some_and(|meta| meta.key == key)
+        });
+        if taken {
+            return Err(already_registered());
+        }
+        Ok(())
+    }
+
+    /// Refuses a Plane identity that another entry, or the local Plane,
+    /// already has. `ssh localhost` and host aliases are caught here.
+    pub(crate) fn check_identity(
+        &self,
+        identity: Uuid,
+        skip: Option<Uuid>,
+    ) -> Result<(), PublicError> {
+        let local = self
+            .identity(PlaneId::Local)
+            .or_else(|| self.local_identity.lock().ok().and_then(|value| *value));
+        if local == Some(identity) {
+            return Err(already_registered());
+        }
+        let taken = self.all()?.iter().any(|entry| {
+            entry.id != skip.map_or(PlaneId::Local, PlaneId::Remote)
+                && entry
+                    .remote
+                    .as_ref()
+                    .is_some_and(|meta| meta.plane_identity == identity)
+        });
+        if taken {
+            return Err(already_registered());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check_capacity(&self) -> Result<(), PublicError> {
+        if self.remote_count() >= MAXIMUM_REMOTE_PLANES {
+            return Err(PublicError::invalid_input(
+                "plane.limit_reached",
+                "This computer already has the maximum of 16 remote Planes. Forget one first.",
+            ));
+        }
+        Ok(())
+    }
+
+    /// A registered remote Plane, for Pair again. `local` is not removable
+    /// and cannot be paired again.
+    pub(crate) fn remote_target(&self, plane_id: &str) -> Result<RemoteTarget, PublicError> {
+        let plane = PlaneId::parse(plane_id)?;
+        if plane == PlaneId::Local {
+            return Err(local_not_removable());
+        }
+        let entry = self.entry(plane)?.ok_or_else(unknown_plane)?;
+        let meta = entry.remote.as_ref().ok_or_else(unknown_plane)?;
+        Ok(RemoteTarget {
+            binding: PlaneBinding {
+                plane,
+                identity: Some(meta.plane_identity),
+            },
+            destination: entry.label.clone(),
+            endpoint: meta.endpoint.clone(),
+            client: entry.client.clone(),
+            credential: meta.connector.credential(),
+        })
+    }
+
+    /// Registers a remote Plane whose identity is proven, then persists the
+    /// registry. The duplicate and capacity checks run again here, under the
+    /// same lock as the write.
+    pub(crate) fn add_remote(
+        &self,
+        plane: NewRemote,
+        added_at_unix_ms: i64,
+    ) -> Result<PlaneId, PublicError> {
+        let _guard = self.changes.lock().map_err(|_| PublicError::internal())?;
+        self.check_capacity()?;
+        self.check_destination(&plane.destination, None)?;
+        self.check_identity(plane.plane_identity, None)?;
+        let id = PlaneId::Remote(plane.id);
+        if self.contains(id) {
+            return Err(PublicError::internal());
+        }
+        let entry = self.remote_entry(
+            plane.id,
+            plane.destination,
+            plane.endpoint,
+            plane.plane_identity,
+            plane.credential,
+            added_at_unix_ms,
+            plane.session,
+        );
+        self.entries
+            .write()
+            .map_err(|_| PublicError::internal())?
+            .push(entry);
+        if self.persist().is_err() {
+            self.entries
+                .write()
+                .map_err(|_| PublicError::internal())?
+                .retain(|entry| entry.id != id);
+            return Err(registry_unsaved());
+        }
+        Ok(id)
+    }
+
+    /// Pair again replaced this computer's key on the Plane: same entry,
+    /// same `PlaneId`, new credential. The identity must be the stored one.
+    pub(crate) async fn repaired(
+        &self,
+        binding: &PlaneBinding,
+        credential: Credential,
+    ) -> Result<PlaneClient, PublicError> {
+        let entry = self
+            .entry(binding.plane)?
+            .ok_or_else(|| review_moved(binding.plane))?;
+        let meta = entry
+            .remote
+            .as_ref()
+            .ok_or_else(|| review_moved(binding.plane))?;
+        if Some(meta.plane_identity) != binding.identity {
+            return Err(review_moved(binding.plane));
+        }
+        let previous = meta.connector.credential();
+        meta.connector.set_credential(credential);
+        let saved = {
+            let _guard = self.changes.lock().map_err(|_| PublicError::internal())?;
+            self.persist()
+        };
+        if saved.is_err() {
+            meta.connector.set_credential(previous);
+            return Err(registry_unsaved());
+        }
+        meta.connector.reset().await;
+        meta.connector.shutdown().await;
+        Ok(entry.client.clone())
+    }
+
+    /// Removes a remote Plane from this computer and kills its ssh. Nothing
+    /// is sent to the Plane.
+    pub(crate) async fn forget(&self, plane: PlaneId) -> Result<(), PublicError> {
+        if plane == PlaneId::Local {
+            return Err(local_not_removable());
+        }
+        let removed = {
+            let _guard = self.changes.lock().map_err(|_| PublicError::internal())?;
+            let removed = {
+                let mut entries = self.entries.write().map_err(|_| PublicError::internal())?;
+                let index = entries
+                    .iter()
+                    .position(|entry| entry.id == plane)
+                    .ok_or_else(unknown_plane)?;
+                entries.remove(index)
+            };
+            if self.persist().is_err() {
+                if let Ok(mut entries) = self.entries.write() {
+                    entries.push(Arc::clone(&removed));
+                }
+                return Err(registry_unsaved());
+            }
+            removed
+        };
+        if let Some(meta) = &removed.remote {
+            meta.connector.shutdown().await;
+        }
+        Ok(())
+    }
+
+    /// Writes `planes.json` from the current entries. Callers hold `changes`.
+    fn persist(&self) -> std::io::Result<()> {
+        let Some(file) = &self.file else {
+            return Ok(());
+        };
+        let planes = self
+            .all()
+            .map_err(|_| std::io::Error::other("registry unavailable"))?
+            .iter()
+            .filter_map(|entry| {
+                let meta = entry.remote.as_ref()?;
+                let PlaneId::Remote(id) = entry.id else {
+                    return None;
+                };
+                Some(StoredPlane {
+                    id,
+                    destination: entry.label.clone(),
+                    plane_identity: meta.plane_identity,
+                    credential: meta.connector.credential(),
+                    added_at_unix_ms: meta.added_at_unix_ms,
+                })
+            })
+            .collect();
+        let local_identity = self.local_identity.lock().ok().and_then(|value| *value);
+        file.save(&Stored {
+            local_identity,
+            planes,
+        })
+    }
+
     fn view_of(entry: &PlaneEntry) -> Result<PlaneView, PublicError> {
         let observed = entry.observed.lock().map_err(|_| PublicError::internal())?;
         let health = observed.health.view();
@@ -454,7 +914,10 @@ impl PlaneRegistry {
             plane_identity: observed.identity.map(|id| id.to_string()),
             connection: observed.connection.clone(),
             core_version: observed.core_version.clone(),
-            credential: None,
+            credential: entry
+                .remote
+                .as_ref()
+                .map(|meta| meta.connector.credential().name()),
             security: health.security,
             store: health.store,
             features: observed.knowledge.features(),
@@ -474,13 +937,39 @@ impl PlaneRegistry {
         Self::view_of(&entry)
     }
 
+    /// Registry snapshot plus identity state. Never connects, never touches
+    /// the secret store.
+    pub(crate) fn snapshot(
+        &self,
+        restored_selection: Option<(Uuid, PlaneId)>,
+    ) -> Result<PlanesView, PublicError> {
+        let key = self.keys.view();
+        Ok(PlanesView {
+            planes: self.views()?,
+            identity: IdentityView {
+                client_id: self.local.client_id().to_string(),
+                key: key.key,
+                fingerprint: key.fingerprint,
+            },
+            restored_selection: restored_selection
+                .filter(|(_, plane)| self.contains(*plane))
+                .map(|(conversation_id, plane)| SelectionView {
+                    plane_id: plane.to_string(),
+                    conversation_id: conversation_id.to_string(),
+                }),
+            notice: self.notice,
+            maximum_remote_planes: MAXIMUM_REMOTE_PLANES as u32,
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn insert_for_test(&self, id: Uuid, label: &str, client: PlaneClient) {
         self.entries.write().unwrap().push(Arc::new(PlaneEntry {
             id: PlaneId::Remote(id),
             label: label.into(),
             client,
-            observed: Mutex::new(Observed::default()),
+            observed: Arc::new(Mutex::new(Observed::default())),
+            remote: None,
         }));
     }
 
@@ -491,6 +980,39 @@ impl PlaneRegistry {
             .unwrap()
             .retain(|entry| entry.id != PlaneId::Remote(id));
     }
+}
+
+fn review_moved(plane: PlaneId) -> PublicError {
+    PublicError::conflict(
+        "plane.review_moved",
+        "This Plane changed since the request was prepared. Review it again.",
+    )
+    .with_plane(plane.to_string())
+}
+
+pub(crate) fn already_registered() -> PublicError {
+    PublicError::conflict(
+        "plane.already_registered",
+        "This is the same Plane as one already on this computer.",
+    )
+}
+
+fn duplicates_local() -> PublicError {
+    PublicError::conflict(
+        "plane.duplicates_local",
+        "This is this computer's own Plane. Forget it.",
+    )
+}
+
+pub(crate) fn local_not_removable() -> PublicError {
+    PublicError::invalid_input(
+        "plane.local_not_removable",
+        "This computer's own Plane is always listed.",
+    )
+}
+
+fn registry_unsaved() -> PublicError {
+    PublicError::internal()
 }
 
 fn unknown_plane() -> PublicError {
@@ -504,25 +1026,9 @@ fn unknown_plane() -> PublicError {
 /// never touches the secret store.
 #[tauri::command]
 pub(crate) fn list_planes(bridge: State<'_, JetBridge>) -> Result<PlanesView, PublicError> {
-    let restored_selection = bridge
-        .conversations
-        .restored_selection()?
-        .filter(|(_, plane)| bridge.planes.contains(*plane))
-        .map(|(conversation_id, plane)| SelectionView {
-            plane_id: plane.to_string(),
-            conversation_id: conversation_id.to_string(),
-        });
-    Ok(PlanesView {
-        planes: bridge.planes.views()?,
-        identity: IdentityView {
-            client_id: bridge.planes.local().client_id().to_string(),
-            key: "unknown",
-            fingerprint: None,
-        },
-        restored_selection,
-        notice: None,
-        maximum_remote_planes: MAXIMUM_REMOTE_PLANES,
-    })
+    bridge
+        .planes
+        .snapshot(bridge.conversations.restored_selection()?)
 }
 
 /// Status, capabilities and protocol knowledge for one Plane. Each part fails
@@ -534,6 +1040,14 @@ pub(crate) async fn load_plane_detail(
 ) -> Result<PlaneDetailView, PublicError> {
     let (binding, client) = bridge.planes.resolve(Some(&plane_id))?;
     let plane = binding.plane;
+    if let Some(connector) = client.connector() {
+        // Key presence only; nothing is unlocked here.
+        bridge
+            .planes
+            .keys()
+            .has_seed(client.client_id(), connector.credential())
+            .await;
+    }
     let mut issues = Vec::new();
     let mut capabilities = None;
     match client.connect().await {

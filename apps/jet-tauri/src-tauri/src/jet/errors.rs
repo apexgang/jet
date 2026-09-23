@@ -90,8 +90,36 @@ enum PublicSafeState {
     },
 }
 
+/// Anything that can fail a Plane request: a `jet_client` failure, or a
+/// failure the shell classified itself while reaching a remote Plane.
+pub(crate) trait ToPublic {
+    fn to_public(&self) -> PublicError;
+}
+
+impl ToPublic for ClientError {
+    fn to_public(&self) -> PublicError {
+        PublicError::from_client_error(self)
+    }
+}
+
+impl<T: ToPublic + ?Sized> ToPublic for Box<T> {
+    fn to_public(&self) -> PublicError {
+        (**self).to_public()
+    }
+}
+
+impl ToPublic for PublicError {
+    fn to_public(&self) -> PublicError {
+        self.clone()
+    }
+}
+
 impl PublicError {
-    pub(crate) fn from_client(error: &ClientError) -> Self {
+    pub(crate) fn from_client<E: ToPublic + ?Sized>(error: &E) -> Self {
+        error.to_public()
+    }
+
+    fn from_client_error(error: &ClientError) -> Self {
         match error {
             ClientError::Rejected(error)
             | ClientError::Remote(error)
@@ -171,6 +199,16 @@ impl PublicError {
         Self::new("unauthorized", code, message, false)
     }
 
+    /// A Plane or local facility that cannot serve the request right now.
+    pub(crate) fn unavailable(code: &'static str, message: &'static str, retryable: bool) -> Self {
+        Self::new("unavailable", code, message, retryable)
+    }
+
+    /// A reply the shell refuses to trust, classified by call site.
+    pub(crate) fn invalid_response_code(code: &'static str, message: &'static str) -> Self {
+        Self::new("invalid_response", code, message, false)
+    }
+
     pub(crate) fn internal() -> Self {
         Self::new(
             "internal",
@@ -197,7 +235,7 @@ impl PublicError {
         )
     }
 
-    fn offline() -> Self {
+    pub(crate) fn offline() -> Self {
         Self::new(
             "offline",
             "transport.offline",

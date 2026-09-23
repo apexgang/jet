@@ -8,6 +8,7 @@ import {
 import { publicError } from "$lib/jet/errors";
 import {
   LOCAL_PLANE,
+  forgetRemotePlane,
   listPlanes,
   loadPlaneDetail,
   planeLabel,
@@ -17,6 +18,7 @@ import {
   type PlanesSnapshot,
 } from "$lib/jet/planes";
 
+import { PlaneEnrollment } from "./enrollment.svelte";
 import { aggregateStatus, planeAttentionCount } from "./model";
 import { OwnerPairing } from "./pairing.svelte";
 
@@ -33,7 +35,17 @@ export type FeedHandler = {
   receive(planeId: PlaneId, update: PlaneUpdate): void;
   opened(planeId: PlaneId, snapshot: ConnectionSnapshot): void;
   openFailed(planeId: PlaneId, error: PublicError): void;
+  /** A Plane was paired (new) or paired again (`repaired`). */
+  planePaired?(planeId: PlaneId, repaired: boolean): Promise<void> | void;
+  /** A Plane was forgotten on this computer. */
+  planeForgotten?(planeId: PlaneId): void;
 };
+
+export type ForgetState =
+  | { kind: "idle" }
+  | { kind: "confirming"; planeId: PlaneId }
+  | { kind: "forgetting"; planeId: PlaneId }
+  | { kind: "failed"; planeId: PlaneId; error: PublicError };
 
 /**
  * The webview's mirror of the native Plane registry plus one live feed per
@@ -56,6 +68,9 @@ export class PlanesSession {
   pendingSwitch = $state<{ planeId: PlaneId; focus: PlanesFocus | null } | null>(null);
   /** Owner-side Pairing for the selected Plane. */
   readonly pairing: OwnerPairing;
+  /** Add a Plane / Pair again. */
+  readonly enrollment: PlaneEnrollment;
+  forgetState = $state<ForgetState>({ kind: "idle" });
 
   private refreshRequest = 0;
   private detailRequest = 0;
@@ -68,7 +83,75 @@ export class PlanesSession {
 
   constructor(handler: FeedHandler) {
     this.handler = handler;
-    this.pairing = new OwnerPairing((planeId) => this.label(planeId));
+    this.pairing = new OwnerPairing(
+      (planeId) => this.label(planeId),
+      (planeId) => this.forget(planeId),
+    );
+    this.enrollment = new PlaneEnrollment((plane, repaired) => this.paired(plane, repaired));
+  }
+
+  private async paired(plane: Plane, repaired: boolean): Promise<void> {
+    await this.refresh();
+    await this.handler.planePaired?.(plane.planeId, repaired);
+    if (this.selectedPlaneId === plane.planeId) void this.loadDetail();
+  }
+
+  /** Opens the wizard at the SSH address. */
+  startAdd(): void {
+    this.enrollment.startAdd();
+  }
+
+  /** Pair again, in place, for a registered remote Plane. */
+  startRepair(planeId: PlaneId): Promise<void> {
+    const plane = this.plane(planeId);
+    if (!plane || plane.kind !== "remote") return Promise.resolve();
+    return this.enrollment.startRepair(planeId, plane.label);
+  }
+
+  /** Shows the inline Forget choice for a remote Plane. */
+  askForget(planeId: PlaneId): void {
+    if (this.plane(planeId)?.kind === "remote") this.forgetState = { kind: "confirming", planeId };
+  }
+
+  cancelForget(): void {
+    if (this.forgetState.kind !== "forgetting") this.forgetState = { kind: "idle" };
+  }
+
+  /**
+   * Revoke this computer's access on the Plane, then forget it. Runs the
+   * reviewed revoke (ClientChangeDialog); on a refusal or an uncertain
+   * outcome it stops and shows the error, and plain Forget stays available.
+   */
+  async revokeThenForget(planeId: PlaneId): Promise<void> {
+    const view = this.pairing.planeId === planeId ? this.pairing.view : null;
+    if (!view) return;
+    this.forgetState = { kind: "idle" };
+    await this.pairing.prepareChange(view.thisClientId, "revoke", { thenForget: true });
+  }
+
+  /**
+   * Forget only: removes the Plane from this computer and hides its tasks.
+   * Nothing is sent to the Plane, which still lists this computer as paired.
+   */
+  async forget(planeId: PlaneId): Promise<void> {
+    if (planeId === LOCAL_PLANE) return;
+    this.forgetState = { kind: "forgetting", planeId };
+    try {
+      const snapshot = await forgetRemotePlane(planeId);
+      this.refreshRequest += 1;
+      this.snapshot = snapshot;
+      this.error = null;
+      this.closeFeed(planeId);
+      if (this.pairing.planeId === planeId) this.pairing.leave();
+      if (this.selectedPlaneId === planeId) {
+        this.selectedPlaneId = LOCAL_PLANE;
+        this.detail = null;
+      }
+      this.forgetState = { kind: "idle" };
+      this.handler.planeForgotten?.(planeId);
+    } catch (error: unknown) {
+      this.forgetState = { kind: "failed", planeId, error: publicError(error) };
+    }
   }
 
   get planes(): Plane[] {

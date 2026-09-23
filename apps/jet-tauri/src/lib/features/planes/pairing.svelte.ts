@@ -83,10 +83,17 @@ export class OwnerPairing {
   private knownClients = new Set<string>();
   /** Uncertain client changes survive switching Planes, per Plane. */
   private retained = new Map<PlaneId, Extract<ClientChangeState, { kind: "uncertain" }>>();
+  /** Revoke-then-forget: forget this Plane once its revoke has applied. */
+  private forgetAfter: PlaneId | null = null;
   private readonly labelOf: (planeId: PlaneId) => string;
+  private readonly onForget: (planeId: PlaneId) => Promise<void>;
 
-  constructor(labelOf: (planeId: PlaneId) => string) {
+  constructor(
+    labelOf: (planeId: PlaneId) => string,
+    onForget: (planeId: PlaneId) => Promise<void> = async () => undefined,
+  ) {
     this.labelOf = labelOf;
+    this.onForget = onForget;
   }
 
   get view(): PairingView | null {
@@ -377,10 +384,20 @@ export class OwnerPairing {
     void this.load();
   }
 
-  /** Prepares a client change natively. Enable is not destructive and runs at once. */
-  async prepareChange(clientId: string, change: ClientChange): Promise<void> {
+  /**
+   * Prepares a client change natively. Enable is not destructive and runs at
+   * once. With `thenForget`, an applied (or applied-unverified) revoke of
+   * this computer also forgets the Plane here; a refusal or an uncertain
+   * outcome stops before forgetting.
+   */
+  async prepareChange(
+    clientId: string,
+    change: ClientChange,
+    options: { thenForget?: boolean } = {},
+  ): Promise<void> {
     const planeId = this.planeId;
     if (!planeId || !this.canMutate || this.changeInFlight) return;
+    this.forgetAfter = options.thenForget ? planeId : null;
     this.actionError = null;
     this.notice = null;
     this.change = { kind: "preparing", clientId };
@@ -410,7 +427,19 @@ export class OwnerPairing {
   }
 
   cancelChange(): void {
-    if (this.change.kind === "review" || this.change.kind === "done") this.change = { kind: "none" };
+    if (this.change.kind === "review" || this.change.kind === "done") {
+      this.change = { kind: "none" };
+      this.forgetAfter = null;
+    }
+  }
+
+  /** "Forget {label}" after this computer lost access to a remote Plane. */
+  async forgetPlane(): Promise<void> {
+    if (this.change.kind !== "done") return;
+    const { planeId } = this.change.review;
+    this.change = { kind: "none" };
+    this.forgetAfter = null;
+    await this.onForget(planeId);
   }
 
   private async execute(sending: Extract<ClientChangeState, { kind: "sending" }>): Promise<void> {
@@ -422,7 +451,14 @@ export class OwnerPairing {
       if (!this.current(review.planeId)) return;
       if (receipt.kind === "refused") {
         this.change = { kind: "none" };
+        this.forgetAfter = null;
         this.actionError = receipt.error;
+        return;
+      }
+      if (this.forgetAfter === review.planeId && review.change === "revoke") {
+        this.forgetAfter = null;
+        this.change = { kind: "none" };
+        await this.onForget(review.planeId);
         return;
       }
       this.change = { kind: "done", receipt, review };
@@ -437,6 +473,8 @@ export class OwnerPairing {
         void this.load();
       }
     } catch (error: unknown) {
+      // Uncertain: stop before forgetting; the user can retry or forget only.
+      this.forgetAfter = null;
       const uncertain = { kind: "uncertain" as const, review, error: publicError(error) };
       this.retained.set(review.planeId, uncertain);
       if (this.current(review.planeId)) this.change = uncertain;

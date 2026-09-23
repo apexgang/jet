@@ -6,7 +6,10 @@
   import {
     featureLabel,
     featureName,
+    formatFingerprint,
     identityPrefix,
+    needsPairing,
+    onlyForget,
     planeErrorCopy,
     planeStatus,
   } from "./model";
@@ -31,14 +34,40 @@
     detail?.issues.find((issue) => issue.section === "capabilities") ?? null,
   );
 
+  const identity = $derived(planes.snapshot?.identity ?? null);
+  const pairingView = $derived(
+    plane && planes.pairing.planeId === plane.planeId ? planes.pairing.view : null,
+  );
+  const forgetState = $derived(planes.forgetState);
+  const forgetting = $derived(
+    plane !== null && forgetState.kind !== "idle" && forgetState.planeId === plane.planeId ? forgetState : null,
+  );
+  /** Revoke-then-forget needs a current Pairing read that lists this computer. */
+  const canRevokeFirst = $derived(
+    plane?.connection.state === "online" &&
+      pairingView !== null &&
+      pairingView.mutations.allowed &&
+      planes.pairing.state.kind === "ready" &&
+      pairingView.clients.some((client) => client.isThisComputer),
+  );
+  const revokeBlockedReason = $derived(
+    canRevokeFirst
+      ? null
+      : plane?.connection.state !== "online"
+        ? `Revoking needs ${plane?.label ?? "the Plane"} to be connected.`
+        : pairingView && !pairingView.mutations.allowed
+          ? `Pairing changes are paused on ${plane?.label ?? "the Plane"}.`
+          : `${plane?.label ?? "The Plane"} doesn't list this computer as paired.`,
+  );
+
   let retrying = $state(false);
   let connectionHeading = $state<HTMLHeadingElement>();
 
   // Deep links land on their section heading. "pairing" and "clients" live
-  // in PairingSection; "repair" waits for enrollment and lands on Connection.
+  // in PairingSection; "add" and "repair" open the wizard in PlanesPanel.
   $effect(() => {
     const request = planes.focusRequest;
-    if (!request || request.section === "add") return;
+    if (!request || request.section === "add" || request.section === "repair") return;
     untrack(() => {
       planes.focusRequest = null;
       void tick().then(() => {
@@ -67,6 +96,25 @@
 
   function unauthorizedCopy(label: string): string {
     return `This computer isn't allowed on ${label}. It may have been disabled or revoked there, or never paired.`;
+  }
+
+  function keyCopy(key: string): string {
+    switch (key) {
+      case "present":
+        return "Stored in your system keyring";
+      case "not_created":
+        return "Not created yet";
+      case "session_only":
+        return "Kept for this session only";
+      case "unavailable":
+        return "Keyring unavailable";
+      case "locked":
+        return "Keyring locked";
+      case "unsupported":
+        return "No supported secure storage on this computer";
+      default:
+        return "Checked when you pair with a remote Plane";
+    }
   }
 </script>
 
@@ -103,6 +151,12 @@
         {/if}
       </dl>
 
+      {#if plane.credential === "session"}
+        <p class="plane-session-warning" role="note">
+          This pairing ends when Jet quits. Set up secure storage to keep it.
+        </p>
+      {/if}
+
       {#if plane.security === "degraded"}
         <p class="plane-health" role="status">
           Security record can't be vouched for. Changes that need them are paused.
@@ -117,6 +171,8 @@
           <p>
             {#if connectionError.code === "connection.unauthorized"}
               {unauthorizedCopy(plane.label)}
+            {:else if connectionError.code === "identity.session_ended"}
+              This computer paired with {plane.label} for one session only. Pair again to reconnect.
             {:else if plane.connection.state === "reconnecting"}
               Reconnecting to {plane.label}…
             {:else}
@@ -137,7 +193,16 @@
         </p>
       {/if}
 
-      {#if plane.connection.state !== "online" || connectionIssues.length > 0}
+      {#if plane.kind === "remote" && plane.connection.state === "failed" && onlyForget(connectionError)}
+        <div class="plane-actions">
+          <button class="secondary-button" onclick={() => planes.askForget(plane.planeId)}>Forget…</button>
+        </div>
+      {:else if plane.kind === "remote" && plane.connection.state === "failed" && needsPairing(connectionError)}
+        <div class="plane-actions">
+          <button class="primary-button" onclick={() => planes.startRepair(plane.planeId)}>Pair again</button>
+          <button class="secondary-button" onclick={() => planes.askForget(plane.planeId)}>Forget…</button>
+        </div>
+      {:else if plane.connection.state !== "online" || connectionIssues.length > 0}
         <div class="plane-actions">
           <button class="secondary-button" disabled={retrying} onclick={retry}>
             {retrying ? "Retrying…" : "Retry"}
@@ -202,6 +267,73 @@
     {#key plane.planeId}
       <PairingSection {session} {plane} />
     {/key}
+
+    <section class="plane-section" aria-labelledby="plane-key-heading">
+      <h3 id="plane-key-heading">This computer's pairing key</h3>
+      <dl class="plane-facts">
+        <div><dt>Key</dt><dd>{keyCopy(identity?.key ?? "unknown")}</dd></div>
+        {#if identity?.fingerprint}
+          <div><dt>Fingerprint</dt><dd><code>{formatFingerprint(identity.fingerprint)}</code></dd></div>
+        {/if}
+        {#if identity?.clientId}
+          <div><dt>Client</dt><dd><code>{identityPrefix(identity.clientId) ?? identity.clientId}</code></dd></div>
+        {/if}
+      </dl>
+    </section>
+
+    {#if plane.kind === "remote"}
+      <section class="plane-section" aria-labelledby="plane-forget-heading">
+        <h3 id="plane-forget-heading">Forget {plane.label}</h3>
+        {#if !forgetting}
+          <div class="plane-actions">
+            <button class="secondary-button" onclick={() => planes.askForget(plane.planeId)}>Forget {plane.label}…</button>
+          </div>
+        {:else}
+          <p>
+            Forget only removes {plane.label} from this computer's list and hides its tasks here. {plane.label} will
+            still list this computer as paired until someone revokes it there.
+          </p>
+          {#if forgetting.kind === "failed"}
+            <p class="section-error" role="alert">
+              {planeErrorCopy(forgetting.error, plane.label)} <code>{forgetting.error.code}</code>
+            </p>
+          {/if}
+          <div class="plane-actions">
+            {#if canRevokeFirst}
+              <button
+                class="danger-button"
+                disabled={forgetting.kind === "forgetting"}
+                onclick={() => planes.revokeThenForget(plane.planeId)}
+              >
+                Revoke this computer's access on {plane.label}, then forget
+              </button>
+            {:else}
+              <button
+                class="danger-button"
+                aria-disabled="true"
+                aria-describedby="plane-revoke-reason"
+                onclick={(event) => event.preventDefault()}
+              >
+                Revoke this computer's access on {plane.label}, then forget
+              </button>
+            {/if}
+            <button
+              class="secondary-button"
+              disabled={forgetting.kind === "forgetting"}
+              onclick={() => planes.forget(plane.planeId)}
+            >
+              {forgetting.kind === "forgetting" ? "Forgetting…" : "Forget only"}
+            </button>
+            <button class="text-button" disabled={forgetting.kind === "forgetting"} onclick={() => planes.cancelForget()}>
+              Cancel
+            </button>
+          </div>
+          {#if !canRevokeFirst}
+            <p id="plane-revoke-reason" class="plane-muted">{revokeBlockedReason}</p>
+          {/if}
+        {/if}
+      </section>
+    {/if}
   </section>
 {/if}
 
@@ -263,6 +395,24 @@
   .plane-health {
     margin: 0;
     color: var(--warning);
+  }
+
+  .plane-session-warning {
+    margin: 0;
+    color: var(--warning);
+    font-weight: 600;
+  }
+
+  .plane-section > p {
+    margin: 0;
+  }
+
+  .plane-actions {
+    flex-wrap: wrap;
+  }
+
+  .plane-actions button[aria-disabled="true"] {
+    opacity: 0.55;
   }
 
   .plane-connection-error p {

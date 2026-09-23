@@ -72,20 +72,11 @@
           </p>
         </header>
         <footer>
-          <button
-            class="secondary-button"
-            type="button"
-            aria-disabled="true"
-            aria-describedby="client-change-forget-reason"
-            onclick={(event) => event.preventDefault()}
-          >
+          <button class="secondary-button" type="button" onclick={() => pairing.forgetPlane()}>
             Forget {review.planeLabel}
           </button>
           <button bind:this={closeButton} class="primary-button" type="button" onclick={dismiss}>Close</button>
         </footer>
-        <p id="client-change-forget-reason" class="client-change-note">
-          Forgetting a Plane arrives with remote Planes.
-        </p>
       {:else}
         <header>
           <h2 id="client-change-title">
@@ -173,7 +164,10 @@
       {change.review.planeLabel} no longer accepts this computer, so the change almost certainly took effect. Jet
       can't read it back from here.
     </p>
-    <button class="secondary-button" onclick={dismiss}>Close</button>
+    <div class="client-change-actions">
+      <button class="secondary-button" onclick={() => pairing.forgetPlane()}>Forget {change.review.planeLabel}</button>
+      <button class="secondary-button" onclick={dismiss}>Close</button>
+    </div>
   </section>
 {/if}
 
@@ -185,12 +179,6 @@
   .client-change-warning {
     color: var(--warning);
     font-weight: 600;
-  }
-
-  .client-change-note {
-    margin: 0;
-    color: var(--muted);
-    font-size: 12px;
   }
 
   .client-change-inline {
@@ -211,9 +199,5 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-  }
-
-  button[aria-disabled="true"] {
-    opacity: 0.55;
   }
 </style>

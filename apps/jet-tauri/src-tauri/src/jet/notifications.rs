@@ -109,6 +109,13 @@ impl NotificationState {
             gate.fence(plane, cursor);
         }
     }
+    /// Drops a forgotten Plane's fence. If it is added again it is a new
+    /// Plane handle, fenced at its first connect.
+    pub(crate) fn forget(&self, plane: PlaneId) {
+        if let Ok(mut gate) = self.gate.lock() {
+            gate.cursors.remove(&plane);
+        }
+    }
     /// `plane_label` is `Some` only when several Planes are registered, so
     /// the copy names the Plane exactly when that disambiguates it.
     pub(crate) fn observe(

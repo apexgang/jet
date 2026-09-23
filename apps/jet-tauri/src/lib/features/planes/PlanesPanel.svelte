@@ -2,28 +2,38 @@
   import { tick, untrack } from "svelte";
 
   import type { DesktopSession } from "$lib/features/shell/session.svelte";
+  import AddPlaneDialog from "./AddPlaneDialog.svelte";
   import { planeStatus } from "./model";
   import PlaneDetail from "./PlaneDetail.svelte";
 
   let { session }: { session: DesktopSession } = $props();
   const planes = $derived(session.planes);
   const remoteCount = $derived(planes.planes.filter((plane) => plane.kind === "remote").length);
+  const maximum = $derived(planes.snapshot?.maximumRemotePlanes ?? 16);
   const addBlockedReason = $derived(
     planes.snapshot?.identity.key === "unsupported"
       ? "This computer has no supported secure storage for a pairing key."
-      : "Add a Plane arrives with remote Planes.",
+      : remoteCount >= maximum
+        ? `This computer already has the maximum of ${maximum} remote Planes. Forget one first.`
+        : null,
   );
 
   let addButton = $state<HTMLButtonElement>();
 
-  // Deep links ask for "add"; enrollment is not available yet, so focus lands
-  // on the disabled button and its reason instead of opening a dialog.
+  // Deep links: "add" opens the wizard (or focuses the disabled button and
+  // its reason); "repair" opens it at Pair again for the selected Plane.
   $effect(() => {
     const request = planes.focusRequest;
-    if (request?.section !== "add") return;
+    if (request?.section !== "add" && request?.section !== "repair") return;
     untrack(() => {
       planes.focusRequest = null;
-      void tick().then(() => addButton?.focus());
+      if (request.section === "repair") {
+        void planes.startRepair(planes.selectedPlaneId);
+      } else if (addBlockedReason) {
+        void tick().then(() => addButton?.focus());
+      } else {
+        planes.startAdd();
+      }
     });
   });
 
@@ -94,22 +104,30 @@
         {#if remoteCount === 0}
           <p class="planes-empty">No remote Planes. Add one to see its tasks here.</p>
         {/if}
-        <button
-          bind:this={addButton}
-          class="secondary-button"
-          aria-disabled="true"
-          aria-describedby="add-plane-reason"
-          onclick={(event) => event.preventDefault()}
-        >
-          Add a Plane
-        </button>
-        <p id="add-plane-reason" class="planes-reason">{addBlockedReason}</p>
+        {#if addBlockedReason}
+          <button
+            bind:this={addButton}
+            class="secondary-button"
+            aria-disabled="true"
+            aria-describedby="add-plane-reason"
+            onclick={(event) => event.preventDefault()}
+          >
+            Add a Plane
+          </button>
+          <p id="add-plane-reason" class="planes-reason">{addBlockedReason}</p>
+        {:else}
+          <button bind:this={addButton} class="secondary-button" onclick={() => planes.startAdd()}>
+            Add a Plane
+          </button>
+        {/if}
       </nav>
 
       <PlaneDetail {session} />
     </div>
   {/if}
 </section>
+
+<AddPlaneDialog {planes} />
 
 <style>
   .planes-panel {

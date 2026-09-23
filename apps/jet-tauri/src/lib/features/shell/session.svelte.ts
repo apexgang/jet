@@ -421,6 +421,26 @@ export class DesktopSession implements FeedHandler {
     if (newest) await this.openConversation(newest.id, false, newest.planeId);
   }
 
+  /** FeedHandler: a Plane was paired, or paired again in place. */
+  async planePaired(planeId: PlaneId, repaired: boolean): Promise<void> {
+    this.catalog.sync();
+    // Pair again keeps the Plane handle, selection and Recent section; the
+    // feed reopens with the sticky failure cleared.
+    if (repaired) await this.retryPlane(planeId);
+  }
+
+  /** FeedHandler: a Plane was forgotten here; its tasks leave Recent. */
+  planeForgotten(planeId: PlaneId): void {
+    this.catalog.sync();
+    if (this.selectedPlaneId !== planeId) return;
+    this.selectedConversationId = null;
+    this.selectedPlaneId = LOCAL_PLANE;
+    this.conversationDetail = null;
+    this.timeline = [];
+    this.supervision = null;
+    this.resetWorkPanel();
+  }
+
   /** FeedHandler: a Plane's feed opened. */
   opened(planeId: PlaneId, snapshot: ConnectionSnapshot): void {
     if (planeId !== LOCAL_PLANE) return;

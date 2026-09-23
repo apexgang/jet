@@ -94,6 +94,15 @@ impl FeedRegistry {
         Ok(())
     }
 
+    /// Aborts whatever feed a forgotten Plane still has.
+    pub(crate) fn forget(&self, plane: PlaneId) {
+        if let Ok(mut feeds) = self.by_plane.lock() {
+            if let Some((_, task)) = feeds.remove(&plane) {
+                task.abort();
+            }
+        }
+    }
+
     /// Forgets a task that ended by itself, without touching a newer feed.
     fn finished(&self, plane: PlaneId, feed: Uuid) {
         if let Ok(mut feeds) = self.by_plane.lock() {
@@ -303,10 +312,12 @@ pub(crate) async fn open_plane_feed(
     let requested_cursor = parse_resume_cursor(after)?;
     let (binding, client) = bridge.plane(plane_id.as_deref())?;
     let plane = binding.plane;
-    // `reset` is the user's Retry. The local Plane keeps connect-per-request
-    // semantics and has no sticky or backed-off failure state to clear, so
-    // every open already starts a fresh attempt.
-    let _retry_requested = reset.unwrap_or(false);
+    // `reset` is the user's Retry: it clears a remote Plane's sticky or
+    // backed-off failure. The local Plane connects per request and has no
+    // such state, so every open already starts a fresh attempt there.
+    if reset.unwrap_or(false) {
+        client.reset().await;
+    }
     let context = FeedContext {
         app,
         plane,
@@ -413,6 +424,8 @@ async fn reconnect(
                 if on_update.send(update).is_err() || terminal {
                     return;
                 }
+                // A remote Plane waits out its connector's backoff here.
+                context.client.pace().await;
             }
         }
     }

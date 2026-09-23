@@ -2,10 +2,13 @@ mod channels;
 mod client;
 mod conversations;
 pub(crate) mod delivery;
+pub(crate) mod enrollment;
 mod errors;
 mod identity;
+mod keystore;
 pub(crate) mod notifications;
 pub(crate) mod pairing;
+mod pairing_transcript;
 pub(crate) mod planes;
 mod run_control;
 mod setup;
@@ -29,6 +32,7 @@ pub(crate) struct JetBridge {
     feeds: Arc<FeedRegistry>,
     delivery: delivery::DeliveryState,
     pairing: pairing::PairingState,
+    enrollment: enrollment::EnrollmentState,
     notifications: std::sync::Arc<notifications::NotificationState>,
     setup: setup::SetupState,
     conversations: conversations::ConversationState,
@@ -43,20 +47,32 @@ impl JetBridge {
     ) -> io::Result<Self> {
         let client_id = identity::load_or_create(app_data_directory)?;
         let socket = home_directory.join(".jet/runtime/jetd.sock");
-        Ok(Self {
-            planes: Arc::new(PlaneRegistry::new(PlaneClient::new(
-                socket,
-                client_id,
-                [
-                    Duration::from_millis(100),
-                    Duration::from_millis(500),
-                    Duration::from_secs(1),
-                ],
+        let local = PlaneClient::new(
+            socket,
+            client_id,
+            [
+                Duration::from_millis(100),
                 Duration::from_millis(500),
-            ))),
+                Duration::from_secs(1),
+            ],
+            Duration::from_millis(500),
+        );
+        let planes = PlaneRegistry::open(
+            local,
+            Some(app_data_directory),
+            Arc::new(planes::spawner::SystemSsh),
+            Arc::new(keystore::IdentityKeys::new(keystore::platform_store())),
+        );
+        Ok(Self::with_planes(planes, app_data_directory))
+    }
+
+    fn with_planes(planes: PlaneRegistry, app_data_directory: &Path) -> Self {
+        Self {
+            planes: Arc::new(planes),
             feeds: Arc::new(FeedRegistry::default()),
             delivery: delivery::DeliveryState::default(),
             pairing: pairing::PairingState::default(),
+            enrollment: enrollment::EnrollmentState::default(),
             notifications: std::sync::Arc::new(notifications::NotificationState::new(
                 app_data_directory,
             )),
@@ -64,7 +80,26 @@ impl JetBridge {
             conversations: conversations::ConversationState::new(app_data_directory),
             run_control: run_control::RunControlState::default(),
             work_panel: work_panel::WorkPanelState::default(),
-        })
+        }
+    }
+
+    /// A bridge whose remote Planes use `spawner` and `keys` and whose local
+    /// Plane socket does not exist. Nothing leaves the process.
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        app_data_directory: &Path,
+        client_id: uuid::Uuid,
+        spawner: Arc<dyn planes::spawner::SshSpawner>,
+        keys: Arc<keystore::IdentityKeys>,
+    ) -> Self {
+        let local = PlaneClient::new(
+            app_data_directory.join("missing-jetd.sock"),
+            client_id,
+            [Duration::from_millis(1)],
+            Duration::from_millis(1),
+        );
+        let planes = PlaneRegistry::open(local, Some(app_data_directory), spawner, keys);
+        Self::with_planes(planes, app_data_directory)
     }
 
     /// The local Plane: Project setup and new tasks stay local in Wave 3.1.

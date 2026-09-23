@@ -85,11 +85,50 @@ export type PlaneDetail = {
   issues: Array<{ section: "connection" | "status" | "capabilities"; error: PublicError }>;
 };
 
+/** `connected`: the key already worked. Otherwise pairing needs the code. */
+export type AddPlaneResult =
+  | { kind: "connected"; plane: Plane }
+  | { kind: "pairing_required"; draftId: string; destination: string };
+
+/**
+ * The confirm step. `authenticationString` was computed on this computer
+ * from the validated transcript; it is never the Plane's own copy.
+ */
+export type Enrollment = {
+  ticketId: string;
+  destination: string;
+  planeIdentity: string;
+  authenticationString: string;
+  confirmByUnixMs: string;
+  sessionOnly: boolean;
+};
+
 /** Registry snapshot. Never connects to a Plane. */
 export const listPlanes = () => invoke<PlanesSnapshot>("list_planes");
 
 export const loadPlaneDetail = (planeId: PlaneId) =>
   invoke<PlaneDetail>("load_plane_detail", { planeId });
+
+/** Pairs this computer with a remote Plane reached over SSH, or logs in. */
+export const addRemotePlane = (destination: string, sessionOnly = false) =>
+  invoke<AddPlaneResult>("add_remote_plane", { destination, sessionOnly });
+
+/** Pair again in place: same Plane handle, selection and feeds. */
+export const repairRemotePlane = (planeId: PlaneId, sessionOnly = false) =>
+  invoke<AddPlaneResult>("repair_remote_plane", { planeId, sessionOnly });
+
+export const claimRemotePairing = (draftId: string, code: string) =>
+  invoke<Enrollment>("claim_remote_pairing", { draftId, code });
+
+export const completeRemotePairing = (ticketId: string) =>
+  invoke<Plane>("complete_remote_pairing", { ticketId });
+
+/** Drops the native draft or ticket. Nothing is sent to the Plane. */
+export const cancelRemotePairing = (id: string) => invoke<void>("cancel_remote_pairing", { id });
+
+/** Removes a remote Plane from this computer only. */
+export const forgetRemotePlane = (planeId: PlaneId) =>
+  invoke<PlanesSnapshot>("forget_remote_plane", { planeId });
 
 /** The label a Plane is presented with; "This computer" for the local Plane. */
 export function planeLabel(snapshot: PlanesSnapshot | null, planeId: PlaneId): string {
