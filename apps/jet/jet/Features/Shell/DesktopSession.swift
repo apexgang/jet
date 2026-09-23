@@ -3,6 +3,9 @@ import Foundation
 import Observation
 
 typealias JetClientFactory = @Sendable () async throws -> JetClient
+typealias JetRemoteClientFactory = @Sendable (String) async throws -> JetClient
+typealias JetRemotePairingClaimer = @Sendable (String, String, UUID) async throws -> JetRemotePairingClaim
+typealias JetRemotePairingCompleter = @Sendable (JetRemotePairingClaim, UUID) async throws -> JetPairedClientSummary
 typealias JetNotificationPreference = @MainActor (JetNotificationKind) -> Bool
 
 enum SidebarDestination: String, CaseIterable, Hashable, Sendable {
@@ -136,6 +139,22 @@ struct WorkRefreshContinuity {
 @MainActor
 @Observable
 final class DesktopSession {
+    private struct PlaneConversationLoad: Sendable {
+        let planeRegistryID: UUID
+        let result: Result<JetConversationPage, JetPresentationError>
+    }
+
+    private struct PlaneSearchLoad: Sendable {
+        let planeRegistryID: UUID
+        let planeName: String
+        let result: Result<JetSearchResult, JetPresentationError>
+    }
+
+    private struct PlaneConversationPageLoad: Sendable {
+        let planeRegistryID: UUID
+        let result: Result<JetConversationPage, JetPresentationError>
+    }
+
     private struct PendingStart {
         let conversationID: UUID
         let craft: String
@@ -152,6 +171,27 @@ final class DesktopSession {
     private struct RunControlKey: Hashable {
         let runID: UUID
         let control: JetRunControl
+    }
+
+    private struct PairingGateIntent: Hashable {
+        let planeRegistryID: UUID
+        let open: Bool
+    }
+
+    private struct PairingConfirmationIntent: Hashable {
+        let planeRegistryID: UUID
+        let offerID: UUID
+    }
+
+    private struct PairedClientAccessIntent: Hashable {
+        let planeRegistryID: UUID
+        let clientID: UUID
+        let access: JetPairedClientAccess
+    }
+
+    private struct PairedClientIntent: Hashable {
+        let planeRegistryID: UUID
+        let clientID: UUID
     }
 
     private struct PendingWorkEdit {
@@ -207,6 +247,19 @@ final class DesktopSession {
     var setupNotice: String?
     var setupOperation: String?
     var remotePairingSkipped = false
+    var planes: [JetPlanePresentation]
+    var remoteProfiles: [JetRemotePlaneProfile]
+    var newTaskPlaneRegistryID: UUID
+    var remotePlaneName = ""
+    var remoteSSHEndpoint = ""
+    var remotePairingSecret = ""
+    var remotePairingClaim: JetRemotePairingClaim?
+    var remotePairingOperation: String?
+    var remotePairingNotice: String?
+    var openedPairing: JetOpenedPairing?
+    var openedPairingPlaneID: UUID?
+    var pairedClientPendingRevocation: JetPairedClientSummary?
+    var pairedClientPendingRevocationPlaneID: UUID?
     var conversations: [JetConversationSummary] = []
     var conversationCursor: UInt64 = 0
     var nextConversationPage: UUID?
@@ -220,7 +273,7 @@ final class DesktopSession {
     var runExecution: JetRunExecution?
     var runControlConfirmation: JetRunControl?
     var searchText = ""
-    var searchResult: JetSearchResult?
+    var searchResult: JetFederatedSearchResult?
     var searchIsLoading = false
     var workDiff: JetChangeDiff?
     var workFiles: [JetChangedFile] = []
@@ -265,9 +318,20 @@ final class DesktopSession {
     private var scenarios: [DesktopFixtureState: DesktopFixtureScenario] = [:]
     private var didLoadFixtures = false
     private let makeJetClient: JetClientFactory?
+    private let makeRemoteClient: JetRemoteClientFactory?
+    private let claimRemotePairing: JetRemotePairingClaimer?
+    private let completeRemotePairing: JetRemotePairingCompleter?
+    private let saveRemoteProfiles: @MainActor ([JetRemotePlaneProfile]) -> Void
+    private let localPlaneRegistryID: UUID
     private let notifications: (any JetNotificationDelivering)?
     private let notificationPreference: JetNotificationPreference
     private var client: JetClient?
+    private var remoteClients: [UUID: JetClient] = [:]
+    private var conversationPlaneRegistryIDs: [UUID: UUID] = [:]
+    private var planeConversationCursors: [UUID: UInt64] = [:]
+    private var planeNextConversationPages: [UUID: UUID] = [:]
+    private var planeConversations: [UUID: [JetConversationSummary]] = [:]
+    private var planeConnectionObservationTasks: [UUID: Task<Void, Never>] = [:]
     private var connectionObservationTask: Task<Void, Never>?
     private var registrationCommandID = UUID()
     private var removalTrashCommandID = UUID()
@@ -280,7 +344,7 @@ final class DesktopSession {
     private var withdrawalCommandIDs: [UUID: UUID] = [:]
     private var runControlCommandIDs: [RunControlKey: UUID] = [:]
     private var approvalRetryCommandIDs: [UUID: UUID] = [:]
-    private var eventObservationTask: Task<Void, Never>?
+    private var eventObservationTasks: [UUID: Task<Void, Never>] = [:]
     private var conversationRequest = 0
     private var searchRequest = 0
     private var workRequest = 0
@@ -298,17 +362,62 @@ final class DesktopSession {
     private var gitDeliveryObservationTask: Task<Void, Never>?
     private var pendingGitDelivery: PendingGitDelivery?
     private var gitDeliveryAcknowledgementCommandIDs: [UUID: UUID] = [:]
+    private var pairingGateCommandIDs: [PairingGateIntent: UUID] = [:]
+    private var openPairingCommandIDs: [UUID: UUID] = [:]
+    private var confirmPairingCommandIDs: [PairingConfirmationIntent: UUID] = [:]
+    private var pairedClientAccessCommandIDs: [PairedClientAccessIntent: UUID] = [:]
+    private var pairedClientRevokeCommandIDs: [PairedClientIntent: UUID] = [:]
+    private var remotePairingClaimCommandID = UUID()
+    private var remotePairingCompleteCommandID = UUID()
 
     init(
         makeJetClient: JetClientFactory? = nil,
+        localPlaneRegistryID: UUID = UUID(),
+        remoteProfiles: [JetRemotePlaneProfile] = [],
+        makeRemoteClient: JetRemoteClientFactory? = nil,
+        claimRemotePairing: JetRemotePairingClaimer? = nil,
+        completeRemotePairing: JetRemotePairingCompleter? = nil,
+        saveRemoteProfiles: @escaping @MainActor ([JetRemotePlaneProfile]) -> Void = { _ in },
         notifications: (any JetNotificationDelivering)? = nil,
         notificationPreference: @escaping JetNotificationPreference = {
             JetNotificationPreferences.isEnabled($0)
         }
     ) {
         self.makeJetClient = makeJetClient
+        self.localPlaneRegistryID = localPlaneRegistryID
+        self.remoteProfiles = remoteProfiles
+        self.makeRemoteClient = makeRemoteClient
+        self.claimRemotePairing = claimRemotePairing
+        self.completeRemotePairing = completeRemotePairing
+        self.saveRemoteProfiles = saveRemoteProfiles
         self.notifications = notifications
         self.notificationPreference = notificationPreference
+        newTaskPlaneRegistryID = localPlaneRegistryID
+        planes = [
+            JetPlanePresentation(
+                id: localPlaneRegistryID,
+                name: "This Mac",
+                endpoint: nil,
+                isLocal: true,
+                planeID: nil,
+                connection: .disconnected,
+                snapshot: nil,
+                failure: nil,
+                conversationCursor: nil
+            ),
+        ] + remoteProfiles.map {
+            JetPlanePresentation(
+                id: $0.id,
+                name: $0.name,
+                endpoint: $0.endpoint,
+                isLocal: false,
+                planeID: $0.planeID,
+                connection: .disconnected,
+                snapshot: nil,
+                failure: nil,
+                conversationCursor: nil
+            )
+        }
     }
 
     var scenario: DesktopFixtureScenario? {
@@ -341,8 +450,37 @@ final class DesktopSession {
         return snapshot
     }
 
+    var selectedPlaneRegistryID: UUID {
+        selectedConversationID.flatMap { conversationPlaneRegistryIDs[$0] }
+            ?? newTaskPlaneRegistryID
+    }
+
+    var selectedPlane: JetPlanePresentation? {
+        planes.first { $0.id == selectedPlaneRegistryID }
+    }
+
+    var selectedPlaneName: String { selectedPlane?.name ?? "This Mac" }
+
+    var selectedSetupSnapshot: JetSetupSnapshot? {
+        selectedPlane?.snapshot ?? (selectedPlaneRegistryID == localPlaneRegistryID ? setupSnapshot : nil)
+    }
+
+    var allProjects: [JetPlaneProject] {
+        planes.flatMap { plane in
+            (plane.snapshot?.projects.projects ?? []).map {
+                JetPlaneProject(planeRegistryID: plane.id, planeName: plane.name, project: $0)
+            }
+        }
+    }
+
+    var hasMoreConversations: Bool { !planeNextConversationPages.isEmpty }
+
+    var unavailablePlanes: [JetPlanePresentation] {
+        planes.filter { $0.failure != nil }
+    }
+
     var selectedProject: JetProjectSummary? {
-        setupSnapshot?.projects.projects.first { $0.id == selectedProjectID }
+        selectedSetupSnapshot?.projects.projects.first { $0.id == selectedProjectID }
     }
 
     var selectedProjectName: String {
@@ -350,7 +488,7 @@ final class DesktopSession {
             guard let projectID = selectedConversation?.projectID else {
                 return selectedConversation == nil ? "Project unavailable" : "No Project"
             }
-            return setupSnapshot?.projects.projects.first(where: { $0.id == projectID })?.name
+            return selectedSetupSnapshot?.projects.projects.first(where: { $0.id == projectID })?.name
                 ?? "Project unavailable"
         }
         if let selectedProject { return selectedProject.name }
@@ -358,8 +496,8 @@ final class DesktopSession {
     }
 
     var selectedHarnessName: String {
-        if let label = setupSnapshot?.accounts.bindings.first?.label
-            ?? setupSnapshot?.capabilities.authProviders.first?.harness
+        if let label = selectedSetupSnapshot?.accounts.bindings.first?.label
+            ?? selectedSetupSnapshot?.capabilities.authProviders.first?.harness
         {
             return label
         }
@@ -367,7 +505,7 @@ final class DesktopSession {
     }
 
     var selectedCraftID: String? {
-        setupSnapshot?.capabilities.crafts.first?.id
+        selectedSetupSnapshot?.capabilities.crafts.first?.id
     }
 
     var selectedConversation: JetConversationSummary? {
@@ -420,7 +558,7 @@ final class DesktopSession {
     var gitDeliveryUnavailableReason: String? {
         guard usesLivePlane else { return "Connect to a Plane to deliver this work." }
         guard planeIsConnected else { return "Reconnect to the Plane to deliver this work." }
-        guard setupSnapshot?.capabilities.gitIsAvailable == true else {
+        guard selectedSetupSnapshot?.capabilities.gitIsAvailable == true else {
             return "The Plane reports Git as unavailable."
         }
         guard workDiff != nil else { return "Load a retained Change checkpoint first." }
@@ -455,7 +593,11 @@ final class DesktopSession {
     }
 
     var planeIsConnected: Bool {
-        if case .connected = connectionState { return true }
+        if selectedPlaneRegistryID == localPlaneRegistryID {
+            if case .connected = connectionState { return true }
+            return false
+        }
+        if case .connected = selectedPlane?.connection { return true }
         return false
     }
 
@@ -500,8 +642,14 @@ final class DesktopSession {
         guard makeJetClient != nil else { return }
         if setupSnapshot == nil { setupState = .loading }
         do {
-            let snapshot = try await activeClient().setupSnapshot()
+            let snapshot = try await client(for: localPlaneRegistryID).setupSnapshot()
             setupState = .ready(snapshot)
+            updatePlane(localPlaneRegistryID) { plane in
+                plane.planeID = snapshot.status.planeID
+                plane.snapshot = snapshot
+                plane.failure = nil
+                plane.conversationCursor = snapshot.status.cursor
+            }
             if snapshot.issue(for: .projects) == nil,
                !snapshot.projects.projects.contains(where: { $0.id == selectedProjectID })
             {
@@ -519,10 +667,14 @@ final class DesktopSession {
         } catch {
             let failure = presentationError(error)
             setupState = .failed(failure)
+            updatePlane(localPlaneRegistryID) { plane in
+                plane.failure = failure
+            }
             connectionState = failure.retryable
                 ? .reconnecting(attempt: 1)
                 : .failed(failure)
         }
+        await loadRemotePlaneSnapshots()
     }
 
     func loadConversations(restoring restoredID: UUID? = nil) async {
@@ -530,76 +682,193 @@ final class DesktopSession {
         conversationRequest += 1
         let request = conversationRequest
         if conversations.isEmpty { conversationFreshness = .loading }
-        do {
-            let client = try await activeClient()
-            let page = try await client.conversations()
-            guard request == conversationRequest else { return }
-            conversations = page.conversations
-            conversationCursor = page.cursor
-            nextConversationPage = page.nextPage
-            conversationFreshness = .live
-            let previousConversationID = selectedConversationID
-            let candidate = restoredID ?? selectedConversationID
-            var restoredSnapshot: JetConversationSnapshot?
-            if let candidate,
-               !conversations.contains(where: { $0.id == candidate })
-            {
-                restoredSnapshot = try? await client.conversation(candidate)
-                guard request == conversationRequest else { return }
-                if let restoredSnapshot {
-                    conversations.append(restoredSnapshot.conversation)
+        var targets: [(UUID, JetClient)] = []
+        for plane in planes {
+            do {
+                targets.append((plane.id, try await client(for: plane.id)))
+            } catch {
+                let failure = presentationError(error)
+                updatePlane(plane.id) { $0.failure = failure }
+            }
+        }
+
+        let loads = await withTaskGroup(
+            of: PlaneConversationLoad.self,
+            returning: [PlaneConversationLoad].self
+        ) { group in
+            for (planeID, client) in targets {
+                group.addTask {
+                    do {
+                        return PlaneConversationLoad(
+                            planeRegistryID: planeID,
+                            result: .success(try await client.conversations())
+                        )
+                    } catch let failure as JetClientFailure {
+                        let presentation: JetPresentationError = switch failure {
+                        case let .presentation(error): error
+                        case .commandOutcomeUnknown: .invalidResponse
+                        }
+                        return PlaneConversationLoad(
+                            planeRegistryID: planeID,
+                            result: .failure(presentation)
+                        )
+                    } catch {
+                        return PlaneConversationLoad(
+                            planeRegistryID: planeID,
+                            result: .failure(.invalidResponse)
+                        )
+                    }
                 }
             }
-            selectedConversationID = candidate.flatMap { wanted in
-                conversations.contains(where: { $0.id == wanted }) ? wanted : nil
-            } ?? conversations.first?.id
-            if selectedConversationID != previousConversationID {
-                detachCurrentTerminal()
-                timeline = []
-                conversationSnapshot = nil
-                resetWorkPanel()
+            var values: [PlaneConversationLoad] = []
+            for await value in group { values.append(value) }
+            return values
+        }
+        guard request == conversationRequest else { return }
+
+        var successfulLoads = 0
+        for load in loads {
+            switch load.result {
+            case let .success(page):
+                successfulLoads += 1
+                for conversation in planeConversations[load.planeRegistryID, default: []]
+                where conversationPlaneRegistryIDs[conversation.id] == load.planeRegistryID {
+                    conversationPlaneRegistryIDs.removeValue(forKey: conversation.id)
+                }
+                planeConversations[load.planeRegistryID] = page.conversations
+                planeConversationCursors[load.planeRegistryID] = page.cursor
+                if let next = page.nextPage {
+                    planeNextConversationPages[load.planeRegistryID] = next
+                } else {
+                    planeNextConversationPages.removeValue(forKey: load.planeRegistryID)
+                }
+                for conversation in page.conversations {
+                    conversationPlaneRegistryIDs[conversation.id] = load.planeRegistryID
+                }
+                updatePlane(load.planeRegistryID) { plane in
+                    plane.failure = nil
+                    plane.conversationCursor = page.cursor
+                }
+                observeEvents(for: load.planeRegistryID, after: page.cursor)
+            case let .failure(failure):
+                updatePlane(load.planeRegistryID) { $0.failure = failure }
             }
-            if let restoredSnapshot,
-               restoredSnapshot.conversation.id == selectedConversationID
-            {
-                conversationSnapshot = restoredSnapshot
-                await loadRunSupervision()
-            } else if selectedConversationID != nil {
-                await loadSelectedConversation()
-            } else {
-                conversationSnapshot = nil
-                turnQueue = nil
-                runExecution = nil
-                resetWorkPanel()
+        }
+        rebuildConversationAggregation()
+        conversationCursor = planeConversationCursors[localPlaneRegistryID] ?? 0
+        nextConversationPage = planeNextConversationPages.values.first
+        conversationFreshness = successfulLoads > 0
+            ? .live
+            : (conversations.isEmpty ? .failed : .cached)
+
+        let previousConversationID = selectedConversationID
+        let candidate = restoredID ?? selectedConversationID
+        var restoredSnapshot: JetConversationSnapshot?
+        if let candidate, !conversations.contains(where: { $0.id == candidate }) {
+            for (planeID, client) in targets {
+                if let snapshot = try? await client.conversation(candidate) {
+                    restoredSnapshot = snapshot
+                    planeConversations[planeID, default: []].append(snapshot.conversation)
+                    conversationPlaneRegistryIDs[candidate] = planeID
+                    rebuildConversationAggregation()
+                    break
+                }
             }
-            if eventObservationTask == nil {
-                observeEvents(after: page.cursor)
-            }
-        } catch {
-            guard request == conversationRequest else { return }
-            let failure = presentationError(error)
-            conversationFreshness = conversations.isEmpty ? .failed : .cached
+        }
+        guard request == conversationRequest else { return }
+        let resolvedConversationID = candidate.flatMap { wanted in
+            conversations.contains(where: { $0.id == wanted }) ? wanted : nil
+        } ?? conversations.first?.id
+        if resolvedConversationID != previousConversationID {
+            detachCurrentTerminal()
+            timeline = []
+            conversationSnapshot = nil
+            resetWorkPanel()
+        }
+        selectedConversationID = resolvedConversationID
+        if let restoredSnapshot,
+           restoredSnapshot.conversation.id == selectedConversationID
+        {
+            conversationSnapshot = restoredSnapshot
+            await loadRunSupervision()
+        } else if selectedConversationID != nil {
+            await loadSelectedConversation()
+        } else {
+            conversationSnapshot = nil
+            turnQueue = nil
+            runExecution = nil
+            resetWorkPanel()
+        }
+        if successfulLoads == 0, let failure = unavailablePlanes.first?.failure {
             actionNotice = failure.message
         }
     }
 
     func loadMoreConversations() async {
-        guard let nextConversationPage, conversationOperation == nil else { return }
+        guard !planeNextConversationPages.isEmpty, conversationOperation == nil else { return }
         conversationOperation = "page"
-        do {
-            let page = try await activeClient().nextConversations(nextConversationPage)
-            let known = Set(conversations.map(\.id))
-            conversations.append(contentsOf: page.conversations.filter { !known.contains($0.id) })
-            self.nextConversationPage = page.nextPage
-            conversationFreshness = .live
-        } catch {
-            let failure = presentationError(error)
-            if failure.restart?.requiresPaginationSnapshot == true {
-                await loadConversations()
-            } else {
-                actionNotice = failure.message
+        let pending = planeNextConversationPages
+        let loads = await withTaskGroup(
+            of: PlaneConversationPageLoad.self,
+            returning: [PlaneConversationPageLoad].self
+        ) { group in
+            for (planeID, cursor) in pending {
+                do {
+                    let client = try await client(for: planeID)
+                    group.addTask {
+                        do {
+                            return PlaneConversationPageLoad(
+                                planeRegistryID: planeID,
+                                result: .success(try await client.nextConversations(cursor))
+                            )
+                        } catch let failure as JetClientFailure {
+                            let presentation: JetPresentationError = switch failure {
+                            case let .presentation(error): error
+                            case .commandOutcomeUnknown: .invalidResponse
+                            }
+                            return PlaneConversationPageLoad(
+                                planeRegistryID: planeID,
+                                result: .failure(presentation)
+                            )
+                        } catch {
+                            return PlaneConversationPageLoad(
+                                planeRegistryID: planeID,
+                                result: .failure(.invalidResponse)
+                            )
+                        }
+                    }
+                } catch {
+                    updatePlane(planeID) { $0.failure = presentationError(error) }
+                }
+            }
+            var values: [PlaneConversationPageLoad] = []
+            for await value in group { values.append(value) }
+            return values
+        }
+        var requiresSnapshot = false
+        for load in loads {
+            switch load.result {
+            case let .success(page):
+                let known = Set(planeConversations[load.planeRegistryID, default: []].map(\.id))
+                let additions = page.conversations.filter { !known.contains($0.id) }
+                planeConversations[load.planeRegistryID, default: []].append(contentsOf: additions)
+                for conversation in additions {
+                    conversationPlaneRegistryIDs[conversation.id] = load.planeRegistryID
+                }
+                if let next = page.nextPage {
+                    planeNextConversationPages[load.planeRegistryID] = next
+                } else {
+                    planeNextConversationPages.removeValue(forKey: load.planeRegistryID)
+                }
+                updatePlane(load.planeRegistryID) { $0.failure = nil }
+            case let .failure(failure):
+                updatePlane(load.planeRegistryID) { $0.failure = failure }
+                requiresSnapshot = requiresSnapshot || failure.restart?.requiresPaginationSnapshot == true
             }
         }
+        rebuildConversationAggregation()
+        nextConversationPage = planeNextConversationPages.values.first
+        if requiresSnapshot { await loadConversations() }
         conversationOperation = nil
     }
 
@@ -613,13 +882,83 @@ final class DesktopSession {
             return
         }
         searchIsLoading = true
-        do {
-            let result = try await activeClient().searchConversations(text)
-            guard request == searchRequest else { return }
-            searchResult = result
-        } catch {
-            guard request == searchRequest else { return }
-            actionNotice = presentationError(error).message
+        var targets: [(UUID, String, JetClient)] = []
+        for plane in planes {
+            do {
+                targets.append((plane.id, plane.name, try await client(for: plane.id)))
+            } catch {
+                updatePlane(plane.id) { $0.failure = presentationError(error) }
+            }
+        }
+        let loads = await withTaskGroup(
+            of: PlaneSearchLoad.self,
+            returning: [PlaneSearchLoad].self
+        ) { group in
+            for (planeID, planeName, client) in targets {
+                group.addTask {
+                    do {
+                        return PlaneSearchLoad(
+                            planeRegistryID: planeID,
+                            planeName: planeName,
+                            result: .success(try await client.searchConversations(text))
+                        )
+                    } catch let failure as JetClientFailure {
+                        let presentation: JetPresentationError = switch failure {
+                        case let .presentation(error): error
+                        case .commandOutcomeUnknown: .invalidResponse
+                        }
+                        return PlaneSearchLoad(
+                            planeRegistryID: planeID,
+                            planeName: planeName,
+                            result: .failure(presentation)
+                        )
+                    } catch {
+                        return PlaneSearchLoad(
+                            planeRegistryID: planeID,
+                            planeName: planeName,
+                            result: .failure(.invalidResponse)
+                        )
+                    }
+                }
+            }
+            var values: [PlaneSearchLoad] = []
+            for await value in group { values.append(value) }
+            return values
+        }
+        guard request == searchRequest else { return }
+        var hits: [JetFederatedSearchHit] = []
+        var cursors: [UUID: UInt64] = [:]
+        var indexedThrough: [UUID: UInt64] = [:]
+        var failures: [UUID: JetPresentationError] = [:]
+        for load in loads.sorted(by: { $0.planeName < $1.planeName }) {
+            switch load.result {
+            case let .success(result):
+                cursors[load.planeRegistryID] = result.cursor
+                indexedThrough[load.planeRegistryID] = result.indexedThrough
+                hits.append(contentsOf: result.hits.map {
+                    JetFederatedSearchHit(
+                        planeRegistryID: load.planeRegistryID,
+                        planeName: load.planeName,
+                        hit: $0
+                    )
+                })
+                for hit in result.hits {
+                    conversationPlaneRegistryIDs[hit.conversationID] = load.planeRegistryID
+                }
+                updatePlane(load.planeRegistryID) { $0.failure = nil }
+            case let .failure(failure):
+                failures[load.planeRegistryID] = failure
+                updatePlane(load.planeRegistryID) { $0.failure = failure }
+            }
+        }
+        searchResult = JetFederatedSearchResult(
+            hits: hits,
+            cursors: cursors,
+            indexedThrough: indexedThrough,
+            failures: failures
+        )
+        if hits.isEmpty, let failure = failures.values.first {
+            actionNotice = failure.message
         }
         if request == searchRequest { searchIsLoading = false }
     }
@@ -640,8 +979,9 @@ final class DesktopSession {
         Task { await loadSelectedConversation() }
     }
 
-    func selectSearchHit(_ conversationID: UUID) {
-        selectConversation(conversationID)
+    func selectSearchHit(_ hit: JetFederatedSearchHit) {
+        conversationPlaneRegistryIDs[hit.hit.conversationID] = hit.planeRegistryID
+        selectConversation(hit.hit.conversationID)
     }
 
     private func loadSelectedConversation() async {
@@ -1084,7 +1424,7 @@ final class DesktopSession {
             guard runID == selectedRun?.id else { return }
             await loadRunSupervision()
         case let .resumeEvents(after):
-            observeEvents(after: after)
+            observeEvents(for: selectedPlaneRegistryID, after: after)
             workNotice = "Activity reconnected from the requested checkpoint."
         }
     }
@@ -1549,6 +1889,7 @@ final class DesktopSession {
     }
 
     func requestAddProject() {
+        newTaskPlaneRegistryID = localPlaneRegistryID
         sidebarSelection = .project
         isWorkPanelPresented = false
         isProjectImporterPresented = true
@@ -1556,15 +1897,25 @@ final class DesktopSession {
     }
 
     func showProjects() {
+        newTaskPlaneRegistryID = localPlaneRegistryID
         sidebarSelection = .project
         isWorkPanelPresented = false
         setupNotice = nil
     }
 
     func selectProject(_ projectID: UUID) {
-        guard setupSnapshot?.projects.projects.contains(where: { $0.id == projectID }) == true else {
+        selectProject(projectID, on: localPlaneRegistryID)
+    }
+
+    func selectProject(_ projectID: UUID, on planeRegistryID: UUID) {
+        let planeSnapshot = planes.first(where: { $0.id == planeRegistryID })?.snapshot
+        let snapshot = planeSnapshot
+            ?? (planeRegistryID == localPlaneRegistryID ? setupSnapshot : nil)
+        guard snapshot?.projects.projects.contains(where: { $0.id == projectID }) == true
+        else {
             return
         }
+        newTaskPlaneRegistryID = planeRegistryID
         selectedProjectID = projectID
         sidebarSelection = .project
         isWorkPanelPresented = false
@@ -1678,6 +2029,298 @@ final class DesktopSession {
         setupNotice = "Remote pairing was skipped. You can return here at any time."
     }
 
+    func chooseNewTaskPlane(_ planeRegistryID: UUID) {
+        guard let plane = planes.first(where: { $0.id == planeRegistryID }) else { return }
+        newTaskPlaneRegistryID = planeRegistryID
+        selectedProjectID = plane.snapshot?.projects.projects.first?.id
+        actionNotice = nil
+    }
+
+    func refreshPlanes() async {
+        await loadSetup()
+        await loadConversations()
+    }
+
+    func setPairingGate(on planeRegistryID: UUID, open: Bool) async {
+        guard remotePairingOperation == nil else { return }
+        remotePairingOperation = "gate"
+        remotePairingNotice = nil
+        let intent = PairingGateIntent(planeRegistryID: planeRegistryID, open: open)
+        let commandID = pairingGateCommandIDs[intent] ?? UUID()
+        pairingGateCommandIDs[intent] = commandID
+        do {
+            _ = try await client(for: planeRegistryID).setPairingGate(
+                open ? "open" : "closed",
+                commandID: commandID
+            )
+            pairingGateCommandIDs.removeValue(forKey: intent)
+            if !open {
+                openedPairing = nil
+                openedPairingPlaneID = nil
+            }
+            await loadPlaneSnapshot(planeRegistryID)
+            remotePairingNotice = open
+                ? "This Plane now accepts one new pairing."
+                : "This Plane no longer accepts new pairings."
+        } catch {
+            remotePairingNotice = presentationError(error).message
+        }
+        remotePairingOperation = nil
+    }
+
+    func openManualPairing(on planeRegistryID: UUID) async {
+        guard remotePairingOperation == nil else { return }
+        remotePairingOperation = "open"
+        remotePairingNotice = nil
+        do {
+            let client = try await client(for: planeRegistryID)
+            if planes.first(where: { $0.id == planeRegistryID })?.snapshot?.pairing.gate != "open" {
+                let gateIntent = PairingGateIntent(
+                    planeRegistryID: planeRegistryID,
+                    open: true
+                )
+                let gateCommandID = pairingGateCommandIDs[gateIntent] ?? UUID()
+                pairingGateCommandIDs[gateIntent] = gateCommandID
+                _ = try await client.setPairingGate("open", commandID: gateCommandID)
+                pairingGateCommandIDs.removeValue(forKey: gateIntent)
+            }
+            let commandID = openPairingCommandIDs[planeRegistryID] ?? UUID()
+            openPairingCommandIDs[planeRegistryID] = commandID
+            openedPairing = try await client.openManualPairing(commandID: commandID)
+            openedPairingPlaneID = planeRegistryID
+            openPairingCommandIDs.removeValue(forKey: planeRegistryID)
+            await loadPlaneSnapshot(planeRegistryID)
+        } catch {
+            remotePairingNotice = presentationError(error).message
+        }
+        remotePairingOperation = nil
+    }
+
+    func confirmPendingPairing(on planeRegistryID: UUID) async {
+        guard remotePairingOperation == nil,
+              let pending = planes.first(where: { $0.id == planeRegistryID })?
+                .snapshot?.pairing.pending,
+              case let .awaitingConfirmation(_, authenticationString) = pending.progress
+        else { return }
+        remotePairingOperation = "confirm"
+        remotePairingNotice = nil
+        let intent = PairingConfirmationIntent(
+            planeRegistryID: planeRegistryID,
+            offerID: pending.id
+        )
+        let commandID = confirmPairingCommandIDs[intent] ?? UUID()
+        confirmPairingCommandIDs[intent] = commandID
+        do {
+            _ = try await client(for: planeRegistryID).confirmPairing(
+                offerID: pending.id,
+                authenticationString: authenticationString,
+                commandID: commandID
+            )
+            confirmPairingCommandIDs.removeValue(forKey: intent)
+            await loadPlaneSnapshot(planeRegistryID)
+            remotePairingNotice = "The target confirmed the matching authentication string."
+        } catch {
+            remotePairingNotice = presentationError(error).message
+        }
+        remotePairingOperation = nil
+    }
+
+    func setPairedClientAccess(
+        _ pairedClient: JetPairedClientSummary,
+        on planeRegistryID: UUID,
+        enabled: Bool
+    ) async {
+        guard remotePairingOperation == nil else { return }
+        remotePairingOperation = "access-\(pairedClient.id.uuidString)"
+        remotePairingNotice = nil
+        let access: JetPairedClientAccess = enabled ? .enabled : .disabled
+        let intent = PairedClientAccessIntent(
+            planeRegistryID: planeRegistryID,
+            clientID: pairedClient.id,
+            access: access
+        )
+        let commandID = pairedClientAccessCommandIDs[intent] ?? UUID()
+        pairedClientAccessCommandIDs[intent] = commandID
+        do {
+            _ = try await client(for: planeRegistryID).setPairedClientAccess(
+                clientID: pairedClient.id,
+                access: access,
+                commandID: commandID
+            )
+            pairedClientAccessCommandIDs.removeValue(forKey: intent)
+            await loadPlaneSnapshot(planeRegistryID)
+            remotePairingNotice = enabled
+                ? "The client can control this Plane again."
+                : "The client was disabled. Its key remains paired."
+        } catch {
+            remotePairingNotice = presentationError(error).message
+        }
+        remotePairingOperation = nil
+    }
+
+    func requestPairedClientRevocation(
+        _ client: JetPairedClientSummary,
+        on planeRegistryID: UUID
+    ) {
+        pairedClientPendingRevocation = client
+        pairedClientPendingRevocationPlaneID = planeRegistryID
+    }
+
+    func cancelPairedClientRevocation() {
+        pairedClientPendingRevocation = nil
+        pairedClientPendingRevocationPlaneID = nil
+    }
+
+    func confirmPairedClientRevocation() async {
+        guard remotePairingOperation == nil,
+              let pairedClientPendingRevocation,
+              let planeRegistryID = pairedClientPendingRevocationPlaneID
+        else { return }
+        remotePairingOperation = "revoke-\(pairedClientPendingRevocation.id.uuidString)"
+        remotePairingNotice = nil
+        let intent = PairedClientIntent(
+            planeRegistryID: planeRegistryID,
+            clientID: pairedClientPendingRevocation.id
+        )
+        let commandID = pairedClientRevokeCommandIDs[intent] ?? UUID()
+        pairedClientRevokeCommandIDs[intent] = commandID
+        do {
+            _ = try await client(for: planeRegistryID).revokePairedClient(
+                clientID: pairedClientPendingRevocation.id,
+                commandID: commandID
+            )
+            pairedClientRevokeCommandIDs.removeValue(forKey: intent)
+            cancelPairedClientRevocation()
+            await loadPlaneSnapshot(planeRegistryID)
+            remotePairingNotice = "The client key was revoked from this Plane."
+        } catch {
+            remotePairingNotice = presentationError(error).message
+        }
+        remotePairingOperation = nil
+    }
+
+    func claimRemotePlane() async {
+        guard remotePairingOperation == nil, let claimRemotePairing else { return }
+        remotePairingOperation = "remote-claim"
+        remotePairingNotice = nil
+        do {
+            let endpoint = try JetSSHEndpoint.validated(
+                remoteSSHEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            remotePairingClaim = try await claimRemotePairing(
+                endpoint,
+                remotePairingSecret,
+                remotePairingClaimCommandID
+            )
+            // The one-time secret is no longer needed after a successful claim.
+            remotePairingSecret = ""
+            remotePairingNotice = "Compare this authentication string on both devices, then confirm it on the target Plane."
+        } catch {
+            remotePairingNotice = presentationError(error).message
+        }
+        remotePairingOperation = nil
+    }
+
+    func completeRemotePlanePairing() async {
+        guard remotePairingOperation == nil,
+              let claim = remotePairingClaim,
+              let completeRemotePairing
+        else { return }
+        remotePairingOperation = "remote-complete"
+        remotePairingNotice = nil
+        do {
+            _ = try await completeRemotePairing(claim, remotePairingCompleteCommandID)
+            remotePairingClaimCommandID = UUID()
+            remotePairingCompleteCommandID = UUID()
+            let name = try JetRemotePlaneName.validated(
+                remotePlaneName,
+                fallback: claim.endpoint
+            )
+            let existing = remoteProfiles.firstIndex { $0.endpoint == claim.endpoint }
+            let profileID: UUID
+            if let existing {
+                profileID = remoteProfiles[existing].id
+                remoteProfiles[existing].name = name
+                updatePlane(profileID) { $0.name = name }
+            } else {
+                let profile = JetRemotePlaneProfile(
+                    id: UUID(),
+                    name: name,
+                    endpoint: claim.endpoint,
+                    planeID: nil
+                )
+                profileID = profile.id
+                remoteProfiles.append(profile)
+                planes.append(JetPlanePresentation(
+                    id: profile.id,
+                    name: profile.name,
+                    endpoint: profile.endpoint,
+                    isLocal: false,
+                    planeID: nil,
+                    connection: .disconnected,
+                    snapshot: nil,
+                    failure: nil,
+                    conversationCursor: nil
+                ))
+            }
+            saveRemoteProfiles(remoteProfiles)
+            remotePairingClaim = nil
+            remotePairingSecret = ""
+            newTaskPlaneRegistryID = profileID
+            await loadPlaneSnapshot(profileID)
+            remotePairingNotice = "The remote Plane is paired and uses encrypted SSH standard I/O."
+        } catch {
+            remotePairingNotice = presentationError(error).message
+        }
+        remotePairingOperation = nil
+    }
+
+    func remotePairingInputDidChange() {
+        remotePairingClaim = nil
+        remotePairingClaimCommandID = UUID()
+        remotePairingCompleteCommandID = UUID()
+        remotePairingNotice = nil
+    }
+
+    func restartRemotePlanePairing() {
+        remotePairingSecret = ""
+        remotePairingInputDidChange()
+    }
+
+    func forgetRemotePlane(_ planeRegistryID: UUID) async {
+        guard planeRegistryID != localPlaneRegistryID else { return }
+        let removedSelectedConversation = selectedConversationID.flatMap {
+            conversationPlaneRegistryIDs[$0]
+        } == planeRegistryID
+        if let client = remoteClients.removeValue(forKey: planeRegistryID) {
+            await client.disconnect()
+        }
+        eventObservationTasks.removeValue(forKey: planeRegistryID)?.cancel()
+        planeConnectionObservationTasks.removeValue(forKey: planeRegistryID)?.cancel()
+        remoteProfiles.removeAll { $0.id == planeRegistryID }
+        planes.removeAll { $0.id == planeRegistryID }
+        planeConversations.removeValue(forKey: planeRegistryID)
+        planeConversationCursors.removeValue(forKey: planeRegistryID)
+        planeNextConversationPages.removeValue(forKey: planeRegistryID)
+        conversationPlaneRegistryIDs = conversationPlaneRegistryIDs.filter { $0.value != planeRegistryID }
+        if newTaskPlaneRegistryID == planeRegistryID {
+            newTaskPlaneRegistryID = localPlaneRegistryID
+        }
+        if removedSelectedConversation {
+            selectedConversationID = nil
+            conversationSnapshot = nil
+            timeline = []
+            turnQueue = nil
+            runExecution = nil
+            resetWorkPanel()
+            sidebarSelection = .newTask
+            isWorkPanelPresented = false
+        }
+        saveRemoteProfiles(remoteProfiles)
+        rebuildConversationAggregation()
+        remotePairingNotice = "The SSH connection was removed from this Mac. The target still retains its pairing until an owner revokes it there."
+    }
+
     func restore(selection: String, workPanel: String, panelPresented: Bool) {
         if let selection = SidebarDestination(rawValue: selection) {
             sidebarSelection = selection
@@ -1743,7 +2386,7 @@ final class DesktopSession {
         case .schedules:
             actionNotice = "Schedules are planned for Wave 3."
         case .planes:
-            actionNotice = "Connection management is planned for Wave 3."
+            isWorkPanelPresented = false
         }
     }
 
@@ -1832,6 +2475,13 @@ final class DesktopSession {
         showScenario(state)
     }
 
+    func conversationPlaneName(_ conversationID: UUID) -> String {
+        guard let planeRegistryID = conversationPlaneRegistryIDs[conversationID] else {
+            return "Plane"
+        }
+        return planeName(planeRegistryID)
+    }
+
     func retryFixtureLoad() {
         didLoadFixtures = false
         contentState = .loading
@@ -1886,8 +2536,11 @@ final class DesktopSession {
         let terminalID = terminalStreamTerminalID
         terminalStreamTerminalID = nil
         attachedTerminalID = nil
-        if let terminalID, let client {
-            Task { await client.detachTerminal(terminalID: terminalID) }
+        let selectedClient = selectedPlaneRegistryID == localPlaneRegistryID
+            ? client
+            : remoteClients[selectedPlaneRegistryID]
+        if let terminalID, let selectedClient {
+            Task { await selectedClient.detachTerminal(terminalID: terminalID) }
         }
     }
 
@@ -1911,8 +2564,14 @@ final class DesktopSession {
                     projectID: conversation.projectID
                 )
             }
-            if let index = conversations.firstIndex(where: { $0.id == id }) {
-                conversations[index] = updated(conversations[index])
+            if let planeRegistryID = conversationPlaneRegistryIDs[id],
+               let index = planeConversations[planeRegistryID, default: []]
+                .firstIndex(where: { $0.id == id })
+            {
+                planeConversations[planeRegistryID]?[index] = updated(
+                    planeConversations[planeRegistryID, default: []][index]
+                )
+                rebuildConversationAggregation()
             }
             if let snapshot = conversationSnapshot, snapshot.conversation.id == id {
                 conversationSnapshot = JetConversationSnapshot(
@@ -1946,11 +2605,16 @@ final class DesktopSession {
     }
 
     private func mergeConversation(_ conversation: JetConversationSummary) {
-        if let index = conversations.firstIndex(where: { $0.id == conversation.id }) {
-            conversations[index] = conversation
+        let planeRegistryID = selectedPlaneRegistryID
+        conversationPlaneRegistryIDs[conversation.id] = planeRegistryID
+        if let index = planeConversations[planeRegistryID, default: []]
+            .firstIndex(where: { $0.id == conversation.id })
+        {
+            planeConversations[planeRegistryID]?[index] = conversation
         } else {
-            conversations.insert(conversation, at: 0)
+            planeConversations[planeRegistryID, default: []].insert(conversation, at: 0)
         }
+        rebuildConversationAggregation()
     }
 
     private func pendingStartFor(
@@ -1994,40 +2658,52 @@ final class DesktopSession {
         return pending
     }
 
-    private func observeEvents(after initialCursor: UInt64) {
-        eventObservationTask?.cancel()
-        eventObservationTask = Task { [weak self] in
+    private func observeEvents(for planeRegistryID: UUID, after initialCursor: UInt64) {
+        guard eventObservationTasks[planeRegistryID] == nil else { return }
+        eventObservationTasks[planeRegistryID] = Task { [weak self] in
             guard let self else { return }
             var cursor = initialCursor
             while !Task.isCancelled {
                 do {
-                    let client = try await activeClient()
+                    let client = try await client(for: planeRegistryID)
                     let events = await client.eventStream(after: cursor)
                     for try await event in events {
                         guard !Task.isCancelled else { return }
                         cursor = event.sequence
-                        await receive(event)
+                        planeConversationCursors[planeRegistryID] = cursor
+                        updatePlane(planeRegistryID) { plane in
+                            plane.conversationCursor = cursor
+                            plane.failure = nil
+                        }
+                        await receive(event, from: planeRegistryID)
                     }
                 } catch {
                     let failure = presentationError(error)
+                    updatePlane(planeRegistryID) { $0.failure = failure }
                     if failure.restart?.requiresEventSnapshot == true {
-                        timeline = []
-                        actionNotice = "The activity cursor expired. Jet refreshed the full Conversation snapshot."
+                        if selectedPlaneRegistryID == planeRegistryID {
+                            timeline = []
+                            actionNotice = "The activity cursor expired on \(planeName(planeRegistryID)). Jet refreshed its task snapshot."
+                        }
                         await loadConversations()
-                        cursor = conversationCursor
+                        cursor = planeConversationCursors[planeRegistryID] ?? 0
                         continue
                     }
-                    if conversationSnapshot != nil { conversationFreshness = .cached }
-                    actionNotice = failure.message
+                    if selectedPlaneRegistryID == planeRegistryID {
+                        if conversationSnapshot != nil { conversationFreshness = .cached }
+                        actionNotice = failure.message
+                    }
                     try? await Task.sleep(for: .seconds(1))
                 }
             }
         }
     }
 
-    private func receive(_ event: JetEvent) async {
+    private func receive(_ event: JetEvent, from planeRegistryID: UUID) async {
         await deliverNotificationIfNeeded(for: event)
-        if event.conversationID == selectedConversationID {
+        if event.conversationID == selectedConversationID,
+           selectedPlaneRegistryID == planeRegistryID
+        {
             let projections = event.timelineProjections()
             if projections.isEmpty {
                 groupRawEvent(sequence: event.sequence)
@@ -2118,38 +2794,150 @@ final class DesktopSession {
     }
 
     private func activeClient() async throws -> JetClient {
-        if let client { return client }
-        guard let makeJetClient else {
+        try await client(for: selectedPlaneRegistryID)
+    }
+
+    private func client(for planeRegistryID: UUID) async throws -> JetClient {
+        if planeRegistryID == localPlaneRegistryID {
+            if let client { return client }
+            guard let makeJetClient else {
+                throw JetClientFailure.presentation(.offline)
+            }
+            let client = try await makeJetClient()
+            self.client = client
+            observeConnection(of: client)
+            return client
+        }
+        if let client = remoteClients[planeRegistryID] { return client }
+        guard let profile = remoteProfiles.first(where: { $0.id == planeRegistryID }),
+              let makeRemoteClient
+        else {
             throw JetClientFailure.presentation(.offline)
         }
-        let client = try await makeJetClient()
-        self.client = client
-        observeConnection(of: client)
-        return client
+        updatePlane(planeRegistryID) { $0.connection = .connecting }
+        do {
+            let client = try await makeRemoteClient(profile.endpoint)
+            remoteClients[planeRegistryID] = client
+            observeConnection(of: client, planeRegistryID: planeRegistryID)
+            return client
+        } catch {
+            let failure = presentationError(error)
+            updatePlane(planeRegistryID) { plane in
+                plane.connection = failure.retryable ? .reconnecting(attempt: 1) : .failed(failure)
+                plane.failure = failure
+            }
+            throw error
+        }
     }
 
     private func observeConnection(of client: JetClient) {
         connectionObservationTask?.cancel()
         connectionObservationTask = Task { [weak self] in
+            guard let self else { return }
             let states = await client.connectionStates()
             for await state in states {
                 guard !Task.isCancelled else { return }
-                self?.connectionState = state
+                connectionState = state
+                updatePlane(localPlaneRegistryID) { plane in
+                    plane.connection = state
+                    if case .connected = state { plane.failure = nil }
+                }
                 if case .connected = state,
-                   self?.conversationFreshness == .cached
+                   conversationFreshness == .cached
                 {
-                    await self?.loadConversations()
+                    await loadConversations()
                 } else if case .reconnecting = state,
-                          self?.conversationSnapshot != nil
+                          conversationSnapshot != nil
                 {
-                    self?.conversationFreshness = .cached
+                    conversationFreshness = .cached
                 } else if case .disconnected = state,
-                          self?.conversationSnapshot != nil
+                          conversationSnapshot != nil
                 {
-                    self?.conversationFreshness = .cached
+                    conversationFreshness = .cached
                 }
             }
         }
+    }
+
+    private func observeConnection(of client: JetClient, planeRegistryID: UUID) {
+        planeConnectionObservationTasks[planeRegistryID]?.cancel()
+        planeConnectionObservationTasks[planeRegistryID] = Task { [weak self] in
+            let states = await client.connectionStates()
+            for await state in states {
+                guard !Task.isCancelled else { return }
+                self?.updatePlane(planeRegistryID) { plane in
+                    plane.connection = state
+                    if case .connected = state { plane.failure = nil }
+                }
+                if self?.selectedPlaneRegistryID == planeRegistryID {
+                    if case .connected = state, self?.conversationFreshness == .cached {
+                        await self?.loadConversations()
+                    } else if case .reconnecting = state, self?.conversationSnapshot != nil {
+                        self?.conversationFreshness = .cached
+                    } else if case .disconnected = state, self?.conversationSnapshot != nil {
+                        self?.conversationFreshness = .cached
+                    }
+                }
+            }
+        }
+    }
+
+    private func loadRemotePlaneSnapshots() async {
+        await withTaskGroup(of: Void.self) { group in
+            for profile in remoteProfiles {
+                group.addTask { [weak self] in
+                    await self?.loadPlaneSnapshot(profile.id)
+                }
+            }
+        }
+    }
+
+    private func loadPlaneSnapshot(_ planeRegistryID: UUID) async {
+        do {
+            let snapshot = try await client(for: planeRegistryID).setupSnapshot()
+            updatePlane(planeRegistryID) { plane in
+                plane.planeID = snapshot.status.planeID
+                plane.snapshot = snapshot
+                plane.failure = nil
+                plane.conversationCursor = snapshot.status.cursor
+            }
+            if planeRegistryID == localPlaneRegistryID {
+                setupState = .ready(snapshot)
+            } else if let index = remoteProfiles.firstIndex(where: { $0.id == planeRegistryID }),
+                      remoteProfiles[index].planeID != snapshot.status.planeID
+            {
+                remoteProfiles[index].planeID = snapshot.status.planeID
+                saveRemoteProfiles(remoteProfiles)
+            }
+        } catch {
+            let failure = presentationError(error)
+            updatePlane(planeRegistryID) { $0.failure = failure }
+        }
+    }
+
+    private func updatePlane(
+        _ planeRegistryID: UUID,
+        _ update: (inout JetPlanePresentation) -> Void
+    ) {
+        guard let index = planes.firstIndex(where: { $0.id == planeRegistryID }) else { return }
+        update(&planes[index])
+    }
+
+    private func rebuildConversationAggregation() {
+        conversations = planeConversations.values
+            .flatMap { $0 }
+            .sorted { left, right in
+                if left.createdAtUnixMilliseconds != right.createdAtUnixMilliseconds {
+                    return left.createdAtUnixMilliseconds > right.createdAtUnixMilliseconds
+                }
+                let leftPlane = conversationPlaneRegistryIDs[left.id]?.uuidString ?? ""
+                let rightPlane = conversationPlaneRegistryIDs[right.id]?.uuidString ?? ""
+                return leftPlane < rightPlane
+            }
+    }
+
+    private func planeName(_ planeRegistryID: UUID) -> String {
+        planes.first(where: { $0.id == planeRegistryID })?.name ?? "Plane"
     }
 
     private func presentationError(_ error: Error) -> JetPresentationError {
@@ -2162,6 +2950,13 @@ final class DesktopSession {
                 message: "Jet could not confirm this change. Refresh before trying again. Command \(commandID.uuidString.prefix(8)).",
                 retryable: false,
                 recoveryActions: []
+            )
+        case is JetIdentityFailure:
+            JetPresentationError(
+                category: .unavailable,
+                code: "credential.keychain_unavailable",
+                message: "Jet could not use this installation's pairing key in Keychain.",
+                retryable: true
             )
         default: .invalidResponse
         }

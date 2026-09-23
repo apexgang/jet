@@ -10,6 +10,9 @@ struct jetApp: App {
             homeDirectory: FileManager.default.homeDirectoryForCurrentUser
         )
         let configuration = JetClientConfiguration(clientID: JetClientIdentity.load())
+        let identity = JetKeychainSigningIdentity(clientID: configuration.clientID)
+        let remoteService = JetRemotePlaneService(identity: identity)
+        let registry = JetPlaneRegistryStore()
         _session = State(
             initialValue: DesktopSession(
                 makeJetClient: {
@@ -18,6 +21,22 @@ struct jetApp: App {
                         configuration: configuration
                     )
                 },
+                localPlaneRegistryID: configuration.clientID,
+                remoteProfiles: registry.load(),
+                makeRemoteClient: { endpoint in
+                    try await remoteService.connect(endpoint: endpoint)
+                },
+                claimRemotePairing: { endpoint, secret, commandID in
+                    try await remoteService.claim(
+                        endpoint: endpoint,
+                        secret: secret,
+                        commandID: commandID
+                    )
+                },
+                completeRemotePairing: { claim, commandID in
+                    try await remoteService.complete(claim: claim, commandID: commandID)
+                },
+                saveRemoteProfiles: registry.save,
                 notifications: SystemJetNotificationCenter()
             )
         )

@@ -41,7 +41,7 @@ struct JetSettingsView: View {
                 .tabItem { Label(Pane.general.title, systemImage: Pane.general.symbol) }
                 .tag(Pane.general)
 
-            SetupSettingsPane(session: session, kind: .agents)
+            SetupSettingsPane(session: session)
             .tabItem { Label(Pane.agents.title, systemImage: Pane.agents.symbol) }
             .tag(Pane.agents)
 
@@ -53,7 +53,7 @@ struct JetSettingsView: View {
             .tabItem { Label(Pane.work.title, systemImage: Pane.work.symbol) }
             .tag(Pane.work)
 
-            SetupSettingsPane(session: session, kind: .connections)
+            PlaneManagementView(session: session)
             .tabItem { Label(Pane.connections.title, systemImage: Pane.connections.symbol) }
             .tag(Pane.connections)
 
@@ -65,7 +65,7 @@ struct JetSettingsView: View {
             .tabItem { Label(Pane.safety.title, systemImage: Pane.safety.symbol) }
             .tag(Pane.safety)
         }
-        .frame(width: 620, height: 430)
+        .frame(width: 720, height: 560)
     }
 
     private var paneBinding: Binding<Pane> {
@@ -77,49 +77,25 @@ struct JetSettingsView: View {
 }
 
 private struct SetupSettingsPane: View {
-    enum Kind {
-        case agents
-        case connections
-    }
-
     let session: DesktopSession
-    let kind: Kind
 
     var body: some View {
         Form {
-            switch kind {
-            case .agents:
-                Section("Harness access") {
-                    if let snapshot = session.setupSnapshot {
-                        if snapshot.accounts.bindings.isEmpty {
-                            Text("No Harness accounts connected")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(snapshot.accounts.bindings) { binding in
-                                LabeledContent(binding.label, value: binding.stateLabel)
-                            }
-                        }
-                        Text("Add Harness access from Projects in the main window.")
-                            .font(.caption)
+            Section("Harness access") {
+                if let snapshot = session.setupSnapshot {
+                    if snapshot.accounts.bindings.isEmpty {
+                        Text("No Harness accounts connected")
                             .foregroundStyle(.secondary)
                     } else {
-                        Text(session.planeConnectionLabel)
-                            .foregroundStyle(.secondary)
+                        ForEach(snapshot.accounts.bindings) { binding in
+                            LabeledContent(binding.label, value: binding.stateLabel)
+                        }
                     }
-                }
-            case .connections:
-                Section("Local Plane") {
-                    LabeledContent("Status", value: session.planeConnectionLabel)
-                    if let snapshot = session.setupSnapshot {
-                        LabeledContent("Core", value: snapshot.capabilities.coreVersion)
-                        LabeledContent("Platform", value: snapshot.capabilities.platform)
-                    }
-                }
-                Section("Remote pairing") {
-                    let count = session.setupSnapshot?.pairing.pairedClients ?? 0
-                    LabeledContent("Paired clients", value: count.formatted())
-                    Text("Pairing controls arrive in Wave 3. Remote setup is optional for local work.")
+                    Text("Add Harness access from Projects in the main window.")
                         .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(session.planeConnectionLabel)
                         .foregroundStyle(.secondary)
                 }
             }

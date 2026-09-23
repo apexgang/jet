@@ -1,6 +1,6 @@
 import Foundation
 
-extension SettingKey: Sendable {}
+extension SettingKey: @unchecked Sendable {}
 
 struct JetNegotiation: Sendable, Equatable {
     let protocolVersion: UInt32
@@ -17,7 +17,7 @@ enum JetConnectionState: Sendable, Equatable {
     case failed(JetPresentationError)
 }
 
-struct JetPlaneStatus: Sendable, Equatable {
+nonisolated struct JetPlaneStatus: Sendable, Equatable {
     let cursor: UInt64?
     let planeID: UUID
     let daemonStarts: UInt64
@@ -27,7 +27,7 @@ struct JetPlaneStatus: Sendable, Equatable {
     let recovery: JetRawJSON?
 }
 
-struct JetRawJSON: Sendable, Equatable {
+nonisolated struct JetRawJSON: Sendable, Equatable {
     /// Exact UTF-8 fragment from the schema-validated frame.
     let source: String
 }
@@ -55,7 +55,7 @@ enum JetCapabilityObservation: Sendable {
     case fresh
 }
 
-enum JetCredentialStoreState: String, Sendable, Equatable {
+nonisolated enum JetCredentialStoreState: String, Sendable, Equatable {
     case available
     case locked
     case unavailable
@@ -77,7 +77,7 @@ struct JetAuthProvider: Sendable, Equatable, Identifiable {
     var id: String { provider }
 }
 
-struct JetCapabilitySummary: Sendable, Equatable {
+nonisolated struct JetCapabilitySummary: Sendable, Equatable {
     let coreVersion: String
     let platform: String
     let externalTools: [JetExternalToolSummary]
@@ -120,7 +120,7 @@ struct JetCapabilitySummary: Sendable, Equatable {
     }
 }
 
-enum JetExternalToolAvailability: Sendable, Equatable {
+nonisolated enum JetExternalToolAvailability: Sendable, Equatable {
     case present(version: String)
     case missing
 
@@ -130,14 +130,14 @@ enum JetExternalToolAvailability: Sendable, Equatable {
     }
 }
 
-struct JetExternalToolSummary: Sendable, Equatable, Identifiable {
+nonisolated struct JetExternalToolSummary: Sendable, Equatable, Identifiable {
     let tool: String
     let availability: JetExternalToolAvailability
 
     var id: String { tool }
 }
 
-struct JetInstalledCraft: Sendable, Equatable, Identifiable {
+nonisolated struct JetInstalledCraft: Sendable, Equatable, Identifiable {
     let id: String
     let version: String
     let harnesses: [String]
@@ -157,7 +157,7 @@ struct JetConversationPage: Sendable, Equatable {
     let nextPage: UUID?
 }
 
-enum JetRunLifecycle: String, Sendable, Equatable {
+nonisolated enum JetRunLifecycle: String, Sendable, Equatable {
     case created
     case starting
     case active
@@ -175,7 +175,7 @@ enum JetRunLifecycle: String, Sendable, Equatable {
     }
 }
 
-struct JetRunSummary: Sendable, Equatable, Identifiable {
+nonisolated struct JetRunSummary: Sendable, Equatable, Identifiable {
     let id: UUID
     let conversationID: UUID
     let revision: UInt64
@@ -193,7 +193,7 @@ struct JetConversationSnapshot: Sendable, Equatable {
     let runs: [JetRunSummary]
 }
 
-enum JetFileTarget: Sendable, Equatable, Hashable {
+nonisolated enum JetFileTarget: Sendable, Equatable, Hashable {
     case project(UUID)
     case workspace(UUID)
 }
@@ -421,13 +421,13 @@ enum JetTerminalEvent: Sendable, Equatable {
     case finished(totalBytes: UInt64)
 }
 
-enum JetSearchField: String, Sendable, Equatable {
+nonisolated enum JetSearchField: String, Sendable, Equatable {
     case name
     case path
     case branch
 }
 
-struct JetSearchHit: Sendable, Equatable, Identifiable {
+nonisolated struct JetSearchHit: Sendable, Equatable, Identifiable {
     let conversationID: UUID
     let sequence: UInt64
     let field: JetSearchField
@@ -436,19 +436,34 @@ struct JetSearchHit: Sendable, Equatable, Identifiable {
     var id: String { "\(conversationID.uuidString)-\(sequence)" }
 }
 
-struct JetSearchResult: Sendable, Equatable {
+nonisolated struct JetSearchResult: Sendable, Equatable {
     let cursor: UInt64
     let indexedThrough: UInt64
     let hits: [JetSearchHit]
 }
 
-enum JetTurnSource: String, Sendable, Equatable {
+nonisolated struct JetFederatedSearchHit: Sendable, Equatable, Identifiable {
+    let planeRegistryID: UUID
+    let planeName: String
+    let hit: JetSearchHit
+
+    var id: String { "\(planeRegistryID.uuidString)-\(hit.id)" }
+}
+
+nonisolated struct JetFederatedSearchResult: Sendable, Equatable {
+    let hits: [JetFederatedSearchHit]
+    let cursors: [UUID: UInt64]
+    let indexedThrough: [UUID: UInt64]
+    let failures: [UUID: JetPresentationError]
+}
+
+nonisolated enum JetTurnSource: String, Sendable, Equatable {
     case user
     case schedule
     case autoContinue = "auto_continue"
 }
 
-enum JetTurnState: String, Sendable, Equatable {
+nonisolated enum JetTurnState: String, Sendable, Equatable {
     case queued
     case active
     case completed
@@ -459,13 +474,13 @@ enum JetTurnState: String, Sendable, Equatable {
     case outcomeUnknown = "outcome_unknown"
 }
 
-struct JetTurnSummary: Sendable, Equatable, Identifiable {
+nonisolated struct JetTurnSummary: Sendable, Equatable, Identifiable {
     let id: UUID
     let sequence: UInt64
     let state: JetTurnState
 }
 
-struct JetTurnQueueEntry: Sendable, Equatable, Identifiable {
+nonisolated struct JetTurnQueueEntry: Sendable, Equatable, Identifiable {
     let id: UUID
     let sequence: UInt64
     let position: Int
@@ -477,7 +492,7 @@ struct JetTurnQueueEntry: Sendable, Equatable, Identifiable {
     var targetLabel: String { runID == nil ? "Next Run" : "Current Run" }
 }
 
-struct JetTurnQueue: Sendable, Equatable {
+nonisolated struct JetTurnQueue: Sendable, Equatable {
     static let maximumEntries = 128
     static let maximumPromptBytes = 65_536
 
@@ -583,7 +598,7 @@ struct JetTimelineEntry: Sendable, Equatable, Identifiable {
     var approval: JetApprovalPresentation? = nil
 }
 
-struct JetProjectSummary: Sendable, Equatable, Identifiable {
+nonisolated struct JetProjectSummary: Sendable, Equatable, Identifiable {
     let id: UUID
     let root: String
 
@@ -594,17 +609,17 @@ struct JetProjectSummary: Sendable, Equatable, Identifiable {
     }
 }
 
-struct JetProjectList: Sendable, Equatable {
+nonisolated struct JetProjectList: Sendable, Equatable {
     let cursor: UInt64
     let projects: [JetProjectSummary]
 }
 
-enum JetProjectRegistrability: Sendable, Equatable {
+nonisolated enum JetProjectRegistrability: Sendable, Equatable {
     case registrable(detail: String)
     case unavailable(verdict: String, detail: String)
 }
 
-struct JetProjectPreview: Sendable, Equatable {
+nonisolated struct JetProjectPreview: Sendable, Equatable {
     let root: String
     let registrability: JetProjectRegistrability
 
@@ -614,7 +629,7 @@ struct JetProjectPreview: Sendable, Equatable {
     }
 }
 
-struct JetProjectRemovalPreview: Sendable, Equatable, Identifiable {
+nonisolated struct JetProjectRemovalPreview: Sendable, Equatable, Identifiable {
     let id = UUID()
     let projectID: UUID
     let root: String
@@ -646,7 +661,7 @@ struct JetProjectRemoved: Sendable, Equatable {
     let disposition: String
 }
 
-struct JetAccountBindingSummary: Sendable, Equatable, Identifiable {
+nonisolated struct JetAccountBindingSummary: Sendable, Equatable, Identifiable {
     let id: UUID
     let provider: String
     let label: String
@@ -654,19 +669,158 @@ struct JetAccountBindingSummary: Sendable, Equatable, Identifiable {
     let stateLabel: String
 }
 
-struct JetAccountBindingList: Sendable, Equatable {
+nonisolated struct JetAccountBindingList: Sendable, Equatable {
     let cursor: UInt64
     let bindings: [JetAccountBindingSummary]
 }
 
-struct JetPairingSummary: Sendable, Equatable {
+nonisolated enum JetPairedClientAccess: String, Sendable, Equatable, Hashable {
+    case enabled
+    case disabled
+
+    var label: String {
+        switch self {
+        case .enabled: "Enabled"
+        case .disabled: "Disabled"
+        }
+    }
+}
+
+nonisolated struct JetPairedClientSummary: Sendable, Equatable, Identifiable {
+    let id: UUID
+    let access: JetPairedClientAccess
+    let pairedAtUnixMilliseconds: Int64
+    let pairingProtocol: String
+    let publicKey: String
+}
+
+nonisolated enum JetPairingProgress: Sendable, Equatable {
+    case offered
+    case awaitingConfirmation(clientID: UUID, authenticationString: String)
+    case confirmed(clientID: UUID, authenticationString: String)
+    case ended(reason: String)
+
+    var authenticationString: String? {
+        switch self {
+        case let .awaitingConfirmation(_, value), let .confirmed(_, value): value
+        case .offered, .ended: nil
+        }
+    }
+
+    var clientID: UUID? {
+        switch self {
+        case let .awaitingConfirmation(clientID, _), let .confirmed(clientID, _): clientID
+        case .offered, .ended: nil
+        }
+    }
+}
+
+nonisolated struct JetPendingPairing: Sendable, Equatable, Identifiable {
+    let id: UUID
+    let method: String
+    let progress: JetPairingProgress
+    let attemptsRemaining: UInt32
+    let openedAtUnixMilliseconds: Int64
+    let expiresAtUnixMilliseconds: Int64
+}
+
+nonisolated struct JetPairingSummary: Sendable, Equatable {
     let cursor: UInt64
     let gate: String
     let pairedClients: Int
     let hasPendingOffer: Bool
+    let clients: [JetPairedClientSummary]
+    let pending: JetPendingPairing?
+
+    init(
+        cursor: UInt64,
+        gate: String,
+        clients: [JetPairedClientSummary],
+        pending: JetPendingPairing?
+    ) {
+        self.cursor = cursor
+        self.gate = gate
+        pairedClients = clients.count
+        hasPendingOffer = pending != nil
+        self.clients = clients
+        self.pending = pending
+    }
+
+    init(
+        cursor: UInt64,
+        gate: String,
+        pairedClients: Int,
+        hasPendingOffer: Bool
+    ) {
+        self.cursor = cursor
+        self.gate = gate
+        self.pairedClients = pairedClients
+        self.hasPendingOffer = hasPendingOffer
+        clients = []
+        pending = nil
+    }
 }
 
-enum JetSetupSection: String, Sendable, Equatable {
+nonisolated enum JetPairingDisclosure: Sendable, Equatable {
+    case manualCode(String)
+    case qrPayload(String)
+    case alreadyDisclosed
+}
+
+nonisolated struct JetOpenedPairing: Sendable, Equatable {
+    let disclosure: JetPairingDisclosure
+    let pending: JetPendingPairing
+}
+
+nonisolated struct JetRemotePairingClaim: Sendable, Equatable {
+    let endpoint: String
+    let offerID: UUID
+    let authenticationString: String
+    let signingBytes: Data
+}
+
+nonisolated struct JetRemotePlaneProfile: Codable, Sendable, Equatable, Identifiable {
+    let id: UUID
+    var name: String
+    let endpoint: String
+    var planeID: UUID?
+}
+
+struct JetPlanePresentation: Sendable, Equatable, Identifiable {
+    let id: UUID
+    var name: String
+    let endpoint: String?
+    let isLocal: Bool
+    var planeID: UUID?
+    var connection: JetConnectionState
+    var snapshot: JetSetupSnapshot?
+    var failure: JetPresentationError?
+    var conversationCursor: UInt64?
+
+    var capabilityLimitations: [String] {
+        guard let capabilities = snapshot?.capabilities else { return [] }
+        var limitations = capabilities.degraded
+        if capabilities.credentialStore != .available {
+            limitations.append(capabilities.credentialStore.label)
+        }
+        if capabilities.crafts.isEmpty { limitations.append("No Crafts installed") }
+        if capabilities.harnesses.isEmpty { limitations.append("No supported Harnesses") }
+        for tool in capabilities.externalTools where !tool.availability.isPresent {
+            limitations.append("\(tool.tool) unavailable")
+        }
+        return Array(Set(limitations)).sorted()
+    }
+}
+
+struct JetPlaneProject: Sendable, Equatable, Identifiable {
+    let planeRegistryID: UUID
+    let planeName: String
+    let project: JetProjectSummary
+
+    var id: String { "\(planeRegistryID.uuidString)-\(project.id.uuidString)" }
+}
+
+nonisolated enum JetSetupSection: String, Sendable, Equatable {
     case capabilities
     case projects
     case accounts
@@ -682,14 +836,14 @@ enum JetSetupSection: String, Sendable, Equatable {
     }
 }
 
-struct JetSetupIssue: Sendable, Equatable, Identifiable {
+nonisolated struct JetSetupIssue: Sendable, Equatable, Identifiable {
     let section: JetSetupSection
     let error: JetPresentationError
 
     var id: JetSetupSection { section }
 }
 
-struct JetSetupSnapshot: Sendable, Equatable {
+nonisolated struct JetSetupSnapshot: Sendable, Equatable {
     let status: JetPlaneStatus
     let capabilities: JetCapabilitySummary
     let projects: JetProjectList
@@ -718,18 +872,18 @@ struct JetSetupSnapshot: Sendable, Equatable {
     }
 }
 
-enum JetSettingScope: Sendable, Equatable {
+nonisolated enum JetSettingScope: Sendable, Equatable {
     case plane
     case project(UUID)
     case conversation(UUID)
 }
 
-struct JetSettingCleared: Sendable, Equatable {
+nonisolated struct JetSettingCleared: Sendable, Equatable {
     let key: SettingKey
     let scope: JetSettingScope
 }
 
-enum JetPresentationErrorCategory: String, Sendable {
+nonisolated enum JetPresentationErrorCategory: String, Sendable {
     case offline
     case invalidInput = "invalid_input"
     case unauthorized
@@ -745,7 +899,7 @@ enum JetPresentationErrorCategory: String, Sendable {
     case cancelled
 }
 
-enum JetRecoveryAction: Sendable, Equatable, Identifiable {
+nonisolated enum JetRecoveryAction: Sendable, Equatable, Identifiable {
     case refreshFile
     case refreshConversation(UUID)
     case refreshRun(UUID)
@@ -770,7 +924,7 @@ enum JetRecoveryAction: Sendable, Equatable, Identifiable {
     }
 }
 
-enum JetRestartMetadata: Sendable, Equatable {
+nonisolated enum JetRestartMetadata: Sendable, Equatable {
     case cursorExpired(minimumAvailable: UInt64, snapshotRevision: UInt64)
     case cursorAhead(snapshotRevision: UInt64)
     case paginationStale(snapshotRevision: UInt64)
@@ -788,17 +942,17 @@ enum JetRestartMetadata: Sendable, Equatable {
     }
 }
 
-enum JetConflictSafeState: Sendable, Equatable {
+nonisolated enum JetConflictSafeState: Sendable, Equatable {
     case conversation(id: UUID, revision: UInt64?)
     case run(JetRunSummary)
 }
 
-struct JetRevisionConflict: Sendable, Equatable {
+nonisolated struct JetRevisionConflict: Sendable, Equatable {
     let currentRevision: UInt64
     let safeState: JetConflictSafeState
 }
 
-struct JetPresentationError: Error, Sendable, Equatable {
+nonisolated struct JetPresentationError: Error, Sendable, Equatable {
     let category: JetPresentationErrorCategory
     let code: String
     let message: String
@@ -868,12 +1022,12 @@ struct JetPresentationError: Error, Sendable, Equatable {
     }
 }
 
-enum JetClientFailure: Error, Sendable, Equatable {
+nonisolated enum JetClientFailure: Error, Sendable, Equatable {
     case presentation(JetPresentationError)
     case commandOutcomeUnknown(commandID: UUID)
 }
 
-struct JetClientConfiguration: Sendable {
+nonisolated struct JetClientConfiguration: Sendable {
     static let protocolVersion: UInt32 = 1
     static let protocolMinor: UInt32 = 43
     static let codec = "json-v1"

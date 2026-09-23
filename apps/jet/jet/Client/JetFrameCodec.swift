@@ -1,17 +1,17 @@
 import Foundation
 
-enum JetFrameKind: UInt8, Sendable {
+nonisolated enum JetFrameKind: UInt8, Sendable {
     case control = 0
     case data = 1
 }
 
-struct JetFrame: Sendable, Equatable {
+nonisolated struct JetFrame: Sendable, Equatable {
     let kind: JetFrameKind
     let streamID: UInt32
     let payload: Data
 }
 
-struct JetFrameLimits: Sendable, Equatable {
+nonisolated struct JetFrameLimits: Sendable, Equatable {
     static let protocolMaximum = JetFrameLimits(
         control: 1_048_576,
         data: 262_144
@@ -35,14 +35,14 @@ struct JetFrameLimits: Sendable, Equatable {
     }
 }
 
-enum JetFrameFailure: Error, Equatable, Sendable {
+nonisolated enum JetFrameFailure: Error, Equatable, Sendable {
     case unknownKind(UInt8)
     case invalidStream
     case oversized(declared: Int, limit: Int)
     case multiplexingRequired
 }
 
-enum JetFrameCodec {
+nonisolated enum JetFrameCodec {
     static func read(
         from transport: any JetByteTransport,
         multiplexed: Bool,

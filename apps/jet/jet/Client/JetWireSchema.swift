@@ -1,7 +1,7 @@
 import CoreFoundation
 import Foundation
 
-enum JetWireValidationFailure: Error, Equatable {
+nonisolated enum JetWireValidationFailure: Error, Equatable {
     case schemaUnavailable
     case malformedJSON
     case duplicateField
@@ -10,7 +10,7 @@ enum JetWireValidationFailure: Error, Equatable {
     case schemaMismatch
 }
 
-indirect enum JetJSONNode {
+nonisolated indirect enum JetJSONNode {
     case object([JetJSONField], Range<Int>)
     case array([JetJSONNode], Range<Int>)
     case scalar(Range<Int>)
@@ -33,12 +33,12 @@ indirect enum JetJSONNode {
     }
 }
 
-struct JetJSONField {
+nonisolated struct JetJSONField {
     let key: String
     let node: JetJSONNode
 }
 
-struct JetJSONDocument {
+nonisolated struct JetJSONDocument {
     let data: Data
     let root: JetJSONNode
     let value: Any
@@ -56,7 +56,7 @@ struct JetJSONDocument {
 
 // JSONSerialization builds immutable schema graphs here. The validator never
 // exposes or mutates that graph; tests exercise the same instance concurrently.
-struct JetWireSchema: @unchecked Sendable {
+nonisolated struct JetWireSchema: @unchecked Sendable {
     private final class ResourceAnchor: NSObject {}
 
     private let definitions: [String: Any]
@@ -278,7 +278,7 @@ struct JetWireSchema: @unchecked Sendable {
     }
 }
 
-private struct JetBoundedJSONParser {
+private nonisolated struct JetBoundedJSONParser {
     private static let maximumDepth = 64
     private static let maximumDirectItems = 4_096
     private static let maximumTotalItems = 8_192

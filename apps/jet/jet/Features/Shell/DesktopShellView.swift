@@ -19,6 +19,8 @@ struct DesktopShellView: View {
         } detail: {
             if session.sidebarSelection == .project {
                 ProjectSetupView(session: session)
+            } else if session.sidebarSelection == .planes {
+                PlaneManagementView(session: session)
             } else {
                 ConversationView(session: session)
             }
@@ -165,15 +167,21 @@ private struct SidebarView: View {
             }
 
             Section("Projects") {
-                if let projects = session.setupSnapshot?.projects.projects {
-                    ForEach(projects) { project in
+                ForEach(session.allProjects) { item in
                         Button {
-                            session.selectProject(project.id)
+                            session.selectProject(item.project.id, on: item.planeRegistryID)
                         } label: {
-                            Label(project.name, systemImage: "folder")
+                            VStack(alignment: .leading, spacing: 1) {
+                                Label(item.project.name, systemImage: "folder")
+                                if session.planes.count > 1 {
+                                    Text(item.planeName)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.leading, 24)
+                                }
+                            }
                         }
                         .buttonStyle(.plain)
-                    }
                 }
 
                 Button(action: session.requestAddProject) {
@@ -195,8 +203,16 @@ private struct SidebarView: View {
                     Button {
                         session.selectConversation(conversation.id)
                     } label: {
-                        Label(conversation.title, systemImage: "bubble.left.and.bubble.right")
-                            .lineLimit(2)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Label(conversation.title, systemImage: "bubble.left.and.bubble.right")
+                                .lineLimit(2)
+                            if session.planes.count > 1 {
+                                Text(session.conversationPlaneName(conversation.id))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.leading, 24)
+                            }
+                        }
                     }
                     .buttonStyle(.plain)
                     .listRowBackground(
@@ -218,7 +234,7 @@ private struct SidebarView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if session.nextConversationPage != nil {
+                if session.hasMoreConversations {
                     Button {
                         Task { await session.loadMoreConversations() }
                     } label: {
@@ -232,12 +248,12 @@ private struct SidebarView: View {
                 Section("Search results") {
                     ForEach(result.hits) { hit in
                         Button {
-                            session.selectSearchHit(hit.conversationID)
+                            session.selectSearchHit(hit)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(hit.excerpt)
+                                Text(hit.hit.excerpt)
                                     .lineLimit(2)
-                                Text(hit.field.rawValue.capitalized)
+                                Text("\(hit.planeName) · \(hit.hit.field.rawValue.capitalized)")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -248,6 +264,16 @@ private struct SidebarView: View {
                     if result.hits.isEmpty {
                         Text("No matching tasks")
                             .foregroundStyle(.secondary)
+                    }
+                    ForEach(
+                        result.failures.keys.sorted(by: { $0.uuidString < $1.uuidString }),
+                        id: \.self
+                    ) { planeID in
+                        if let failure = result.failures[planeID] {
+                            Text("\(session.planes.first(where: { $0.id == planeID })?.name ?? "Plane") unavailable: \(failure.code)")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
                     }
                 }
             }
@@ -282,6 +308,11 @@ private struct PlaneStatusFooter: View {
                 Text("This Mac")
                     .font(.caption.weight(.medium))
                 Text(session.planeConnectionLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if !session.remoteProfiles.isEmpty {
+                Text("+\(session.remoteProfiles.count) remote")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -361,7 +392,7 @@ private struct LiveConversationView: View {
                     HStack(spacing: 6) {
                         Text(session.selectedProjectName)
                         Text("·")
-                        Text("Runs on This Mac")
+                        Text("Runs on \(session.selectedPlaneName)")
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -458,7 +489,7 @@ private struct LiveTimelineView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Showing cached state")
                                 .font(.subheadline.weight(.semibold))
-                            Text("Jet will refresh this Conversation after the local Plane reconnects.")
+                            Text("Jet will refresh this task after \(session.selectedPlaneName) reconnects.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
@@ -684,7 +715,26 @@ private struct LiveComposerView: View {
             HStack(spacing: 12) {
                 ContextValue(label: "Project", value: session.selectedProjectName)
                 ContextValue(label: "Agent", value: session.selectedHarnessName)
-                ContextValue(label: "Runs on", value: "This Mac")
+                if session.selectedConversationID == nil, session.planes.count > 1 {
+                    Menu {
+                        ForEach(session.planes) { plane in
+                            Button {
+                                session.chooseNewTaskPlane(plane.id)
+                            } label: {
+                                if plane.id == session.newTaskPlaneRegistryID {
+                                    Label(plane.name, systemImage: "checkmark")
+                                } else {
+                                    Text(plane.name)
+                                }
+                            }
+                        }
+                    } label: {
+                        ContextValue(label: "Runs on", value: session.selectedPlaneName)
+                    }
+                    .menuStyle(.borderlessButton)
+                } else {
+                    ContextValue(label: "Runs on", value: session.selectedPlaneName)
+                }
                 Spacer(minLength: 0)
                 Text("\(session.draftBytes.formatted()) / \(JetTurnQueue.maximumPromptBytes.formatted()) bytes")
                     .font(.caption.monospacedDigit())

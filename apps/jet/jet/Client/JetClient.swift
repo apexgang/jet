@@ -19,7 +19,6 @@ actor JetClient {
         var active: Bool
     }
 
-    private static let preface = Data("jet-protocol\n".utf8)
     private static let maximumInFlightRequests = 256
     private static let maximumTerminalStreams = 16
     private static let maximumTerminalCredit: UInt64 = 16 * 1_024 * 1_024
@@ -30,6 +29,7 @@ actor JetClient {
     private let configuration: JetClientConfiguration
     private let schema: JetWireSchema
     private let makeTransport: JetTransportFactory
+    private let remoteSigner: (any JetConnectionSigning)?
 
     private var transport: (any JetByteTransport)?
     private var negotiation: JetNegotiation?
@@ -46,11 +46,13 @@ actor JetClient {
     init(
         configuration: JetClientConfiguration,
         schema: JetWireSchema,
-        makeTransport: @escaping JetTransportFactory
+        makeTransport: @escaping JetTransportFactory,
+        remoteSigner: (any JetConnectionSigning)? = nil
     ) {
         self.configuration = configuration
         self.schema = schema
         self.makeTransport = makeTransport
+        self.remoteSigner = remoteSigner
     }
 
 #if os(macOS)
@@ -63,6 +65,23 @@ actor JetClient {
             configuration: configuration,
             schema: schema,
             makeTransport: { JetUnixSocketTransport(socketURL: socketURL) }
+        )
+        try await client.connect()
+        return client
+    }
+
+    static func connectRemote(
+        endpoint: String,
+        configuration: JetClientConfiguration,
+        signer: any JetConnectionSigning
+    ) async throws -> JetClient {
+        let schema = try JetWireSchema.bundled()
+        let validatedEndpoint = try JetSSHEndpoint.validated(endpoint)
+        let client = JetClient(
+            configuration: configuration,
+            schema: schema,
+            makeTransport: { JetSSHTransport(validatedEndpoint: validatedEndpoint) },
+            remoteSigner: signer
         )
         try await client.connect()
         return client
@@ -464,6 +483,151 @@ actor JetClient {
     func pairing() async throws -> JetPairingSummary {
         let (data, requestID) = try await sendQuery(["type": "pairing"])
         return try decodePairing(data, requestID: requestID)
+    }
+
+    func setPairingGate(
+        _ gate: String,
+        commandID: UUID
+    ) async throws -> String {
+        guard ["open", "closed"].contains(gate) else {
+            throw JetClientFailure.presentation(.invalidInput(
+                code: "pairing.gate_invalid",
+                message: "Choose whether this Plane accepts new pairings."
+            ))
+        }
+        try await requireProtocolMinor(6, feature: "remote pairing")
+        let (data, requestID) = try await sendCommand(
+            ["type": "set_pairing_gate", "gate": gate],
+            commandID: commandID
+        )
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "pairing_gate_set"
+        )
+        guard let accepted = result["gate"] as? String,
+              ["open", "closed"].contains(accepted)
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+        return accepted
+    }
+
+    func openManualPairing(commandID: UUID) async throws -> JetOpenedPairing {
+        try await requireProtocolMinor(6, feature: "remote pairing")
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "open_pairing",
+                "method": ["method": "manual_code"],
+            ],
+            commandID: commandID
+        )
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "pairing_opened"
+        )
+        guard let disclosure = result["disclosure"] as? [String: Any],
+              let disclosureKind = disclosure["disclosure"] as? String,
+              let pendingValue = result["pending"] as? [String: Any],
+              let pending = JetPairingWire.pending(pendingValue)
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+        let decoded: JetPairingDisclosure
+        switch disclosureKind {
+        case "manual_code":
+            guard let code = disclosure["code"] as? String else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            decoded = .manualCode(code)
+        case "qr_payload":
+            guard let payload = disclosure["payload"] as? String else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            decoded = .qrPayload(payload)
+        case "already_disclosed":
+            decoded = .alreadyDisclosed
+        default:
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return JetOpenedPairing(disclosure: decoded, pending: pending)
+    }
+
+    func confirmPairing(
+        offerID: UUID,
+        authenticationString: String,
+        commandID: UUID
+    ) async throws -> JetPendingPairing {
+        try await requireProtocolMinor(6, feature: "remote pairing")
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "confirm_pairing",
+                "offer_id": offerID.uuidString.lowercased(),
+                "authentication_string": authenticationString,
+            ],
+            commandID: commandID
+        )
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "pairing_confirmed"
+        )
+        guard let value = result["pending"] as? [String: Any],
+              let pending = JetPairingWire.pending(value)
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+        return pending
+    }
+
+    func setPairedClientAccess(
+        clientID: UUID,
+        access: JetPairedClientAccess,
+        commandID: UUID
+    ) async throws -> JetPairedClientSummary {
+        try await requireProtocolMinor(6, feature: "paired-client access")
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "set_paired_client_access",
+                "client_id": clientID.uuidString.lowercased(),
+                "access": access.rawValue,
+            ],
+            commandID: commandID
+        )
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "paired_client_access_set"
+        )
+        guard let value = result["client"] as? [String: Any],
+              let client = JetPairingWire.client(value),
+              client.id == clientID,
+              client.access == access
+        else { throw JetClientFailure.presentation(.invalidResponse) }
+        return client
+    }
+
+    func revokePairedClient(
+        clientID: UUID,
+        commandID: UUID
+    ) async throws -> UUID {
+        try await requireProtocolMinor(6, feature: "paired-client revocation")
+        let (data, requestID) = try await sendCommand(
+            [
+                "type": "revoke_paired_client",
+                "client_id": clientID.uuidString.lowercased(),
+            ],
+            commandID: commandID
+        )
+        let (_, result, _) = try responseResult(
+            data,
+            requestID: requestID,
+            kind: "command_result",
+            type: "paired_client_revoked"
+        )
+        guard let revoked = uuid(result["client_id"]), revoked == clientID else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return revoked
     }
 
     func previewProjectRemoval(
@@ -1060,7 +1224,7 @@ actor JetClient {
                 }
             }
             let hello = try encodeClientHello()
-            try await candidate.write(Self.preface)
+            try await candidate.write(JetHandshakeCodec.preface)
             try await candidate.write(
                 JetFrameCodec.encode(
                     JetFrame(kind: .control, streamID: 0, payload: hello),
@@ -1068,14 +1232,66 @@ actor JetClient {
                     limits: .protocolMaximum
                 )
             )
-            let frame = try await JetFrameCodec.read(
+            let frame = try await readHandshakeFrame(
                 from: candidate,
-                multiplexed: false
+                timeout: configuration.connectionTimeout
             )
             guard frame.kind == .control, frame.streamID == 0 else {
                 throw JetClientFailure.presentation(.invalidResponse)
             }
-            let accepted = try decodeServerHello(frame.payload)
+            let accepted: JetNegotiation
+            if try serverHelloIsChallenge(frame.payload) {
+                guard let remoteSigner else {
+                    throw JetClientFailure.presentation(
+                        JetPresentationError(
+                            category: .incompatible,
+                            code: "protocol.unexpected_remote_challenge",
+                            message: "The local Plane requested remote authentication.",
+                            retryable: false
+                        )
+                    )
+                }
+                let nonce = try JetHandshakeCodec.challenge(frame.payload, schema: schema)
+                var transcript = Data("jet.connection.v1\0ed25519\0".utf8)
+                transcript.append(hello)
+                transcript.append(nonce)
+                let signature = try await remoteSigner.sign(transcript)
+                guard signature.count == 64 else {
+                    throw JetIdentityFailure.invalidSignature
+                }
+                let proof = try JetHandshakeCodec.encode(
+                    ["signature": signature.hexadecimal],
+                    definition: "ConnectionProof",
+                    schema: schema
+                )
+                try await candidate.write(
+                    JetFrameCodec.encode(
+                        JetFrame(kind: .control, streamID: 0, payload: proof),
+                        multiplexed: false,
+                        limits: .protocolMaximum
+                    )
+                )
+                let welcome = try await readHandshakeFrame(
+                    from: candidate,
+                    timeout: configuration.connectionTimeout
+                )
+                guard welcome.kind == .control, welcome.streamID == 0 else {
+                    throw JetClientFailure.presentation(.invalidResponse)
+                }
+                accepted = try decodeServerHello(welcome.payload)
+                guard accepted.minorVersion >= 7 else {
+                    throw JetClientFailure.presentation(
+                        JetPresentationError(
+                            category: .incompatible,
+                            code: "protocol.remote_auth_downgrade",
+                            message: "The remote Plane did not keep authenticated transport enabled.",
+                            retryable: false
+                        )
+                    )
+                }
+            } else {
+                accepted = try decodeServerHello(frame.payload)
+            }
 
             generation &+= 1
             let acceptedGeneration = generation
@@ -1096,21 +1312,41 @@ actor JetClient {
     }
 
     private func encodeClientHello() throws -> Data {
-        try encode(
-            [
-                "protocol": [
-                    "min": NSNumber(value: Self.protocolVersion),
-                    "max": NSNumber(value: Self.protocolVersion),
-                ],
-                "minor": NSNumber(value: Self.protocolMinor),
-                "codec": Self.codec,
-                "client_id": configuration.clientID.uuidString.lowercased(),
-                "max_control_frame": NSNumber(value: JetFrameLimits.protocolMaximum.control),
-                "max_data_frame": NSNumber(value: JetFrameLimits.protocolMaximum.data),
-                "capabilities": [],
-            ],
-            definition: "ClientHello"
+        try JetHandshakeCodec.clientHello(
+            clientID: configuration.clientID,
+            schema: schema
         )
+    }
+
+    private func readHandshakeFrame(
+        from transport: any JetByteTransport,
+        timeout: Duration
+    ) async throws -> JetFrame {
+        return try await withThrowingTaskGroup(of: JetFrame.self) { group in
+            group.addTask {
+                try await JetFrameCodec.read(from: transport, multiplexed: false)
+            }
+            group.addTask {
+                try await Task.sleep(for: timeout)
+                await transport.close()
+                throw JetClientFailure.presentation(.offline)
+            }
+            defer { group.cancelAll() }
+            guard let frame = try await group.next() else {
+                throw JetClientFailure.presentation(.offline)
+            }
+            return frame
+        }
+    }
+
+    private func serverHelloIsChallenge(_ data: Data) throws -> Bool {
+        let document = try schema.validate(data, definition: "ServerHello")
+        guard let object = document.value as? [String: Any],
+              let kind = object["kind"] as? String
+        else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        return kind == "challenge"
     }
 
     private func decodeServerHello(_ data: Data) throws -> JetNegotiation {
@@ -2402,12 +2638,25 @@ actor JetClient {
         else {
             throw JetClientFailure.presentation(.invalidResponse)
         }
-        let clients = result["clients"] as? [[String: Any]] ?? []
+        let clientValues = result["clients"] as? [[String: Any]] ?? []
+        let clients = clientValues.compactMap(JetPairingWire.client)
+        guard clients.count == clientValues.count else {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        let pending: JetPendingPairing?
+        if let pendingValue = result["pending"] as? [String: Any] {
+            guard let decoded = JetPairingWire.pending(pendingValue) else {
+                throw JetClientFailure.presentation(.invalidResponse)
+            }
+            pending = decoded
+        } else {
+            pending = nil
+        }
         return JetPairingSummary(
             cursor: cursor,
             gate: gate,
-            pairedClients: clients.count,
-            hasPendingOffer: result["pending"] != nil && !(result["pending"] is NSNull)
+            clients: clients,
+            pending: pending
         )
     }
 
@@ -3372,6 +3621,14 @@ actor JetClient {
         if let error = error as? JetClientFailure { return error }
         if error is CancellationError { return .presentation(.cancelled) }
         if error is JetTransportFailure { return .presentation(.offline) }
+        if error is JetIdentityFailure {
+            return .presentation(JetPresentationError(
+                category: .unavailable,
+                code: "credential.keychain_unavailable",
+                message: "Jet could not use this installation's pairing key in Keychain.",
+                retryable: true
+            ))
+        }
         if error is JetFrameFailure || error is JetWireValidationFailure {
             return .presentation(.invalidResponse)
         }
