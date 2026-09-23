@@ -312,7 +312,7 @@
             {session.conversationBusy ? "Sending" : "Send"}
           </button>
         </div>
-        <div class="context-row" aria-label="Task context">
+        <div class="context-row" role="group" aria-label="Task context">
           <span><small>Project</small>{session.selectedProjectName}</span>
           <span><small>Agent</small>{session.selectedHarnessName}</span>
           <span><small>Runs on</small>{session.runsOnLabel}</span>

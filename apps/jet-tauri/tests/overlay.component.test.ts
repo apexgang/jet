@@ -51,6 +51,8 @@ describe("compact work panel overlay", () => {
   it("starts closed in a narrow window, whatever the column preference (D12)", () => {
     const { session } = renderShell();
     expect(document.querySelector(".app-shell")?.getAttribute("data-layout")).toBe("compact");
+    // The task view is the window's main landmark (adaptation audit, axe landmark-one-main).
+    expect(main().tagName).toBe("MAIN");
     expect(session.workPanelPresented).toBe(false);
     expect(panel().classList.contains("hidden")).toBe(true);
     expect(document.querySelector(".work-panel-scrim")).toBeNull();

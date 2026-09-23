@@ -106,7 +106,7 @@
       <button class:active={selected("attention")} onclick={() => session.select("attention")}>
         <span>Needs attention</span>
         {#if session.attentionCount > 0}
-          <span class="attention-count" aria-label={`${session.attentionCount} items`}>{session.attentionCount}</span>
+          <span class="attention-count">{session.attentionCount}<span class="visually-hidden">{session.attentionCount === 1 ? " item" : " items"}</span></span>
         {/if}
       </button>
     </div>

@@ -97,7 +97,7 @@
                   {/if}
                 </span>
                 {#if status.attention}
-                  <span class="attention-count" aria-label="Needs attention">!</span>
+                  <span class="attention-count"><span aria-hidden="true">!</span><span class="visually-hidden">Needs attention</span></span>
                 {/if}
               </button>
             </li>

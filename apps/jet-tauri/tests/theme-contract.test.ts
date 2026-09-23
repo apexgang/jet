@@ -283,6 +283,9 @@ describe("theme tokens", () => {
 
   const PAIRS: Array<{ foreground: string[]; background: string[]; minimum: number }> = [
     { foreground: ["--text", "--muted", "--quiet"], background: ["--background", "--sidebar", "--panel", "--raised"], minimum: 4.5 },
+    // Rows keep their secondary text (shortcut hints, dates) while hovered
+    // or selected; found by the adaptation audit (axe on the sidebar).
+    { foreground: ["--text", "--muted", "--quiet"], background: ["--hover", "--selected"], minimum: 4.5 },
     {
       foreground: ["--success", "--warning", "--danger-text", "--accent-text"],
       background: ["--background", "--sidebar", "--raised", "--selected"],

@@ -197,15 +197,15 @@
       </div>
     {:else}
       <div id="work-changes" class="work-view" class:active={session.selectedWorkPanel === "changes"} role="tabpanel" aria-labelledby="work-tab-changes">
-        <header class="work-heading">
+        <div class="work-heading">
           <div>
             <h2>Changed files</h2>
             <p>{session.workPanel?.scope ?? "Current"} checkpoint · {session.workPanel?.totalFiles ?? 0} files</p>
           </div>
           <button disabled={session.workPanelBusy} onclick={() => session.refreshWorkPanel()}>Refresh</button>
-        </header>
+        </div>
 
-        <div class="checkpoint-controls" aria-label="Change checkpoint">
+        <div class="checkpoint-controls" role="group" aria-label="Change checkpoint">
           <label>
             Checkpoint
             <select bind:value={session.checkpointKind}>
@@ -277,12 +277,12 @@
       </div>
 
       <div id="work-files" class="work-view" class:active={session.selectedWorkPanel === "files"} role="tabpanel" aria-labelledby="work-tab-files">
-        <header class="work-heading">
+        <div class="work-heading">
           <div>
             <h2>Workspace file</h2>
             <p>{session.editableFile?.path ?? "Choose a changed file"}</p>
           </div>
-        </header>
+        </div>
 
         {#if !session.selectedWorkFileId}
           <div class="work-empty">
@@ -321,13 +321,13 @@
       </div>
 
       <div id="work-terminal" class="work-view" class:active={session.selectedWorkPanel === "terminal"} role="tabpanel" aria-labelledby="work-tab-terminal">
-        <header class="work-heading">
+        <div class="work-heading">
           <div>
             <h2>Workspace terminal</h2>
             <p>{session.workPanel?.workspaceId ? "Scoped to this managed Workspace" : "Requires a managed Workspace"}</p>
           </div>
           <button disabled={session.workPanelBusy || !session.workPanel?.workspaceId} onclick={() => session.createTerminal()}>New</button>
-        </header>
+        </div>
 
         {#if !session.workPanel?.workspaceId}
           <div class="work-empty"><strong>No managed Workspace</strong><p>This Run does not expose a terminal-capable Workspace.</p></div>
@@ -371,7 +371,7 @@
           <dl>
             <div><dt>Lifecycle</dt><dd>{session.selectedRun?.lifecycle ?? "Not started"}</dd></div>
             <div><dt>Activity</dt><dd>{session.supervision?.execution?.activity?.replaceAll("_", " ") ?? (session.hasLiveRun ? "Starting" : "Idle")}</dd></div>
-            <div><dt>Runs on</dt><dd>{session.runsOnLabel}</dd></div>
+            <div><dt>Runs on</dt><dd class="plane-label">{session.runsOnLabel}</dd></div>
             <div><dt>Checkpoint</dt><dd>{session.workPanel?.scope ?? "Unavailable"}</dd></div>
             <div><dt>Latest Turn</dt><dd>{session.workPanel?.latestTurn ?? "—"}</dd></div>
             <div><dt>Changed files</dt><dd>{session.workPanel?.totalFiles ?? 0}</dd></div>
@@ -388,7 +388,7 @@
             </section>
           {/if}
 
-          <div class="run-controls" aria-label="Run controls">
+          <div class="run-controls" role="group" aria-label="Run controls">
             <button disabled={!session.canInterruptTurn || session.controlBusy !== null} onclick={(event) => session.requestRunControl("interrupt_turn", event.currentTarget)}>Interrupt Turn…</button>
             <button class="danger-action" disabled={!session.canStopRun || session.controlBusy !== null} onclick={(event) => session.requestRunControl("stop_run", event.currentTarget)}>Stop Run…</button>
           </div>
@@ -428,7 +428,7 @@
 
     {#if session.workPanelNotice}<p class="work-notice" role="status">{session.workPanelNotice}</p>{/if}
     {#if session.workPanelNoticeError && (session.workPanelNoticeError.recoveryActions.length > 0 || session.pairAgainTarget(session.workPanelNoticeError))}
-      <div class="recovery-actions panel-recovery" aria-label="Recovery actions">
+      <div class="recovery-actions panel-recovery" role="group" aria-label="Recovery actions">
         {#each session.workPanelNoticeError.recoveryActions as action}
           <button onclick={() => session.applyWorkRecovery(action, session.workPanelNoticeError?.planeId ?? null)}>{recoveryLabel(action)}</button>
         {/each}

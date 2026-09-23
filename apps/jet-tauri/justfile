@@ -42,6 +42,11 @@ test:
 # Run the app-local contract, frontend, lint, and test checks.
 check: contracts frontend-check frontend-test frontend-build fmt clippy test
 
+# Audit every scene at every window size and media setting (local only; needs agent-browser).
+adaptation-audit *args:
+	@command -v agent-browser >/dev/null || { echo "adaptation-audit needs agent-browser on the PATH." >&2; exit 2; }
+	bun scripts/adaptation/audit.ts {{args}}
+
 # Build a debug app bundle on macOS or AppImage on Linux.
 bundle:
 	bun run tauri build --debug --bundles "{{bundle_kind}}"

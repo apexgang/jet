@@ -46,7 +46,7 @@
 </script>
 
 <section class="delivery-panel" aria-label="Git delivery">
-  <header class="work-heading"><div><h2>Deliver work</h2><p>Review each step before it changes Git or GitHub.</p></div></header>
+  <div class="work-heading"><div><h2>Deliver work</h2><p>Review each step before it changes Git or GitHub.</p></div></div>
   {#if !session.selectedConversationId}
     <p>Select a task to review and deliver its work.</p>
   {:else}
@@ -92,7 +92,7 @@
     {:else if delivery.review?.kind === "queued"}<p role="status">Request accepted. Its delivery result appears in history; acceptance does not mean completion.</p>
     {:else if delivery.review?.kind === "acknowledged"}<p role="status">Acknowledgement recorded. The original outcome remains unknown.</p>{/if}
 
-    <header class="work-heading"><h3>Delivery history</h3><button disabled={delivery.loading || !session.selectedPlaneOnline} onclick={() => delivery.refresh()}>Refresh</button></header>
+    <div class="work-heading"><h3>Delivery history</h3><button disabled={delivery.loading || !session.selectedPlaneOnline} onclick={() => delivery.refresh()}>Refresh</button></div>
     <p aria-live="polite">{deliverySummary(delivery.rows)}</p>
     <ol class="delivery-history">
       {#each delivery.rows as row (row.id)}

@@ -32,7 +32,8 @@
   --input-border: #3a454c;
   --text: #eaf0f3;
   --muted: #9aa7ae;
-  --quiet: #7d8990;
+  /* 4.5:1 on --selected and on the approval card's warning tint. */
+  --quiet: #89959c;
   --placeholder: #89969d;
   --success: #59ca82;
   --warning: #efa94d;
@@ -1540,8 +1541,11 @@ kbd {
   background: var(--raised);
 }
 
+/* A 2 px ring: the border colour alone was too faint a focus indicator
+   (adaptation audit). */
 .composer-box:focus-within {
   border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
 }
 
 .composer-box textarea {
@@ -1596,7 +1600,6 @@ kbd {
   gap: 5px;
   color: var(--muted);
   font-size: 11px;
-  text-transform: capitalize;
 }
 
 .context-row small {
@@ -2031,6 +2034,11 @@ kbd {
   text-overflow: ellipsis;
   text-transform: capitalize;
   white-space: nowrap;
+}
+
+/* A Plane's label is shown as the shell names it ("This computer"). */
+.run-summary dd.plane-label {
+  text-transform: none;
 }
 
 .lost-run {

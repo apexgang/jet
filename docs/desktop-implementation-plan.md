@@ -228,6 +228,8 @@ Goal: cover the confirmed onboarding, pairing, settings, and recovery scope.
 
 Exit: every section of `docs/design-language.md` has implemented acceptance coverage on both desktop platforms or an explicitly approved platform exception.
 
+Linux status (2026-09-23): the Tauri client implements this wave's adaptation work and seeds `docs/desktop-parity-matrix.md`, with the macOS column observed read-only, native manual checks still open, and exceptions PE-1, PE-2, PE-5, PE-6, PE-7 and deferral PD-1 awaiting product approval (`apps/jet-tauri/docs/wave-3.4.md`).
+
 Estimated effort: 8 to 14 engineer-weeks after Wave 2, with backend gap work included only where noted below.
 
 ## Wave 4: release hardening

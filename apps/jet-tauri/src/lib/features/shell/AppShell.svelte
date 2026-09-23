@@ -59,9 +59,9 @@
   <!-- Shell status (full screen, window layout): outside the regions an overlay makes inert. -->
   <p class="visually-hidden" role="status">{session.shellStatus}</p>
   <Sidebar {session} inert={overlay} />
-  <div class="main-region" inert={overlay}>
+  <main class="main-region" inert={overlay}>
     <Conversation {session} />
-  </div>
+  </main>
   <WorkPanel {session} mode={overlay ? "overlay" : "column"} />
 
   {#if mode === "regular" && widths.sidebar > 0}
