@@ -1,9 +1,11 @@
 import base64
+import functools
 import hashlib
 import io
 import json
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -105,7 +107,7 @@ class RequiredChecks(unittest.TestCase):
         for recipe in ('just install', 'just check', 'just audit'):
             self.assertIn(f'run: {recipe}', job)
         justfile = (ROOT / 'apps/jet-tauri/justfile').read_text()
-        self.assertIn('check: contracts frontend-check frontend-test frontend-build fmt clippy test',
+        self.assertIn('check: version-check contracts frontend-check frontend-test frontend-build fmt clippy test',
                       justfile)
         self.assertIn('cd ../../packages && just contracts-check', justfile)
         self.assertIn('cargo clippy --locked', justfile)
@@ -134,19 +136,54 @@ class CodeScanning(unittest.TestCase):
         self.assertIn('build-mode: manual', workflow)
 
 
+class SigningKey:
+    """An Ed25519 key that signs through OpenSSL, as `tauri signer` would with the updater key."""
+
+    def __init__(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.pem = Path(self.directory.name) / 'key.pem'
+        subprocess.run(['openssl', 'genpkey', '-algorithm', 'ed25519', '-out', self.pem], check=True, capture_output=True)
+        der = subprocess.run(['openssl', 'pkey', '-in', self.pem, '-pubout', '-outform', 'DER'],
+                             check=True, capture_output=True).stdout
+        self.public = der[-32:]
+        self.signatures = {}
+
+    def sign(self, message):
+        if message not in self.signatures:
+            (Path(self.directory.name) / 'message').write_bytes(message)
+            self.signatures[message] = subprocess.run(
+                ['openssl', 'pkeyutl', '-sign', '-inkey', self.pem, '-rawin', '-in', Path(self.directory.name) / 'message'],
+                check=True, capture_output=True).stdout
+        return self.signatures[message]
+
+
+@functools.cache
+def signing_key(key_id):
+    """The one test key behind `key_id` for the whole run."""
+    return SigningKey()
+
+
 def public_key(key_id):
     """A `tauri signer` public key: base64 of a minisign key file."""
-    line = base64.b64encode(b'Ed' + key_id + bytes(32)).decode()
+    line = base64.b64encode(b'Ed' + key_id + signing_key(key_id).public).decode()
     text = f'untrusted comment: minisign public key: {key_id[::-1].hex().upper()}\n{line}\n'
     return base64.b64encode(text.encode()).decode()
 
 
-def signature_file(bundle, version, key_id):
-    """What Tauri writes to `<bundle>.sig`: base64 of a minisign signature box."""
-    signature = base64.b64encode(b'ED' + key_id + bytes(64)).decode()
-    box = (f'untrusted comment: signature from tauri secret key\n{signature}\n'
-           f'trusted comment: timestamp:1790000000\tfile:{bundle}\tversion:{version}\n'
-           f'{base64.b64encode(bytes(64)).decode()}\n')
+def signature_file(bundle, content, version, key_id, prehashed=True, signer=None):
+    """What `tauri signer sign` writes to `<bundle>.sig` for a file named `bundle` holding `content`.
+
+    `version=None` leaves the version out, as `tauri signer sign` does without
+    `--app-version`. `signer` signs under `key_id` with another key.
+    """
+    key = signing_key(signer or key_id)
+    signed = key.sign(hashlib.blake2b(content).digest() if prehashed else content)
+    bound = '' if version is None else f'\tversion:{version}'
+    comment = f'timestamp:1790000000\tfile:{bundle}{bound}'
+    body = base64.b64encode((b'ED' if prehashed else b'Ed') + key_id + signed).decode()
+    box = (f'untrusted comment: signature from tauri secret key\n{body}\n'
+           f'trusted comment: {comment}\n'
+           f'{base64.b64encode(key.sign(signed + comment.encode())).decode()}\n')
     return base64.b64encode(box.encode())
 
 
@@ -201,9 +238,13 @@ class ReleaseAssets(unittest.TestCase):
         desktop = desktop or self.desktop
         for name in release_assets.DESKTOP[label][1].values():
             bundle = name.format(version=self.VERSION)
-            (desktop / bundle).write_bytes(f'{bundle} contents'.encode())
+            (desktop / bundle).write_bytes(self.content(bundle))
             if signed:
-                (desktop / f'{bundle}.sig').write_bytes(signature_file(bundle, self.VERSION, self.KEY))
+                (desktop / f'{bundle}.sig').write_bytes(signature_file(bundle, self.content(bundle), self.VERSION, self.KEY))
+
+    @staticmethod
+    def content(bundle):
+        return f'{bundle} contents'.encode()
 
     def generate(self, pub_date='2026-09-24T12:00:00+03:00'):
         release_assets.generate(self.tag, self.dist, self.desktop, pub_date)
@@ -224,10 +265,12 @@ class ReleaseAssets(unittest.TestCase):
         self.assertNotRegex(formula + cask, '@[A-Z_0-9]+@')
         self.assertNotIn(release_assets.UNBUILT, formula + cask)
         base = f'https://github.com/apexgang/jet/releases/download/{self.tag}'
-        for label in release_assets.LABELS:
+        for label in release_assets.DESKTOP:
             name = f'jet-core-{self.VERSION}-{label}.tar.gz'
             self.assertIn(f'url "{base}/{name}"', formula)
             self.assertIn(sums[name], formula)
+        # The macOS payload is published, but `jetd` is the Linux formula.
+        self.assertNotIn('universal-apple-darwin', formula)
         self.assertIn(f'url "{base}/Jet_#{{version}}_#{{arch}}.AppImage"', cask)
         self.assertIn(f'arm64_linux:  "{sums[f"Jet_{self.VERSION}_aarch64.AppImage"]}"', cask)
         self.assertIn(f'x86_64_linux: "{sums[f"Jet_{self.VERSION}_amd64.AppImage"]}"', cask)
@@ -281,19 +324,43 @@ class ReleaseAssets(unittest.TestCase):
     def test_signatures_must_sign_the_named_bundle_with_the_updater_key(self):
         bundle = f'Jet_{self.VERSION}_amd64.AppImage'
         other = f'Jet_{self.VERSION}_amd64.deb'
+        content = self.content(bundle)
+        good = signature_file(bundle, content, self.VERSION, self.KEY)
+        forged = base64.b64decode(good).decode().replace(f'version:{self.VERSION}', 'version:9.9.9')
         cases = {
             'a path': str(self.desktop / f'{bundle}.sig').encode(),
-            'a trailing newline': signature_file(bundle, self.VERSION, self.KEY) + b'\n',
-            'another bundle': signature_file(other, self.VERSION, self.KEY),
-            'another version': signature_file(bundle, '0.1.0', self.KEY),
-            'another key': signature_file(bundle, self.VERSION, bytes(8)),
+            'a trailing newline': good + b'\n',
+            'another bundle': signature_file(other, content, self.VERSION, self.KEY),
+            'another version': signature_file(bundle, content, '0.1.0', self.KEY),
+            'no version': signature_file(bundle, content, None, self.KEY),
+            'another key': signature_file(bundle, content, self.VERSION, bytes(8)),
+            # The updater key's id on another key's signature.
+            'another key under this id': signature_file(bundle, content, self.VERSION, self.KEY, signer=bytes(8)),
+            'other content': signature_file(bundle, self.content(other), self.VERSION, self.KEY),
+            'a forged trusted comment': base64.b64encode(forged.encode()),
         }
-        for case, content in cases.items():
+        for case, signature in cases.items():
             with self.subTest(signature=case):
-                (self.desktop / f'{bundle}.sig').write_bytes(content)
+                (self.dist / 'latest.json').unlink(missing_ok=True)
+                (self.desktop / f'{bundle}.sig').write_bytes(signature)
                 with self.assertRaisesRegex(ValueError, f'{bundle}.sig'):
                     self.generate()
                 self.assertFalse((self.dist / 'latest.json').exists())
+
+    def test_signatures_must_verify_for_the_published_bytes(self):
+        # A bundle changed after signing would fail every update on its platform.
+        bundle = self.desktop / f'Jet_{self.VERSION}_amd64.deb'
+        bundle.write_bytes(b'changed ' + bundle.read_bytes())
+        with self.assertRaisesRegex(ValueError, f'{bundle.name}.sig: the signature does not verify'):
+            self.generate()
+        self.assertFalse((self.dist / 'latest.json').exists())
+
+    def test_legacy_signatures_of_the_whole_file_verify(self):
+        bundle = f'Jet_{self.VERSION}_arm64.deb'
+        (self.desktop / f'{bundle}.sig').write_bytes(
+            signature_file(bundle, self.content(bundle), self.VERSION, self.KEY, prehashed=False))
+        self.generate()
+        self.assertIn('linux-aarch64-deb', json.loads((self.dist / 'latest.json').read_text())['platforms'])
 
     def test_release_configuration_must_pin_the_updater_key(self):
         config = self.root / 'apps/jet-tauri/src-tauri/tauri.release.conf.json'
@@ -349,7 +416,7 @@ class ReleaseAssets(unittest.TestCase):
         payload = dist / f'jet-core-{self.VERSION}-{label}.tar.gz'
         self.assertIn(f'url "file:///tmp/jet-assets/{payload.name}"', formula)
         self.assertIn(hashlib.sha256(payload.read_bytes()).hexdigest(), formula)
-        self.assertEqual(formula.count(release_assets.UNBUILT), 2)
+        self.assertEqual(formula.count(release_assets.UNBUILT), 1)
         appimage = desktop / f'Jet_{self.VERSION}_amd64.AppImage'
         self.assertIn(f'x86_64_linux: "{hashlib.sha256(appimage.read_bytes()).hexdigest()}"', cask)
         self.assertIn(f'arm64_linux:  "{release_assets.UNBUILT}"', cask)
@@ -362,9 +429,10 @@ class ReleaseAssets(unittest.TestCase):
 
 class HomebrewTemplates(unittest.TestCase):
     """What the tap must keep true across edits to the templates (spec: formula jetd, cask jet-app)."""
+    TEMPLATES = ROOT / '.github/packaging/homebrew'
 
     def template(self, name):
-        return (ROOT / '.github/packaging/homebrew' / name).read_text()
+        return (self.TEMPLATES / name).read_text()
 
     def test_formula_is_jetd_and_guards_an_orphaned_service(self):
         formula = self.template('jetd.rb.in')
@@ -374,6 +442,38 @@ class HomebrewTemplates(unittest.TestCase):
         self.assertIn('brew services start apexgang/tap/jetd', formula)
         # `brew audit` rejects a `version` the release URL already carries.
         self.assertNotRegex(formula, r'(?m)^\s*version ')
+
+    def test_each_platform_gets_one_daemon_formula(self):
+        # The Swift app's release publishes the macOS daemon as `apexgang/tap/jet`
+        # from `jet.rb.in`, under the same binary and service names, so `jetd`
+        # must never also install on macOS.
+        formula = self.template('jetd.rb.in')
+        self.assertIn('\n  depends_on :linux\n', formula)
+        self.assertNotIn('on_macos', formula)
+        self.assertNotIn('universal-apple-darwin', formula)
+        self.assertEqual(release_assets.FORMULAE, ('jetd.rb.in', 'jet-app.rb.in'))
+
+    def test_the_swift_release_keeps_its_macos_formula_template(self):
+        # package_swift_app.py renders `jet.rb.in` into the tap's `Formula/jet.rb`:
+        # it cuts `  on_linux do` up to `  def install`, adds `depends_on :macos`
+        # after the license, and fills VERSION, URL and MACOS_SHA256. The tap's
+        # `jet` cask depends on that formula.
+        template = self.template('jet.rb.in')
+        self.assertTrue(template.startswith('class Jet < Formula\n'))
+        self.assertIn('  version "@VERSION@"\n', template)
+        self.assertIn('  license "Apache-2.0"\n', template)
+        linux = template.index('  on_linux do\n')
+        macos = template[:linux] + template[template.index('  def install\n', linux):]
+        self.assertEqual(set(re.findall(r'@([A-Z_0-9]+)@', macos)), {'VERSION', 'URL', 'MACOS_SHA256'})
+        self.assertIn('  on_macos do\n    url "@URL@/jet-core-@VERSION@-universal-apple-darwin.tar.gz"\n', macos)
+
+    def test_every_template_a_script_names_exists(self):
+        named = set()
+        for script in [*(ROOT / '.github/scripts').glob('*.*'), *(ROOT / '.github/workflows').glob('*.yml')]:
+            named.update(re.findall(r'packaging/homebrew/([\w.-]+\.rb\.in)', script.read_text()))
+        for name in named | set(release_assets.FORMULAE):
+            with self.subTest(template=name):
+                self.assertTrue((self.TEMPLATES / name).is_file())
 
     def test_cask_is_linux_only_and_depends_on_the_tap_formula(self):
         cask = self.template('jet-app.rb.in')
@@ -402,14 +502,22 @@ class ReleaseWorkflows(unittest.TestCase):
     """Shape of the release and packaging workflows that nothing else checks before a tag."""
     WORKFLOWS = ROOT / '.github/workflows'
 
-    def test_every_workflow_is_pinned_through_the_lockfile(self):
+    def test_every_workflow_pins_its_actions(self):
         lock = (self.WORKFLOWS / 'actions.lock').read_text()
         for workflow in sorted(self.WORKFLOWS.glob('*.yml')):
             with self.subTest(workflow=workflow.name):
                 text = workflow.read_text()
-                self.assertTrue(text.startswith('# This workflow is managed by gh actions-lock.\n'))
+                actions = re.findall(r'uses: ([\w.-]+/[\w.-]+)(?:/[\w./-]+)?@(\S+)', text)
+                if not text.startswith('# This workflow is managed by gh actions-lock.\n'):
+                    # The Swift app's release pins literal commit SHAs instead,
+                    # which the lockfile tool would rewrite to tags.
+                    self.assertNotIn(f"'.github/workflows/{workflow.name}':", lock)
+                    self.assertTrue(actions)
+                    for action, ref in actions:
+                        self.assertRegex(ref, r'^[0-9a-f]{40}$', action)
+                    continue
                 self.assertIn(f"'.github/workflows/{workflow.name}':", lock)
-                for action in re.findall(r'uses: ([\w.-]+/[\w.-]+)(?:/[\w./-]+)?@(\S+)', text):
+                for action in actions:
                     self.assertIn(f"'{action[0]}@{action[1]}'", lock)
 
     def test_publication_waits_for_every_build_and_the_homebrew_check(self):
@@ -433,6 +541,73 @@ class ReleaseWorkflows(unittest.TestCase):
             if ecosystem != 'github-actions':
                 with self.subTest(ecosystem=ecosystem, directory=directory):
                     self.assertIn(f'{directory}/{rewritten[ecosystem]}', paths)
+
+    def jobs(self, workflow):
+        """A workflow's text before `jobs:`, and each job's text by its id."""
+        head, body = (self.WORKFLOWS / workflow).read_text().split('\njobs:\n', 1)
+        parts = re.split(r'(?m)^  ([\w-]+):\n', body)
+        return head, dict(zip(parts[1::2], parts[2::2]))
+
+    @staticmethod
+    def steps(job):
+        return re.split(r'(?m)^      - ', job.split('\n    steps:\n', 1)[1])[1:]
+
+    def test_only_a_job_that_builds_nothing_receives_the_updater_key(self):
+        # ASVS 13.3.2: the steps of one job share a runner, a user, the
+        # checkout, GITHUB_ENV and GITHUB_PATH, so the npm and crate build
+        # scripts and the linuxdeploy tools could change what a later step of
+        # the build job runs. The key goes to another job on a fresh runner.
+        head, jobs = self.jobs('desktop-linux.yml')
+        self.assertNotRegex(head, r'secrets\.\w')
+        self.assertEqual(list(jobs), ['bundle', 'sign'])
+        bundle, sign = jobs['bundle'], jobs['sign']
+        self.assertNotRegex(bundle, r'secrets\.\w')
+        self.assertIn('        run: just release-bundle "$PAYLOAD"\n', bundle)
+        self.assertIn('          JET_RELEASE_SIGN: ${{ inputs.sign }}\n', bundle)
+        self.assertIn("          name: ${{ inputs.sign && 'unsigned-' || '' }}jet-desktop-linux-${{ matrix.label }}\n",
+                      bundle)
+        for line in ('    if: inputs.sign\n', '    needs: bundle\n',
+                     '          name: unsigned-jet-desktop-linux-${{ matrix.label }}\n',
+                     '          name: jet-desktop-linux-${{ matrix.label }}\n'):
+            self.assertIn(line, sign)
+        for same in (r'(?m)^    runs-on: .*$', r'(?m)^        label: .*$'):
+            self.assertEqual(re.findall(same, bundle), re.findall(same, sign))
+
+        # Nothing before the signer runs code from the repository's packages,
+        # and nothing in the job builds.
+        steps = self.steps(sign)
+        [signing] = [step for step in steps if re.search(r'\$\{\{ secrets\.\w+ \}\}', step)]
+        self.assertIn('        run: just release-sign "$RUNNER_TEMP/jet-desktop"\n', signing)
+        self.assertEqual(re.findall(r'(?m)^          (\w+): \$\{\{ secrets\.(\w+) \}\}$', signing),
+                         [('TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY'),
+                          ('TAURI_SIGNING_PRIVATE_KEY_PASSWORD', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD')])
+        before = steps[:steps.index(signing)]
+        self.assertEqual([re.match(r'uses: ([\w/-]+)@', step)[1] for step in before if step.startswith('uses: ')],
+                         ['actions/checkout', 'actions/download-artifact', 'oven-sh/setup-bun',
+                          'extractions/setup-just'])
+        self.assertEqual([step.split('\n', 1)[0] for step in before if not step.startswith('uses: ')],
+                         ['name: Install the signer without running package scripts',
+                          'name: Require the updater signing key'])
+        self.assertIn('        run: bun install --frozen-lockfile --ignore-scripts\n', before[4])
+        for build in ('release-bundle', 'tauri build', 'just install', 'bun run build', 'cargo', 'rustup',
+                      'GITHUB_ENV', 'GITHUB_PATH'):
+            self.assertNotIn(build, sign)
+        after = steps[steps.index(signing) + 1:]
+        self.assertIn('        run: just release-check-signatures "$RUNNER_TEMP/jet-desktop"\n', after[0])
+        for step in steps:
+            if step is not signing:
+                for expression in re.findall(r'\$\{\{(.*?)\}\}', step):
+                    if 'secrets.' in expression:
+                        with self.subTest(expression=expression):
+                            # Whether a secret is set, never its value.
+                            self.assertRegex(expression, r"^ *secrets\.\w+ != '' *(&& *secrets\.\w+ != '' *)*$")
+        # The rehearsal builds unsigned and holds no release secret.
+        packaging = (self.WORKFLOWS / 'packaging.yml').read_text()
+        self.assertNotIn('secrets', packaging)
+        self.assertIn('      sign: false\n', packaging)
+        self.assertIn('      sign: true\n', (self.WORKFLOWS / 'release.yml').read_text())
+        # Publication takes only the signed artifacts.
+        self.assertIn('          pattern: jet-desktop-linux-*\n', (self.WORKFLOWS / 'release.yml').read_text())
 
     def run_step(self, workflow, name, env):
         """Runs a step's script with the shell GitHub gives it on Linux."""
@@ -493,6 +668,122 @@ esac
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual(history, [documented])
 
+
+class ReleaseRecipes(unittest.TestCase):
+    """`release-bundle` and `release-sign` in apps/jet-tauri/justfile, run by bash
+    with `bun` and `just` faked, so the key's path through them is checked
+    without a build (ASVS 13.3.2)."""
+    KEY = 'updater-key-for-tests'
+    PASSWORD = 'updater-password-for-tests'
+    FAKE = """#!/usr/bin/env bash
+marker=
+if [[ -n ${TAURI_SIGNING_PRIVATE_KEY:-}${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}${TAURI_SIGNING_PRIVATE_KEY_PATH:-} ]]; then
+  marker=' [key]'
+fi
+echo "$(basename "$0") $*$marker" >> "$TEST_CALLS"
+[[ $(basename "$0") == bun ]] || exit 0
+case "$*" in
+  'scripts/release/main.ts bundle-mode') [[ ${JET_RELEASE_SIGN:-} == true ]] && echo release || echo unsigned ;;
+  'scripts/release/main.ts app-version') echo 0.2.0 ;;
+  'scripts/release/main.ts bundles'|'scripts/release/main.ts bundles --in '*) [[ -n $TEST_BUNDLES ]] && echo "$TEST_BUNDLES" ;;
+  'run tauri signer sign '*)
+    [[ $TAURI_SIGNING_PRIVATE_KEY == "$TEST_KEY" && $TAURI_SIGNING_PRIVATE_KEY_PASSWORD == "$TEST_PASSWORD" ]] || exit 1
+    echo signature > "${@: -1}.sig" ;;
+esac
+"""
+
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.root = Path(scratch.name)
+        (self.root / 'app').mkdir()
+        (self.root / 'bin').mkdir()
+        for tool in ('bun', 'just'):
+            (self.root / 'bin' / tool).write_text(self.FAKE)
+            (self.root / 'bin' / tool).chmod(0o755)
+        self.payload = self.root / 'jet-core-0.2.0-x86_64-unknown-linux-gnu.tar.gz'
+        self.payload.write_bytes(b'payload')
+        self.bundles = [self.root / 'bundle' / path for path in
+                        ('deb/Jet_0.2.0_amd64.deb', 'rpm/Jet-0.2.0-1.x86_64.rpm', 'appimage/Jet_0.2.0_amd64.AppImage')]
+        for bundle in self.bundles:
+            bundle.parent.mkdir(parents=True)
+            bundle.write_bytes(b'bundle')
+
+    def run_recipe(self, name, env, dir=''):
+        """Runs a shebang recipe's script, its `{{...}}` filled as `just` would."""
+        lines = (ROOT / 'apps/jet-tauri/justfile').read_text().splitlines()
+        start = next(index for index, line in enumerate(lines) if re.match(rf'{re.escape(name)}\b[^:]*:$', line))
+        body = []
+        for line in lines[start + 1:]:
+            if not line.startswith('\t'):
+                break
+            body.append(line[1:])
+        self.assertEqual(body[0], '#!/usr/bin/env bash')
+        values = {'quote(invocation_directory())': str(self.root), 'quote(payload)': self.payload.name,
+                  'quote(dir)': shlex.quote(dir), 'justfile()': 'JUSTFILE'}
+        script = re.sub(r'\{\{(.*?)\}\}', lambda match: values[match[1]], '\n'.join(body) + '\n')
+        script = script.replace("'{{'", '{{')
+        calls = self.root / 'calls'
+        calls.unlink(missing_ok=True)
+        base = {'PATH': f'{self.root / "bin"}:/usr/bin:/bin', 'HOME': str(self.root), 'TEST_CALLS': str(calls),
+                'TEST_BUNDLES': '\n'.join(map(str, self.bundles)), 'TEST_KEY': self.KEY, 'TEST_PASSWORD': self.PASSWORD}
+        result = subprocess.run(['bash', '-c', script], cwd=self.root / 'app', env=base | env,
+                                capture_output=True, text=True)
+        history = calls.read_text().splitlines() if calls.exists() else []
+        return result, history
+
+    def key_env(self):
+        return {'TAURI_SIGNING_PRIVATE_KEY': self.KEY, 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD': self.PASSWORD,
+                'TAURI_SIGNING_PRIVATE_KEY_PATH': str(self.root / 'key')}
+
+    def test_release_bundle_builds_without_the_key(self):
+        release = '{"bundle":{"createUpdaterArtifacts":false}}'
+        unsigned = '{"bundle":{"createUpdaterArtifacts":false},"plugins":{"updater":null}}'
+        for request, overlay, verify in (('true', release, ' --release'), ('', unsigned, '')):
+            with self.subTest(JET_RELEASE_SIGN=request):
+                result, history = self.run_recipe('release-bundle', {'JET_RELEASE_SIGN': request} | self.key_env())
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('release-sign', result.stderr)
+                self.assertTrue(history)
+                self.assertEqual([call for call in history if call.endswith('[key]')], [])
+                self.assertIn('bun run tauri build --config src-tauri/tauri.release.conf.json '
+                              f'--config {overlay} --bundles deb,rpm,appimage', history)
+                self.assertEqual(history[-1], f'just --justfile JUSTFILE release-verify --payload {self.payload}{verify}')
+                self.assertEqual((self.root / 'app/src-tauri/resources/jet-core.tar.gz').read_bytes(), b'payload')
+
+    def test_release_sign_hands_the_key_to_the_signer_alone(self):
+        result, history = self.run_recipe('release-sign', self.key_env())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('bun scripts/release/main.ts bundles', history)
+        signer = [f'bun run tauri signer sign --app-version 0.2.0 {bundle} [key]' for bundle in self.bundles]
+        self.assertEqual([call for call in history if call.endswith('[key]')], signer)
+        self.assertTrue(set(history) - set(signer))
+        for bundle in self.bundles:
+            self.assertTrue(bundle.with_name(f'{bundle.name}.sig').exists())
+
+    def test_release_sign_takes_the_bundles_from_a_directory(self):
+        # CI signs what the build job uploaded, on a runner that never built.
+        downloaded = self.root / 'downloaded'
+        downloaded.mkdir()
+        for given in ('downloaded', str(downloaded)):
+            with self.subTest(dir=given):
+                result, history = self.run_recipe('release-sign', self.key_env(), dir=given)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f'bun scripts/release/main.ts bundles --in {downloaded.resolve()}', history)
+                self.assertEqual(len([call for call in history if call.endswith('[key]')]), 3)
+        result, history = self.run_recipe('release-sign', self.key_env(), dir='missing')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual([call for call in history if 'signer' in call], [])
+
+    def test_release_sign_refuses_without_the_key_or_the_bundles(self):
+        for name, env in (('no password', {'TAURI_SIGNING_PRIVATE_KEY': self.KEY}),
+                          ('no key', {'TAURI_SIGNING_PRIVATE_KEY_PASSWORD': self.PASSWORD}),
+                          ('no bundles', self.key_env() | {'TEST_BUNDLES': ''})):
+            with self.subTest(name):
+                result, history = self.run_recipe('release-sign', env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual([call for call in history if 'signer' in call], [])
+                self.assertEqual(list(self.root.glob('bundle/*/*.sig')), [])
 
 if __name__ == '__main__':
     unittest.main()

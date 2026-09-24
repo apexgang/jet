@@ -1,14 +1,13 @@
-class Jetd < Formula
+class Jet < Formula
   desc "Run and manage coding agent conversations across machines"
   homepage "https://github.com/apexgang/jet"
-  # No `version`: Homebrew reads it from the release URL, and `brew audit`
-  # rejects a `version` that repeats the one the URL already carries.
+  version "@VERSION@"
   license "Apache-2.0"
 
-  # On macOS the Swift app's release publishes this daemon as the `jet`
-  # formula, with the same service names; a second formula there would link
-  # the same `jetd` and register the same launchd label.
-  depends_on :linux
+  on_macos do
+    url "@URL@/jet-core-@VERSION@-universal-apple-darwin.tar.gz"
+    sha256 "@MACOS_SHA256@"
+  end
 
   on_linux do
     on_arm do
@@ -43,13 +42,9 @@ class Jetd < Formula
         <key>ExitTimeOut</key><integer>15</integer>
       </dict></plist>
     PLIST
-    # Uninstalling the jet-app cask autoremoves this formula but leaves the
-    # unit `brew services` installed. The condition turns the next restart of
-    # the removed executable into a skipped start instead of a restart loop.
     (prefix/"jet-homebrew.service").write <<~SERVICE
       [Unit]
       Description=Jet daemon
-      ConditionFileIsExecutable=#{opt_bin}/jetd
       [Service]
       ExecStart=#{opt_bin}/jetd serve --channel homebrew
       Environment="PATH=#{service_path}"
@@ -60,16 +55,6 @@ class Jetd < Formula
       [Install]
       WantedBy=default.target
     SERVICE
-  end
-
-  # Homebrew prints no start hint for a service block that only names its
-  # definitions. Formulae installed as a dependency show no caveats at all,
-  # so the jet-app cask repeats this one.
-  def caveats
-    <<~EOS
-      To start the Jet daemon now and at login:
-        brew services start apexgang/tap/jetd
-    EOS
   end
 
   service do

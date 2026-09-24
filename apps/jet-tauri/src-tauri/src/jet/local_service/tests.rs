@@ -257,6 +257,9 @@ struct Setup {
     bundled: bool,
     keg: bool,
     configure: fn(&mut Core),
+    /// The cross-instance lock, instead of `app-data/local-service.lock`
+    /// in the scratch directory.
+    lock_file: Option<PathBuf>,
 }
 
 impl Default for Setup {
@@ -265,6 +268,7 @@ impl Default for Setup {
             bundled: true,
             keg: false,
             configure: |_| (),
+            lock_file: None,
         }
     }
 }
@@ -297,7 +301,10 @@ fn world(setup: Setup) -> World {
         user_home: base.join("home"),
         config_home: base.join("home/.config"),
         scratch: base.join("cache"),
-        lock_file: app_data.join(super::LOCK_FILE),
+        lock_file: setup
+            .lock_file
+            .clone()
+            .unwrap_or_else(|| app_data.join(super::LOCK_FILE)),
         bundled: Some(BundledPayload {
             archive,
             version: BUNDLED.into(),
@@ -943,6 +950,25 @@ async fn another_instance_holding_the_lock_keeps_this_one_out() {
 
     other.unlock().unwrap();
     assert_eq!(world.state.provision().await.phase, Phase::Running);
+}
+
+/// What one provisioning pass on a fresh simulated computer did with
+/// `lock_file` as its cross-instance lock. `app_data_tests.rs` damages the
+/// app data directory's lock file and runs a pass through this.
+pub(crate) struct LockedPass {
+    pub(crate) view: LocalServiceView,
+    /// Commands the pass ran; one that could not lock runs none.
+    pub(crate) commands: usize,
+}
+
+pub(crate) async fn provision_with_lock_file(lock_file: &Path) -> LockedPass {
+    let world = world(Setup {
+        lock_file: Some(lock_file.to_owned()),
+        ..Setup::default()
+    });
+    let view = world.state.provision().await;
+    let commands = world.processes.calls.lock().unwrap().len();
+    LockedPass { view, commands }
 }
 
 /// A directory, or any unopenable file, in place of `local-service.lock`

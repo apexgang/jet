@@ -6,7 +6,9 @@ import datetime
 import hashlib
 import json
 import re
+import subprocess
 import tarfile
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -34,6 +36,10 @@ DESKTOP = {
 }
 APP = 'apps/jet-tauri'
 TEMPLATES = '.github/packaging/homebrew'
+# The tagged release renders these. `jet.rb.in` beside them is the macOS core
+# formula of the Swift app's release (`apexgang/tap/jet`), which renders it
+# itself.
+FORMULAE = ('jetd.rb.in', 'jet-app.rb.in')
 # A test tap renders labels it has no payload for with this checksum; nothing downloads them.
 UNBUILT = '0' * 64
 
@@ -98,34 +104,69 @@ def digest(path):
         return hashlib.file_digest(file, 'sha256').hexdigest()
 
 
-def key_id(minisign_line):
-    """The 8-byte key id of a base64 minisign public key or signature line."""
-    raw = base64.b64decode(minisign_line, validate=True)
-    if raw[:2] not in (b'Ed', b'ED') or len(raw) not in (42, 74):
+def minisign(line, size):
+    """Algorithm, key id and the rest of a base64 minisign public key (42 bytes) or signature (74) line."""
+    raw = base64.b64decode(line, validate=True)
+    if len(raw) != size or raw[:2] not in (b'Ed', b'ED'):
         raise ValueError('not a minisign Ed25519 key or signature')
-    return raw[2:10]
+    return raw[:2], raw[2:10], raw[10:]
 
 
-def updater_key_id():
-    """The key id of the updater public key the release build embeds."""
+def updater_key():
+    """The key id and Ed25519 public key of the updater key the release build embeds."""
     path = ROOT / APP / 'src-tauri/tauri.release.conf.json'
     try:
         config = json.loads(path.read_text())
         public_key = base64.b64decode(config['plugins']['updater']['pubkey'], validate=True).decode()
-        return key_id(public_key.splitlines()[1])
+        algorithm, key_id, key = minisign(public_key.splitlines()[1], 42)
+        if algorithm != b'Ed':
+            raise ValueError
+        return key_id, key
     except (OSError, LookupError, TypeError, ValueError, binascii.Error, UnicodeDecodeError):
         raise ValueError(f'{path.relative_to(ROOT)} must pin the updater public key') from None
 
 
-def signature(path, bundle, version, expected_key):
-    """Return a `.sig` file's content: the base64 minisign box Tauri wrote for `bundle`.
+# The DER prefix of an Ed25519 SubjectPublicKeyInfo (RFC 8410).
+ED25519_PUBLIC_KEY = bytes.fromhex('302a300506032b6570032100')
+
+
+def ed25519_verifies(key, message, signature):
+    """Whether `signature` is the Ed25519 signature of `message` (bytes, or a file) by `key`.
+
+    The standard library has no Ed25519, so OpenSSL (3.0 or later) checks it.
+    """
+    with tempfile.TemporaryDirectory() as scratch:
+        scratch = Path(scratch)
+        pem = base64.encodebytes(ED25519_PUBLIC_KEY + key).decode()
+        (scratch / 'key.pem').write_text(f'-----BEGIN PUBLIC KEY-----\n{pem}-----END PUBLIC KEY-----\n')
+        (scratch / 'signature').write_bytes(signature)
+        if isinstance(message, bytes):
+            (scratch / 'message').write_bytes(message)
+            message = scratch / 'message'
+        try:
+            result = subprocess.run(['openssl', 'pkeyutl', '-verify', '-pubin', '-inkey', scratch / 'key.pem',
+                                     '-rawin', '-in', message, '-sigfile', scratch / 'signature'],
+                                    capture_output=True, text=True)
+        except FileNotFoundError:
+            raise RuntimeError('checking the updater signatures needs the openssl command') from None
+    if result.returncode == 0 and 'Signature Verified Successfully' in result.stdout:
+        return True
+    if 'Signature Verification Failure' in result.stdout:
+        return False
+    raise RuntimeError(f'openssl could not check an Ed25519 signature: {result.stderr.strip()}')
+
+
+def signature(path, bundle, version, updater):
+    """Return a `.sig` file's content: the base64 minisign box Tauri wrote for the `bundle` file.
 
     The updater takes this content itself, never a path, and validates the whole
     manifest before it reads the version, so one bad entry breaks every update.
     """
     # ASVS 2.2.1: accept only the box Tauri writes for this bundle and version,
     # signed with the key the release configuration pins. Tauri only warns when
-    # the signing key does not match that public key.
+    # the signing key does not match that public key, and the artifacts reach
+    # this job from other runners, so the signatures are verified here too.
+    expected_key, public_key = updater
     content = path.read_bytes()
     try:
         if len(content) > 4096:
@@ -134,15 +175,32 @@ def signature(path, bundle, version, expected_key):
         if (len(box) != 4 or not box[0].startswith('untrusted comment: ')
                 or not box[2].startswith('trusted comment: ')):
             raise ValueError
-        signed_key = key_id(box[1])
+        algorithm, signed_key, signed = minisign(box[1], 74)
+        comment = box[2].removeprefix('trusted comment: ')
+        global_signature = base64.b64decode(box[3], validate=True)
+        if len(global_signature) != 64:
+            raise ValueError
     except (ValueError, binascii.Error, UnicodeDecodeError):
         raise ValueError(f'{path.name}: not a Tauri updater signature') from None
-    fields = dict(field.partition(':')[::2] for field in box[2].removeprefix('trusted comment: ').split('\t'))
-    if fields.get('file') != bundle or fields.get('version', version) != version:
-        raise ValueError(f'{path.name}: signs {fields.get("file")!r} {fields.get("version", "")}, not {bundle}')
     if signed_key != expected_key:
         raise ValueError(f'{path.name}: signed with key {signed_key[::-1].hex().upper()}, '
                          f'not the updater key {expected_key[::-1].hex().upper()}')
+    # `ED` signs the BLAKE2b-512 digest of the file, legacy `Ed` the file itself.
+    if algorithm == b'ED':
+        with bundle.open('rb') as file:
+            message = hashlib.file_digest(file, 'blake2b').digest()
+    else:
+        message = bundle
+    if not ed25519_verifies(public_key, message, signed):
+        raise ValueError(f'{path.name}: the signature does not verify for the content of {bundle.name}')
+    if not ed25519_verifies(public_key, signed + comment.encode(), global_signature):
+        raise ValueError(f'{path.name}: the global signature does not cover the trusted comment')
+    fields = dict(field.partition(':')[::2] for field in comment.split('\t'))
+    # The app sets `requireSignedVersion`, so a signature without the version
+    # (`tauri signer sign` without `--app-version`) would fail every update.
+    if fields.get('file') != bundle.name or fields.get('version') != version:
+        raise ValueError(f'{path.name}: signs {fields.get("file")!r} version {fields.get("version")!r}, '
+                         f'not {bundle.name} version {version!r}')
     return content.decode('ascii')
 
 
@@ -158,9 +216,10 @@ def release_date(value):
 
 
 def render(values):
-    """Render every Homebrew template: `jetd.rb.in` to `jetd.rb`, `jet-app.rb.in` to `jet-app.rb`."""
+    """Render the release's Homebrew templates: `jetd.rb.in` to `jetd.rb`, `jet-app.rb.in` to `jet-app.rb`."""
     rendered = {}
-    for template in sorted((ROOT / TEMPLATES).glob('*.rb.in')):
+    for name in FORMULAE:
+        template = ROOT / TEMPLATES / name
         text = template.read_text()
         unknown = set(re.findall(r'@([A-Z_0-9]+)@', text)) - set(values)
         if unknown:
@@ -190,10 +249,10 @@ def generate(tag, dist, desktop, pub_date):
         checksums.update((f'{name}.sig', digest(desktop / f'{name}.sig')) for name in kinds.values())
     appimages = {label: checksums[kinds['appimage']] for label, kinds in names.items()}
     generated = render(replacements(version, url, checksums, appimages))
-    expected_key = updater_key_id()
+    updater = updater_key()
     manifest = {'version': version, 'pub_date': published, 'platforms': {
         f'linux-{DESKTOP[label][0]}-{kind}': {
-            'signature': signature(desktop / f'{name}.sig', name, version, expected_key),
+            'signature': signature(desktop / f'{name}.sig', desktop / name, version, updater),
             'url': f'{url}/{name}',
         }
         for label, kinds in names.items() for kind, name in kinds.items()
@@ -241,7 +300,7 @@ if __name__ == '__main__':
             parser.error('--desktop, --pub-date, --test-tap and --url need --dist')
         version = version_for(args.tag)
         # Fail before any build when the release could not publish signatures.
-        updater_key_id()
+        updater_key()
         print(version)
     elif args.test_tap is not None:
         if args.desktop is None or args.url is None or args.pub_date:

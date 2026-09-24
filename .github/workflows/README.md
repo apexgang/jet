@@ -76,7 +76,8 @@ re-enabling it silently rejects this workflow's uploads.
    payloads, preserving the per-role profiles and enforcing the release envelope.
 3. `desktop-linux.yml` bundles the Tauri app for each Linux payload as a deb,
    an rpm, and an AppImage on the same runner images, with the payload archive
-   inside, and signs every bundle for the updater.
+   inside. A separate job on a fresh runner then signs every bundle for the
+   updater.
 4. `homebrew-check.yml` renders the formula and the cask against the x86_64
    artifacts, runs `brew style` and `brew audit --strict`, installs both from
    a local tap with the documented command, runs the daemon under
@@ -88,13 +89,16 @@ re-enabling it silently rejects this workflow's uploads.
    release, then publishes the complete release. `latest.json` embeds each
    signature file's contents and dates the release by its tagged commit.
 6. For a stable release, Ape Bonker commits `Formula/jetd.rb` and
-   `Casks/jet-app.rb` to `apexgang/homebrew-tap` in one commit.
-   `brew install apexgang/tap/jetd` installs the compiled executables and
-   `brew services start apexgang/tap/jetd` starts the daemon.
-   `brew install apexgang/tap/jetd apexgang/tap/jet-app` also installs the
-   desktop app. Name both, or run `brew trust apexgang/tap` first: Homebrew 6
-   and later trust only the tap items named on the command line, and the cask
-   cannot load its formula otherwise.
+   `Casks/jet-app.rb` to `apexgang/homebrew-tap` in one commit. Both are
+   Linux-only. On Linux, `brew install apexgang/tap/jetd` installs the
+   compiled executables and `brew services start apexgang/tap/jetd` starts
+   the daemon. `brew install apexgang/tap/jetd apexgang/tap/jet-app` also
+   installs the desktop app. Name both, or run `brew trust apexgang/tap`
+   first: Homebrew 6 and later trust only the tap items named on the command
+   line, and the cask cannot load its formula otherwise. On macOS, the Swift
+   app's release publishes the daemon as `Formula/jet.rb` from
+   `.github/packaging/homebrew/jet.rb.in`, with the same executables and
+   service names, so `jetd` does not install there.
 
 The Actions secret `APE_BONKER_PRIVATE_KEY` holds Ape Bonker's private key.
 `RELEASE_APP_CLIENT_ID` identifies the installed app; the workflow defaults to
@@ -105,13 +109,25 @@ neither the private key nor the tap token.
 
 `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` hold the
 updater's minisign key. Every release tag needs both, prereleases included.
-Only the signed bundle step receives them, but that step runs the whole app
-build, so the frontend dependencies, crate build scripts, and the linuxdeploy
-tools the Tauri bundler downloads can read the key. The matching public key is
-`plugins.updater.pubkey` in `apps/jet-tauri/src-tauri/tauri.release.conf.json`;
-`release_assets.py` refuses a signature made with any other key, which Tauri
-itself only warns about. Rotating the key means changing both together, and
-installed apps accept only updates signed with the key they shipped with.
+The `bundle` job of `desktop-linux.yml` runs the frontend dependencies, crate
+build scripts, and the linuxdeploy tools the Tauri bundler downloads, so it
+never receives them. Steps of one job share a runner, so code in the build
+could change what a later step runs; the key therefore goes only to the
+`sign` job on a fresh runner. That job checks out the same commit, downloads
+the unsigned bundles, installs the locked frontend packages with
+`--ignore-scripts`, and gives the key to one step, `just release-sign`, which
+hands it to the Tauri CLI's signer alone. The build uses
+`JET_RELEASE_SIGN=true`, which keeps the updater endpoint and public key in
+the app. The signer binds each signature to the bundle's file name and the
+release version, which the app's `requireSignedVersion` checks. The matching
+public key is `plugins.updater.pubkey` in
+`apps/jet-tauri/src-tauri/tauri.release.conf.json`; the `sign` job and
+`release_assets.py` in the publish job both verify every signature against it
+(OpenSSL checks the Ed25519 signatures for `release_assets.py`), so a
+signature made with any other key, which Tauri itself only warns about, or a
+bundle changed after signing is never published. Rotating the key means
+changing both together, and installed apps accept only updates signed with
+the key they shipped with.
 
 Prerelease tags must also match the workspace version. They publish prerelease
 assets without modifying the stable formula or cask, and the updater never
@@ -139,6 +155,8 @@ problem.
 
 Run `python3 -m unittest discover -s .github/tests -v`, `actionlint`, and
 `gh actions-lock --verify-local` after editing automation. The release tests
-run `ruby -c` on the rendered formula and cask, so they need Ruby. Regenerate
+run `ruby -c` on the rendered formula and cask, so they need Ruby, and sign
+and verify updater signatures with the `openssl` command (OpenSSL 3.0 or
+later). Regenerate
 action pins with `gh actions-lock`. Run `just release-envelope` and `just fmt`
 from `packages/` after moving release tooling or changing its inputs.

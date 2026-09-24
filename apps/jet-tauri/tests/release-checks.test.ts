@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import releaseConfig from "../src-tauri/tauri.release.conf.json";
 import {
   binaryBuildPathFindings,
+  bundleDirectoryFindings,
   bundleEntryFindings,
+  bundleMode,
   bundleTypeFindings,
   cargoLockVersion,
   expectedBundles,
@@ -14,7 +16,6 @@ import {
   releaseRustflags,
   sha256,
   signatureState,
-  signingDecision,
   tomlString,
   updaterEndpointFindings,
   verifyOptions,
@@ -115,6 +116,41 @@ describe("expected bundles", () => {
     expect(linuxArch("x64")).toBe("x86_64");
     expect(linuxArch("arm64")).toBe("aarch64");
     expect(linuxArch("ia32")).toBeUndefined();
+  });
+
+  describe("in the directory the signing job receives", () => {
+    const expected = expectedBundles("Jet", "0.2.0", "x86_64");
+    const files = (...names: string[]) => names.map((name) => ({ name, kind: "file" as const }));
+    const bundles = ["Jet_0.2.0_amd64.deb", "Jet-0.2.0-1.x86_64.rpm", "Jet_0.2.0_amd64.AppImage"];
+
+    it("accepts the three bundles, before and after signing", () => {
+      expect(bundleDirectoryFindings(files(...bundles), expected)).toEqual([]);
+      expect(bundleDirectoryFindings(files(...bundles, ...bundles.map((name) => `${name}.sig`)), expected)).toEqual([]);
+    });
+
+    it("names a missing bundle and anything else in the directory", () => {
+      // Only what `release-sign` signs may travel on into the release.
+      expect(
+        bundleDirectoryFindings(files(bundles[0], bundles[2], "Jet_0.2.0_arm64.deb", "latest.json", "notes.sig"), expected),
+      ).toEqual([
+        "rpm: Jet-0.2.0-1.x86_64.rpm is missing",
+        "unexpected Jet_0.2.0_arm64.deb",
+        "unexpected latest.json",
+        "unexpected notes.sig",
+      ]);
+    });
+
+    it("refuses a bundle or signature that is not a regular file", () => {
+      const entries = [
+        ...files(bundles[0], bundles[1]),
+        { name: bundles[2], kind: "symlink" as const },
+        { name: `${bundles[0]}.sig`, kind: "directory" as const },
+      ];
+      expect(bundleDirectoryFindings(entries, expected)).toEqual([
+        "Jet_0.2.0_amd64.AppImage is a symlink, not a regular file",
+        "Jet_0.2.0_amd64.deb.sig is a directory, not a regular file",
+      ]);
+    });
   });
 });
 
@@ -278,53 +314,38 @@ describe("bundle and webview content", () => {
     expect(binaryBuildPathFindings(remapped, "jet-tauri", ["/home/builder/src/jet", "/home/builder"])).toEqual([]);
   });
 
-  it("keeps the updater endpoint in signed binaries only", () => {
+  it("keeps the updater endpoint in release builds only", () => {
     const endpoints = releaseConfig.plugins.updater.endpoints;
     const withUpdater = Buffer.from(`ELF\0{"updater":{"endpoints":["${endpoints[0]}"]}}\0`);
     const withoutUpdater = Buffer.from("ELF\0https://github.com/apexgang/jet\0");
     expect(updaterEndpointFindings(withUpdater, "jet-tauri", endpoints, true)).toEqual([]);
     expect(updaterEndpointFindings(withoutUpdater, "jet-tauri", endpoints, false)).toEqual([]);
     expect(updaterEndpointFindings(withUpdater, "jet-tauri", endpoints, false)).toEqual([
-      `usr/bin/jet-tauri is unsigned but carries the updater endpoint ${endpoints[0]}`,
+      `usr/bin/jet-tauri is not a release build but carries the updater endpoint ${endpoints[0]} (verify a release build with --release)`,
     ]);
     expect(updaterEndpointFindings(withoutUpdater, "jet-tauri", endpoints, true)).toEqual([
-      `usr/bin/jet-tauri is signed but lacks the updater endpoint ${endpoints[0]}`,
+      `usr/bin/jet-tauri is a release build but lacks the updater endpoint ${endpoints[0]}`,
     ]);
   });
 });
 
 describe("build inputs", () => {
   it.each([
-    { request: undefined, key: true, signing: "signed" },
-    { request: undefined, key: false, signing: "unsigned" },
-    { request: "", key: true, signing: "signed" },
-    { request: "", key: false, signing: "unsigned" },
-    { request: "true", key: true, signing: "signed" },
-    { request: "1", key: true, signing: "signed" },
-    { request: "false", key: true, signing: "unsigned" },
-    { request: "0", key: false, signing: "unsigned" },
-  ] as const)("signs with JET_RELEASE_SIGN=$request and key $key: $signing", ({ request, key, signing }) => {
-    expect(signingDecision(request, key)).toMatchObject({ signing });
-  });
-
-  it("refuses required signing without a key, before the build", () => {
-    // A `sign: true` workflow whose secret is missing gets an empty key.
-    for (const request of ["true", "1"]) {
-      expect(signingDecision(request, false)).toEqual({
-        finding: "JET_RELEASE_SIGN requires updater signatures, but TAURI_SIGNING_PRIVATE_KEY is unset or empty",
-      });
-    }
+    { request: undefined, mode: "unsigned" },
+    { request: "", mode: "unsigned" },
+    { request: "false", mode: "unsigned" },
+    { request: "0", mode: "unsigned" },
+    { request: "true", mode: "release" },
+    { request: "1", mode: "release" },
+  ] as const)("builds JET_RELEASE_SIGN=$request as $mode", ({ request, mode }) => {
+    // The mode never depends on the updater key: no build signs.
+    expect(bundleMode(request)).toEqual({ mode });
   });
 
   it("refuses a JET_RELEASE_SIGN it does not understand", () => {
-    expect(signingDecision("yes", true)).toEqual({ finding: 'JET_RELEASE_SIGN is "yes"; use true, false, 1 or 0' });
-  });
-
-  it("says why a build is unsigned", () => {
-    expect(signingDecision(undefined, false)).toEqual({
-      signing: "unsigned",
-      note: "TAURI_SIGNING_PRIVATE_KEY is unset: building without updater signatures.",
-    });
+    for (const request of ["yes", "TRUE", " true"]) {
+      expect(bundleMode(request)).toEqual({ finding: `JET_RELEASE_SIGN is ${JSON.stringify(request)}; use true, false, 1 or 0` });
+    }
   });
 
   const remaps = [
@@ -354,10 +375,12 @@ describe("build inputs", () => {
 
   it("parses verify's flags without a payload argument", () => {
     // `just release-verify --require-signatures` passes the flag alone.
-    expect(verifyOptions(["--require-signatures"])).toEqual({ payload: undefined, requireSignatures: true });
-    expect(verifyOptions([])).toEqual({ payload: undefined, requireSignatures: false });
+    expect(verifyOptions(["--require-signatures"])).toEqual({ payload: undefined, release: true, requireSignatures: true });
+    expect(verifyOptions([])).toEqual({ payload: undefined, release: false, requireSignatures: false });
+    expect(verifyOptions(["--release"])).toEqual({ payload: undefined, release: true, requireSignatures: false });
     expect(verifyOptions(["--require-signatures", "--payload", "dist/core.tar.gz"])).toEqual({
       payload: "dist/core.tar.gz",
+      release: true,
       requireSignatures: true,
     });
   });

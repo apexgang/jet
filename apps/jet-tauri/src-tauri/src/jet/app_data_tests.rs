@@ -2,14 +2,26 @@
 //! Wave 4 fault drill lists (corrupted local state): empty, truncated,
 //! oversized, garbage, a directory in its place, and a newer version. The
 //! app state `lib.rs` builds at launch still loads, and each file is reset,
-//! set aside or kept exactly as its module specifies.
+//! set aside or kept exactly as its module specifies. The local service's
+//! provisioning lock is also used by a provisioning pass, which either runs
+//! or fails with a stable error, and never hangs or panics.
 
-use std::{fs, path::Path, sync::Arc};
+use std::{
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::Path,
+    sync::{mpsc, Arc},
+    time::Duration,
+};
 
 use uuid::Uuid;
 
 use super::{
     keystore::tests::{CountingStore, Fail},
+    local_service::{
+        tests::{provision_with_lock_file, LockedPass},
+        LocalServiceView,
+    },
     notifications::NotificationPreferences,
     planes::spawner::fake::FakeSpawner,
     presentation::{PresentationState, ShellPresentation},
@@ -89,8 +101,8 @@ const FILES: [AppDataFile; 9] = [
         valid: r#"{"version":1,"width":1000,"height":700,"x":null,"y":null,"monitor":null,"maximized":false}"#,
         newer: r#"{"version":2,"width":1000,"height":700,"x":null,"y":null,"monitor":null,"maximized":false}"#,
     },
-    // Section A's provisioning lock. Its bytes carry no state; nothing at
-    // launch reads it, so it only must not stop the app from loading.
+    // Section A's provisioning lock. Its bytes carry no state and launch
+    // never reads it; a provisioning pass locks it (`provision_through`).
     AppDataFile {
         name: "local-service.lock",
         valid: "",
@@ -139,6 +151,55 @@ fn launch(home: &Path, app_data: &Path) -> Launched {
         presentation: PresentationState::new(app_data),
         geometry: WindowGeometryState::new(app_data),
     }
+}
+
+/// One provisioning pass with `lock` as its cross-instance lock, on its own
+/// thread: a pass that blocks (a blocking lock, an open that waits) fails
+/// the test instead of hanging it.
+fn provision_through(lock: &Path) -> LockedPass {
+    let (sender, receiver) = mpsc::channel();
+    let path = lock.to_owned();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _ = sender.send(runtime.block_on(provision_with_lock_file(&path)));
+    });
+    match receiver.recv_timeout(Duration::from_secs(30)) {
+        Ok(pass) => pass,
+        Err(mpsc::RecvTimeoutError::Timeout) => panic!("provisioning hung on {}", lock.display()),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("provisioning panicked on {}", lock.display())
+        }
+    }
+}
+
+/// A pass that could not use its lock: failed, repairable, nothing run, and
+/// the one stable code the Setup screen explains.
+fn assert_lock_unavailable(pass: &LockedPass, case: &str) {
+    let LocalServiceView {
+        phase,
+        can_repair,
+        error,
+        ..
+    } = &pass.view;
+    let error = error.as_ref().unwrap_or_else(|| panic!("{case}: no error"));
+    assert_eq!(serde_json::to_value(phase).unwrap(), "failed", "{case}");
+    assert!(can_repair, "{case}");
+    assert_eq!(error.code, "service.lock_unavailable", "{case}");
+    assert!(error.retryable, "{case}");
+    assert_eq!(pass.commands, 0, "{case}");
+}
+
+fn assert_provisioned(pass: &LockedPass, case: &str) {
+    assert_eq!(
+        serde_json::to_value(pass.view.phase).unwrap(),
+        "running",
+        "{case}: {:?}",
+        pass.view
+    );
+    assert_eq!(pass.view.error, None, "{case}");
 }
 
 fn planes_view(launched: &Launched) -> serde_json::Value {
@@ -265,7 +326,16 @@ fn every_app_data_file_survives_every_kind_of_damage() {
                     assert_eq!(launched.geometry.saved(), None, "{case}");
                 }
                 "local-service.lock" => {
-                    assert_eq!(fs::read(app_data.join(file.name)).ok(), written, "{case}");
+                    let lock = app_data.join(file.name);
+                    let pass = provision_through(&lock);
+                    if kind == Damage::Directory {
+                        assert_lock_unavailable(&pass, &case);
+                        assert!(lock.join("inner").is_file(), "{case}");
+                    } else {
+                        // Any bytes lock: the pass runs and keeps them.
+                        assert_provisioned(&pass, &case);
+                        assert_eq!(fs::read(&lock).ok(), written, "{case}");
+                    }
                 }
                 other => panic!("no expectation for {other}"),
             }
@@ -283,4 +353,45 @@ fn every_app_data_file_survives_every_kind_of_damage() {
             }
         }
     }
+}
+
+/// A lock file, or an app data directory, this user may not write fails the
+/// pass cleanly, and the next pass runs once the permission is back. Where
+/// permissions do not bind (root), the pass simply runs.
+#[test]
+fn an_unwritable_provisioning_lock_fails_cleanly() {
+    let home = tempfile::tempdir().unwrap();
+    let app_data = home.path().join("app-data");
+    fs::create_dir(&app_data).unwrap();
+    let lock = app_data.join("local-service.lock");
+    let mode = |path: &Path, mode: u32| {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    };
+
+    // The lock file itself, read-only.
+    fs::write(&lock, b"").unwrap();
+    mode(&lock, 0o400);
+    let bound = fs::OpenOptions::new().write(true).open(&lock).is_err();
+    let pass = provision_through(&lock);
+    if bound {
+        assert_lock_unavailable(&pass, "read-only lock file");
+    } else {
+        assert_provisioned(&pass, "read-only lock file");
+    }
+    assert_eq!(fs::read(&lock).unwrap(), b"");
+    mode(&lock, 0o600);
+    assert_provisioned(&provision_through(&lock), "lock file writable again");
+
+    // No lock file, in a directory the user may not write.
+    fs::remove_file(&lock).unwrap();
+    mode(&app_data, 0o500);
+    let pass = provision_through(&lock);
+    mode(&app_data, 0o700);
+    if bound {
+        assert_lock_unavailable(&pass, "read-only app data directory");
+        assert!(!lock.exists());
+    } else {
+        assert_provisioned(&pass, "read-only app data directory");
+    }
+    assert_provisioned(&provision_through(&lock), "app data writable again");
 }

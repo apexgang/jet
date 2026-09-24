@@ -2,14 +2,15 @@
  * Pure release checks for the Linux desktop bundles: the version stamps
  * (ADR-0053), the core payload archive, the expected bundle names, what a
  * bundle, its app binary or the webview assets must not contain, and the
- * build's inputs (whether it signs, its rustc flags, the `verify` arguments).
+ * build's inputs (release or unsigned build, its rustc flags, the `verify`
+ * arguments).
  * `main.ts` does the file and process work; everything here takes bytes or
  * text and returns findings, so the tests need no bundle.
  */
 
 import { createHash } from "node:crypto";
 
-import { gunzip, readTar, type ArchiveEntry } from "./archives";
+import { gunzip, readTar, type ArchiveEntry, type EntryKind } from "./archives";
 
 // ---------------------------------------------------------------------------
 // Versions (ADR-0053: the GUIs and the core ship under one release version)
@@ -114,6 +115,28 @@ export function expectedBundles(productName: string, version: string, arch: Linu
     { kind: "rpm", directory: "rpm", fileName: `${productName}-${version}-1.${names.rpm}.rpm` },
     { kind: "appimage", directory: "appimage", fileName: `${productName}_${version}_${names.appimage}.AppImage` },
   ];
+}
+
+/** A name in a directory, and what it is without following symlinks. */
+export type DirectoryEntry = { name: string; kind: EntryKind };
+
+/**
+ * Problems with a directory that should hold exactly the expected bundles as
+ * regular files, and at most their `.sig` files, as the CI signing job
+ * receives them from the build job. Anything else there would travel into
+ * the release beside the signed bundles.
+ */
+export function bundleDirectoryFindings(entries: DirectoryEntry[], expected: ExpectedBundle[]): string[] {
+  const findings: string[] = [];
+  const allowed = new Set(expected.flatMap((bundle) => [bundle.fileName, `${bundle.fileName}.sig`]));
+  for (const bundle of expected) {
+    if (!entries.some((entry) => entry.name === bundle.fileName)) findings.push(`${bundle.kind}: ${bundle.fileName} is missing`);
+  }
+  for (const entry of entries) {
+    if (!allowed.has(entry.name)) findings.push(`unexpected ${entry.name}`);
+    else if (entry.kind !== "file") findings.push(`${entry.name} is a ${entry.kind}, not a regular file`);
+  }
+  return findings;
 }
 
 /** Where `bundle.resources` places the payload: `usr/lib/<productName>/`. */
@@ -273,22 +296,24 @@ export function binaryBuildPathFindings(binary: Buffer, mainBinary: string, buil
 
 /**
  * Problems with the updater configuration Tauri compiles into the app binary.
- * A signed build must carry every `plugins.updater` endpoint. An unsigned
- * build (a pull-request or end-to-end bundle) must carry none: the app
- * registers the updater whenever its configuration has one and checks the
- * endpoint after launch, so an unsigned bundle would contact github.com and
- * follow the live release feed.
+ * A release build (`release`: built for `just release-sign`, or signed) must
+ * carry every `plugins.updater` endpoint. Any other build (a pull-request or
+ * end-to-end bundle) must carry none: the app registers the updater whenever
+ * its configuration has one and checks the endpoint after launch, so such a
+ * bundle would contact github.com and follow the live release feed.
  */
 export function updaterEndpointFindings(
   binary: Buffer,
   mainBinary: string,
   endpoints: string[],
-  signed: boolean,
+  release: boolean,
 ): string[] {
   return endpoints.flatMap((endpoint) => {
     const present = binary.includes(endpoint);
-    if (signed && !present) return [`usr/bin/${mainBinary} is signed but lacks the updater endpoint ${endpoint}`];
-    if (!signed && present) return [`usr/bin/${mainBinary} is unsigned but carries the updater endpoint ${endpoint}`];
+    if (release && !present) return [`usr/bin/${mainBinary} is a release build but lacks the updater endpoint ${endpoint}`];
+    if (!release && present) {
+      return [`usr/bin/${mainBinary} is not a release build but carries the updater endpoint ${endpoint} (verify a release build with --release)`];
+    }
     return [];
   });
 }
@@ -296,33 +321,26 @@ export function updaterEndpointFindings(
 // ---------------------------------------------------------------------------
 // Build inputs
 
-export type Signing = "signed" | "unsigned";
-
-export type SigningDecision = { signing: Signing; note?: string } | { finding: string };
+export type BundleMode = "release" | "unsigned";
 
 /**
- * Whether `just release-bundle` writes updater signatures. `JET_RELEASE_SIGN`
- * (`request`) states it: `true` or `1` requires them, `false` or `0` never
- * signs. Unset or empty, a build signs exactly when it has the private key.
- * Required signing without a key is a finding before the long build, so a
- * release job whose secret is missing fails instead of shipping unsigned
- * bundles.
+ * Which build `just release-bundle` makes. `JET_RELEASE_SIGN` (`request`)
+ * states it: `true` or `1` is a release build, which keeps
+ * `plugins.updater` (the endpoint and public key compiled into the app) for
+ * `just release-sign` to sign afterwards; `false`, `0`, unset or empty is an
+ * unsigned pull-request or test build without `plugins.updater`. Neither
+ * build signs: the updater key never reaches the build's dependencies
+ * (ASVS 13.3.2). Anything else is refused before the long build.
  */
-export function signingDecision(request: string | undefined, keyPresent: boolean): SigningDecision {
-  const unsigned = (note: string): SigningDecision => ({ signing: "unsigned", note });
+export function bundleMode(request: string | undefined): { mode: BundleMode } | { finding: string } {
   switch (request ?? "") {
     case "true":
     case "1":
-      return keyPresent
-        ? { signing: "signed" }
-        : { finding: "JET_RELEASE_SIGN requires updater signatures, but TAURI_SIGNING_PRIVATE_KEY is unset or empty" };
+      return { mode: "release" };
     case "false":
     case "0":
-      return unsigned("JET_RELEASE_SIGN is off: building without updater signatures.");
     case "":
-      return keyPresent
-        ? { signing: "signed" }
-        : unsigned("TAURI_SIGNING_PRIVATE_KEY is unset: building without updater signatures.");
+      return { mode: "unsigned" };
     default:
       return { finding: `JET_RELEASE_SIGN is ${JSON.stringify(request)}; use true, false, 1 or 0` };
   }
@@ -353,17 +371,26 @@ export function releaseRustflags(
   return flags.join(ENCODED_SEPARATOR);
 }
 
-export type VerifyOptions = { payload: string | undefined; requireSignatures: boolean };
+export type VerifyOptions = {
+  payload: string | undefined;
+  /** The bundles are a release build: every app binary carries the updater endpoint. */
+  release: boolean;
+  /** Every bundle carries a verified `.sig`; implies `release`. */
+  requireSignatures: boolean;
+};
 
-/** Parses `verify [--payload <archive>] [--require-signatures]`, in any order. */
+/** Parses `verify [--payload <archive>] [--release] [--require-signatures]`, in any order. */
 export function verifyOptions(args: string[]): VerifyOptions | { error: string } {
   let payload: string | undefined;
+  let release = false;
   let requireSignatures = false;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     const value = args[index + 1];
     if (arg === "--require-signatures") {
       requireSignatures = true;
+    } else if (arg === "--release") {
+      release = true;
     } else if (arg === "--payload") {
       if (payload !== undefined || !value || value.startsWith("--")) return { error: "--payload takes one archive path" };
       payload = value;
@@ -372,7 +399,7 @@ export function verifyOptions(args: string[]): VerifyOptions | { error: string }
       return { error: `unknown verify argument ${arg}` };
     }
   }
-  return { payload, requireSignatures };
+  return { payload, release: release || requireSignatures, requireSignatures };
 }
 
 // ---------------------------------------------------------------------------

@@ -44,9 +44,13 @@ Ape Bonker installation token scoped to that repository. Prereleases leave
 the stable formula unchanged. See [CI and releases](../.github/workflows/README.md)
 for credentials and retry instructions.
 
-`brew install apexgang/tap/jetd` installs the compiled payload without Rust.
-The formula is `jetd` because homebrew/core already has an unrelated `jet`.
-`brew services start apexgang/tap/jetd` runs `jetd serve --channel homebrew`.
+On Linux, `brew install apexgang/tap/jetd` installs the compiled payload
+without Rust. The formula is `jetd` because homebrew/core already has an
+unrelated `jet`. It is Linux-only: on macOS the Swift app's release publishes
+the same executables and service names as the tap's `jet` formula, from
+`.github/packaging/homebrew/jet.rb.in`, and two formulas would link the same
+`jetd`. `brew services start apexgang/tap/jetd` runs
+`jetd serve --channel homebrew`.
 The service definitions preserve helpers across daemon restarts. The systemd
 unit starts only while the formula's `jetd` exists, so a unit left behind by
 an uninstall cannot restart in a loop.

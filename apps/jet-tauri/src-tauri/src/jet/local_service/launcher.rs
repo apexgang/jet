@@ -11,7 +11,7 @@ use std::{
 use super::manager::write_if_changed;
 
 /// The bundle identifier (`tauri.conf.json`), which names the entry and the
-/// icon. The Homebrew cask removes both files by these names on uninstall.
+/// icon. The Homebrew cask's `zap` removes both files by these names.
 pub(crate) const APP_ID: &str = "me.heeka.jet-tauri";
 const ICON: &[u8] = include_bytes!("../../../icons/128x128.png");
 
@@ -67,14 +67,22 @@ fn validated(path: &Path) -> Option<PathBuf> {
         .then_some(canonical)
 }
 
-/// The desktop entry that starts the AppImage at `path`.
+/// The desktop entry that starts the AppImage at `path`. `TryExec` names
+/// the same file, so desktop environments hide the entry once the AppImage
+/// is gone: `brew uninstall` without `--zap` leaves the entry behind.
 pub(crate) fn desktop_entry(path: &Path) -> Option<String> {
-    let exec = exec_argument(path.to_str()?)?;
+    let path = path.to_str()?;
+    let exec = exec_argument(path)?;
+    // A plain string value: only the backslash needs its escape (control
+    // characters were refused above, and the absolute path never starts
+    // with a space).
+    let try_exec = path.replace('\\', "\\\\");
     Some(format!(
         "[Desktop Entry]\n\
          Type=Application\n\
          Name=Jet\n\
          Comment=Start, supervise and return to agent work across computers\n\
+         TryExec={try_exec}\n\
          Exec={exec}\n\
          Icon={APP_ID}\n\
          Terminal=false\n\
@@ -138,6 +146,16 @@ mod tests {
     }
 
     #[test]
+    fn try_exec_names_the_appimage_as_a_string_value() {
+        let entry = desktop_entry(Path::new("/a/My Apps/b\\c/Jet.AppImage")).unwrap();
+        assert!(
+            entry.contains("\nTryExec=/a/My Apps/b\\\\c/Jet.AppImage\n"),
+            "{entry}"
+        );
+        assert_eq!(desktop_entry(Path::new("/a/line\nbreak")), None);
+    }
+
+    #[test]
     fn the_identifier_matches_the_bundle() {
         let configuration: serde_json::Value =
             serde_json::from_str(include_str!("../../../tauri.conf.json")).unwrap();
@@ -178,6 +196,7 @@ mod tests {
         let entry = fs::read_to_string(entry_path(&data)).unwrap();
         let canonical = fs::canonicalize(&appimage).unwrap();
         assert!(entry.contains(&format!("Exec=\"{}\"\n", canonical.display())));
+        assert!(entry.contains(&format!("\nTryExec={}\n", canonical.display())));
         assert!(entry.contains("Icon=me.heeka.jet-tauri\n"));
         assert_eq!(fs::read(icon_path(&data)).unwrap(), ICON);
 

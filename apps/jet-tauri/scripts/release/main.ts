@@ -2,29 +2,37 @@
  * Release checks for the Linux desktop bundles, run through `just`:
  *
  *   bun scripts/release/main.ts version-check
- *   bun scripts/release/main.ts signing
+ *   bun scripts/release/main.ts app-version
+ *   bun scripts/release/main.ts bundle-mode
  *   bun scripts/release/main.ts check-payload <jet-core-<v>-<target>.tar.gz>
  *   bun scripts/release/main.ts clean-bundles
  *   bun scripts/release/main.ts rustflags
- *   bun scripts/release/main.ts verify [--payload <archive>] [--require-signatures]
+ *   bun scripts/release/main.ts bundles [--in <directory>]
+ *   bun scripts/release/main.ts verify [--payload <archive>] [--release] [--require-signatures]
+ *   bun scripts/release/main.ts check-signatures <directory>
  *
  * `version-check` fails unless tauri.conf.json, src-tauri/Cargo.toml (and its
  * Cargo.lock entry) and package.json carry the core workspace version
- * (ADR-0053). `signing` prints `signed` or `unsigned` from `JET_RELEASE_SIGN`
- * and whether `TAURI_SIGNING_PRIVATE_KEY` is set, and fails when signing is
- * required without the key. `check-payload` validates the core payload
- * archive before a long build. `clean-bundles` removes earlier deb, rpm and
- * AppImage output so no stale bundle or `.sig` survives into a new build.
- * `rustflags` prints the `CARGO_ENCODED_RUSTFLAGS` that remap build paths out
- * of the app binary. `verify` checks the built deb, rpm and AppImage:
- * expected names, the payload byte-identical at `usr/lib/Jet/jet-core.tar.gz`,
- * the bundle type patched into each app binary, no build paths in it and the
- * updater endpoint only when signed, no source maps or fixtures, clean
- * webview assets, and updater signatures that verify against
- * `plugins.updater.pubkey` (all three or none; `--require-signatures` makes
- * none a failure). Without `--payload` it compares against the copy in
- * `src-tauri/resources/`. It prints each bundle's size and SHA-256. Relative
- * paths resolve against the working directory.
+ * (ADR-0053); `app-version` prints that version. `bundle-mode` prints
+ * `release` or `unsigned` from `JET_RELEASE_SIGN`. `check-payload` validates
+ * the core payload archive before a long build. `clean-bundles` removes
+ * earlier deb, rpm and AppImage output so no stale bundle or `.sig` survives
+ * into a new build. `rustflags` prints the `CARGO_ENCODED_RUSTFLAGS` that
+ * remap build paths out of the app binary. `bundles` prints the path of this
+ * machine's deb, rpm and AppImage, one per line, for `just release-sign`:
+ * from the build output, or from a directory that holds only those three
+ * (and their `.sig` files), as the CI signing job receives them.
+ * `verify` checks them: expected names, the payload byte-identical at
+ * `usr/lib/Jet/jet-core.tar.gz`, the bundle type patched into each app
+ * binary, no build paths in it and the updater endpoint only in a release
+ * build (`--release`, or signed), no source maps or fixtures, clean webview
+ * assets, and updater signatures that verify against `plugins.updater.pubkey`
+ * (all three or none; `--require-signatures` makes none a failure and implies
+ * `--release`). Without `--payload` it compares against the copy in
+ * `src-tauri/resources/`. It prints each bundle's size and SHA-256.
+ * `check-signatures` verifies only the updater signatures of the bundles in
+ * a directory `bundles --in` accepts, without opening the bundles, the build
+ * or the payload. Relative paths resolve against the working directory.
  *
  * Exit status: 0 passed, 1 a check failed, 2 the checks could not run.
  */
@@ -46,6 +54,7 @@ import { fileURLToPath } from "node:url";
 import { debEntries, rpmEntries, type ArchiveEntry, type EntryKind } from "./archives";
 import {
   binaryBuildPathFindings,
+  bundleDirectoryFindings,
   cargoLockVersion,
   expectedBundles,
   formatSize,
@@ -55,17 +64,19 @@ import {
   releaseRustflags,
   sha256,
   signatureState,
-  signingDecision,
   targetTriple,
   tomlString,
   bundleEntryFindings,
+  bundleMode,
   bundleTypeFindings,
   updaterEndpointFindings,
   verifyOptions,
   versionFindings,
   webviewAssetFindings,
+  type DirectoryEntry,
   type ExpectedBundle,
   type LinuxArch,
+  type VerifyOptions,
 } from "./checks";
 import { decodePublicKey, signatureFindings } from "./signatures";
 
@@ -93,6 +104,15 @@ function readJson<T>(path: string): T {
 
 function tauriConfig(): TauriConfig {
   return readJson<TauriConfig>(join(TAURI_DIRECTORY, "tauri.conf.json"));
+}
+
+/** The release configuration's updater public key and endpoints. */
+function releaseUpdater(): { pubkey: string; endpoints: string[] } {
+  const updater = readJson<TauriConfig>(RELEASE_CONFIG).plugins?.updater;
+  if (updater?.pubkey === undefined || !updater.endpoints?.length) {
+    throw new UsageError("tauri.release.conf.json has no plugins.updater pubkey and endpoints");
+  }
+  return { pubkey: updater.pubkey, endpoints: updater.endpoints };
 }
 
 function appVersion(): string {
@@ -137,11 +157,15 @@ function versionCheck(): number {
   return report(findings, `App version ${appVersion()} matches the core workspace version.`);
 }
 
-function signing(): number {
-  const decision = signingDecision(process.env.JET_RELEASE_SIGN, Boolean(process.env.TAURI_SIGNING_PRIVATE_KEY));
+function printBundleMode(): number {
+  const decision = bundleMode(process.env.JET_RELEASE_SIGN);
   if ("finding" in decision) return report([decision.finding], "");
-  if (decision.note !== undefined) console.error(decision.note);
-  console.log(decision.signing);
+  console.error(
+    decision.mode === "release"
+      ? "JET_RELEASE_SIGN is on: a release build with plugins.updater, signed afterwards by `just release-sign`."
+      : "JET_RELEASE_SIGN is off: an unsigned build without plugins.updater.",
+  );
+  console.log(decision.mode);
   return 0;
 }
 
@@ -282,19 +306,14 @@ function webviewAssets(): { path: string; data: Buffer }[] {
     .map((entry) => ({ path: entry.path, data: readFileSync(join(root, entry.path)) }));
 }
 
-function verify(payloadPath: string, requireSignatures: boolean): number {
-  const product = productName();
-  const version = appVersion();
-  const arch = hostArch();
-  const payload = readFileSync(payloadPath);
-  const target = targetDirectory();
-  const directory = join(target, "release", "bundle");
-  const machinePaths = buildPaths(target);
-  const bundles = expectedBundles(product, version, arch);
-  const findings: string[] = [];
-  const rows: string[] = [];
+type BuiltBundles = { directory: string; bundles: ExpectedBundle[]; paths: string[]; findings: string[] };
 
+/** This machine's deb, rpm and AppImage under `target`, each alone in its directory. */
+function builtBundles(target: string, version: string): BuiltBundles {
+  const directory = join(target, "release", "bundle");
+  const bundles = expectedBundles(productName(), version, hostArch());
   const paths = bundles.map((bundle) => join(directory, bundle.directory, bundle.fileName));
+  const findings: string[] = [];
   for (const [index, bundle] of bundles.entries()) {
     const kindDirectory = join(directory, bundle.directory);
     const present = existsSync(kindDirectory)
@@ -306,14 +325,71 @@ function verify(payloadPath: string, requireSignatures: boolean): number {
     if (!existsSync(paths[index])) findings.push(`${bundle.kind}: ${bundle.fileName} is missing (found ${present.join(", ") || "nothing"})`);
     else if (unexpected.length > 0) findings.push(`${bundle.kind}: unexpected ${unexpected.join(", ")} next to ${bundle.fileName}`);
   }
+  return { directory, bundles, paths, findings };
+}
+
+/**
+ * This machine's deb, rpm and AppImage in a directory of their own, as the CI
+ * signing job downloads them from the build job: nothing else may be there
+ * apart from their `.sig` files.
+ */
+function bundlesIn(directory: string, version: string): BuiltBundles {
+  const bundles = expectedBundles(productName(), version, hostArch());
+  const entries: DirectoryEntry[] = readdirSync(directory, { withFileTypes: true }).map((entry) => ({
+    name: entry.name,
+    kind: entry.isSymbolicLink() ? "symlink" : entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other",
+  }));
+  const paths = bundles.map((bundle) => join(directory, bundle.fileName));
+  return { directory, bundles, paths, findings: bundleDirectoryFindings(entries, bundles) };
+}
+
+function printBundles(directory: string | undefined): number {
+  const version = appVersion();
+  const { paths, findings } = directory === undefined ? builtBundles(targetDirectory(), version) : bundlesIn(directory, version);
+  if (findings.length > 0) return report(findings, "");
+  for (const path of paths) console.log(path);
+  return 0;
+}
+
+/**
+ * Verifies the updater signature of each bundle in `directory` against
+ * `plugins.updater.pubkey`, the file name and the app version. It never opens
+ * or runs a bundle, so the signing job needs no build to run it.
+ */
+function checkSignatures(directory: string): number {
+  const version = appVersion();
+  const { bundles, paths, findings } = bundlesIn(directory, version);
+  if (findings.length > 0) return report(findings, "");
+  const publicKey = decodePublicKey(releaseUpdater().pubkey);
+  for (const [index, bundle] of bundles.entries()) {
+    const signature = `${paths[index]}.sig`;
+    if (!existsSync(signature)) {
+      findings.push(`${bundle.kind}: ${bundle.fileName}.sig is missing`);
+      continue;
+    }
+    for (const finding of signatureFindings(readFileSync(paths[index]), readFileSync(signature, "utf8"), publicKey, bundle.fileName, version)) {
+      findings.push(`${bundle.kind}: ${bundle.fileName}.sig: ${finding}`);
+    }
+  }
+  return report(findings, `Updater signatures of ${bundles.map((bundle) => bundle.fileName).join(", ")} verify for ${version}.`);
+}
+
+function verify(payloadPath: string, options: Pick<VerifyOptions, "release" | "requireSignatures">): number {
+  const product = productName();
+  const version = appVersion();
+  const arch = hostArch();
+  const payload = readFileSync(payloadPath);
+  const target = targetDirectory();
+  const machinePaths = buildPaths(target);
+  const { directory, bundles, paths, findings } = builtBundles(target, version);
+  const rows: string[] = [];
   if (findings.length > 0) return report(findings, "");
 
-  const updater = readJson<TauriConfig>(RELEASE_CONFIG).plugins?.updater;
-  if (updater?.pubkey === undefined || !updater.endpoints?.length) {
-    throw new UsageError("tauri.release.conf.json has no plugins.updater pubkey and endpoints");
-  }
+  const updater = releaseUpdater();
   const signed = paths.map((path) => existsSync(`${path}.sig`));
   const state = signatureState(signed);
+  // A signed bundle is a release build even when `--release` is not given.
+  const release = options.release || state === "all";
 
   const scratch = mkdtempSync(join(tmpdir(), "jet-release-verify-"));
   try {
@@ -333,7 +409,7 @@ function verify(payloadPath: string, requireSignatures: boolean): number {
           ...binaryBuildPathFindings(binary, MAIN_BINARY, machinePaths),
         );
         // A partial signature set is its own finding below.
-        if (state !== "partial") bundleFindings.push(...updaterEndpointFindings(binary, MAIN_BINARY, updater.endpoints, state === "all"));
+        if (state !== "partial") bundleFindings.push(...updaterEndpointFindings(binary, MAIN_BINARY, updater.endpoints, release));
       }
       if (bundled !== undefined && !bundled.equals(payload)) {
         bundleFindings.push(`${payloadEntryPath(product)} differs from ${payloadPath} (sha256 ${sha256(bundled)} vs ${sha256(payload)})`);
@@ -349,8 +425,8 @@ function verify(payloadPath: string, requireSignatures: boolean): number {
 
   if (state === "partial") {
     findings.push(`only some bundles are signed: ${bundles.filter((_, i) => !signed[i]).map((b) => b.fileName).join(", ")} lack a .sig`);
-  } else if (state === "none" && requireSignatures) {
-    findings.push("no updater signatures, but signing was requested");
+  } else if (state === "none" && options.requireSignatures) {
+    findings.push("no updater signatures, but signing was requested; sign the bundles with `just release-sign`");
   } else if (state === "all") {
     const publicKey = decodePublicKey(updater.pubkey);
     for (const [index, bundle] of bundles.entries()) {
@@ -369,7 +445,12 @@ function verify(payloadPath: string, requireSignatures: boolean): number {
   rows.push(`payload ${basename(payloadPath)}  ${payload.length} bytes (${formatSize(payload.length)})  sha256 ${sha256(payload)}`);
   console.log(`Bundles in ${directory}:`);
   for (const row of rows) console.log(`  ${row}`);
-  const signatures = state === "all" ? "updater signatures verified" : "unsigned, without updater endpoints";
+  const signatures =
+    state === "all"
+      ? "updater signatures verified"
+      : release
+        ? "a release build with the updater endpoint, not yet signed (`just release-sign`)"
+        : "unsigned, without updater endpoints";
   return report(findings, `Release bundles ${version} (${arch}) passed: payload byte-identical in deb, rpm and AppImage; ${signatures}.`);
 }
 
@@ -380,24 +461,36 @@ function main(args: string[]): number {
   switch (command) {
     case "version-check":
       return versionCheck();
+    case "app-version":
+      console.log(appVersion());
+      return 0;
     case "check-payload": {
       if (rest.length !== 1) throw new UsageError("check-payload takes one archive path");
       return checkPayload(realpathSync(rest[0]));
     }
     case "clean-bundles":
       return cleanBundles();
-    case "signing":
-      return signing();
+    case "bundle-mode":
+      return printBundleMode();
     case "rustflags":
       return rustflags();
+    case "bundles": {
+      if (rest.length === 0) return printBundles(undefined);
+      if (rest.length !== 2 || rest[0] !== "--in") throw new UsageError("bundles takes nothing, or --in <directory>");
+      return printBundles(realpathSync(rest[1]));
+    }
+    case "check-signatures": {
+      if (rest.length !== 1) throw new UsageError("check-signatures takes one directory");
+      return checkSignatures(realpathSync(rest[0]));
+    }
     case "verify": {
       const options = verifyOptions(rest);
       if ("error" in options) throw new UsageError(options.error);
-      return verify(realpathSync(options.payload ?? BUNDLED_PAYLOAD), options.requireSignatures);
+      return verify(realpathSync(options.payload ?? BUNDLED_PAYLOAD), options);
     }
     default:
       throw new UsageError(
-        "usage: main.ts version-check | signing | check-payload <archive> | clean-bundles | rustflags | verify [--payload <archive>] [--require-signatures]",
+        "usage: main.ts version-check | app-version | bundle-mode | check-payload <archive> | clean-bundles | rustflags | bundles [--in <directory>] | verify [--payload <archive>] [--release] [--require-signatures] | check-signatures <directory>",
       );
   }
 }

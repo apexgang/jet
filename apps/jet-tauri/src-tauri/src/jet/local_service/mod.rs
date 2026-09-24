@@ -21,7 +21,7 @@ mod manager;
 mod payload;
 pub(crate) mod process;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::{
     collections::HashMap,
