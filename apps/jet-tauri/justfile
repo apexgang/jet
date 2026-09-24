@@ -45,8 +45,16 @@ test:
 version-check:
 	bun scripts/release/main.ts version-check
 
-# Run the app-local version, contract, frontend, lint, and test checks.
-check: version-check contracts frontend-check frontend-test frontend-build fmt clippy test
+# Run the desktop release journey (tests/e2e/) against fakes: the WebDriver
+# client, the page script, /proc sampling of real processes, a fake systemd
+# and the report, everything but the app itself. It never touches the real
+# Jet home. The journey proper needs a fresh runner and runs in CI only
+# (.github/workflows/desktop-e2e.yml). Linux only: it reads /proc.
+e2e-dry-run:
+	@if [ "$(uname -s)" != Linux ]; then echo "e2e-dry-run: skipped, it reads /proc"; else bun tests/e2e/main.ts --dry-run --quiet > /dev/null; fi
+
+# Run the app-local version, contract, frontend, lint, test and journey dry-run checks.
+check: version-check contracts frontend-check frontend-test frontend-build fmt clippy test e2e-dry-run
 
 # Fail on any known npm or RustSec advisory, apart from the reviewed exceptions in
 # docs/dependency-advisories.md (the npm one below, the Rust ones in

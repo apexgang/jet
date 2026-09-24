@@ -351,6 +351,30 @@ describe("D17: a Plane event never selects a task behind New task", () => {
   });
 });
 
+describe("a Plane feed that dials again after a drop", () => {
+  it("reads the selected task again: the feed says resumed, not connected", async () => {
+    const { calls, feeds } = harness();
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    expect(session.selection).toEqual({ planeId: "local", conversationId: "l2" });
+    const reads = () => calls.filter((call) => call.command === "load_conversation").length;
+    feeds[0]?.onmessage({ type: "resumed", after: "40" });
+    await settle(session);
+    const opened = reads();
+    expect(session.conversationFreshness).toBe("live");
+
+    feeds[0]?.onmessage({ type: "reconnecting", error: { ...failure("offline", "transport.offline"), retryable: true } });
+    await settle(session);
+    expect(session.conversationFreshness).toBe("cached");
+    feeds[0]?.onmessage({ type: "resumed", after: "40" });
+    await settle(session);
+    expect(reads()).toBe(opened + 1);
+    expect(session.conversationFreshness).toBe("live");
+    expect(session.connectionState).toBe("online");
+  });
+});
+
 describe("D2: a composer Send keeps its attempt only while it is retried", () => {
   const uncertain = failure("outcome_unknown", "command.outcome_unknown");
 

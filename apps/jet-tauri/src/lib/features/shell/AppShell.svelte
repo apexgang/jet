@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
 
   import ColumnResizer from "./ColumnResizer.svelte";
@@ -14,9 +14,14 @@
   } from "./layout";
   import type { DesktopSession } from "./session.svelte";
   import Sidebar from "./Sidebar.svelte";
+  import { markShellInteractive } from "./timing";
   import WorkPanel from "./WorkPanel.svelte";
 
   let { session }: { session: DesktopSession } = $props();
+
+  // The sidebar and the task view's composer mount first, whatever startup
+  // restores later; the release journey times launch to this mark.
+  onMount(() => markShellInteractive());
 
   const compact = new MediaQuery(`max-width: ${OVERLAY_BREAKPOINT}px`);
   let innerWidth = $state<number>(MINIMUM_WINDOW.width);

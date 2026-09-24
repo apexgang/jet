@@ -88,6 +88,7 @@ import {
   type ShellIntent,
   type ShortcutContext,
 } from "./shortcuts";
+import { LOCAL_PLANE_CONNECTED, mark } from "./timing";
 import {
   fixtureForState,
   type DesktopFixtureScenario,
@@ -314,6 +315,12 @@ export class DesktopSession implements FeedHandler {
    * incomplete-setup redirect.
    */
   private startupSetupFailed: number | null = null;
+  /**
+   * Planes whose feed dropped (`reconnecting`, `failed`) and has not come
+   * back. A feed that dials again says `resumed`, not `connected`, so either
+   * one ends the drop.
+   */
+  private readonly droppedFeeds = new Set<PlaneId>();
   private restoreRequest = 0;
   private workRequest = 0;
   private workFileRequest = 0;
@@ -874,6 +881,7 @@ export class DesktopSession implements FeedHandler {
 
   /** FeedHandler: a Plane was forgotten here; its tasks leave Recent. */
   planeForgotten(planeId: PlaneId): void {
+    this.droppedFeeds.delete(planeId);
     this.catalog.sync();
     this.trash.forget(planeId);
     if (this.selectedPlaneId !== planeId) return;
@@ -891,6 +899,7 @@ export class DesktopSession implements FeedHandler {
     if (planeId !== LOCAL_PLANE) return;
     this.connection = snapshot.state === "online" ? snapshot : null;
     this.connectionState = snapshot.state;
+    if (snapshot.state === "online") mark(LOCAL_PLANE_CONNECTED);
     // The local Plane answers now although startup's Setup read failed.
     if (snapshot.state === "online" && this.setup.kind === "failed") {
       const startup = this.startupSetupFailed;
@@ -2138,23 +2147,17 @@ export class DesktopSession implements FeedHandler {
     switch (update.type) {
       case "connected":
         this.applyConnection(planeId, update.connection);
+        this.droppedFeeds.delete(planeId);
         void this.planes.refresh();
         this.catalog.reconnected(planeId);
-        this.trash.reconnected(planeId);
-        if (selectedPlane && this.selectedConversationId) {
-          void this.trash.loadBanner(planeId, this.selectedConversationId);
-        }
-        if (selectedPlane && this.selectedConversationId && this.conversationFreshness !== "live") {
-          void this.loadSelectedConversation(false);
-        }
+        this.readPlaneAgain(planeId);
         if (!local) break;
         {
           // The local Plane came back (wave 4 §A): Setup re-reads it rather
           // than keep showing it unavailable.
-          const reconnected = this.connectionState === "reconnecting" || this.connectionState === "failed";
+          const reconnected = this.localPlaneOnline();
           this.connection = update.connection;
-          this.connectionState = "online";
-          this.failure = null;
+          mark(LOCAL_PLANE_CONNECTED);
           if (reconnected || this.setup.kind === "failed") {
             const startup = this.startupSetupFailed;
             void this.refreshSetup(startup !== null, startup);
@@ -2162,10 +2165,21 @@ export class DesktopSession implements FeedHandler {
         }
         break;
       case "resumed":
+        // The feed streams: it just opened, or it dialed again after a drop,
+        // which is how it outlives a restarted jetd (`client.rs`
+        // `stream_updates`). Natively the Plane is online again; no status
+        // was read, so its health stays as last read.
         void this.catalog.load(planeId);
+        if (this.droppedFeeds.delete(planeId)) {
+          void this.planes.refresh();
+          this.readPlaneAgain(planeId);
+        }
         if (!local) break;
-        this.connectionState = "online";
-        this.failure = null;
+        if (this.localPlaneOnline()) {
+          mark(LOCAL_PLANE_CONNECTED);
+          const startup = this.startupSetupFailed;
+          void this.refreshSetup(startup !== null, startup);
+        }
         break;
       case "event":
         if (local) {
@@ -2182,6 +2196,7 @@ export class DesktopSession implements FeedHandler {
         this.receiveTrashEvent(planeId, update.kind, update.conversation_id);
         break;
       case "reconnecting":
+        this.droppedFeeds.add(planeId);
         this.health.offline(planeId);
         this.trash.offline(planeId);
         void this.planes.refresh();
@@ -2200,6 +2215,7 @@ export class DesktopSession implements FeedHandler {
           void this.recoverSnapshot(planeId);
           break;
         }
+        this.droppedFeeds.add(planeId);
         this.health.offline(planeId);
         this.trash.offline(planeId);
         void this.planes.refresh();
@@ -2211,6 +2227,22 @@ export class DesktopSession implements FeedHandler {
         if (selectedPlane && this.conversationDetail) this.conversationFreshness = "cached";
         break;
     }
+  }
+
+  /** A Plane's feed is back: what its drop left offline or cached is read again. */
+  private readPlaneAgain(planeId: PlaneId): void {
+    this.trash.reconnected(planeId);
+    if (planeId !== this.selectedPlaneId || !this.selectedConversationId) return;
+    void this.trash.loadBanner(planeId, this.selectedConversationId);
+    if (this.conversationFreshness !== "live") void this.loadSelectedConversation(false);
+  }
+
+  /** This computer's feed is online; true when it was shown down until now. */
+  private localPlaneOnline(): boolean {
+    const reconnected = this.connectionState === "reconnecting" || this.connectionState === "failed";
+    this.connectionState = "online";
+    this.failure = null;
+    return reconnected;
   }
 
   /**
