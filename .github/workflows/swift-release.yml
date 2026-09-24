@@ -1,5 +1,5 @@
-# This workflow is managed by gh actions-lock.
-# External actions resolve to the exact commit hashes in actions.lock.
+# Action commits are pinned directly here. This workflow is intentionally not
+# enrolled in actions.lock because that mechanism rewrites SHA refs to tags.
 name: Release Swift app
 
 on:
@@ -27,14 +27,14 @@ jobs:
       contents: write
     steps:
       # ASVS 15.2.4: every external action resolves to a reviewed commit.
-      - uses: actions/checkout@v7.0.1
-      - uses: extractions/setup-just@v4.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
       - name: Test the Swift app
         run: >
           xcodebuild -project apps/jet/jet.xcodeproj -scheme jet
           -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/jet-swift-tests"
           CODE_SIGNING_ALLOWED=NO test -only-testing:jetTests
-      - uses: actions/cache@v6.1.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -46,8 +46,8 @@ jobs:
       - name: Build the universal core payload
         run: |
           bash .github/scripts/setup-rust.sh release
-          rustup target add aarch64-apple-darwin x86_64-apple-darwin
           cd packages
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
           just release-package --target aarch64-apple-darwin --target x86_64-apple-darwin
       - name: Build and package the Swift app
         env:
@@ -85,7 +85,7 @@ jobs:
               --latest=false
           fi
       # ASVS 13.3.1/13.3.2: a secret mints a short-lived token scoped to the tap.
-      - uses: actions/create-github-app-token@v3.2.0
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app
         with:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID || 'Iv23liPckhcRTwkS6Yxe' }}
@@ -93,7 +93,7 @@ jobs:
           owner: apexgang
           repositories: homebrew-tap
           permission-contents: write
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: apexgang/homebrew-tap
           ref: main
