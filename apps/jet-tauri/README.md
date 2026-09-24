@@ -36,7 +36,9 @@ not granted are refused by the Tauri ACL.
 - `jetd` decides every policy. The shell validates shape and size, and every
   change is reviewed before it is sent.
 - Wave records: [2.3](docs/wave-2.3.md), [3.1](docs/wave-3.1.md),
-  [3.2](docs/wave-3.2.md).
+  [3.2](docs/wave-3.2.md), [3.3](docs/wave-3.3.md), [3.4](docs/wave-3.4.md).
+- Accepted dependency advisories and why they are safe:
+  [dependency advisories](docs/dependency-advisories.md).
 
 ## Verify
 
@@ -45,5 +47,9 @@ Run these commands from this directory:
 ```sh
 just install
 just check
+just audit
 just bundle
 ```
+
+CI runs `just check` and `just audit` for every change to this app. `just audit`
+needs `cargo-deny` and network access.

@@ -137,6 +137,11 @@ After Rust, Tauri configuration, capability, or plugin changes:
 4. Run `bun run tauri build --debug` when the change affects native wiring,
    permissions, bundled resources, or packaging.
 
+After dependency or lockfile changes, run `just audit` (it needs `cargo-deny`).
+CI runs `just check` and `just audit` for every change to this app. Do not
+silence an advisory to make the audit pass. Accept one only under the rules in
+`docs/dependency-advisories.md`, and record it there.
+
 Use `bun run tauri dev` for interactive checks and `bun run tauri info` when
 diagnosing toolchain or platform failures.
 
