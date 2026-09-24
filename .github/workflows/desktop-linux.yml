@@ -1,0 +1,110 @@
+# This workflow is managed by gh actions-lock.
+# Bundle the Linux desktop app (deb, rpm, AppImage) around the release payload
+# the calling workflow uploaded as `jet-core-<label>`. The payload travels
+# inside each bundle as the unmodified archive, never as loose executables,
+# because the AppImage build rewrites every ELF file under usr/lib and would
+# break the manifest digests `jetd core stage` checks. `just release-bundle`
+# builds and checks the bundles; `release_assets.py` checks their names again
+# before anything is published.
+name: Desktop Linux bundles
+
+on:
+  workflow_call:
+    inputs:
+      sign:
+        description: Sign the bundles for the updater; needs both secrets.
+        type: boolean
+        required: true
+      labels:
+        description: JSON array of the Linux labels to bundle.
+        type: string
+        default: '["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]'
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    name: Bundle (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        label: ${{ fromJSON(inputs.labels) }}
+    # The same images as the core payload legs, so the bundles share its glibc floor.
+    runs-on: ${{ matrix.label == 'aarch64-unknown-linux-gnu' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/jet-tauri
+    env:
+      LABEL: ${{ matrix.label }}
+      # Core builds already fill the repository's Actions cache, so this job
+      # builds from scratch and skips state it could not reuse.
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: jet-core-${{ matrix.label }}
+          path: ${{ runner.temp }}/jet-core
+      - name: Install the WebKitGTK build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev file
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.4.2
+      - uses: extractions/setup-just@v4.0.0
+      - name: Set up Rust
+        run: |
+          toolchain=$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
+          rustup toolchain install "$toolchain" --profile minimal
+      - name: Install the locked frontend dependencies
+        run: just install
+      - name: Name the payload
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("../../packages/Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          echo "PAYLOAD=$RUNNER_TEMP/jet-core/jet-core-$version-$LABEL.tar.gz" >> "$GITHUB_ENV"
+      - name: Require the updater signing key
+        if: inputs.sign
+        env:
+          HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD != '' }}
+        run: |
+          if [[ "$HAS_UPDATER_KEY" != true ]]; then
+            echo 'Signed bundles need TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD.' >&2
+            exit 1
+          fi
+      # ASVS 13.3.2: only the signed build receives the updater key, but all of
+      # it runs with the key in its environment: the frontend build, crate
+      # build scripts, and the linuxdeploy tools the Tauri bundler downloads
+      # unpinned. `release-bundle` builds the updater configuration into the
+      # app only when it signs, so it cannot yet sign in a later step.
+      - name: Build, check, and sign the bundles
+        if: inputs.sign
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: just release-bundle "$PAYLOAD"
+      - name: Build and check unsigned bundles
+        if: ${{ !inputs.sign }}
+        run: just release-bundle "$PAYLOAD"
+      - name: Collect the bundles
+        run: |
+          out="$RUNNER_TEMP/jet-desktop"
+          mkdir -p "$out"
+          bundle=src-tauri/target/release/bundle
+          cp "$bundle"/deb/*.deb* "$bundle"/rpm/*.rpm* "$bundle"/appimage/*.AppImage* "$out"/
+          ls -l "$out"
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: jet-desktop-linux-${{ matrix.label }}
+          path: ${{ runner.temp }}/jet-desktop/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

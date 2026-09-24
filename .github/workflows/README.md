@@ -68,14 +68,33 @@ re-enabling it silently rejects this workflow's uploads.
 
 ## Releases
 
-1. Set the workspace version and push its matching `vMAJOR.MINOR.PATCH` tag.
+1. Set the workspace version, and the desktop app's version in
+   `apps/jet-tauri` to the same value (ADR-0053), then push the matching
+   `vMAJOR.MINOR.PATCH` tag. `validate` refuses a tag that differs from
+   either, and a release configuration without the updater public key.
 2. The release workflow builds Linux x86_64, Linux ARM64, and universal macOS
    payloads, preserving the per-role profiles and enforcing the release envelope.
-3. Once every gate passes, it uploads six archives, `SHA256SUMS`, and `jet.rb`
-   into a draft release, then publishes the complete release.
-4. For a stable release, Ape Bonker commits `Formula/jet.rb` to
-   `apexgang/homebrew-tap`. `brew install apexgang/tap/jet` installs the compiled
-   executables; `brew services start apexgang/tap/jet` starts the daemon.
+3. `desktop-linux.yml` bundles the Tauri app for each Linux payload as a deb,
+   an rpm, and an AppImage on the same runner images, with the payload archive
+   inside, and signs every bundle for the updater.
+4. `homebrew-check.yml` renders the formula and the cask against the x86_64
+   artifacts, runs `brew style` and `brew audit --strict`, installs both from
+   a local tap with the documented command, runs the daemon under
+   `brew services` in a systemd user session, and checks that uninstalling
+   leaves no restarting service behind.
+5. Once every gate passes, it uploads six core archives, six desktop bundles
+   with their signatures, `jetd.rb`, `jet-app.rb`, the updater's
+   `latest.json`, and a `SHA256SUMS` covering all of them into a draft
+   release, then publishes the complete release. `latest.json` embeds each
+   signature file's contents and dates the release by its tagged commit.
+6. For a stable release, Ape Bonker commits `Formula/jetd.rb` and
+   `Casks/jet-app.rb` to `apexgang/homebrew-tap` in one commit.
+   `brew install apexgang/tap/jetd` installs the compiled executables and
+   `brew services start apexgang/tap/jetd` starts the daemon.
+   `brew install apexgang/tap/jetd apexgang/tap/jet-app` also installs the
+   desktop app. Name both, or run `brew trust apexgang/tap` first: Homebrew 6
+   and later trust only the tap items named on the command line, and the cask
+   cannot load its formula otherwise.
 
 The Actions secret `APE_BONKER_PRIVATE_KEY` holds Ape Bonker's private key.
 `RELEASE_APP_CLIENT_ID` identifies the installed app; the workflow defaults to
@@ -84,21 +103,42 @@ the short-lived token to `contents:write` on `homebrew-tap` and revokes it at jo
 completion. The normal `GITHUB_TOKEN` publishes Jet releases. PR jobs receive
 neither the private key nor the tap token.
 
+`TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` hold the
+updater's minisign key. Every release tag needs both, prereleases included.
+Only the signed bundle step receives them, but that step runs the whole app
+build, so the frontend dependencies, crate build scripts, and the linuxdeploy
+tools the Tauri bundler downloads can read the key. The matching public key is
+`plugins.updater.pubkey` in `apps/jet-tauri/src-tauri/tauri.release.conf.json`;
+`release_assets.py` refuses a signature made with any other key, which Tauri
+itself only warns about. Rotating the key means changing both together, and
+installed apps accept only updates signed with the key they shipped with.
+
 Prerelease tags must also match the workspace version. They publish prerelease
-assets without modifying the stable formula. Rerun failed jobs to retry a tap
-update. A full rerun keeps published assets intact and downloads the original
-formula, so rebuilt checksums cannot replace the published ones. Dispatch the
-workflow against a version tag, never a branch. Older releases cannot downgrade
-the formula after a newer stable release is published.
+assets without modifying the stable formula or cask, and the updater never
+offers them because it reads the latest stable release. Rerun failed jobs to
+retry a tap update. A full rerun keeps published assets intact and downloads
+the original formula and cask, so rebuilt checksums cannot replace the
+published ones. Dispatch the workflow against a version tag, never a branch.
+Older releases cannot downgrade the formula or the cask after a newer stable
+release is published, and a tap that already holds a newer formula or cask
+keeps both unchanged.
 
 Failed size gates retain build artifacts for seven days but prevent publication.
 The historical `jetd` size overage is documented in
 [Core distribution](../../docs/core-distribution.md); this workflow does not relax
-that budget. GUI signing and notarization remain separate distribution steps.
+that budget. macOS GUI signing and notarization remain separate distribution steps.
+
+`packaging.yml` rehearses the Linux x86_64 half of a release on pull requests
+that touch packaging inputs, and on demand: it builds and gates the core
+payload, bundles the desktop app unsigned, and runs the Homebrew check. It uses
+no release secret and is not a required check. When only the size gate fails,
+the later jobs still run on the uploaded payload so one run reports every
+problem.
 
 ## Validation
 
 Run `python3 -m unittest discover -s .github/tests -v`, `actionlint`, and
-`gh actions-lock --verify-local` after editing automation. Regenerate action
-pins with `gh actions-lock`. Run `just release-envelope` and `just fmt` from
-`packages/` after moving release tooling or changing its inputs.
+`gh actions-lock --verify-local` after editing automation. The release tests
+run `ruby -c` on the rendered formula and cask, so they need Ruby. Regenerate
+action pins with `gh actions-lock`. Run `just release-envelope` and `just fmt`
+from `packages/` after moving release tooling or changing its inputs.

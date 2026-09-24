@@ -1,0 +1,51 @@
+# The Linux desktop client. `app_image` needs Homebrew 6.0 or later, and the
+# target must stay version-less so Homebrew 7 can move it into place.
+cask "jet-app" do
+  arch arm: "aarch64", intel: "amd64"
+
+  version "@VERSION@"
+  sha256 arm64_linux:  "@LINUX_ARM_APPIMAGE_SHA256@",
+         x86_64_linux: "@LINUX_INTEL_APPIMAGE_SHA256@"
+
+  url "@URL@/Jet_#{version}_#{arch}.AppImage"
+  name "Jet"
+  desc "Desktop client for coding agent conversations"
+  homepage "https://github.com/apexgang/jet"
+
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  # Never the bare name: homebrew/core's unrelated `jet` would satisfy it.
+  depends_on formula: "apexgang/tap/jetd"
+  depends_on :linux
+
+  app_image "Jet_#{version}_#{arch}.AppImage", target: "Jet.AppImage"
+
+  # The app writes its launcher entry and icon when it runs as an AppImage.
+  # They go in zap: `brew upgrade` runs the old version's uninstall stanza, and
+  # the entry, which names the version-less target, stays valid across upgrades.
+  # ~/.jet belongs to the daemon and holds the Plane's state; never zap it.
+  zap trash: [
+    "#{ENV.fetch("HOMEBREW_XDG_CACHE_HOME", "~/.cache")}/me.heeka.jet-tauri",
+    "#{ENV.fetch("HOMEBREW_XDG_CONFIG_HOME", "~/.config")}/me.heeka.jet-tauri",
+    "#{ENV.fetch("HOMEBREW_XDG_DATA_HOME", "~/.local/share")}/applications/me.heeka.jet-tauri.desktop",
+    "#{ENV.fetch("HOMEBREW_XDG_DATA_HOME", "~/.local/share")}/icons/hicolor/128x128/apps/me.heeka.jet-tauri.png",
+    "#{ENV.fetch("HOMEBREW_XDG_DATA_HOME", "~/.local/share")}/me.heeka.jet-tauri",
+  ]
+
+  caveats <<~EOS
+    Jet's daemon comes from the apexgang/tap/jetd formula. The app starts it
+    with `brew services` when it is stopped; to start it yourself:
+      brew services start apexgang/tap/jetd
+    Stop it before uninstalling, and uninstall with --zap to also remove the
+    launcher entry and the app's settings:
+      brew services stop apexgang/tap/jetd
+      brew uninstall --zap --cask apexgang/tap/jet-app
+
+    Homebrew trusts only the tap items named on the command line, so install
+    the daemon and the app together, or run `brew trust apexgang/tap` first:
+      brew install apexgang/tap/jetd apexgang/tap/jet-app
+  EOS
+end

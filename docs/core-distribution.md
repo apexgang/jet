@@ -44,9 +44,39 @@ Ape Bonker installation token scoped to that repository. Prereleases leave
 the stable formula unchanged. See [CI and releases](../.github/workflows/README.md)
 for credentials and retry instructions.
 
-`brew install apexgang/tap/jet` installs the compiled payload without Rust.
-`brew services start apexgang/tap/jet` runs `jetd serve --channel homebrew`.
-The service definitions preserve helpers across daemon restarts.
+`brew install apexgang/tap/jetd` installs the compiled payload without Rust.
+The formula is `jetd` because homebrew/core already has an unrelated `jet`.
+`brew services start apexgang/tap/jetd` runs `jetd serve --channel homebrew`.
+The service definitions preserve helpers across daemon restarts. The systemd
+unit starts only while the formula's `jetd` exists, so a unit left behind by
+an uninstall cannot restart in a loop.
+
+## The Linux desktop app
+
+Each release also bundles the Tauri desktop app for both Linux labels as a
+deb, an rpm, and an AppImage. Every bundle carries the label's unmodified
+`jet-core-<version>-<label>.tar.gz` archive, never loose executables: the
+AppImage build rewrites every ELF file under `usr/lib`, which would break
+the digests `jetd core stage` checks. On first launch the app extracts the
+archive, stages and activates it under `~/.jet/core`, and installs the
+systemd user unit or the autostart entry described in
+[Versions under the Jet home](#versions-under-the-jet-home), so these
+installs run the `gui` channel. The bundles are signed for the Tauri updater, and `latest.json`
+on the latest release lists them.
+
+The `apexgang/tap/jet-app` cask installs the AppImage on Linux and depends on
+`apexgang/tap/jetd`, so the Homebrew channel owns the daemon, `brew services`
+runs it, and the app's updater stays off. It needs Homebrew 6.0 or later.
+Homebrew trusts only the tap items named on the command line, so install
+both together:
+
+```sh
+brew install apexgang/tap/jetd apexgang/tap/jet-app
+```
+
+or run `brew trust apexgang/tap` first. See
+[CI and releases](../.github/workflows/README.md#releases) for how the
+bundles, the cask, and the updater manifest are built and published.
 
 ## The release envelope
 

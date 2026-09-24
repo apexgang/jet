@@ -1,0 +1,122 @@
+# This workflow is managed by gh actions-lock.
+# Rehearse the Linux x86_64 release on pull requests that change what it
+# packages or how: build and gate the core payload as release.yml does, bundle
+# the desktop app around it unsigned, and install both through a local
+# Homebrew tap. Nothing is published and no release secret is used. No job
+# here is a required check.
+name: Packaging
+
+on:
+  pull_request:
+    paths:
+      - '.github/packaging/**'
+      - '.github/scripts/release*.py'
+      - '.github/scripts/*homebrew*'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/packaging.yml'
+      - '.github/workflows/desktop-linux.yml'
+      - '.github/workflows/homebrew-check.yml'
+      - 'apps/jet-tauri/src-tauri/tauri*.json'
+      - 'apps/jet-tauri/justfile'
+      - 'apps/jet-tauri/scripts/release/**'
+      # Dependency and toolchain bumps: the Tauri CLI is the bundler that
+      # names the bundles and builds the AppImage.
+      - 'apps/jet-tauri/package.json'
+      - 'apps/jet-tauri/bun.lock'
+      - 'apps/jet-tauri/rust-toolchain.toml'
+      - 'apps/jet-tauri/src-tauri/Cargo.toml'
+      - 'apps/jet-tauri/src-tauri/Cargo.lock'
+      - 'packages/Cargo.lock'
+      - 'packages/rust-toolchain.toml'
+      - 'packages/.cargo/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: packages
+    env:
+      LABEL: x86_64-unknown-linux-gnu
+    # The size gate below can fail while the payload itself is fine, as it
+    # does while jetd is over its budget. The later jobs still rehearse that
+    # payload so one run reports every problem; this job's failure keeps the
+    # run red.
+    outputs:
+      payload: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: extractions/setup-just@v4.0.0
+      - name: Set up Rust
+        working-directory: .
+        run: bash .github/scripts/setup-rust.sh release
+      - uses: actions/cache/restore@v6.1.0
+        id: cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/target
+            !packages/target/dist
+            .github/.cache
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-release-x86_64-unknown-linux-gnu-${{ hashFiles('packages/rust-toolchain.toml', 'packages/.cargo/config.toml', '.github/ci/cargo.toml') }}-${{ hashFiles('packages/**', 'docs/conformance-matrix.md') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-release-x86_64-unknown-linux-gnu-${{ hashFiles('packages/rust-toolchain.toml', 'packages/.cargo/config.toml', '.github/ci/cargo.toml') }}-
+      - name: Restore unchanged source timestamps
+        working-directory: .
+        run: python3 .github/scripts/cache_sources.py restore
+      - name: Install targets
+        run: rustup target add "$LABEL"
+      - name: Build, split symbols, strip, and package
+        run: just release-package --target "$LABEL"
+      - name: Gate sizes, dependency seams, and profiles
+        run: just release-check --target "$LABEL"
+      - name: Save source timestamps
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
+        working-directory: .
+        run: python3 .github/scripts/cache_sources.py save
+      - uses: actions/cache/save@v6.1.0
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' }}
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/target
+            !packages/target/dist
+            .github/.cache
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v7.0.1
+        id: upload
+        if: ${{ !cancelled() }}
+        with:
+          name: jet-core-x86_64-unknown-linux-gnu
+          path: packages/target/dist/*.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  desktop-linux:
+    needs: package
+    if: ${{ !cancelled() && needs.package.outputs.payload != '' }}
+    uses: ./.github/workflows/desktop-linux.yml
+    with:
+      sign: false
+      labels: '["x86_64-unknown-linux-gnu"]'
+
+  # Slot for the desktop end-to-end journey and its measurements (Wave 4
+  # spec F): a job that needs desktop-linux, installs the unsigned .deb from
+  # `jet-desktop-linux-x86_64-unknown-linux-gnu` on a fresh runner, and
+  # uploads its measurements as a JSON artifact.
+
+  homebrew-check:
+    needs: [package, desktop-linux]
+    if: ${{ !cancelled() && needs.package.outputs.payload != '' && needs.desktop-linux.result == 'success' }}
+    uses: ./.github/workflows/homebrew-check.yml

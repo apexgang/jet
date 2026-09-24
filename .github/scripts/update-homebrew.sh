@@ -2,36 +2,49 @@
 set -euo pipefail
 
 tag=$GITHUB_REF_NAME
-# Reruns use the published formula and its checksums, never a second build.
-gh release download "$tag" --repo apexgang/jet --pattern jet.rb --dir "$RUNNER_TEMP/jet-formula" --clobber
+# The daemon formula and the desktop cask that depends on it, as tap paths.
+files=(Formula/jetd.rb Casks/jet-app.rb)
+# Reruns use the published formula, cask and checksums, never a second build.
+gh release download "$tag" --repo apexgang/jet --pattern jetd.rb --pattern jet-app.rb \
+  --dir "$RUNNER_TEMP/jet-homebrew" --clobber
 cd homebrew-tap
-# A rerun of an old release must not downgrade the stable formula.
+# A rerun of an old release must not downgrade the stable formula or cask.
 latest=$(gh release view --repo apexgang/jet --json tagName --jq .tagName)
 if [[ "$tag" != "$latest" ]]; then
   echo "Skipped $tag: the latest stable release is $latest"
   exit 0
 fi
-mkdir -p Formula
-if [[ -f Formula/jet.rb ]]; then
-  update=$(ruby -e '
-    require "rubygems"
-    current = File.read(ARGV[1]).match(/^\s*version "([0-9]+\.[0-9]+\.[0-9]+)"$/)
-    abort "Cannot read the current Jet formula version" unless current
-    puts Gem::Version.new(ARGV[0].delete_prefix("v")) >= Gem::Version.new(current[1])
-  ' "$tag" Formula/jet.rb)
-  if [[ "$update" != true ]]; then
-    echo "Skipped $tag: the tap already contains a newer version"
-    exit 0
+# One newer file skips both, so the tap never pairs the app with another
+# release's daemon.
+for file in "${files[@]}"; do
+  if [[ -f $file ]]; then
+    update=$(ruby -e '
+      require "rubygems"
+      # The cask names its version; the formula carries it in its release URLs.
+      source = File.read(ARGV[1])
+      current = source[/^\s*version "([0-9]+\.[0-9]+\.[0-9]+)"$/, 1] ||
+                source[%r{/releases/download/v([0-9]+\.[0-9]+\.[0-9]+)/}, 1]
+      abort "Cannot read the current version of #{ARGV[1]}" unless current
+      puts Gem::Version.new(ARGV[0].delete_prefix("v")) >= Gem::Version.new(current)
+    ' "$tag" "$file")
+    if [[ "$update" != true ]]; then
+      echo "Skipped $tag: the tap's $file is newer"
+      exit 0
+    fi
   fi
-fi
-cp "$RUNNER_TEMP/jet-formula/jet.rb" Formula/jet.rb
-ruby -c Formula/jet.rb
-if [[ -z $(git status --porcelain -- Formula/jet.rb) ]]; then
+done
+for file in "${files[@]}"; do
+  mkdir -p "$(dirname "$file")"
+  cp "$RUNNER_TEMP/jet-homebrew/$(basename "$file")" "$file"
+  ruby -c "$file"
+done
+if [[ -z $(git status --porcelain -- "${files[@]}") ]]; then
   exit 0
 fi
 bot_id=$(gh api 'users/ape-bonker[bot]' --jq .id)
 git config user.name 'ape-bonker[bot]'
 git config user.email "${bot_id}+ape-bonker[bot]@users.noreply.github.com"
-git add Formula/jet.rb
+# One commit, so the tap never pairs the app with another release's daemon.
+git add -- "${files[@]}"
 git commit -m "Updated Jet to $tag"
 git push origin HEAD:main

@@ -7,6 +7,12 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
 
+  - package-ecosystem: cargo
+    directory: /apps/jet-tauri/src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
   - package-ecosystem: bun
     directory: /apps/jet-tauri
     schedule:

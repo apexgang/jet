@@ -1,0 +1,169 @@
+# This workflow is managed by gh actions-lock.
+# Install the daemon formula and the desktop cask from a local `apexgang/tap`
+# before anything reaches the real tap. Both are rendered from the x86_64
+# artifacts the calling workflow built, with file:// URLs, then checked with
+# `brew style` and `brew audit --strict` and installed with the command the
+# cask documents. The daemon runs under `brew services` in a real systemd user
+# session. Uninstalling both must leave no restart loop behind: brew keeps the
+# unit it installed, and only the formula's executable condition stops it.
+name: Homebrew check
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# Naming bash adds pipefail, which the install step's `| tee` relies on;
+# without a shell, GitHub runs `bash -e` and a failed pipeline passes.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  install:
+    name: Install from a local tap
+    # Homebrew is preinstalled on GitHub's Ubuntu images, outside PATH.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      HOMEBREW_NO_ANALYTICS: 1
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_ENV_HINTS: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: jet-core-x86_64-unknown-linux-gnu
+          path: ${{ runner.temp }}/jet-homebrew/core
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: jet-desktop-linux-x86_64-unknown-linux-gnu
+          path: ${{ runner.temp }}/jet-homebrew/desktop
+      - name: Update Homebrew and require 6.0 or later
+        run: |
+          echo /home/linuxbrew/.linuxbrew/bin >> "$GITHUB_PATH"
+          brew=/home/linuxbrew/.linuxbrew/bin/brew
+          "$brew" update
+          "$brew" --version
+          # The cask's `app_image` artifact arrived in Homebrew 6.0.
+          major=$("$brew" --version | sed -n '1s/^Homebrew \([0-9][0-9]*\)\..*/\1/p')
+          if [[ -z "$major" || "$major" -lt 6 ]]; then
+            echo 'The jet-app cask needs Homebrew 6.0 or later.' >&2
+            exit 1
+          fi
+      - name: Render the formula and the cask with file:// URLs
+        run: |
+          assets="$RUNNER_TEMP/jet-homebrew"
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("packages/Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          # Both templates share one download base, as on a release.
+          mkdir "$assets/serve"
+          ln -s "$assets"/core/*.tar.gz "$assets"/desktop/* "$assets/serve/"
+          python3 .github/scripts/release_assets.py --tag "v$version" --dist "$assets/core" \
+            --desktop "$assets/desktop" --test-tap "$assets/tap" --url "file://$assets/serve"
+      - name: Create the local apexgang/tap
+        run: |
+          brew tap-new --no-git apexgang/tap
+          tap=$(brew --repository apexgang/tap)
+          mkdir -p "$tap/Formula" "$tap/Casks"
+          cp "$RUNNER_TEMP/jet-homebrew/tap/jetd.rb" "$tap/Formula/jetd.rb"
+          cp "$RUNNER_TEMP/jet-homebrew/tap/jet-app.rb" "$tap/Casks/jet-app.rb"
+          cat "$tap/Formula/jetd.rb" "$tap/Casks/jet-app.rb"
+      - name: Check style and audit
+        run: |
+          brew style apexgang/tap
+          brew audit --strict --formula apexgang/tap/jetd
+          brew audit --strict --cask apexgang/tap/jet-app
+      # Since Homebrew 6 a tap is untrusted until an item in it is named on the
+      # command line. The documented command names both, so the cask may load
+      # its dependency. Should Homebrew refuse it over trust anyway, the
+      # warning flags the stale documentation and trusting the whole tap keeps
+      # the check going; any other failure fails the job.
+      - name: Install with the documented command
+        run: |
+          log="$RUNNER_TEMP/brew-install.log"
+          if ! brew install apexgang/tap/jetd apexgang/tap/jet-app 2>&1 | tee "$log"; then
+            grep -q 'untrusted tap' "$log"
+            echo '::warning::brew install apexgang/tap/jetd apexgang/tap/jet-app was refused over tap trust; retried after brew trust apexgang/tap. Update the documented install command.'
+            brew trust apexgang/tap
+            brew install apexgang/tap/jetd apexgang/tap/jet-app
+          fi
+          brew trust --json=v1 || true
+          brew test apexgang/tap/jetd
+          test -x "$HOME/Applications/Jet.AppImage"
+      - name: Enable a systemd user session for the runner
+        run: |
+          sudo loginctl enable-linger "$USER"
+          runtime="/run/user/$(id -u)"
+          echo "XDG_RUNTIME_DIR=$runtime" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime/bus" >> "$GITHUB_ENV"
+          for _ in $(seq 30); do
+            XDG_RUNTIME_DIR=$runtime systemctl --user show-environment >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo 'The systemd user manager did not start.' >&2
+          exit 1
+      - name: Run the daemon with brew services
+        run: |
+          brew services start apexgang/tap/jetd
+          status="$RUNNER_TEMP/jetd-status.json"
+          for _ in $(seq 30); do
+            if [[ -S "$HOME/.jet/runtime/jetd.sock" ]]; then
+              jetd core status > "$status"
+              jq -e '.owner.daemon != null' "$status" >/dev/null && break
+            fi
+            sleep 1
+          done
+          test -S "$HOME/.jet/runtime/jetd.sock"
+          cat "$status"
+          jq -e '.owner.state == "held" and .owner.daemon.channel == "homebrew"' "$status"
+          systemctl --user is-active jet-homebrew.service
+      - name: Stop the daemon with brew services
+        run: |
+          brew services stop apexgang/tap/jetd
+          for _ in $(seq 30); do
+            jetd core status > "$RUNNER_TEMP/jetd-status.json"
+            jq -e '.owner.state == "free"' "$RUNNER_TEMP/jetd-status.json" && exit 0
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/jetd-status.json"
+          exit 1
+      # The case ConditionFileIsExecutable exists for: the daemon is still
+      # running when the cask and formula go, and its unit stays behind.
+      - name: Uninstall while running and require no restart loop
+        run: |
+          brew services start apexgang/tap/jetd
+          # jetd holds the lock before it writes its metadata, so wait for the
+          # owner, not only the lock.
+          for _ in $(seq 30); do
+            jetd core status > "$RUNNER_TEMP/jetd-status.json"
+            jq -e '.owner.daemon != null' "$RUNNER_TEMP/jetd-status.json" >/dev/null && break
+            sleep 1
+          done
+          jq -e '.owner.state == "held" and .owner.daemon.channel == "homebrew"' "$RUNNER_TEMP/jetd-status.json"
+          brew uninstall --cask apexgang/tap/jet-app
+          brew uninstall apexgang/tap/jetd
+          unit=jet-homebrew.service
+          test -f "$HOME/.config/systemd/user/$unit"
+          test ! -e "$HOME/Applications/Jet.AppImage"
+          # The orphaned daemon exits as it does after a drain. Restart=always
+          # tries again after RestartSec, and the condition skips that start.
+          systemctl --user kill "$unit"
+          state() { systemctl --user show "$unit" -p "$1" --value; }
+          for _ in $(seq 30); do
+            [[ $(state ActiveState) == inactive && $(state ConditionResult) == no ]] && break
+            sleep 1
+          done
+          systemctl --user status "$unit" --no-pager || true
+          [[ $(state ActiveState) == inactive && $(state ConditionResult) == no ]]
+          restarts=$(state NRestarts)
+          sleep 10
+          [[ $(state ActiveState) == inactive && $(state NRestarts) == "$restarts" ]]
+          if pgrep -u "$(id -u)" -x jetd; then
+            echo 'jetd is still running after its formula was removed.' >&2
+            exit 1
+          fi
+      - name: Show the daemon's journal
+        if: ${{ failure() }}
+        run: sudo journalctl --no-pager _SYSTEMD_USER_UNIT=jet-homebrew.service | tail -n 200
