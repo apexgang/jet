@@ -1,6 +1,6 @@
 {
   "name": "jet-tauri",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Jet desktop client for Linux",
   "type": "module",
   "scripts": {
@@ -12,7 +12,7 @@
     "test": "vitest run",
     "tauri": "tauri"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.3"

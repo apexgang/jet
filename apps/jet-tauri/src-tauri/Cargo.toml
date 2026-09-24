@@ -1,8 +1,11 @@
 [package]
 name = "jet-tauri"
-version = "0.1.0"
+# One release version with the core (ADR-0053): `just version-check` fails
+# unless this, tauri.conf.json and package.json equal packages/Cargo.toml's.
+version = "0.2.0"
 description = "Jet desktop client for Linux"
 edition = "2021"
+license = "Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -46,3 +49,13 @@ secret-service = { version = "5.2", default-features = false, features = ["rt-as
 
 [dev-dependencies]
 tempfile = "3"
+
+# Release bundles (`just release-bundle`). Size first: a single optimized,
+# link-time-optimized unit, stripped of symbols. `panic` stays `unwind`: the
+# shell maps a panicked `spawn_blocking` file write or spawned task to an
+# error through its `JoinError` instead of losing the whole app.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

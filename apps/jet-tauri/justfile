@@ -40,8 +40,13 @@ clippy:
 test:
 	cargo test --locked --manifest-path "{{manifest}}"
 
-# Run the app-local contract, frontend, lint, and test checks.
-check: contracts frontend-check frontend-test frontend-build fmt clippy test
+# Fail unless tauri.conf.json, src-tauri/Cargo.toml (and its Cargo.lock entry)
+# and package.json carry the core workspace version (ADR-0053).
+version-check:
+	bun scripts/release/main.ts version-check
+
+# Run the app-local version, contract, frontend, lint, and test checks.
+check: version-check contracts frontend-check frontend-test frontend-build fmt clippy test
 
 # Fail on any known npm or RustSec advisory, apart from the reviewed exceptions in
 # docs/dependency-advisories.md (the npm one below, the Rust ones in
@@ -59,6 +64,52 @@ adaptation-audit *args:
 # Build a debug app bundle on macOS or AppImage on Linux.
 bundle:
 	bun run tauri build --debug --bundles "{{bundle_kind}}"
+
+# Build this machine's release deb, rpm and AppImage around a core payload
+# archive (`jet-core-<version>-<target>.tar.gz` from `just release-package` in
+# packages/), then verify them. JET_RELEASE_SIGN says whether to write updater
+# signatures: `true` requires them, so a missing TAURI_SIGNING_PRIVATE_KEY
+# fails before the build and every bundle must carry a verified `.sig`;
+# `false` never signs; unset, the build signs when the key (and its password)
+# is set. An unsigned build switches off the updater artifacts, because
+# `tauri build` fails on a public key without a private key, and drops
+# `plugins.updater`, so a pull-request or test bundle never checks github.com
+# for updates. The rustc flags remap build paths out of the app binary.
+release-bundle payload:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	payload="$(cd {{quote(invocation_directory())}} && realpath -e -- {{quote(payload)}})"
+	signing="$(bun scripts/release/main.ts signing)"
+	just --justfile "{{justfile()}}" version-check
+	bun scripts/release/main.ts check-payload "$payload"
+	mkdir -p src-tauri/resources
+	cp -f -- "$payload" src-tauri/resources/jet-core.tar.gz
+	bun scripts/release/main.ts clean-bundles
+	if [ "$signing" = signed ]; then
+		unsigned=()
+		verify=(--require-signatures)
+	else
+		unsigned=(--config '{"bundle":{"createUpdaterArtifacts":false},"plugins":{"updater":null}}')
+		verify=()
+	fi
+	CARGO_ENCODED_RUSTFLAGS="$(bun scripts/release/main.ts rustflags)"
+	export CARGO_ENCODED_RUSTFLAGS
+	# linuxdeploy's bundled strip predates `.relr.dyn` and fails on current
+	# distribution libraries; they ship stripped, and the release profile
+	# already strips the app, so skip it.
+	NO_STRIP=1 bun run tauri build --config src-tauri/tauri.release.conf.json "${unsigned[@]}" --bundles deb,rpm,appimage
+	just --justfile "{{justfile()}}" release-verify --payload "$payload" "${verify[@]}"
+
+# Check the release bundles: expected names, the payload byte-identical in the
+# deb, rpm and AppImage, no build paths in the app binary and the updater
+# endpoint only in signed ones, no source maps or fixtures, clean webview
+# assets, and updater signatures that verify when present. Prints sizes and
+# SHA-256s. Flags: `--payload <archive>` (default: the copy `release-bundle`
+# made; relative to where you run `just`) and `--require-signatures`.
+[no-cd]
+[positional-arguments]
+release-verify *args:
+	bun {{quote(justfile_directory() / "scripts/release/main.ts")}} verify "$@"
 
 # Launch the desktop app in development mode.
 dev:

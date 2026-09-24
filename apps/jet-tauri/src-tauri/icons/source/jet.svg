@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!--
+    The Jet mark: a forward-leaning J with two speed lines on a flat tile in
+    the brand accent (docs/design-language.md). Regenerate the icon set from
+    apps/jet-tauri with `bun run tauri icon src-tauri/icons/source/jet.svg`
+    and keep only the file names tauri.conf.json already lists.
+  -->
+  <title>Jet</title>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="#29B6F6"/>
+  <g transform="translate(120 12) skewX(-10)" fill="none" stroke="#FFFFFF" stroke-linecap="round">
+    <path d="M 640 240 V 584 A 176 176 0 0 1 300 648" stroke-width="136"/>
+    <path d="M 320 304 H 480 M 376 448 H 480" stroke-width="88"/>
+  </g>
+</svg>
