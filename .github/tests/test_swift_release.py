@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import plistlib
+import re
 import subprocess
 import sys
 import tarfile
@@ -18,6 +19,13 @@ import package_swift_app
 
 
 class SwiftRelease(unittest.TestCase):
+    def test_workflow_actions_use_commit_shas(self):
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/swift-release.yml").read_text()
+        actions = re.findall(r"^\s*- uses: (\S+)", workflow, re.MULTILINE)
+        self.assertGreaterEqual(len(actions), 4)
+        for action in actions:
+            self.assertRegex(action, r"^[\w.-]+/[\w.-]+@[0-9a-f]{40}$")
+
     def test_versions_and_cask_dependency(self):
         self.assertEqual(package_swift_app.version_from_run("42"), "1.0.42")
         for bad in ("0", "-1", "1.0", "$(id)"):

@@ -125,8 +125,7 @@ Run `python3 -m unittest discover -s .github/tests -v`, `actionlint`, and
 pins in enrolled workflows with `gh actions-lock`. Run `just release-envelope` and `just fmt` from
 `packages/` after moving release tooling or changing its inputs.
 
-`swift-release.yml` is enrolled in `actions.lock`. GitHub requires this for
-the workflow to start. Its action references use release tags as lookup keys;
-the lockfile records the exact commit SHA executed for each action, including
-the transitive `setup-crate` action. Regenerate the lockfile whenever those
-references change.
+`swift-release.yml` uses literal commit SHAs for every external action and is
+not enrolled in `actions.lock`: the lockfile tool rewrites those refs to tags,
+which would undo the required SHA pins. Verify its action SHAs against the
+upstream release tags when updating them.
