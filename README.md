@@ -66,6 +66,13 @@ brew install apexgang/tap/jet
 brew services start apexgang/tap/jet
 ```
 
+The native macOS app is also available as a standalone DMG on the
+[GitHub releases page](https://github.com/apexgang/jet/releases). It includes
+the core and starts it on first launch. Homebrew users can install the cask
+with `brew install --cask apexgang/tap/jet`; it depends on the core formula.
+The app is not notarized yet, so macOS may require approval to open it the
+first time.
+
 The GUI clients have a separate distribution lifecycle. See
 [core distribution](docs/core-distribution.md) for the packaged executables,
 supported targets, upgrades, and rollback behavior.

@@ -16,10 +16,22 @@ struct jetApp: App {
         _session = State(
             initialValue: DesktopSession(
                 makeJetClient: {
-                    try await JetClient.connectLocal(
-                        socketURL: socketURL,
-                        configuration: configuration
-                    )
+                    let bundled = try await JetLocalCoreInstaller.ensureRunning()
+                    for attempt in 0..<40 {
+                        do {
+                            return try await JetClient.connectLocal(
+                                socketURL: socketURL,
+                                configuration: configuration
+                            )
+                        } catch let failure as JetClientFailure {
+                            guard bundled, attempt < 39,
+                                  case let .presentation(error) = failure,
+                                  error.category == .offline
+                            else { throw failure }
+                            try await Task.sleep(for: .milliseconds(250))
+                        }
+                    }
+                    throw JetClientFailure.presentation(.offline)
                 },
                 localPlaneRegistryID: configuration.clientID,
                 remoteProfiles: registry.load(),
