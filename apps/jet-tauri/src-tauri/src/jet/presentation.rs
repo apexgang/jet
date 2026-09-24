@@ -250,6 +250,12 @@ impl PresentationState {
         }
     }
 
+    /// What `load_shell_presentation` would answer.
+    #[cfg(test)]
+    pub(crate) fn loaded(&self) -> ShellPresentationView {
+        self.view().unwrap()
+    }
+
     fn view(&self) -> Result<ShellPresentationView, PublicError> {
         let stored = self.stored.lock().map_err(|_| PublicError::internal())?;
         Ok(ShellPresentationView {

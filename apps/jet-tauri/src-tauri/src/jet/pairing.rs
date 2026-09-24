@@ -15,14 +15,14 @@ use std::{
     collections::HashMap,
     fmt,
     hash::Hash,
-    sync::{Arc, Mutex},
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
-use jet_client::{Client, ClientError};
+use jet_client::ClientError;
 use jet_protocol::{
-    ErrorCategory, PairedClient, PairedClientAccess, PairingDisclosure, PairingEnd, PairingGate,
-    PairingMethod, PairingProgress, PairingSnapshot, PendingPairing, PAIRING_MINOR,
+    PairedClient, PairedClientAccess, PairingDisclosure, PairingEnd, PairingGate, PairingMethod,
+    PairingProgress, PairingSnapshot, PendingPairing, PAIRING_MINOR,
 };
 use serde::Serialize;
 use tauri::State;
@@ -30,7 +30,8 @@ use uuid::Uuid;
 
 pub(crate) use super::keystore::fingerprint;
 use super::{
-    client::PlaneClient,
+    client::{Connection, PlaneClient},
+    command_ids::{definite, settle_command},
     errors::PublicError,
     planes::{PlaneBinding, PlaneHealth, PlaneId},
     JetBridge,
@@ -332,44 +333,6 @@ fn command_id<K: Hash + Eq>(
     Ok(*commands.entry(key).or_insert_with(Uuid::new_v4))
 }
 
-/// Drops a command ID once its outcome is known: on success or on a definite
-/// refusal (ADR-0093). An uncertain outcome keeps it for an exact retry.
-fn settle_command<K: Hash + Eq, T>(
-    commands: &Mutex<HashMap<K, Uuid>>,
-    key: &K,
-    outcome: &Result<T, ClientError>,
-) -> Result<(), PublicError> {
-    let known = match outcome {
-        Ok(_) => true,
-        Err(error) => definite(error),
-    };
-    if known {
-        commands
-            .lock()
-            .map_err(|_| PublicError::internal())?
-            .remove(key);
-    }
-    Ok(())
-}
-
-/// Whether a failure is a durable answer rather than an unknown outcome. A
-/// stable daemon refusal is durable (`execute.rs`: "An authoritative error is
-/// a durable answer"); a local protocol gate sent nothing at all.
-fn definite(error: &ClientError) -> bool {
-    match error {
-        ClientError::Remote(wire) | ClientError::Rejected(wire) => {
-            wire.category != ErrorCategory::OutcomeUnknown
-        }
-        ClientError::FeatureUnavailable { .. } | ClientError::Incompatible { .. } => true,
-        ClientError::Io(_)
-        | ClientError::Frame(_)
-        | ClientError::Control(_)
-        | ClientError::Closed
-        | ClientError::Disconnected(_)
-        | ClientError::Unexpected(_) => false,
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Views
 // ---------------------------------------------------------------------------
@@ -657,15 +620,15 @@ fn client_error(error: &ClientError) -> PublicError {
 async fn read_pairing(
     bridge: &JetBridge,
     plane: PlaneId,
-    connection: &Client,
+    connection: &Connection,
 ) -> Result<PairingView, PublicError> {
     let status = connection
-        .status()
+        .query(connection.status())
         .await
         .map_err(|error| client_error(&error))?;
     bridge.planes.observe_status(plane, &status);
     let snapshot = connection
-        .pairing()
+        .query(connection.pairing())
         .await
         .map_err(|error| client_error(&error))?;
     bridge.planes.observe_success(plane, PAIRING_MINOR);
@@ -677,7 +640,7 @@ async fn read_pairing(
     ))
 }
 
-async fn connect(client: &PlaneClient) -> Result<Arc<Client>, PublicError> {
+async fn connect(client: &PlaneClient) -> Result<Connection, PublicError> {
     client
         .connect()
         .await
@@ -722,7 +685,9 @@ pub(crate) async fn set_gate(
         let key = (binding.plane, gate);
         let id = command_id(&bridge.pairing.gate_commands, key)?;
         let connection = connect(&client).await?;
-        let outcome = connection.set_pairing_gate(id, gate.wire()).await;
+        let outcome = connection
+            .command(connection.set_pairing_gate(id, gate.wire()))
+            .await;
         settle_command(&bridge.pairing.gate_commands, &key, &outcome)?;
         if outcome.map_err(|error| client_error(&error))? != gate.wire() {
             return Err(PublicError::internal());
@@ -752,7 +717,9 @@ pub(crate) async fn open_offer(
     async {
         let id = command_id(&bridge.pairing.offer_commands, binding.plane)?;
         let connection = connect(&client).await?;
-        let outcome = connection.open_pairing(id, PairingMethod::ManualCode).await;
+        let outcome = connection
+            .command(connection.open_pairing(id, PairingMethod::ManualCode))
+            .await;
         settle_command(&bridge.pairing.offer_commands, &binding.plane, &outcome)?;
         let (pending, disclosure) = outcome.map_err(|error| client_error(&error))?;
         bridge.planes.observe_success(binding.plane, PAIRING_MINOR);
@@ -806,7 +773,9 @@ pub(crate) async fn confirm(
         };
         let id = command_id(&bridge.pairing.confirm_commands, key.clone())?;
         let connection = connect(&client).await?;
-        let outcome = connection.confirm_pairing(id, offer_id, &typed).await;
+        let outcome = connection
+            .command(connection.confirm_pairing(id, offer_id, &typed))
+            .await;
         settle_command(&bridge.pairing.confirm_commands, &key, &outcome)?;
         let pending = outcome.map_err(|error| client_error(&error))?;
         if pending.offer_id != offer_id {
@@ -841,7 +810,7 @@ pub(crate) async fn prepare_change(
     async {
         let connection = connect(&client).await?;
         let snapshot = connection
-            .pairing()
+            .query(connection.pairing())
             .await
             .map_err(|error| client_error(&error))?;
         bridge.planes.observe_success(binding.plane, PAIRING_MINOR);
@@ -897,22 +866,21 @@ enum Changed {
 }
 
 async fn send_change(
-    connection: &Client,
+    connection: &Connection,
     id: Uuid,
     target: Uuid,
     change: Change,
 ) -> Result<Changed, Box<ClientError>> {
-    let result = match change.access() {
+    match change.access() {
         Some(access) => connection
-            .set_paired_client_access(id, target, access)
+            .command(connection.set_paired_client_access(id, target, access))
             .await
             .map(Changed::Access),
         None => connection
-            .revoke_paired_client(id, target)
+            .command(connection.revoke_paired_client(id, target))
             .await
             .map(Changed::Revoked),
-    };
-    result.map_err(Box::new)
+    }
 }
 
 /// The connection went away underneath a request that may have been sent.
@@ -1046,9 +1014,9 @@ fn lost_access() -> PublicError {
 
 #[cfg(test)]
 mod tests {
-    use std::io;
+    use std::{io, sync::Arc};
 
-    use jet_protocol::{ClientPublicKey, PairingKeyAlgorithm, WireError};
+    use jet_protocol::{ClientPublicKey, ErrorCategory, PairingKeyAlgorithm, WireError};
 
     use super::*;
     use crate::jet::planes::{Security, Store};
@@ -1249,7 +1217,7 @@ mod tests {
         let second = command_id(&commands, key).unwrap();
         assert_ne!(second, first);
 
-        settle_command(&commands, &key, &Ok(())).unwrap();
+        settle_command(&commands, &key, &Ok::<(), ClientError>(())).unwrap();
         assert_ne!(command_id(&commands, key).unwrap(), second);
 
         // The same gate on another Plane is another body.

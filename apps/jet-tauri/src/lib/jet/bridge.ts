@@ -445,26 +445,35 @@ export function loadConversation(
   return invoke<ConversationDetail>("load_conversation", { conversationId, planeId });
 }
 
-/** New tasks run on this computer in Wave 3.1. */
-export function createConversation(projectId: string): Promise<ConversationRow> {
-  return invoke<ConversationRow>("create_conversation", { projectId });
+/**
+ * New tasks run on this computer in Wave 3.1. `attempt` (a UUID) names one
+ * Send of the composer: the shell resends an uncertain request only for the
+ * same attempt, so a retry is answered with what the Plane already did and a
+ * later Send is new work.
+ */
+export function createConversation(projectId: string, attempt: string): Promise<ConversationRow> {
+  return invoke<ConversationRow>("create_conversation", { projectId, attempt });
 }
 
+/** `attempt` names one Send of the composer, as for `createConversation`. */
 export function startRun(
   conversationId: string,
   craft: string,
   prompt: string,
+  attempt: string,
   planeId: PlaneId | null = null,
 ): Promise<StartResult> {
-  return invoke<StartResult>("start_run", { conversationId, craft, prompt, planeId });
+  return invoke<StartResult>("start_run", { conversationId, craft, prompt, attempt, planeId });
 }
 
+/** `attempt` names one Send of the composer, as for `createConversation`. */
 export function submitTurn(
   conversationId: string,
   prompt: string,
+  attempt: string,
   planeId: PlaneId | null = null,
 ): Promise<TurnResult> {
-  return invoke<TurnResult>("submit_turn", { conversationId, prompt, planeId });
+  return invoke<TurnResult>("submit_turn", { conversationId, prompt, attempt, planeId });
 }
 
 export function loadRunSupervision(

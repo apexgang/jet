@@ -12,10 +12,9 @@ use jet_protocol::{
     RemovalObstacle, ToolAvailability, Worktree,
 };
 use serde::Serialize;
-use tauri::State;
 use uuid::Uuid;
 
-use super::{agents::KnownHarness, errors::PublicError, JetBridge};
+use super::{agents::KnownHarness, command_ids::release_if, errors::PublicError, JetBridge};
 
 const PREVIEW_LIFETIME: Duration = Duration::from_secs(10 * 60);
 
@@ -23,7 +22,10 @@ const PREVIEW_LIFETIME: Duration = Duration::from_secs(10 * 60);
 pub(crate) struct SetupState {
     project_grants: Mutex<HashMap<Uuid, ProjectGrant>>,
     removal_grants: Mutex<HashMap<Uuid, RemovalGrant>>,
-    account_commands: Mutex<HashMap<String, Uuid>>,
+    /// Keyed by provider: the provider fixes the whole bind body (its label
+    /// comes from the same static option). An uncertain bind is forgotten
+    /// once the Plane lists no binding for its provider (`forget_stale_bind`).
+    account_commands: Mutex<HashMap<&'static str, Uuid>>,
 }
 
 struct ProjectGrant {
@@ -152,28 +154,31 @@ pub(crate) struct MutationResult {
     name: String,
 }
 
-pub(crate) async fn load_setup(bridge: State<'_, JetBridge>) -> Result<SetupSnapshot, PublicError> {
-    let client = bridge
-        .local()
+pub(crate) async fn load_setup(bridge: &JetBridge) -> Result<SetupSnapshot, PublicError> {
+    let local = bridge.local();
+    let client = local
         .connect()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
     let status = client
-        .status()
+        .query(client.status())
         .await
         .map_err(|error| PublicError::from_client(&error))?;
     bridge
         .planes
         .observe_status(super::planes::PlaneId::Local, &status);
     let mut issues = Vec::new();
-    let capabilities = match client.capabilities(CapabilityObservation::Fresh).await {
+    let capabilities = match client
+        .query(client.capabilities(CapabilityObservation::Fresh))
+        .await
+    {
         Ok(value) => Some(value),
         Err(error) => {
             issues.push(setup_issue("capabilities", &error));
             None
         }
     };
-    let projects = match client.projects().await {
+    let projects = match client.query(client.projects()).await {
         Ok(value) => Some(value),
         Err(error) => {
             issues.push(setup_issue("projects", &error));
@@ -181,7 +186,7 @@ pub(crate) async fn load_setup(bridge: State<'_, JetBridge>) -> Result<SetupSnap
         }
     };
     let accounts = match client
-        .account_bindings(CapabilityObservation::LastObserved)
+        .query(client.account_bindings(CapabilityObservation::LastObserved))
         .await
     {
         Ok(value) => Some(value),
@@ -190,7 +195,7 @@ pub(crate) async fn load_setup(bridge: State<'_, JetBridge>) -> Result<SetupSnap
             None
         }
     };
-    let pairing = match client.pairing().await {
+    let pairing = match client.query(client.pairing()).await {
         Ok(value) => Some(value),
         Err(error) => {
             issues.push(setup_issue("pairing", &error));
@@ -209,17 +214,17 @@ pub(crate) async fn load_setup(bridge: State<'_, JetBridge>) -> Result<SetupSnap
 }
 
 pub(crate) async fn preview_project(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     path: String,
 ) -> Result<ProjectPreviewView, PublicError> {
     validate_absolute_path(&path)?;
-    let client = bridge
-        .local()
+    let local = bridge.local();
+    let client = local
         .connect()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
     let preview = client
-        .preview_project(&path, CapabilityObservation::Fresh)
+        .query(client.preview_project(&path, CapabilityObservation::Fresh))
         .await
         .map_err(|error| PublicError::from_client(&error))?;
     let (verdict, detail, registrable) = registrability_view(&preview.registrability);
@@ -252,7 +257,7 @@ pub(crate) async fn preview_project(
 }
 
 pub(crate) async fn register_project(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     preview_id: String,
 ) -> Result<MutationResult, PublicError> {
     let preview_id = parse_id(&preview_id, "project.preview_invalid")?;
@@ -271,32 +276,43 @@ pub(crate) async fn register_project(
 
     // ASVS 2.3.1 and 5.3.2: only a native-cached, Plane-canonical preview
     // can become a Path grant. The webview cannot replace the root.
-    let project = bridge
-        .local()
-        .register_project(command_id, &root)
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    bridge
-        .setup
-        .project_grants
-        .lock()
-        .map_err(|_| PublicError::internal())?
-        .remove(&preview_id);
+    let outcome = bridge.local().register_project(command_id, &root).await;
+    {
+        let mut grants = bridge
+            .setup
+            .project_grants
+            .lock()
+            .map_err(|_| PublicError::internal())?;
+        match &outcome {
+            Ok(_) => {
+                grants.remove(&preview_id);
+            }
+            // The refusal is receipted under this ID: the preview stays
+            // usable, but a retry is a new request.
+            Err(error) if error.definite() => {
+                if let Some(grant) = grants.get_mut(&preview_id) {
+                    grant.command_id = Uuid::new_v4();
+                }
+            }
+            Err(_) => {}
+        }
+    }
+    let project = outcome.map_err(|error| PublicError::from_client(&error))?;
     Ok(project_result(&project))
 }
 
 pub(crate) async fn preview_project_removal(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     project_id: String,
 ) -> Result<ProjectRemovalPreviewView, PublicError> {
     let project_id = parse_id(&project_id, "project.identifier_invalid")?;
-    let client = bridge
-        .local()
+    let local = bridge.local();
+    let client = local
         .connect()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
     let preview = client
-        .preview_project_removal(project_id)
+        .query(client.preview_project_removal(project_id))
         .await
         .map_err(|error| PublicError::from_client(&error))?;
     let preview_id = Uuid::new_v4();
@@ -320,7 +336,7 @@ pub(crate) async fn preview_project_removal(
 }
 
 pub(crate) async fn remove_project(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     preview_id: String,
     typed_name: String,
     permanent: bool,
@@ -356,17 +372,36 @@ pub(crate) async fn remove_project(
     };
     // ASVS 2.3.1, 8.3.1, and 15.3.3: the trusted native layer supplies
     // the exact server-issued binding and accepts only the two intended fields.
-    let removed = bridge
+    let outcome = bridge
         .local()
         .remove_project(command_id, binding, &typed_name, disposal)
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    bridge
-        .setup
-        .removal_grants
-        .lock()
-        .map_err(|_| PublicError::internal())?
-        .remove(&preview_id);
+        .await;
+    {
+        let mut grants = bridge
+            .setup
+            .removal_grants
+            .lock()
+            .map_err(|_| PublicError::internal())?;
+        match &outcome {
+            Ok(_) => {
+                grants.remove(&preview_id);
+            }
+            // A refusal (a mistyped name, a Run that started) is receipted
+            // under this ID: a corrected retry must be a new request, not
+            // `command.identity_reused`.
+            Err(error) if error.definite() => {
+                if let Some(grant) = grants.get_mut(&preview_id) {
+                    if permanent {
+                        grant.permanent_command_id = Uuid::new_v4();
+                    } else {
+                        grant.trash_command_id = Uuid::new_v4();
+                    }
+                }
+            }
+            Err(_) => {}
+        }
+    }
+    let removed = outcome.map_err(|error| PublicError::from_client(&error))?;
     Ok(MutationResult {
         id: removed.project_id.to_string(),
         name: project_name(&removed.root),
@@ -374,7 +409,7 @@ pub(crate) async fn remove_project(
 }
 
 pub(crate) async fn bind_harness_account(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     provider: String,
 ) -> Result<MutationResult, PublicError> {
     let capabilities = bridge
@@ -391,34 +426,77 @@ pub(crate) async fn bind_harness_account(
                 "That Harness is not available on this Plane.",
             )
         })?;
+    forget_stale_bind(bridge, option.provider).await?;
     let command_id = {
         let mut commands = bridge
             .setup
             .account_commands
             .lock()
             .map_err(|_| PublicError::internal())?;
-        *commands
-            .entry(provider.clone())
-            .or_insert_with(Uuid::new_v4)
+        *commands.entry(option.provider).or_insert_with(Uuid::new_v4)
     };
 
     // ASVS 13.3.1 and 14.3.3: this command carries only non-secret
     // metadata. Authentication stays with the Harness environment.
-    let binding = bridge
+    let outcome = bridge
         .local()
         .bind_harness_account(command_id, option.provider, option.label)
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    bridge
-        .setup
-        .account_commands
-        .lock()
-        .map_err(|_| PublicError::internal())?
-        .remove(&provider);
+        .await;
+    // Kept only while uncertain: a refusal such as a duplicate binding is
+    // receipted, and replaying it would block this provider (D3).
+    release_if(
+        &bridge.setup.account_commands,
+        &option.provider,
+        outcome
+            .as_ref()
+            .map_or_else(|error| error.definite(), |_| true),
+    )?;
+    let binding = outcome.map_err(|error| PublicError::from_client(&error))?;
     Ok(MutationResult {
         id: binding.binding_id.to_string(),
         name: safe_text(&binding.label, 96, "Harness account"),
     })
+}
+
+/// An uncertain bind keeps its ID so that its retry returns the binding it
+/// made. Once the Plane lists no binding for the provider, either that bind
+/// never applied, so a new ID does the same, or its binding was unbound
+/// since, so the kept ID would only replay a binding that no longer exists:
+/// the next bind is a new request (D3). Only the Plane's list clears the ID;
+/// a failed read keeps it.
+async fn forget_stale_bind(bridge: &JetBridge, provider: &'static str) -> Result<(), PublicError> {
+    let kept = bridge
+        .setup
+        .account_commands
+        .lock()
+        .map_err(|_| PublicError::internal())?
+        .contains_key(provider);
+    if !kept {
+        return Ok(());
+    }
+    let local = bridge.local();
+    let Ok(connection) = local.connect().await else {
+        return Ok(());
+    };
+    let Ok(accounts) = connection
+        .query(connection.account_bindings(CapabilityObservation::LastObserved))
+        .await
+    else {
+        return Ok(());
+    };
+    if !accounts
+        .bindings
+        .iter()
+        .any(|status| status.binding.provider == provider)
+    {
+        bridge
+            .setup
+            .account_commands
+            .lock()
+            .map_err(|_| PublicError::internal())?
+            .remove(provider);
+    }
+    Ok(())
 }
 
 fn snapshot(
@@ -740,14 +818,299 @@ pub(super) fn safe_text(value: &str, maximum_bytes: usize, fallback: &str) -> St
 
 #[cfg(test)]
 mod tests {
-    use jet_protocol::{PlaneStatus, ProjectList};
+    use jet_protocol::{
+        AccountBinding, AccountBindingList, AccountBindingStatus, ClientMessage, CommandRequest,
+        CommandResponse, CredentialItem, CredentialReference, CredentialState, ErrorCategory,
+        PlaneStatus, ProjectList, QueryRequest, QueryResponse,
+    };
     use uuid::Uuid;
 
     use super::{
-        auth_provider_options, snapshot, validate_absolute_path, validate_project_name,
-        SetupIssueView,
+        auth_provider_options, bind_harness_account, snapshot, validate_absolute_path,
+        validate_project_name, SetupIssueView,
     };
-    use crate::jet::errors::PublicError;
+    use crate::jet::{
+        agents::tests::capabilities,
+        errors::PublicError,
+        fake_plane::{
+            answer, command_id, complete, exchange, local_plane, next, refuse, wire, FakePlane,
+            Reader, Writer,
+        },
+    };
+
+    fn openai_binding() -> AccountBinding {
+        AccountBinding {
+            binding_id: Uuid::from_u128(0xb1),
+            provider: "openai".into(),
+            label: "Codex login".into(),
+            provider_account: None,
+            credential_reference: CredentialReference::HarnessNative,
+            created_at_unix_ms: 5,
+        }
+    }
+
+    /// Answers the capability read that starts every bind.
+    async fn serve_capabilities(fake: &FakePlane) {
+        let (mut reader, mut writer) = fake.accept().await;
+        let (stream, message) = next(&mut reader).await;
+        assert!(matches!(
+            message,
+            ClientMessage::Query {
+                query: QueryRequest::Capabilities { .. },
+                ..
+            }
+        ));
+        answer(
+            &mut writer,
+            stream,
+            &message,
+            QueryResponse::Capabilities(capabilities(&["codex"])),
+        )
+        .await;
+    }
+
+    /// Answers the binding list a bind reads while it keeps an uncertain ID.
+    async fn serve_bindings(fake: &FakePlane, bindings: Vec<AccountBinding>) {
+        let (mut reader, mut writer) = fake.accept().await;
+        let (stream, message) = next(&mut reader).await;
+        assert!(matches!(
+            message,
+            ClientMessage::Query {
+                query: QueryRequest::AccountBindings { .. },
+                ..
+            }
+        ));
+        let list = AccountBindingList {
+            cursor: 3,
+            bindings: bindings
+                .into_iter()
+                .map(|binding| AccountBindingStatus {
+                    binding,
+                    credential_state: CredentialState::ResolvedAtUse,
+                })
+                .collect(),
+        };
+        answer(
+            &mut writer,
+            stream,
+            &message,
+            QueryResponse::AccountBindings(list),
+        )
+        .await;
+    }
+
+    /// The bind Command, with the open connection to answer it on.
+    struct Bind {
+        stream: jet_protocol::StreamId,
+        message: ClientMessage,
+        reader: Reader,
+        writer: Writer,
+    }
+
+    impl Bind {
+        fn id(&self) -> Uuid {
+            command_id(&self.message)
+        }
+
+        async fn unknown(mut self) -> Uuid {
+            let unknown = wire(ErrorCategory::OutcomeUnknown, "command.outcome_unknown");
+            refuse(&mut self.writer, self.stream, &self.message, unknown).await;
+            self.id()
+        }
+
+        async fn bound(mut self) -> Uuid {
+            let bound = CommandResponse::AccountBound(openai_binding());
+            complete(&mut self.writer, self.stream, &self.message, bound).await;
+            self.id()
+        }
+
+        /// The transport drops after the Plane read the Command.
+        fn lost(self) -> Uuid {
+            let id = self.id();
+            drop((self.reader, self.writer));
+            id
+        }
+    }
+
+    async fn bind_command(fake: &FakePlane) -> Bind {
+        let (mut reader, writer) = fake.accept().await;
+        let (stream, message) = next(&mut reader).await;
+        assert!(matches!(
+            &message,
+            ClientMessage::Command {
+                command: CommandRequest::BindAccount { provider, .. },
+                ..
+            } if provider == "openai"
+        ));
+        Bind {
+            stream,
+            message,
+            reader,
+            writer,
+        }
+    }
+
+    fn kept(fake: &FakePlane) -> bool {
+        !fake
+            .bridge()
+            .setup
+            .account_commands
+            .lock()
+            .unwrap()
+            .is_empty()
+    }
+
+    /// D3: an uncertain bind that the Plane applied keeps its ID while the
+    /// Plane lists a binding for the provider, so a retry returns it. Once
+    /// the Plane lists none (it was unbound since), the next bind is a new
+    /// request: the kept ID would replay a binding that no longer exists.
+    #[tokio::test]
+    async fn an_uncertain_bind_is_forgotten_once_the_plane_lists_no_binding() {
+        let fake = local_plane();
+        let bind = || bind_harness_account(fake.bridge(), "openai".into());
+
+        let (outcome, first) = tokio::join!(bind(), async {
+            serve_capabilities(&fake).await;
+            bind_command(&fake).await.unknown().await
+        });
+        assert_eq!(outcome.unwrap_err().code, "command.outcome_unknown");
+        assert!(kept(&fake));
+
+        // Still listed: the retry resends the same ID and gets the binding.
+        let (outcome, retried) = tokio::join!(bind(), async {
+            serve_capabilities(&fake).await;
+            serve_bindings(&fake, vec![openai_binding()]).await;
+            bind_command(&fake).await.unknown().await
+        });
+        assert!(outcome.is_err());
+        assert_eq!(retried, first);
+
+        // Unbound since: the next bind is new work under a new ID.
+        let (outcome, fresh) = tokio::join!(bind(), async {
+            serve_capabilities(&fake).await;
+            serve_bindings(&fake, Vec::new()).await;
+            bind_command(&fake).await.bound().await
+        });
+        assert!(outcome.is_ok(), "{outcome:?}");
+        assert_ne!(fresh, first);
+        assert!(!kept(&fake));
+    }
+
+    /// A bind whose transport drops after the Plane read it, and whose
+    /// reconnect handshake is then refused, may have applied: the refused
+    /// handshake answers nothing about the Command, so its ID is kept and
+    /// the retry resends it.
+    #[tokio::test]
+    async fn a_refused_reconnect_keeps_the_id_of_a_bind_that_was_sent() {
+        let fake = local_plane();
+        let bind = || bind_harness_account(fake.bridge(), "openai".into());
+
+        let (outcome, sent) = tokio::join!(bind(), async {
+            serve_capabilities(&fake).await;
+            let sent = bind_command(&fake).await.lost();
+            fake.reject_handshake(wire(
+                ErrorCategory::Incompatible,
+                "protocol.unsupported_version",
+            ))
+            .await;
+            sent
+        });
+        assert_eq!(outcome.unwrap_err().code, "protocol.unsupported_version");
+        assert!(kept(&fake), "the sent bind may have applied");
+
+        let (outcome, retried) = tokio::join!(bind(), async {
+            serve_capabilities(&fake).await;
+            serve_bindings(&fake, vec![openai_binding()]).await;
+            bind_command(&fake).await.bound().await
+        });
+        assert!(outcome.is_ok(), "{outcome:?}");
+        assert_eq!(retried, sent, "the retry resends the exact request");
+        assert!(!kept(&fake));
+    }
+
+    /// D3: a refused account bind is receipted under its ID. The next bind
+    /// of the same provider is a new request, not a replay of the refusal.
+    #[tokio::test]
+    async fn a_refused_account_bind_is_not_replayed() {
+        let fake = local_plane();
+        let serve = |refused: bool| {
+            let fake = &fake;
+            async move {
+                let (mut reader, mut writer) = fake.accept().await;
+                let (stream, message) = next(&mut reader).await;
+                assert!(matches!(
+                    message,
+                    ClientMessage::Query {
+                        query: QueryRequest::Capabilities { .. },
+                        ..
+                    }
+                ));
+                answer(
+                    &mut writer,
+                    stream,
+                    &message,
+                    QueryResponse::Capabilities(capabilities(&["codex"])),
+                )
+                .await;
+                let (mut reader, mut writer) = fake.accept().await;
+                let (stream, message) = next(&mut reader).await;
+                assert!(matches!(
+                    &message,
+                    ClientMessage::Command {
+                        command: CommandRequest::BindAccount { provider, .. },
+                        ..
+                    } if provider == "openai"
+                ));
+                if refused {
+                    let refusal = wire(ErrorCategory::Conflict, "account.binding_exists");
+                    refuse(&mut writer, stream, &message, refusal).await;
+                } else {
+                    let binding = AccountBinding {
+                        binding_id: Uuid::from_u128(0xb1),
+                        provider: "openai".into(),
+                        label: "Codex login".into(),
+                        provider_account: None,
+                        credential_reference: CredentialReference::PlatformStore {
+                            item: CredentialItem {
+                                service: "codex".into(),
+                                account: "someone".into(),
+                            },
+                        },
+                        created_at_unix_ms: 5,
+                    };
+                    complete(
+                        &mut writer,
+                        stream,
+                        &message,
+                        CommandResponse::AccountBound(binding),
+                    )
+                    .await;
+                }
+                command_id(&message)
+            }
+        };
+        let (refused, first) = exchange(
+            bind_harness_account(fake.bridge(), "openai".into()),
+            serve(true),
+        )
+        .await;
+        assert_eq!(refused.unwrap_err().code, "account.binding_exists");
+        let (bound, second) = exchange(
+            bind_harness_account(fake.bridge(), "openai".into()),
+            serve(false),
+        )
+        .await;
+        assert_eq!(bound.unwrap().id, Uuid::from_u128(0xb1).to_string());
+        assert!(second.is_some());
+        assert_ne!(second, first);
+        assert!(fake
+            .bridge()
+            .setup
+            .account_commands
+            .lock()
+            .unwrap()
+            .is_empty());
+    }
 
     #[test]
     fn auth_options_come_only_from_supported_first_party_harnesses() {

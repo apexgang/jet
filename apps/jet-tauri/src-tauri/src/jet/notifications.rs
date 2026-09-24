@@ -237,6 +237,16 @@ impl NotificationState {
             write: tokio::sync::Mutex::new(()),
         }
     }
+
+    /// The preferences in effect: loaded at launch or last saved.
+    #[cfg(test)]
+    pub(crate) fn preferences(&self) -> NotificationPreferences {
+        self.gate
+            .lock()
+            .map(|gate| gate.preferences.clone())
+            .unwrap_or_default()
+    }
+
     pub(crate) fn fence(&self, plane: PlaneId, cursor: u64) {
         if let Ok(mut gate) = self.gate.lock() {
             gate.fence(plane, cursor);

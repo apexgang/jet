@@ -85,7 +85,7 @@ const LOCAL: Plane = plane({ planeId: "local", kind: "local", label: "This compu
 function snapshot(planes: Plane[] = [LOCAL, plane()]): PlanesSnapshot {
   return {
     planes,
-    identity: { clientId: THIS_CLIENT, key: "present", fingerprint: "6668 7aad f862 bd77" },
+    identity: { clientId: THIS_CLIENT, key: "present", fingerprint: "6668 7aad f862 bd77", notice: null },
     restoredSelection: null,
     notice: null,
     maximumRemotePlanes: 16,

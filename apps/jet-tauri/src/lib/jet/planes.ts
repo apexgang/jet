@@ -65,11 +65,22 @@ export type Plane = {
   protocol: ProtocolKnowledge;
 };
 
+/** What happened at launch to an unreadable stored client identity. */
+export type IdentityNotice = "identity_recovered" | "identity_replaced" | "identity_unsaved";
+
 export type ClientIdentity = {
   clientId: string;
   key: "not_created" | "present" | "session_only" | "unavailable" | "locked" | "unsupported" | "unknown";
   fingerprint: string | null;
+  notice: IdentityNotice | null;
 };
+
+/**
+ * Why the saved Planes did not load as stored: set aside and reset, or kept
+ * unchanged and read-only because a newer Jet wrote them or they couldn't be
+ * read this time.
+ */
+export type RegistryNotice = "registry_reset" | "registry_newer" | "registry_unreadable";
 
 export type PlaneSelection = { planeId: PlaneId; conversationId: string };
 
@@ -77,7 +88,7 @@ export type PlanesSnapshot = {
   planes: Plane[];
   identity: ClientIdentity;
   restoredSelection: PlaneSelection | null;
-  notice: "registry_reset" | null;
+  notice: RegistryNotice | null;
   maximumRemotePlanes: number;
 };
 

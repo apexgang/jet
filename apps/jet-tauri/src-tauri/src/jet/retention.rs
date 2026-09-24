@@ -13,7 +13,7 @@
 //! Auto-delete rules for the Settings window live in [`autodelete`].
 use std::{collections::HashMap, sync::Mutex};
 
-use jet_client::{Client, ClientError};
+use jet_client::ClientError;
 use jet_protocol::{
     ConversationTrash, RetentionPreview, RetentionProtection, SettingKey, SettingScope,
     SettingSelection, SettingValue, TrashEntry, TrashReason, RETENTION_MINOR,
@@ -23,6 +23,7 @@ use tauri::State;
 use uuid::Uuid;
 
 use super::{
+    client::Connection,
     conversations::conversation_title,
     errors::PublicError,
     ledger::{Attempt, Ledger, RETENTION_CODES},
@@ -475,7 +476,7 @@ pub(super) async fn load_trash_for(
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         let trash = connection
-            .conversation_trash()
+            .query(connection.conversation_trash())
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         bridge.planes.observe_success(plane, RETENTION_MINOR);
@@ -497,11 +498,12 @@ pub(super) async fn load_trash_status_for(
     let (binding, client) = bridge.plane(Some(plane_id))?;
     let plane = binding.plane;
     async {
-        let preview = client
+        let connection = client
             .connect()
             .await
-            .map_err(|error| PublicError::from_client(&error))?
-            .retention_preview(id)
+            .map_err(|error| PublicError::from_client(&error))?;
+        let preview = connection
+            .query(connection.retention_preview(id))
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         check_preview(&preview, id)?;
@@ -534,7 +536,7 @@ async fn resolve_names_for(
             .map_err(|error| PublicError::from_client(&error))?;
         let mut names = Vec::with_capacity(ids.len());
         for id in ids {
-            let title = match connection.conversation(id).await {
+            let title = match connection.query(connection.conversation(id)).await {
                 Ok(snapshot) if snapshot.conversation.conversation_id == id => {
                     Some(conversation_title(&snapshot.conversation))
                 }
@@ -566,7 +568,7 @@ pub(super) async fn preview_trash_for(
             .map_err(|error| PublicError::from_client(&error))?;
         // A Workspace Git the Plane cannot inspect refuses the preview; the
         // review still goes ahead, with nothing ruled out.
-        let preview = match connection.retention_preview(id).await {
+        let preview = match connection.query(connection.retention_preview(id)).await {
             Ok(preview) => {
                 check_preview(&preview, id)?;
                 Some(preview)
@@ -576,7 +578,7 @@ pub(super) async fn preview_trash_for(
         };
         bridge.planes.observe_success(plane, RETENTION_MINOR);
         let snapshot = connection
-            .conversation(id)
+            .query(connection.conversation(id))
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         if snapshot.conversation.conversation_id != id {
@@ -724,12 +726,12 @@ async fn execute_trash(
     let result = match mode {
         TrashMode::Forget => {
             connection
-                .forget_conversation(id, review.conversation)
+                .command(connection.forget_conversation(id, review.conversation))
                 .await
         }
         TrashMode::DeleteEverywhere => {
             connection
-                .delete_conversation_everywhere(id, review.conversation)
+                .command(connection.delete_conversation_everywhere(id, review.conversation))
                 .await
         }
     };
@@ -768,14 +770,17 @@ async fn execute_trash(
 /// Re-reads the task before a first Delete everywhere. Returns the refusal
 /// to record when work started that the user did not see stop, or when the
 /// re-read failed (nothing was sent, so a new review is safe).
-async fn restarted_work(connection: &Client, review: &TrashReview) -> Option<PublicError> {
+async fn restarted_work(connection: &Connection, review: &TrashReview) -> Option<PublicError> {
     let stale = || {
         PublicError::conflict(
             "retention.review_stale",
             "Activity started in this task after you reviewed it. Review it again.",
         )
     };
-    match connection.retention_preview(review.conversation).await {
+    match connection
+        .query(connection.retention_preview(review.conversation))
+        .await
+    {
         Ok(preview) => {
             if preview.conversation_id != review.conversation {
                 return Some(PublicError::internal());
@@ -814,11 +819,12 @@ pub(super) async fn restore_conversation_for(
     let key = (plane, id, trashed_at);
     let command_id = bridge.retention.restore_id(key)?;
     async {
-        let result = client
+        let connection = client
             .connect()
             .await
-            .map_err(|error| PublicError::from_client(&error))?
-            .restore_conversation(command_id, id)
+            .map_err(|error| PublicError::from_client(&error))?;
+        let result = connection
+            .command(connection.restore_conversation(command_id, id))
             .await;
         match result {
             Ok(()) => {
@@ -890,7 +896,7 @@ fn check_preview(preview: &RetentionPreview, id: Uuid) -> Result<(), PublicError
 
 /// `retention.trash_grace_days` for the disclosure, on the same connection.
 /// A failed read only leaves the number out.
-async fn grace_days(connection: &Client) -> Option<u32> {
+async fn grace_days(connection: &Connection) -> Option<u32> {
     match plane_setting(connection, SettingKey::RetentionTrashGraceDays).await? {
         SettingValue::Count(days) => Some(days),
         SettingValue::Flag(_) | SettingValue::Text(_) => None,
@@ -899,9 +905,9 @@ async fn grace_days(connection: &Client) -> Option<u32> {
 
 /// One Plane-scope Setting's resolved value, read for a disclosure on the
 /// same connection. Any failure leaves it out.
-async fn plane_setting(connection: &Client, key: SettingKey) -> Option<SettingValue> {
+async fn plane_setting(connection: &Connection, key: SettingKey) -> Option<SettingValue> {
     connection
-        .settings(SettingScope::Plane, SettingSelection::Key { key })
+        .query(connection.settings(SettingScope::Plane, SettingSelection::Key { key }))
         .await
         .ok()?
         .settings

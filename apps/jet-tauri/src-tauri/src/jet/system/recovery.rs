@@ -28,7 +28,7 @@
 //! other review of that Plane is dropped with the rest of its caches.
 use std::{collections::HashMap, sync::Mutex};
 
-use jet_client::{Client, ClientError};
+use jet_client::ClientError;
 use jet_protocol::{
     DeletionLedgerStatus, PlaneStatus, RecoverySnapshot, RecoveryState as StoreState,
     SecurityState, SnapshotReason, DELETION_LEDGER_MINOR, SECURITY_AUDIT_MINOR,
@@ -39,6 +39,7 @@ use tauri::State;
 use uuid::Uuid;
 
 use super::super::{
+    client::Connection,
     errors::PublicError,
     ledger::{Attempt, Ledger, RECOVERY_CODES},
     planes::{PlaneBinding, PlaneId},
@@ -374,7 +375,7 @@ pub(in crate::jet) async fn prepare(
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         let status = connection
-            .status()
+            .query(connection.status())
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         bridge.planes.observe_status(plane, &status);
@@ -652,11 +653,11 @@ pub(in crate::jet) async fn execute(
 async fn epoch_still_reviewed(
     bridge: &JetBridge,
     binding: PlaneBinding,
-    connection: &Client,
+    connection: &Connection,
     reviewed: u64,
 ) -> Result<(), PublicError> {
     let status = connection
-        .status()
+        .query(connection.status())
         .await
         .map_err(|error| PublicError::from_client(&error))?;
     bridge.planes.observe_status(binding.plane, &status);
@@ -688,9 +689,9 @@ async fn begin_epoch(
     bridge: &JetBridge,
     id: Uuid,
     binding: PlaneBinding,
-    connection: &Client,
+    connection: &Connection,
 ) -> Result<RecoveryOutcome, PublicError> {
-    match connection.begin_audit_epoch(id).await {
+    match connection.command(connection.begin_audit_epoch(id)).await {
         Ok(epoch) => {
             bridge
                 .planes
@@ -699,7 +700,7 @@ async fn begin_epoch(
             bridge.audit.clear(binding.plane);
             // Best effort: the registry's Security state is current before
             // anything this app gates on it runs.
-            if let Ok(status) = connection.status().await {
+            if let Ok(status) = connection.query(connection.status()).await {
                 bridge.planes.observe_status(binding.plane, &status);
             }
             Ok(record(
@@ -727,13 +728,13 @@ async fn restore(
     bridge: &JetBridge,
     id: Uuid,
     binding: PlaneBinding,
-    connection: &Client,
+    connection: &Connection,
     snapshot: String,
     taken_at_unix_ms: i64,
     reason: SnapshotReason,
 ) -> RecoveryOutcome {
     let result = connection
-        .restore_recovery_snapshot(id, snapshot.clone())
+        .command(connection.restore_recovery_snapshot(id, snapshot.clone()))
         .await;
     match result {
         Ok(restored) => {
@@ -752,7 +753,7 @@ async fn restore(
             store_replaced(bridge, binding.plane, id);
             // Best effort: the registry's health (read-only, audit) is
             // current before any other request of this app is gated on it.
-            if let Ok(status) = connection.status().await {
+            if let Ok(status) = connection.query(connection.status()).await {
                 bridge.planes.observe_status(binding.plane, &status);
             }
             RecoveryOutcome::Restored {
@@ -778,9 +779,12 @@ async fn purge(
     bridge: &JetBridge,
     id: Uuid,
     binding: PlaneBinding,
-    connection: &Client,
+    connection: &Connection,
 ) -> RecoveryOutcome {
-    match connection.purge_recovery_snapshots(id).await {
+    match connection
+        .command(connection.purge_recovery_snapshots(id))
+        .await
+    {
         Ok(purged) => {
             bridge
                 .planes

@@ -124,6 +124,51 @@ pub(crate) trait KeyStore: Send + Sync {
     /// The seed, unlocking the store (with its prompt) if needed.
     fn load(&self, client_id: Uuid) -> StoreFuture<'_, Option<Seed>>;
     fn save<'a>(&'a self, client_id: Uuid, seed: &'a Seed) -> StoreFuture<'a, ()>;
+    /// The client IDs this app's identity items name, read from their
+    /// attributes without unlocking anything or reading a secret (D5).
+    fn client_ids(&self) -> StoreFuture<'_, Vec<Uuid>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+}
+
+/// How long launch waits for the keyring when `client-id` is unreadable.
+const RECOVERY_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The one client ID this app's keyring items name, to recover an
+/// unreadable `client-id` at launch (D5). Blocking and bounded: it runs in
+/// setup, before the window shows, and only when that file is unreadable.
+/// No answer, several identities, or a slow keyring recover nothing.
+pub(crate) fn recover_client_id(store: &dyn KeyStore) -> Option<Uuid> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        // Blocking inside a runtime would panic; setup never is one.
+        return None;
+    }
+    let ids = tauri::async_runtime::block_on(async {
+        tokio::time::timeout(RECOVERY_LIMIT, store.client_ids()).await
+    })
+    .ok()?
+    .ok()?;
+    single_client_id(ids)
+}
+
+/// A `jet-client-id` attribute value, exactly as this app writes it: the
+/// hyphenated lowercase form of a non-nil UUID. Anything else is not one of
+/// its identities. In particular, a locked keyring in gnome-keyring's legacy
+/// file format exposes MD5 hashes of attribute values, 32 hex digits that
+/// the UUID parser would otherwise accept as a (wrong) client ID.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn client_id_attribute(value: &str) -> Option<Uuid> {
+    let id = Uuid::parse_str(value).ok()?;
+    (!id.is_nil() && id.to_string() == value).then_some(id)
+}
+
+fn single_client_id(mut ids: Vec<Uuid>) -> Option<Uuid> {
+    ids.sort_unstable();
+    ids.dedup();
+    match ids.as_slice() {
+        [id] if !id.is_nil() => Some(*id),
+        _ => None,
+    }
 }
 
 /// Process-memory seeds for explicit session-only pairing (and tests). Never
@@ -213,7 +258,7 @@ mod secret_service_store {
     use uuid::Uuid;
     use zeroize::Zeroizing;
 
-    use super::{same_bytes, KeyStore, KeyStoreError, Seed, StoreFuture};
+    use super::{client_id_attribute, same_bytes, KeyStore, KeyStoreError, Seed, StoreFuture};
 
     const APPLICATION: &str = "me.heeka.jet-tauri";
     const CONTENT_TYPE: &str = "application/octet-stream";
@@ -349,6 +394,31 @@ mod secret_service_store {
                 ))
                 .await?;
                 Ok(())
+            })
+        }
+
+        fn client_ids(&self) -> StoreFuture<'_, Vec<Uuid>> {
+            Box::pin(async {
+                let service = connect().await?;
+                let found = bus(service.search_items(HashMap::from([
+                    ("application", APPLICATION),
+                    ("jet-purpose", "client-identity"),
+                ])))
+                .await?;
+                let mut ids = Vec::new();
+                // Attributes only: nothing is unlocked and no secret read. A
+                // locked item may show hashed values, which are skipped.
+                for item in found.unlocked.iter().chain(&found.locked) {
+                    let attributes = bus(item.get_attributes()).await?;
+                    if let Some(id) = attributes
+                        .get("jet-client-id")
+                        .map(String::as_str)
+                        .and_then(client_id_attribute)
+                    {
+                        ids.push(id);
+                    }
+                }
+                Ok(ids)
             })
         }
     }
@@ -665,6 +735,39 @@ pub(crate) mod tests {
     use jet_client::ClientIdentity;
 
     use super::*;
+
+    /// D5: only the exact form this app writes names an identity. A locked
+    /// legacy gnome-keyring shows `jet-client-id` as the MD5 of the value:
+    /// 32 hex digits, which must not become a bogus recovered identity.
+    #[test]
+    fn only_a_canonical_client_id_attribute_names_an_identity() {
+        let id = Uuid::from_u128(0x1d2c_3b4a_5968_4776_8594_a3b2_c1d0_e0f1);
+        assert_eq!(client_id_attribute(&id.to_string()), Some(id));
+        let hashed = "5d41402abc4b2a76b9719d911017c592";
+        assert!(
+            Uuid::parse_str(hashed).is_ok(),
+            "the parser alone accepts it"
+        );
+        assert_eq!(client_id_attribute(hashed), None);
+        assert_eq!(client_id_attribute(&id.simple().to_string()), None);
+        assert_eq!(
+            client_id_attribute(&id.to_string().to_ascii_uppercase()),
+            None
+        );
+        assert_eq!(client_id_attribute(&format!("{{{id}}}")), None);
+        assert_eq!(client_id_attribute(&Uuid::nil().to_string()), None);
+    }
+
+    /// D5: an unreadable `client-id` is recovered only from exactly one
+    /// identity item; none or several recover nothing.
+    #[test]
+    fn only_a_single_keyring_identity_is_recovered() {
+        let one = Uuid::from_u128(1);
+        assert_eq!(single_client_id(vec![one, one]), Some(one));
+        assert_eq!(single_client_id(Vec::new()), None);
+        assert_eq!(single_client_id(vec![one, Uuid::from_u128(2)]), None);
+        assert_eq!(single_client_id(vec![Uuid::nil()]), None);
+    }
 
     /// Which step of the probe a fake store fails at.
     #[derive(Clone, Copy, PartialEq, Eq)]

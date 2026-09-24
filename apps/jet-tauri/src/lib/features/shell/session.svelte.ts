@@ -151,6 +151,18 @@ function focusTarget(value: unknown): FocusTarget | null {
   return value as FocusTarget;
 }
 
+/**
+ * A random (version 4) UUID naming one composer Send. `getRandomValues`
+ * works in every webview context, unlike `randomUUID`.
+ */
+function newSendAttempt(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 /** How long Ctrl+W and Ctrl+Q wait for a pending layout save before closing. */
 export const FLUSH_BEFORE_CLOSE_MS = 500;
 
@@ -178,7 +190,15 @@ export class DesktopSession implements FeedHandler {
   sidebarWidth = $state<number>(SIDEBAR_WIDTH.ideal);
   workPanelWidth = $state<number>(WORK_PANEL_WIDTH.ideal);
   selectedWorkPanel = $state<WorkPanelTab>("run");
-  draft = $state("");
+  #draft = $state("");
+  /**
+   * The composer Send in progress (D2). The shell ties its Command IDs to
+   * it, so it is kept only while the user may retry that Send unchanged: a
+   * retry is then answered with what the Plane already did. A successful
+   * Send or any edit of the draft clears it, so a later Send is new work
+   * even with the same text.
+   */
+  private sendAttempt: string | null = null;
   actionNotice = $state<string | null>(null);
   /** The saved window layout; nothing is saved while it is loading. */
   presentation = $state<PresentationLoad>({ kind: "loading" });
@@ -288,6 +308,15 @@ export class DesktopSession implements FeedHandler {
   private patchDecoder: TextDecoder | null = null;
   private terminalDecoders = new Map<string, TerminalTranscriptDecoder>();
   private lastTerminalSize: { terminalId: string; rows: number; columns: number } | null = null;
+
+  get draft(): string {
+    return this.#draft;
+  }
+
+  set draft(value: string) {
+    if (value !== this.#draft) this.sendAttempt = null;
+    this.#draft = value;
+  }
 
   get canSubmitDraft(): boolean {
     return (
@@ -1162,6 +1191,7 @@ export class DesktopSession implements FeedHandler {
     }
     this.conversationBusy = true;
     this.actionNotice = null;
+    const attempt = (this.sendAttempt ??= newSendAttempt());
     try {
       // New task always creates a task, whatever is still selected (D17).
       const creating = this.sidebarSelection === "new-task" || !this.selectedConversationId;
@@ -1174,7 +1204,7 @@ export class DesktopSession implements FeedHandler {
         if (this.selectedConversationId) this.clearSelectedConversation();
         // New tasks run on this computer in Wave 3.1.
         this.selectedPlaneId = LOCAL_PLANE;
-        const conversation = await createConversation(this.selectedProjectId);
+        const conversation = await createConversation(this.selectedProjectId, attempt);
         this.catalog.upsert(conversation);
         conversationId = conversation.id;
         this.selectedConversationId = conversation.id;
@@ -1185,12 +1215,13 @@ export class DesktopSession implements FeedHandler {
 
       const planeId = this.selectedPlaneId;
       if (this.hasLiveRun) {
-        await submitTurn(conversationId, prompt, planeId);
+        await submitTurn(conversationId, prompt, attempt, planeId);
       } else {
-        await startRun(conversationId, craft, prompt, planeId);
+        await startRun(conversationId, craft, prompt, attempt, planeId);
       }
       this.health.succeeded(planeId);
       this.draft = "";
+      this.sendAttempt = null;
       this.actionNotice = "Sent to the Plane.";
       await this.loadSelectedConversation(false);
     } catch (error: unknown) {

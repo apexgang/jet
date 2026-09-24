@@ -1038,12 +1038,15 @@ async fn load_agents_for(
         .await
         .map_err(|e| settle(PublicError::from_client(&e)))?;
     let status = client
-        .status()
+        .query(client.status())
         .await
         .map_err(|e| settle(PublicError::from_client(&e)))?;
     bridge.planes.observe_status(binding.plane, &status);
     let mut issues = Vec::new();
-    let capabilities = match client.capabilities(CapabilityObservation::Fresh).await {
+    let capabilities = match client
+        .query(client.capabilities(CapabilityObservation::Fresh))
+        .await
+    {
         Ok(value) => Some(value),
         Err(error) => {
             issues.push(issue(
@@ -1058,14 +1061,14 @@ async fn load_agents_for(
     } else {
         CapabilityObservation::LastObserved
     };
-    let accounts = match client.account_bindings(observation).await {
+    let accounts = match client.query(client.account_bindings(observation)).await {
         Ok(value) => Some(value),
         Err(error) => {
             issues.push(issue("accounts", settle(PublicError::from_client(&error))));
             None
         }
     };
-    let usage = match client.usage(UsageSelection::Plane).await {
+    let usage = match client.query(client.usage(UsageSelection::Plane)).await {
         Ok(value) => Some(value),
         Err(error) => {
             issues.push(issue("usage", settle(PublicError::from_client(&error))));
@@ -1101,7 +1104,7 @@ pub(crate) async fn prepare_account_bind_for(
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         let capabilities = connection
-            .capabilities(CapabilityObservation::LastObserved)
+            .query(connection.capabilities(CapabilityObservation::LastObserved))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         let option = auth_provider_options(&capabilities.harnesses)
@@ -1150,7 +1153,7 @@ async fn load_account_detail_for(
         .map_err(|e| settle(PublicError::from_client(&e)))?;
     let mut issues = Vec::new();
     let quota_windows = match connection
-        .usage(UsageSelection::Binding { binding_id })
+        .query(connection.usage(UsageSelection::Binding { binding_id }))
         .await
     {
         Ok(usage) => quota_windows(&usage, binding_id).unwrap_or_else(|error| {
@@ -1164,7 +1167,7 @@ async fn load_account_detail_for(
     };
     let mut cursor = None;
     let auto_continue = match connection
-        .auto_continue(AutoContinueTarget::AccountBinding(binding_id))
+        .query(connection.auto_continue(AutoContinueTarget::AccountBinding(binding_id)))
         .await
     {
         Ok(snapshot) => {
@@ -1236,11 +1239,12 @@ async fn load_usage_history_for(
     let (range, resolution) = history_request(days, now_unix_ms()?);
     let (binding, client) = plane_client(bridge, plane_id)?;
     async {
-        let history = client
+        let connection = client
             .connect()
             .await
-            .map_err(|e| PublicError::from_client(&e))?
-            .usage_history(selection, range, resolution)
+            .map_err(|e| PublicError::from_client(&e))?;
+        let history = connection
+            .query(connection.usage_history(selection, range, resolution))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         Ok(history_view(&history))
@@ -1277,11 +1281,12 @@ async fn prepare_auto_continue_for(
         .ensure_slot_free(binding.plane, action.slot())?;
     async {
         // The typed read gates Auto-continue's minor before any Command.
-        let current = client
+        let connection = client
             .connect()
             .await
-            .map_err(|e| PublicError::from_client(&e))?
-            .auto_continue(AutoContinueTarget::AccountBinding(binding_id))
+            .map_err(|e| PublicError::from_client(&e))?;
+        let current = connection
+            .query(connection.auto_continue(AutoContinueTarget::AccountBinding(binding_id)))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         let review_id = bridge
@@ -1321,11 +1326,12 @@ async fn prepare_account_unbind_for(
         .settings
         .ensure_slot_free(binding.plane, action.slot())?;
     async {
-        let list = client
+        let connection = client
             .connect()
             .await
-            .map_err(|e| PublicError::from_client(&e))?
-            .account_bindings(CapabilityObservation::LastObserved)
+            .map_err(|e| PublicError::from_client(&e))?;
+        let list = connection
+            .query(connection.account_bindings(CapabilityObservation::LastObserved))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         let status = list
@@ -1378,11 +1384,12 @@ async fn prepare_craft_disable_for(
         .settings
         .ensure_slot_free(binding.plane, action.slot())?;
     async {
-        let capabilities = client
+        let connection = client
             .connect()
             .await
-            .map_err(|e| PublicError::from_client(&e))?
-            .capabilities(CapabilityObservation::Fresh)
+            .map_err(|e| PublicError::from_client(&e))?;
+        let capabilities = connection
+            .query(connection.capabilities(CapabilityObservation::Fresh))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         let craft = capabilities
@@ -1503,11 +1510,12 @@ async fn discover_craft_for(
         }
     };
     async {
-        let preview = client
+        let connection = client
             .connect()
             .await
-            .map_err(|e| PublicError::from_client(&e))?
-            .discover_craft(source)
+            .map_err(|e| PublicError::from_client(&e))?;
+        let preview = connection
+            .query(connection.discover_craft(source))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         let view = preview_view(&preview)?;
