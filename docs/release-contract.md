@@ -114,8 +114,8 @@ the DOM, by role and accessible name, and on the machine:
 
 A failed check blocks `publish` in the release workflow. `packaging.yml`
 runs the same journey on the unsigned bundle for pull requests that touch
-packaging, the journey, the timing marks it reads, or the app's
-provisioning code, and on demand. Each run's
+packaging, the journey, the timing marks it reads, the app's provisioning
+code, or the app's dependency and toolchain files, and on demand. Each run's
 `desktop-e2e.json` artifact holds the launch, provisioning, idle CPU and
 memory, and reconnect measurements. They inform and never gate.
 [resource-budgets.md](resource-budgets.md#desktop-linux) says how each value

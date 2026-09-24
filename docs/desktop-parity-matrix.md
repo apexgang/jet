@@ -14,6 +14,11 @@ are **Proposed** until the product owner approves or rejects each one.
 - macOS column observed read-only at `79d450a` (the last commit that touched
   `apps/jet`, unchanged at `d328cc6`). The Swift owner confirms or corrects
   it. This change does not edit `apps/jet`.
+- Wave 4 rows W4-1 to W4-6 (Linux distribution) added on 2026-09-24 at
+  `fb346e1` on branch `w4/docs`. Their Linux cells rest on automated tests
+  against fakes; the CI journey and Homebrew check that would accept them
+  have not run (`apps/jet-tauri/docs/wave-4.md`). Their macOS cells are not
+  assessed.
 
 This is the cross-client acceptance record that
 `docs/desktop-implementation-plan.md` ("Cross-client acceptance") asks for.
@@ -36,10 +41,12 @@ allowed:
 | `Gap (both)` | The protocol supports it, and neither client shows it. |
 | `Pending <wave>` | Planned in a named wave for this platform, not built yet. |
 | `Pending manual check N` | Built and covered by automated tests, but acceptance needs item N of the Wave 3.4 manual native checklist, which has not been run. Becomes `Pass` or `Gap` once the result is recorded. |
+| `Pending release check` | Built and covered by automated tests against fakes, but acceptance needs a run on a real system (the desktop journey, the Homebrew check, or a manual check) that has not happened. The row's evidence names it. |
 | `Exception PE-n` / `Deferral PD-n` | Covered by a platform exception or deferral in the table below. |
 | `Backend: <dependency>` | The protocol or `jet-client` lacks the surface. The UI stays disabled or absent and says why. |
 | `Absent (observed)` | Not present in the observed macOS build, with no plan recorded in this repository. |
 | `n/a` | Does not apply to this platform. |
+| `Not assessed` | This platform was not observed for the row. The platform's owner fills it in. |
 
 Row IDs are stable. When a row changes, update its cells and keep the ID.
 
@@ -54,6 +61,9 @@ macOS cells: 61 `Pass`, 22 `Pending 3.x (Swift)`, 9 `Absent (observed)`
 (Linux is ahead: Deliver, notifications, deep links), 10 `Gap (both)`,
 4 `Backend`, 1 `Gap` (W3-5 pane name) and 3 `n/a`. The Swift client stops at
 Wave 2.2, so most Wave 3 rows are pending there.
+
+Wave 4 rows (2026-09-24), not in the counts above: 6 rows, W4-1 to W4-6.
+Linux cells: 6 `Pending release check`. macOS cells: 6 `Not assessed`.
 
 The mapping checklist (section 5) shows that every source row and every
 public `jet-client` request method maps to a row.
@@ -215,6 +225,17 @@ public `jet-client` request method maps to a row.
 | W3-24 | Utility Provider | Settings (Agents) | `utility`, `settings` | Pending 3.2 (Swift) | Pass | Utility results grant no authority |
 | W3-25 | Creation-time retention choice | New task | `create_conversation` retention | Absent (observed) | Gap: C always Retain | Linux sends `Retain`; the creation-time choice is client work deferred from 3.3 (`apps/jet-tauri/docs/wave-3.3.md`) |
 
+### Wave 4 distribution (Linux)
+
+| ID | Capability | Design ref | Protocol path | macOS | Linux | Notes and evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| W4-1 | Automatic core installation | First launch; Setup and Projects | None: native `jetd core status`, `stage` and `activate`, then `systemctl --user` or XDG autostart | Not assessed | Pending release check | Decision table in `local_service/decision.rs`. Setup shows each phase, then Repair or Check again. `local_service/tests.rs` and the Setup tests run against a simulated `jetd core`, systemd and brew. The desktop journey checks a first install from the `.deb` and has not run |
+| W4-2 | Core channel and versions | Settings (Safety and system) | `jetd core status`; `status` | Not assessed | Pending release check | "Managed by this app", "Managed by Homebrew" or "Development build", with the current, running, previous and bundled versions (`versions-service.component.test.ts`). The journey checks "Managed by this app" and has not run |
+| W4-3 | Core rollback | Settings (Safety and system) | None: `jetd core rollback` behind a one-use native review | Not assessed | Pending release check | The review names both versions and says running tasks keep running and the newer version stays installed. Stale and expired reviews are refused. Fakes only; no real rollback has run |
+| W4-4 | App updates | Settings (Safety and system) | None: Tauri updater and the signed `latest.json` on GitHub | Not assessed | Pending release check | Off with the reason shown for Homebrew, development builds and unsupported bundles. Automatic-check preference with a note about github.com; restart confirmation. Fakes only; the journey checks only which controls show |
+| W4-5 | Homebrew install | Platform adaptation | None: the `apexgang/tap/jet` formula and the Linux `jet-app` cask | Not assessed | Pending release check | `brew install apexgang/tap/jet apexgang/tap/jet-app`. The app starts the formula's service and turns its updater off. `homebrew-check.yml` has not run |
+| W4-6 | Launcher entry | App and window model; Platform adaptation | None (client-local) | Not assessed | Pending release check | deb and rpm install their own entry. An AppImage writes `me.heeka.jet-tauri.desktop` with `TryExec`, and its icon, at launch (`launcher.rs` tests). No bundle has been launched to check it |
+
 ### Error and recovery states
 
 | ID | State | Design ref | Protocol evidence | macOS | Linux | Notes and evidence |
@@ -294,7 +315,7 @@ Every heading of `docs/design-language.md` and the rows that carry it.
 | Product intent | CV-1, CV-4, SU-1, WS-9 |
 | Product principles | SB-1, CV-2, CV-3, WS-9, WS-12, WS-19 |
 | Vocabulary | SB-9 (PE-6), AR-3, RM-1, RM-2 |
-| App and window model | WS-1, WS-2, WS-3, WS-4, WS-9, WS-11, WS-13, IOS-1 |
+| App and window model | WS-1, WS-2, WS-3, WS-4, WS-9, WS-11, WS-13, IOS-1, W4-6 |
 | Main workspace | WS-5, WS-6, WS-7 |
 | Sidebar | SB-1 to SB-9, WS-5 |
 | Conversation | CV-1 to CV-12 |
@@ -304,7 +325,7 @@ Every heading of `docs/design-language.md` and the rows that carry it.
 | Files, terminals, and recovery | WP-4, WP-5, WP-6, WP-8, WP-9, ER-5 |
 | Work-panel states | WP-1 to WP-8 |
 | Core flows | SU-1 to SU-6, CV-8, AR-1 to AR-4, DN-1, W3-16, IM-1 to IM-3 |
-| First launch | SU-1, SU-2, SU-6 |
+| First launch | SU-1, SU-2, SU-6, W4-1 |
 | Setup and Projects | SU-1, SU-3, SU-4, SU-5 |
 | New task | SB-1, CV-8, CV-10, RM-1, RM-2, W3-25 |
 | Active run | AR-1, AR-2, AR-3, AR-4, CV-3, CV-5, CV-12 |
@@ -314,9 +335,9 @@ Every heading of `docs/design-language.md` and the rows that carry it.
 | Visual language | WS-18, W3-7; section 2 (dark, light, contrast, forced colours) |
 | Motion and feedback | DN-2; section 2 (reduced motion, reduced transparency, PE-2) |
 | Menus, commands, and input | WS-12, WS-14, WS-15, WS-16, WS-17, WS-19, CV-6, WP-11, CA-1 to CA-4 |
-| Settings | WS-11, W3-5 to W3-15, W3-21, W3-23, W3-24 |
+| Settings | WS-11, W3-5 to W3-15, W3-21, W3-23, W3-24, W4-2 to W4-4 |
 | Security and privacy behavior | W3-20, ER-9, WS-8 (no Jet content in local layout state) |
-| Platform adaptation | This whole matrix; section 3 |
+| Platform adaptation | This whole matrix; section 3; W4-5, W4-6 |
 | Evidence ledger | n/a (sources, not behaviour) |
 | Confirmed decisions and open dependencies | Section 3 approvals; Backend cells |
 

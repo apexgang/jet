@@ -122,8 +122,9 @@ the job. These measurements never do.
 
 The journey polls every 100 ms, so the daemon-ready time has that
 resolution. The marks and the process start time do not depend on polling.
-A signed build checks github.com for an update 10 seconds after launch,
-which can land in its idle window. Unsigned bundles have no updater.
+A signed build checks github.com for an update 10 seconds after its
+launch provisioning pass ends, which can land in its idle window. Unsigned
+bundles have no updater.
 
 ### Proposed ceilings
 

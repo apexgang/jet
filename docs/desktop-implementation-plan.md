@@ -252,6 +252,8 @@ Goal: prove safety, performance, accessibility, recovery, and distribution.
 
 Exit: the release contract is green, no high-severity accessibility or security findings remain, and recovery drills preserve authoritative Jet state.
 
+Linux status (2026-09-24): the Tauri client implements this wave's Linux distribution work: automatic core installation from the payload each deb, rpm and AppImage carries, signed app updates, the release and Homebrew pipeline (the `jet` formula and the Linux `jet-app` cask), and the D1 to D6 and D8 hardening fixes, recorded in `apps/jet-tauri/docs/wave-4.md`. The exit is not met: `jetd` is over its size budget (#215), so no release can publish; the desktop journey and the Homebrew check have never run in CI, so there are no desktop measurements; the aarch64 bundles have never been built; provisioning and updates are verified against fakes only; and the Wave 3.4 approvals and manual checks are still open. macOS is not part of this Linux change.
+
 Estimated effort: 3 to 5 engineer-weeks after feature completion.
 
 ## Verification strategy
