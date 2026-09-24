@@ -25,8 +25,8 @@ every other job was skipped. The jobs cannot report these names themselves: a
 job skipped by its `if` never expands its matrix, so an edit outside
 `packages/` would leave both checks absent and block the pull request. Edits
 that select neither job, such as documentation or the Swift app, pass the gate
-without running either suite. Only the CodeQL workflow compiles the Swift app,
-and it is not required.
+without running either suite. CodeQL compiles the Swift app on pull requests;
+the Swift release workflow builds it after changes land on `main`.
 
 Test runners append `ci/cargo.toml` to their Cargo configuration. Workspace
 code compiles without optimization or LTO, with 256 codegen units. Dependencies
@@ -162,12 +162,39 @@ the journey's first real run is not the one that gates `publish`. When only
 the size gate fails, the later jobs still run on the uploaded payload so one
 run reports every problem.
 
+## Swift app releases
+
+Changes under `apps/jet/` on `main` trigger `swift-release.yml` independently
+of core version tags. The same workflow runs when its packaging scripts or
+workflow change. Its run number sets the app version to `1.0.<run number>` and
+creates a `swift-v1.0.<run number>` release in this repository. It builds a
+universal macOS app and core payload from the same commit, bundles the payload
+inside `jet.app`, and publishes `jet-app-<version>.dmg` plus the macOS core
+archive. On first launch the app
+stages and activates that payload and starts a user LaunchAgent. If a
+Homebrew-managed daemon already owns the Plane, the app connects to it.
+
+The release job uses Ape Bonker's existing GitHub App secret to publish
+`Casks/jet.rb` in `apexgang/homebrew-tap`. The cask depends on the tap's `jet`
+core formula. If the tap has no formula, or an older core version, this job
+publishes a macOS formula from the same archive. The tagged core release may
+later replace it with the full macOS and Linux formula. Rerunning the job uses
+the published checksums; an older run cannot downgrade either tap package.
+The DMG is ad-hoc signed and not notarized yet.
+macOS Gatekeeper may require approval to open it the first time. Once opened,
+core installation needs no separate download or command.
+
 ## Validation
 
 Run `python3 -m unittest discover -s .github/tests -v`, `actionlint`, and
 `gh actions-lock --verify-local` after editing automation. The release tests
 run `ruby -c` on the rendered formula and cask, so they need Ruby, and sign
 and verify updater signatures with the `openssl` command (OpenSSL 3.0 or
-later). Regenerate
-action pins with `gh actions-lock`. Run `just release-envelope` and `just fmt`
-from `packages/` after moving release tooling or changing its inputs.
+later). Regenerate action pins in enrolled workflows with `gh actions-lock`.
+Run `just release-envelope` and `just fmt` from `packages/` after moving
+release tooling or changing its inputs.
+
+`swift-release.yml` uses literal commit SHAs for every external action and is
+not enrolled in `actions.lock`: the lockfile tool rewrites those refs to tags,
+which would undo the required SHA pins. Verify its action SHAs against the
+upstream release tags when updating them.

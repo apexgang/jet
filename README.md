@@ -59,24 +59,32 @@ Harness, Craft, and the other terms used throughout the repository.
 
 ## Install the core
 
-On Linux, Homebrew installs the compiled core executables:
+Homebrew installs the compiled core executables on macOS and Linux:
 
 ```sh
-brew install apexgang/tap/jetd
-brew services start apexgang/tap/jetd
+brew install apexgang/tap/jet
+brew services start apexgang/tap/jet
 ```
 
-On macOS, the macOS app's releases publish the core as the
-`apexgang/tap/jet` formula instead.
+The native macOS app is also available as a standalone DMG on the
+[GitHub releases page](https://github.com/apexgang/jet/releases). It includes
+the core and starts it on first launch. Homebrew users can install the cask
+with `brew install --cask apexgang/tap/jet`; it depends on the core formula.
+The app is not notarized yet, so macOS may require approval to open it the
+first time.
 
-The `jet-app` cask installs the Linux desktop app with the daemon. Name
-both, because Homebrew trusts only the tap items named on the command line:
+On Linux, the `jet-app` cask installs the desktop app with the core formula.
+Name both, because Homebrew trusts only the tap items named on the command
+line:
 
 ```sh
-brew install apexgang/tap/jetd apexgang/tap/jet-app
+brew install apexgang/tap/jet apexgang/tap/jet-app
 ```
 
-The macOS GUI client has a separate distribution lifecycle. See
+The Linux app's `.deb`, `.rpm` and AppImage on the releases page also carry
+the core and start it on first launch.
+
+The GUI clients have a separate distribution lifecycle. See
 [core distribution](docs/core-distribution.md) for the packaged executables,
 the Linux desktop app, supported targets, upgrades, and rollback behavior.
 

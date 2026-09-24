@@ -332,4 +332,3 @@
     <MoveToTrashDialog {session} returnFocus={moveTrigger} />
   </section>
 {/if}
-

@@ -10,6 +10,7 @@ regenerates every machine-readable artifact from the Rust DTOs:
 | `packages/jet-protocol/contracts/craft-v1.schema.json` | Craft protocol, `jetd` to Craft |
 | `apps/jet-tauri/src/lib/protocol/JetModels.ts` | Client models the Tauri GUI compiles |
 | `apps/jet/jet/Protocol/JetModels.swift` | Client models the Swift GUI compiles |
+| `apps/jet/jet/Protocol/jet-v1.schema.json` | Client schema bundled for Swift runtime validation |
 | `packages/jet-protocol/contracts/CraftModels.{ts,swift}` | Craft models for adapter authors |
 
 `just contracts-check` emits the same artifacts into a scratch directory and
