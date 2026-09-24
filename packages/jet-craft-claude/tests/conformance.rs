@@ -22,6 +22,80 @@ type Reader = FrameReader<OwnedReadHalf>;
 type Writer = FrameWriter<OwnedWriteHalf>;
 
 #[tokio::test]
+async fn rejected_commands_report_the_parser_failure_without_conversation_content()
+ {
+	tokio::time::timeout(Duration::from_secs(20), async {
+		let (root, run, harness) = workspace();
+		let (socket, mut craft) = start_craft(&root, &harness);
+		let (mut reader, mut writer, _) = accept_craft(&socket, run).await;
+		command(
+			&mut writer,
+			&json!({"kind": "private-conversation-content"}),
+		)
+		.await;
+		assert!(matches!(reader.read().await, Err(FrameError::Closed)));
+		craft.child.kill().await.unwrap();
+		let diagnostic = craft.diagnostics().unwrap();
+		assert!(diagnostic.contains("CraftCommand"), "{diagnostic}");
+		assert!(diagnostic.contains("unknown variant"), "{diagnostic}");
+		assert!(
+			diagnostic.contains("malformed control payload"),
+			"{diagnostic}"
+		);
+		assert!(
+			!diagnostic.contains("private-conversation-content"),
+			"{diagnostic}"
+		);
+	})
+	.await
+	.unwrap();
+}
+
+#[tokio::test]
+async fn rejected_helper_messages_identify_the_expected_type_without_content() {
+	tokio::time::timeout(Duration::from_secs(20), async {
+		let (root, run, harness) = workspace();
+		let helper_socket = root.join("h.sock");
+		let helper = tokio::net::UnixListener::bind(&helper_socket).unwrap();
+		let (socket, mut craft) = start_craft(&root, &harness);
+		let (mut reader, mut writer, _) = accept_craft(&socket, run).await;
+		command(
+			&mut writer,
+			&json!({
+				"kind": "start", "id": run, "text": "private prompt",
+				"helper_socket": helper_socket,
+			}),
+		)
+		.await;
+		let (stream, _) = helper.accept().await.unwrap();
+		let (read, write) = stream.into_split();
+		let mut helper_reader = FrameReader::new(read);
+		let mut helper_writer = FrameWriter::new(write);
+		assert!(matches!(
+			helper_reader.read().await.unwrap(),
+			Frame::Control { .. }
+		));
+		command(
+			&mut helper_writer,
+			&json!({
+				"version": {"major": 1, "minor": 3},
+				"helper_pid": "private helper value",
+			}),
+		)
+		.await;
+		assert!(matches!(reader.read().await, Err(FrameError::Closed)));
+		craft.child.kill().await.unwrap();
+		let diagnostic = craft.diagnostics().unwrap();
+		assert!(diagnostic.contains("receive helper"), "{diagnostic}");
+		assert!(diagnostic.contains("HelperReady"), "{diagnostic}");
+		assert!(diagnostic.contains("invalid type"), "{diagnostic}");
+		assert!(!diagnostic.contains("private"), "{diagnostic}");
+	})
+	.await
+	.unwrap();
+}
+
+#[tokio::test]
 async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 	tokio::time::timeout(Duration::from_secs(180), async {
 		let (root, run, harness) = workspace();
@@ -283,7 +357,7 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 		);
 
 		assert!(helper.wait().await.unwrap().success());
-		craft.start_kill().unwrap();
+		craft.child.start_kill().unwrap();
 	})
 	.await
 	.unwrap();
@@ -376,7 +450,7 @@ async fn a_held_permission_request_reaches_the_host_as_the_exact_action() {
 			events.extend(batch(&mut reader, &mut writer).await);
 		}
 		assert!(helper.wait().await.unwrap().success());
-		craft.start_kill().unwrap();
+		craft.child.start_kill().unwrap();
 	})
 	.await
 	.unwrap();
@@ -533,12 +607,43 @@ async fn start_helper(
 	child
 }
 
+/// A file captures stderr synchronously, including the last write before a
+/// connection closes. The test runner shows it if a test fails or times out.
+struct Craft {
+	child: tokio::process::Child,
+	stderr: PathBuf,
+}
+
+impl Craft {
+	fn diagnostics(&self) -> std::io::Result<String> {
+		use std::io::{Read, Seek, SeekFrom};
+		let mut file = std::fs::File::open(&self.stderr)?;
+		let length = file.metadata()?.len();
+		file.seek(SeekFrom::Start(length.saturating_sub(64 * 1024)))?;
+		let mut bytes = Vec::new();
+		file.take(64 * 1024).read_to_end(&mut bytes)?;
+		Ok(String::from_utf8_lossy(&bytes).into_owned())
+	}
+}
+
+impl Drop for Craft {
+	fn drop(&mut self) {
+		// Some tests remove their directory after explicitly stopping the Craft.
+		if self.stderr.exists() {
+			eprintln!(
+				"Craft stderr at {}:\n{}",
+				self.stderr.display(),
+				self.diagnostics().unwrap_or_else(|error| format!(
+					"cannot read stderr: {error}"
+				))
+			);
+		}
+	}
+}
+
 /// Install the Craft the way a Plane owner would: the executable beside the
 /// declaration that names the Harness it is allowed to launch.
-fn start_craft(
-	root: &Path,
-	harness: &Path,
-) -> (PathBuf, tokio::process::Child) {
+fn start_craft(root: &Path, harness: &Path) -> (PathBuf, Craft) {
 	start_craft_with_resume(root, harness, ResumeMode::Fresh)
 }
 enum ResumeMode {
@@ -571,7 +676,7 @@ fn start_craft_with_resume(
 	root: &Path,
 	harness: &Path,
 	mode: ResumeMode,
-) -> (PathBuf, tokio::process::Child) {
+) -> (PathBuf, Craft) {
 	let installed = root.join("craft/jet-craft-claude");
 	std::fs::create_dir_all(installed.with_file_name(".jet")).unwrap();
 	{
@@ -604,14 +709,17 @@ fn start_craft_with_resume(
 	)
 	.unwrap();
 	let socket = root.join("craft.sock");
+	let stderr = root.join("craft.stderr");
+	let diagnostics = std::fs::File::create(&stderr).unwrap();
 	let child = spawn_serialized(
 		tokio::process::Command::new(&installed)
 			.arg("--socket")
 			.arg(&socket)
+			.stderr(diagnostics)
 			.kill_on_drop(true),
 	)
 	.unwrap();
-	(socket, child)
+	(socket, Craft { child, stderr })
 }
 
 async fn accept_craft(
@@ -924,7 +1032,7 @@ async fn native_mcp_call_waits_for_the_jet_remote_result_before_acknowledging_so
         assert!(forwarded);
         let result:Value = serde_json::from_slice(&std::fs::read(root.join("remote-result.json")).unwrap()).unwrap();
         assert_eq!(serde_json::from_str::<Value>(result["content"][0]["text"].as_str().unwrap()).unwrap(), json!({"type":"completed","result":{"type":"file","content":"destination evidence"}}));
-        craft.kill().await.unwrap(); helper.kill().await.unwrap(); std::fs::remove_dir_all(root).unwrap();
+        craft.child.kill().await.unwrap(); helper.kill().await.unwrap(); std::fs::remove_dir_all(root).unwrap();
     }).await.unwrap();
 }
 
@@ -949,7 +1057,7 @@ async fn native_resume_pins_the_requested_model() {
         assert!(arguments.windows(2).any(|pair| pair == ["--resume", &native]));
         assert!(arguments.windows(2).any(|pair| pair == ["--model", "claude-original-model"]));
         assert!(!arguments.iter().any(|argument| argument == "--session-id"));
-        craft.kill().await.unwrap();
+        craft.child.kill().await.unwrap();
         helper.kill().await.unwrap();
         std::fs::remove_dir_all(root).unwrap();
     }).await.expect("resumed native process completed");

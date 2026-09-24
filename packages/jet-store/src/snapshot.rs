@@ -47,7 +47,7 @@ const SUFFIX: &str = ".sqlite3";
 /// a snapshot name, so a crash leaves nothing that looks restorable.
 const PENDING_PREFIX: &str = ".pending-";
 
-const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+pub(crate) const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// Why a snapshot was taken. It is part of the snapshot's name, so
 /// rotation can tell a rollback point from a routine copy.

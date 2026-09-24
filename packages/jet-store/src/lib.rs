@@ -26,6 +26,8 @@ mod checkpoint;
 mod command;
 mod conversation;
 pub use craft::lifecycle::CraftDisableMode;
+mod deep_check;
+pub use deep_check::DeepCheck;
 mod deletion;
 pub use deletion::{DeletedIdentityKind, DeletionLedger, DeletionRecord};
 mod effect;
@@ -183,6 +185,8 @@ pub struct Store {
 	database: PathBuf,
 	/// When the next routine Recovery snapshot is due (ADR-0097).
 	snapshots: snapshot::Tracker,
+	/// Whether a deep check of the live store is owed (ADR-0077).
+	deep_checks: deep_check::Tracker,
 }
 
 /// One connection to the database and what opening it established.
@@ -205,8 +209,11 @@ struct Opened {
 impl Store {
 	/// Opens or creates the store at `path` and applies pending migrations.
 	///
-	/// Every open runs SQLite's lightweight integrity check first. A store
-	/// that fails it, or whose migration fails, still opens, but reads only:
+	/// An open after an unclean shutdown, which the write-ahead log SQLite
+	/// leaves behind marks, runs SQLite's lightweight integrity check first;
+	/// a store its last holder closed is served without it, so the ready
+	/// line keeps its budget at any size (ADR-0022). A store that fails the
+	/// check, or whose migration fails, still opens, but reads only:
 	/// [`Store::integrity`] says so, and the damaged database is kept as
 	/// found until a verified snapshot is restored over it (ADR-0077).
 	///
@@ -225,16 +232,22 @@ impl Store {
 	/// verification.
 	pub async fn open(path: &Path) -> Result<Self, StoreError> {
 		let snapshots = snapshot::Tracker::at_open(path)?;
-		let opened = open::connect(path, &snapshots).await?;
+		let opened = open::connect(
+			path,
+			&snapshots,
+			open::PageCheck::AfterUncleanShutdown,
+		)
+		.await?;
 		Ok(Self {
 			opened: std::sync::RwLock::new(opened),
 			database: path.to_owned(),
 			snapshots,
+			deep_checks: deep_check::Tracker::at_open(),
 		})
 	}
 
 	/// Whether this store passed the checks that make it authoritative, as
-	/// established when it was opened or last restored.
+	/// established when it was opened, last restored, or last deep-checked.
 	#[must_use]
 	pub fn integrity(&self) -> StoreIntegrity {
 		self.opened().integrity.clone()
@@ -243,7 +256,8 @@ impl Store {
 	/// Restores the verified Recovery snapshot called `name` over the
 	/// damaged database, keeping the damaged files beside it under a name
 	/// that carries `now_unix_ms`, and reopens the result through the same
-	/// checks as any open (ADR-0077). The Security audit head stays where
+	/// checks as any open, the page check included, because the copy's
+	/// verification lies in the past (ADR-0077). The Security audit head stays where
 	/// it is, so the audit sees that state moved backwards (ADR-0105), and
 	/// the Deletion ledger is reapplied to the restored copy, so a deletion
 	/// made after the snapshot stays made (ADR-0102).
@@ -436,6 +450,7 @@ impl Store {
 	///
 	/// Returns a [`StoreError`] when the increment cannot be committed.
 	pub async fn record_daemon_start(&self) -> Result<PlaneRecord, StoreError> {
+		self.require_writable()?;
 		plane::record_daemon_start(&self.pool()).await
 	}
 

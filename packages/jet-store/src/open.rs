@@ -1,6 +1,10 @@
 //! Opening the store: the connection, the checks that precede any
 //! migration, the pre-migration snapshot, and what a store that fails its
 //! checks opens as (ADR-0057, ADR-0073, ADR-0077, ADR-0097).
+//!
+//! The page check is owed to an unclean shutdown alone: a database whose
+//! last holder closed it carries no write-ahead log, and is served at once
+//! (ADR-0022).
 
 use crate::{
 	IntegrityFailure, IntegrityFailureReason, Opened, StoreError,
@@ -17,14 +21,17 @@ use sqlx::{
 use std::{path::Path, time::Duration};
 use uuid::Uuid;
 
-/// Opens the database at `path`, checks it, snapshots it when a migration
-/// is pending, migrates it, reads its Plane identity, and reapplies the
-/// Deletion ledger. A check or migration that fails leaves the result
-/// read-only rather than failing the open (ADR-0077).
+/// Opens the database at `path`, checks it when its last holder did not
+/// close it, snapshots it when a migration is pending, migrates it, reads
+/// its Plane identity, and reapplies the Deletion ledger. A check or
+/// migration that fails leaves the result read-only rather than failing
+/// the open (ADR-0077).
 pub(crate) async fn connect(
 	path: &Path,
 	snapshots: &snapshot::Tracker,
+	check: PageCheck,
 ) -> Result<Opened, StoreError> {
+	let shutdown = recovery::PreviousShutdown::of(path);
 	let pool = connect_pool(path).await?;
 	// PRAGMA is exempt from compile-time SQLx checking. Portable copies never
 	// become writable Plane stores, regardless of how the path was selected.
@@ -40,7 +47,7 @@ pub(crate) async fn connect(
 	// Damage can surface in the first statement that touches the schema,
 	// before the check itself runs; any of them failing on content rather
 	// than reachability is the check failing.
-	let schema = match inspect(&pool).await {
+	let schema = match inspect(&pool, check, shutdown).await {
 		Ok(Inspection::Legacy) => return Err(legacy_schema_refusal()),
 		Ok(Inspection::Schema(schema)) => schema,
 		Err(StoreError::Integrity(detail)) => {
@@ -100,6 +107,19 @@ pub(crate) async fn connect(
 	})
 }
 
+/// When an open reads every page of the database with SQLite's
+/// lightweight check (ADR-0077).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PageCheck {
+	/// After an unclean shutdown alone, which the write-ahead log SQLite
+	/// leaves behind marks: what an ordinary open does, so a store its
+	/// last holder closed is served at once (ADR-0022).
+	AfterUncleanShutdown,
+	/// Before the store serves, whatever the files beside it say: what a
+	/// restored copy gets, because its verification lies in the past.
+	Always,
+}
+
 /// What the checks before any migration found.
 enum Inspection {
 	/// A pre-release tracker owns the store; it is refused outright.
@@ -109,16 +129,37 @@ enum Inspection {
 }
 
 /// The checks that precede any migration, in order: durability settings,
-/// the schema tracker, and SQLite's own account of the pages. Damage
-/// reported by the check is an integrity error like damage met on the way
-/// to it.
-async fn inspect(pool: &SqlitePool) -> Result<Inspection, StoreError> {
+/// the schema tracker, and, after an unclean shutdown, SQLite's own
+/// account of the pages. Damage reported by the check is an integrity
+/// error like damage met on the way to it.
+///
+/// A store its last holder closed cleanly is served without the page
+/// check unless `check` insists: reading every page costs what the store
+/// weighs, and the ready line has a budget (ADR-0022). The deeper checks
+/// belong to idle time (ADR-0077, #137).
+async fn inspect(
+	pool: &SqlitePool,
+	check: PageCheck,
+	shutdown: recovery::PreviousShutdown,
+) -> Result<Inspection, StoreError> {
 	verify_durability(pool).await?;
 	if is_legacy_schema(pool).await? {
 		return Ok(Inspection::Legacy);
 	}
 	let schema = migrations::state(pool).await?;
-	let findings = recovery::quick_check(pool).await?;
+	let findings = match (check, shutdown) {
+		(
+			PageCheck::AfterUncleanShutdown,
+			recovery::PreviousShutdown::Clean,
+		) => {
+			vec![]
+		}
+		(PageCheck::Always, _)
+		| (
+			PageCheck::AfterUncleanShutdown,
+			recovery::PreviousShutdown::Unclean,
+		) => recovery::quick_check(pool).await?,
+	};
 	if findings.is_empty() {
 		Ok(Inspection::Schema(schema))
 	} else {

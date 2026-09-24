@@ -513,6 +513,12 @@ public struct CredentialItem {
     public let `service`: String
 }
 
+public enum CredentialProbeStep: String {
+    case `create` = "create"
+    case `read` = "read"
+    case `delete` = "delete"
+}
+
 public enum CredentialReference {
     case `platform_store`(CredentialReferencePlatformStore)
     case `external_helper`(CredentialReferenceExternalHelper)
@@ -544,6 +550,13 @@ public enum CredentialStoreStatus {
     case `available`(CredentialStoreStatusAvailable)
     case `locked`(CredentialStoreStatusLocked)
     case `unavailable`(CredentialStoreStatusUnavailable)
+}
+
+public enum CredentialStoreVerification {
+    case `verified`(CredentialStoreVerificationVerified)
+    case `locked`(CredentialStoreVerificationLocked)
+    case `unavailable`(CredentialStoreVerificationUnavailable)
+    case `failed`(CredentialStoreVerificationFailed)
 }
 
 public enum DegradedCondition {
@@ -1098,6 +1111,7 @@ public enum QueryRequest {
     case `next_conversations`(QueryRequestNextConversations)
     case `conversation`(QueryRequestConversation)
     case `capabilities`(QueryRequestCapabilities)
+    case `verify_credential_store`(QueryRequestVerifyCredentialStore)
     case `account_bindings`(QueryRequestAccountBindings)
     case `usage`(QueryRequestUsage)
     case `usage_history`(QueryRequestUsageHistory)
@@ -1137,6 +1151,7 @@ public enum QueryResponse {
     case `conversations`(QueryResponseConversations)
     case `conversation`(QueryResponseConversation)
     case `capabilities`(QueryResponseCapabilities)
+    case `credential_store_verification`(QueryResponseCredentialStoreVerification)
     case `account_bindings`(QueryResponseAccountBindings)
     case `usage`(QueryResponseUsage)
     case `usage_history`(QueryResponseUsageHistory)
@@ -2612,6 +2627,23 @@ public struct CredentialStoreStatusUnavailable {
     public let `kind`: CredentialStoreKind
 }
 
+public struct CredentialStoreVerificationVerified {
+    public let `kind`: CredentialStoreKind
+}
+
+public struct CredentialStoreVerificationLocked {
+    public let `kind`: CredentialStoreKind
+}
+
+public struct CredentialStoreVerificationUnavailable {
+    public let `kind`: CredentialStoreKind
+}
+
+public struct CredentialStoreVerificationFailed {
+    public let `kind`: CredentialStoreKind
+    public let `step`: CredentialProbeStep
+}
+
 public struct DegradedConditionMissingExternalTool {
     public let `tool`: ExternalTool
 }
@@ -2913,6 +2945,10 @@ public struct QueryRequestCapabilities {
     public let `observation`: CapabilityObservation
 }
 
+public struct QueryRequestVerifyCredentialStore {
+
+}
+
 public struct QueryRequestAccountBindings {
     public let `observation`: CapabilityObservation
 }
@@ -3141,6 +3177,10 @@ public struct QueryResponseCapabilities {
     public let `observed_at_unix_ms`: Int64
     public let `platform`: Platform
     public let `resource_budgets`: ResourceBudgets?
+}
+
+public struct QueryResponseCredentialStoreVerification {
+    public let `verification`: CredentialStoreVerification
 }
 
 public struct QueryResponseAccountBindings {

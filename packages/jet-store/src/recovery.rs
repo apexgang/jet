@@ -1,6 +1,7 @@
-//! Read-only Recovery of the store itself: the integrity check every open
-//! runs, what the store looks like when it fails, and restoring a verified
-//! Recovery snapshot over the damaged database (ADR-0077).
+//! Read-only Recovery of the store itself: the integrity check an open
+//! runs after an unclean shutdown, what the store looks like when it
+//! fails, and restoring a verified Recovery snapshot over the damaged
+//! database (ADR-0077).
 //!
 //! A store that fails its check still opens. Reads work as far as the
 //! damage allows, so the Plane can be diagnosed and exported, and nothing
@@ -10,7 +11,7 @@
 //! the same checks as any other open.
 
 use crate::{
-	Opened, StoreError,
+	Opened, Store, StoreError,
 	snapshot::{self, Tracker, unavailable},
 };
 use serde::{Deserialize, Serialize};
@@ -27,8 +28,36 @@ const DAMAGED_SUFFIX: &str = ".damaged-";
 const UNMIGRATED_SUFFIX: &str = ".unmigrated-";
 const REPLACED_SUFFIX: &str = ".replaced-";
 
+/// The write-ahead log, which SQLite removes when the last connection to
+/// the database closes.
+const WAL_SUFFIX: &str = "-wal";
+
 /// The companions SQLite keeps beside a database in write-ahead-log mode.
-const JOURNAL_SUFFIXES: [&str; 2] = ["-wal", "-shm"];
+const JOURNAL_SUFFIXES: [&str; 2] = [WAL_SUFFIX, "-shm"];
+
+/// How the last process to hold the store left it, as far as the files
+/// beside the database say before anything opens it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PreviousShutdown {
+	/// The last connection closed and SQLite removed its write-ahead log,
+	/// so every acknowledged commit is in the database file itself.
+	Clean,
+	/// A write-ahead log is still beside the database: the last holder
+	/// never closed it. What it left is checked before it is served
+	/// (ADR-0077).
+	Unclean,
+}
+
+impl PreviousShutdown {
+	/// Reads the mark a crash leaves. It is read before the store connects,
+	/// because connecting creates the very log it looks for.
+	pub(crate) fn of(database: &Path) -> Self {
+		match sibling(database, WAL_SUFFIX) {
+			Ok(log) if log.exists() => Self::Unclean,
+			Ok(_) | Err(_) => Self::Clean,
+		}
+	}
+}
 
 /// Whether the open store passed the checks that make it authoritative.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +80,8 @@ pub struct IntegrityFailure {
 /// Which check a store failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntegrityFailureReason {
-	/// `PRAGMA quick_check` reported damage.
+	/// `PRAGMA quick_check` at open, or the deep check while idle,
+	/// reported damage.
 	IntegrityCheck,
 	/// A schema migration failed, leaving the store at its previous
 	/// version (ADR-0073).
@@ -70,8 +100,29 @@ pub struct RestoredStore {
 	pub replaced: String,
 }
 
+impl Store {
+	/// Refuses a write while the store is in read-only Recovery mode: the
+	/// damaged database is preserved exactly as found until a verified
+	/// snapshot is restored over it (ADR-0077). The refusal is
+	/// unavailability, like the one a Command meets at the door, because
+	/// the same write succeeds after the restoration.
+	pub(crate) fn require_writable(&self) -> Result<(), StoreError> {
+		match self.integrity() {
+			StoreIntegrity::Verified => Ok(()),
+			StoreIntegrity::Failed(_) => Err(StoreError::Unavailable(
+				"the store is in read-only Recovery mode; nothing is written \
+				 until a verified Recovery snapshot is restored"
+					.into(),
+			)),
+		}
+	}
+}
+
 /// Runs SQLite's lightweight check over the database behind `pool` and
-/// returns what it found, which is empty when the database is sound.
+/// returns what it found, which is empty when the database is sound. It
+/// reads every page, so it costs what the store weighs; an open runs it
+/// only after an unclean shutdown, and the deeper checks belong to idle
+/// time (ADR-0077, ADR-0022).
 ///
 /// The macros cannot describe pragmas; see `verify_durability`.
 pub(crate) async fn quick_check(
@@ -95,7 +146,8 @@ pub(crate) fn findings(report: Vec<String>) -> Vec<String> {
 
 /// Moves the database and its journal files aside under a name that says
 /// what `integrity` found them to be, copies the verified snapshot `name`
-/// into their place, and reopens it.
+/// into their place, and reopens it. The copy was verified when it was
+/// taken, not now, so it is checked page by page before it serves.
 pub(crate) async fn restore(
 	database: &Path,
 	snapshots: &Tracker,
@@ -127,7 +179,12 @@ pub(crate) async fn restore(
 	fs::File::open(directory)
 		.and_then(|dir| dir.sync_all())
 		.map_err(|error| unavailable(directory, &error))?;
-	let opened = crate::open::connect(database, snapshots).await?;
+	let opened = crate::open::connect(
+		database,
+		snapshots,
+		crate::open::PageCheck::Always,
+	)
+	.await?;
 	snapshots.mark_dirty();
 	Ok((
 		opened,
@@ -200,7 +257,7 @@ fn rename_aside(from: &Path, to: &Path) -> Result<(), StoreError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
 	use super::*;
 	use crate::{SnapshotReason, Store};
 	use pretty_assertions::assert_eq;
@@ -209,13 +266,18 @@ mod tests {
 
 	const NOW_UNIX_MS: i64 = 1_700_000_000_000;
 
+	/// Overwrites one page of a closed database, starting at `offset`.
+	fn damage_at(path: &Path, offset: u64) {
+		let mut file = fs::OpenOptions::new().write(true).open(path).unwrap();
+		file.seek(SeekFrom::Start(offset)).unwrap();
+		file.write_all(&[0xff; 4096]).unwrap();
+		file.sync_all().unwrap();
+	}
+
 	/// Overwrites the second page of a closed database, which holds schema
 	/// or table content in any store this crate creates.
 	fn damage(path: &Path) {
-		let mut file = fs::OpenOptions::new().write(true).open(path).unwrap();
-		file.seek(SeekFrom::Start(4096)).unwrap();
-		file.write_all(&[0xff; 4096]).unwrap();
-		file.sync_all().unwrap();
+		damage_at(path, 4096);
 	}
 
 	/// A damaged store opens read-only with the damage named, keeps every
@@ -275,6 +337,100 @@ mod tests {
 				.collect::<Vec<_>>(),
 			vec![snapshot.name]
 		);
+	}
+
+	/// Overwrites the page in the middle of a closed database, which the
+	/// Event journal fills once [`fill_journal`] has run: a page nothing
+	/// reads on the way to serving the store.
+	pub(crate) fn damage_journal_page(path: &Path) {
+		let length = fs::metadata(path).unwrap().len();
+		damage_at(path, length / 2 / 4096 * 4096);
+	}
+
+	/// Appends Events until the journal is most of the file, so the page
+	/// in its middle is the journal's wherever the schema's pages fall.
+	pub(crate) async fn fill_journal(store: &Store) {
+		store
+			.write(async |tx| {
+				for _ in 0..256 {
+					tx.append_event(crate::NewEvent {
+						event_id: uuid::Uuid::now_v7(),
+						actor: crate::ActorRecord::InteractiveClient {
+							client_id: uuid::Uuid::nil(),
+						},
+						recorded_at_unix_ms: 0,
+						conversation_id: None,
+						run_id: None,
+						kind: "run.progress".into(),
+						payload_version: 1,
+						payload: format!(
+							"{{\"p\":\"{}\"}}",
+							"x".repeat(16 * 1024)
+						),
+						class: crate::EventClass::Operational,
+					})
+					.await?;
+				}
+				Ok::<(), StoreError>(())
+			})
+			.await
+			.unwrap();
+	}
+
+	/// The lightweight check follows an unclean shutdown alone (ADR-0077):
+	/// damage on a page nothing reads at open is served after a clean
+	/// close, and puts the store in read-only Recovery mode when a
+	/// write-ahead log says the last holder never closed it.
+	#[tokio::test]
+	async fn the_check_runs_after_an_unclean_shutdown_alone() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("plane.sqlite3");
+		let store = Store::open(&path).await.unwrap();
+		fill_journal(&store).await;
+		store.close().await;
+		damage_journal_page(&path);
+
+		let clean = Store::open(&path).await.unwrap();
+		assert_eq!(clean.integrity(), StoreIntegrity::Verified);
+		clean.close().await;
+
+		// What a crash leaves behind: the log SQLite removes on a clean
+		// close is still beside the database.
+		fs::write(sibling(&path, WAL_SUFFIX).unwrap(), b"").unwrap();
+		let unclean = Store::open(&path).await.unwrap();
+		let StoreIntegrity::Failed(failure) = unclean.integrity() else {
+			panic!("the damage went unnoticed after an unclean shutdown");
+		};
+		assert_eq!(failure.reason, IntegrityFailureReason::IntegrityCheck);
+		assert!(!failure.detail.is_empty());
+	}
+
+	/// A snapshot that rotted after it was verified is checked as it is
+	/// restored, whatever the files beside the copy say, and the Plane
+	/// stays in read-only Recovery mode rather than serving it (ADR-0077).
+	#[tokio::test]
+	async fn a_restored_copy_is_checked_however_cleanly_it_arrives() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("plane.sqlite3");
+		let store = Store::open(&path).await.unwrap();
+		fill_journal(&store).await;
+		let snapshot = store
+			.snapshot(SnapshotReason::Daily, NOW_UNIX_MS)
+			.await
+			.unwrap();
+		store.close().await;
+		damage(&path);
+		damage_journal_page(
+			&snapshot::snapshots_dir(&path).join(&snapshot.name),
+		);
+
+		let damaged = Store::open(&path).await.unwrap();
+		damaged.restore(&snapshot.name, NOW_UNIX_MS).await.unwrap();
+
+		let StoreIntegrity::Failed(failure) = damaged.integrity() else {
+			panic!("the rotten copy was served");
+		};
+		assert_eq!(failure.reason, IntegrityFailureReason::IntegrityCheck);
 	}
 
 	/// A migration that fails leaves the store at its previous version and

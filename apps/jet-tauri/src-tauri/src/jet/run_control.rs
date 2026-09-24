@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Mutex};
 
 use jet_protocol::{
     RunActivity, RunControl, RunExecution, RunLifecycle, TerminationStage, Turn, TurnSource,
-    TurnState,
+    TurnState, APPROVAL_RETRY_MINOR, TURN_QUEUE_MINOR,
 };
 use serde::Serialize;
 use tauri::State;
@@ -11,6 +11,7 @@ use uuid::Uuid;
 use super::{
     conversations::{run_view, RunView},
     errors::PublicError,
+    planes::PlaneId,
     JetBridge,
 };
 
@@ -20,13 +21,14 @@ const MAX_PROMPT_BYTES: usize = 65_536;
 
 #[derive(Default)]
 pub(crate) struct RunControlState {
-    withdraw: Mutex<HashMap<(Uuid, Uuid), Uuid>>,
+    withdraw: Mutex<HashMap<(PlaneId, Uuid, Uuid), Uuid>>,
     control: Mutex<HashMap<ControlKey, Uuid>>,
-    approval_retry: Mutex<HashMap<(Uuid, Uuid), Uuid>>,
+    approval_retry: Mutex<HashMap<(PlaneId, Uuid, Uuid), Uuid>>,
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 struct ControlKey {
+    plane: PlaneId,
     run_id: Uuid,
     stop_run: bool,
 }
@@ -91,191 +93,220 @@ pub(crate) async fn load_run_supervision(
     bridge: State<'_, JetBridge>,
     conversation_id: String,
     run_id: Option<String>,
+    plane_id: Option<String>,
 ) -> Result<RunSupervisionView, PublicError> {
     let conversation_id = parse_id(&conversation_id, "conversation.identifier_invalid")?;
     let run_id = run_id
         .map(|value| parse_id(&value, "run.identifier_invalid"))
         .transpose()?;
-    let client = bridge
-        .client
-        .connect()
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    let queue = client
-        .turn_queue(conversation_id)
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    let execution = match run_id {
-        Some(run_id) => {
-            let execution = client
-                .run_execution(run_id)
-                .await
-                .map_err(|error| PublicError::from_client(&error))?;
-            if execution.run.conversation_id != conversation_id {
-                return Err(PublicError::invalid_input(
-                    "run.conversation_mismatch",
-                    "That Run does not belong to the selected Conversation.",
-                ));
+    let (binding, plane_client) = bridge.plane(plane_id.as_deref())?;
+    async {
+        let client = plane_client
+            .connect()
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        let queue = client
+            .turn_queue(conversation_id)
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        bridge
+            .planes
+            .observe_success(binding.plane, TURN_QUEUE_MINOR);
+        let execution = match run_id {
+            Some(run_id) => {
+                let execution = client
+                    .run_execution(run_id)
+                    .await
+                    .map_err(|error| PublicError::from_client(&error))?;
+                if execution.run.conversation_id != conversation_id {
+                    return Err(PublicError::invalid_input(
+                        "run.conversation_mismatch",
+                        "That Run does not belong to the selected Conversation.",
+                    ));
+                }
+                Some(execution_view(execution))
             }
-            Some(execution_view(execution))
-        }
-        None => None,
-    };
-    Ok(RunSupervisionView {
-        cursor: queue.cursor.to_string(),
-        maximum_entries: MAX_QUEUE_ENTRIES,
-        maximum_prompt_bytes: MAX_PROMPT_BYTES,
-        turns: queue
-            .turns
-            .into_iter()
-            .enumerate()
-            .map(|(index, turn)| turn_view(turn, index, bridge.client.client_id()))
-            .collect(),
-        execution,
-    })
+            None => None,
+        };
+        Ok(RunSupervisionView {
+            cursor: queue.cursor.to_string(),
+            maximum_entries: MAX_QUEUE_ENTRIES,
+            maximum_prompt_bytes: MAX_PROMPT_BYTES,
+            turns: queue
+                .turns
+                .into_iter()
+                .enumerate()
+                .map(|(index, turn)| turn_view(turn, index, plane_client.client_id()))
+                .collect(),
+            execution,
+        })
+    }
+    .await
+    .map_err(|error| bridge.settle(&binding, error))
 }
 
 pub(crate) async fn withdraw_turn(
     bridge: State<'_, JetBridge>,
     conversation_id: String,
     turn_id: String,
+    plane_id: Option<String>,
 ) -> Result<TurnView, PublicError> {
     let conversation_id = parse_id(&conversation_id, "conversation.identifier_invalid")?;
     let turn_id = parse_id(&turn_id, "turn.identifier_invalid")?;
-    let client = bridge
-        .client
-        .connect()
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    let queue = client
-        .turn_queue(conversation_id)
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    let Some(position) = queue.turns.iter().position(|turn| turn.turn_id == turn_id) else {
-        return Err(PublicError::invalid_input(
-            "turn.not_queued",
-            "That Turn is no longer in this queue.",
-        ));
-    };
-    let candidate = &queue.turns[position];
-    // ASVS 2.2.3 and 8.3.1: narrow the untrusted webview request to the
-    // authenticated client's own queued user input. The Plane rechecks it.
-    if candidate.client_id != bridge.client.client_id()
-        || candidate.source != TurnSource::User
-        || candidate.state != TurnState::Queued
-    {
-        return Err(PublicError::invalid_input(
-            "turn.withdraw_denied",
-            "Only your own queued user Turn can be withdrawn.",
-        ));
+    let (binding, plane_client) = bridge.plane(plane_id.as_deref())?;
+    async {
+        let client = plane_client
+            .connect()
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        let queue = client
+            .turn_queue(conversation_id)
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        let Some(position) = queue.turns.iter().position(|turn| turn.turn_id == turn_id) else {
+            return Err(PublicError::invalid_input(
+                "turn.not_queued",
+                "That Turn is no longer in this queue.",
+            ));
+        };
+        let candidate = &queue.turns[position];
+        // ASVS 2.2.3 and 8.3.1: narrow the untrusted webview request to the
+        // authenticated client's own queued user input. The Plane rechecks it.
+        if candidate.client_id != plane_client.client_id()
+            || candidate.source != TurnSource::User
+            || candidate.state != TurnState::Queued
+        {
+            return Err(PublicError::invalid_input(
+                "turn.withdraw_denied",
+                "Only your own queued user Turn can be withdrawn.",
+            ));
+        }
+        let key = (binding.plane, conversation_id, turn_id);
+        let command_id = command_id(&bridge.run_control.withdraw, key)?;
+        let turn = client
+            .withdraw_turn(command_id, conversation_id, turn_id)
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        remove_command(&bridge.run_control.withdraw, &key)?;
+        Ok(turn_view(turn, position, plane_client.client_id()))
     }
-    let key = (conversation_id, turn_id);
-    let command_id = command_id(&bridge.run_control.withdraw, key)?;
-    let turn = client
-        .withdraw_turn(command_id, conversation_id, turn_id)
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    remove_command(&bridge.run_control.withdraw, &key)?;
-    Ok(turn_view(turn, position, bridge.client.client_id()))
+    .await
+    .map_err(|error| bridge.settle(&binding, error))
 }
 
 pub(crate) async fn interrupt_turn(
     bridge: State<'_, JetBridge>,
     run_id: String,
+    plane_id: Option<String>,
 ) -> Result<CommandAcceptedView, PublicError> {
-    control_run(bridge, run_id, RunControl::InterruptTurn).await
+    control_run(bridge, run_id, RunControl::InterruptTurn, plane_id).await
 }
 
 pub(crate) async fn stop_run(
     bridge: State<'_, JetBridge>,
     run_id: String,
+    plane_id: Option<String>,
 ) -> Result<CommandAcceptedView, PublicError> {
-    control_run(bridge, run_id, RunControl::StopRun).await
+    control_run(bridge, run_id, RunControl::StopRun, plane_id).await
 }
 
 async fn control_run(
     bridge: State<'_, JetBridge>,
     run_id: String,
     control: RunControl,
+    plane_id: Option<String>,
 ) -> Result<CommandAcceptedView, PublicError> {
     let run_id = parse_id(&run_id, "run.identifier_invalid")?;
-    let client = bridge
-        .client
-        .connect()
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    let execution = client
-        .run_execution(run_id)
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    if execution.run.lifecycle != RunLifecycle::Active {
-        return Err(PublicError::invalid_input(
-            "run.not_controllable",
-            "This Run is no longer active.",
-        ));
-    }
-    if control == RunControl::InterruptTurn {
-        let queue = client
-            .turn_queue(execution.run.conversation_id)
+    let (binding, client) = bridge.plane(plane_id.as_deref())?;
+    async {
+        let client = client
+            .connect()
             .await
             .map_err(|error| PublicError::from_client(&error))?;
-        if !queue
-            .turns
-            .iter()
-            .any(|turn| turn.run_id == Some(run_id) && turn.state == TurnState::Active)
-        {
+        let execution = client
+            .run_execution(run_id)
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        if execution.run.lifecycle != RunLifecycle::Active {
             return Err(PublicError::invalid_input(
-                "run.no_active_turn",
-                "This Run does not have an active Turn to interrupt.",
+                "run.not_controllable",
+                "This Run is no longer active.",
             ));
         }
+        if control == RunControl::InterruptTurn {
+            let queue = client
+                .turn_queue(execution.run.conversation_id)
+                .await
+                .map_err(|error| PublicError::from_client(&error))?;
+            if !queue
+                .turns
+                .iter()
+                .any(|turn| turn.run_id == Some(run_id) && turn.state == TurnState::Active)
+            {
+                return Err(PublicError::invalid_input(
+                    "run.no_active_turn",
+                    "This Run does not have an active Turn to interrupt.",
+                ));
+            }
+        }
+        let key = ControlKey {
+            plane: binding.plane,
+            run_id,
+            stop_run: control == RunControl::StopRun,
+        };
+        let command_id = command_id(&bridge.run_control.control, key)?;
+        let run = client
+            .control_run(command_id, run_id, control)
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        remove_command(&bridge.run_control.control, &key)?;
+        Ok(CommandAcceptedView {
+            run: run_view(&run),
+            control: control_name(control),
+            message: match control {
+                RunControl::InterruptTurn => {
+                    "Interrupt requested. The Run will report when the active Turn ends."
+                }
+                RunControl::StopRun => {
+                    "Stop requested. The Run will report when its processes have ended."
+                }
+            },
+        })
     }
-    let key = ControlKey {
-        run_id,
-        stop_run: control == RunControl::StopRun,
-    };
-    let command_id = command_id(&bridge.run_control.control, key)?;
-    let run = client
-        .control_run(command_id, run_id, control)
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    remove_command(&bridge.run_control.control, &key)?;
-    Ok(CommandAcceptedView {
-        run: run_view(&run),
-        control: control_name(control),
-        message: match control {
-            RunControl::InterruptTurn => {
-                "Interrupt requested. The Run will report when the active Turn ends."
-            }
-            RunControl::StopRun => {
-                "Stop requested. The Run will report when its processes have ended."
-            }
-        },
-    })
+    .await
+    .map_err(|error| bridge.settle(&binding, error))
 }
 
 pub(crate) async fn authorize_approval_retry(
     bridge: State<'_, JetBridge>,
     run_id: String,
     review_id: String,
+    plane_id: Option<String>,
 ) -> Result<ApprovalRetryView, PublicError> {
     let run_id = parse_id(&run_id, "run.identifier_invalid")?;
     let review_id = parse_id(&review_id, "review.identifier_invalid")?;
-    let key = (run_id, review_id);
-    let command_id = command_id(&bridge.run_control.approval_retry, key)?;
-    bridge
-        .client
-        .connect()
-        .await
-        .map_err(|error| PublicError::from_client(&error))?
-        .authorize_approval_retry(command_id, run_id, review_id)
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    remove_command(&bridge.run_control.approval_retry, &key)?;
-    Ok(ApprovalRetryView {
-        review_id: review_id.to_string(),
-        message: "One exact retry was authorized. Jet did not change the requested action.",
-    })
+    let (binding, client) = bridge.plane(plane_id.as_deref())?;
+    async {
+        let key = (binding.plane, run_id, review_id);
+        let command_id = command_id(&bridge.run_control.approval_retry, key)?;
+        client
+            .connect()
+            .await
+            .map_err(|error| PublicError::from_client(&error))?
+            .authorize_approval_retry(command_id, run_id, review_id)
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        bridge
+            .planes
+            .observe_success(binding.plane, APPROVAL_RETRY_MINOR);
+        remove_command(&bridge.run_control.approval_retry, &key)?;
+        Ok(ApprovalRetryView {
+            review_id: review_id.to_string(),
+            message: "One exact retry was authorized. Jet did not change the requested action.",
+        })
+    }
+    .await
+    .map_err(|error| bridge.settle(&binding, error))
 }
 
 fn turn_view(turn: Turn, position: usize, client_id: Uuid) -> TurnView {

@@ -49,6 +49,7 @@ impl Client {
 			| QueryResponse::Events(_)
 			| QueryResponse::Capabilities(_)
 			| QueryResponse::AccountBindings(_)
+			| QueryResponse::CredentialStoreVerification { .. }
 			| QueryResponse::Usage(_)
 			| QueryResponse::UsageHistory(_)
 			| QueryResponse::SecurityAudit(_)

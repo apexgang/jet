@@ -1,6 +1,6 @@
 # Jet desktop implementation plan
 
-Status: Wave 0, Wave 1, and Waves 2.1–2.2 were completed on 2026-09-22. The Swift app completed Wave 2.3 on 2026-09-23; Tauri Wave 2.3 remains unimplemented. Generic Harness approval decisions remain a backend dependency.
+Status: Wave 0, Wave 1, and Waves 2.1–2.2 were completed on 2026-09-22. Both desktop clients implemented Wave 2.3, and their Wave 3 adaptation passes have open acceptance checks. Generic Harness approval decisions remain a backend dependency.
 
 This plan turns `docs/design-language.md` into a staged desktop product for macOS and Linux. It is repository-specific and preserves the boundaries in `apps/jet/AGENTS.md`, `apps/jet-tauri/AGENTS.md`, and the Jet protocol ADRs.
 
@@ -189,7 +189,9 @@ Verification: the Swift macOS unit suite and iOS Simulator build passed; the Tau
 
 ### 2.3 Delivery and completion
 
-Swift app status: implemented on 2026-09-23. The native client gates delivery on the observed Git capability, requires review of the operation, destination, branch, and retained checkpoint before admission, and renders the durable outbox's pending, completed, confirmed-failure, and unknown-outcome states. Confirmed failures can be reviewed for a new attempt; unknown outcomes can only be acknowledged after review and are never presented as safe automatic retries. Approval, completion, and failure notifications are individually opt-in, device-local, deduplicated, and use generic lock-screen-safe content. The Tauri client remains out of scope for this implementation and is not complete.
+Swift app status: implemented on 2026-09-23. The native client gates delivery on the observed Git capability, requires review of the operation, destination, branch, and retained checkpoint before admission, and renders the durable outbox's pending, completed, confirmed-failure, and unknown-outcome states. Confirmed failures can be reviewed for a new attempt; unknown outcomes can only be acknowledged after review and are never presented as safe automatic retries. Approval, completion, and failure notifications are individually opt-in, device-local, deduplicated, and use generic lock-screen-safe content.
+
+Tauri app status: implemented in Wave 2.3. See `apps/jet-tauri/docs/wave-2.3.md` for its delivery and notification behavior and remaining checks.
 
 - Implement supported commit, push, and GitHub pull-request delivery paths with explicit destination and branch review.
 - Show partial success and retry states from the transactional outbox rather than presenting optimistic completion.
@@ -227,13 +229,15 @@ Goal: cover the confirmed onboarding, pairing, settings, and recovery scope.
 Swift app status: the macOS adaptation pass was implemented on 2026-09-24 and
 is tracked in `docs/swift-wave-3-4-acceptance.md`. The iOS Simulator target
 builds. Running-window accessibility and visual checks, plus the cross-client
-Linux parity exit, remain open. No Tauri changes were made in this slice.
+Linux parity exit, remain open.
 
 - Close the semantic parity matrix between macOS and Linux.
 - Test narrow, default, wide, full-screen, multiple-display, dark, increased-contrast, reduced-motion, and reduced-transparency configurations.
 - Keep iOS compile-safe and defer remote-companion product work to its own approved plan.
 
 Exit: every section of `docs/design-language.md` has implemented acceptance coverage on both desktop platforms or an explicitly approved platform exception.
+
+Linux status (2026-09-23): the Tauri client implements this wave's adaptation work and seeds `docs/desktop-parity-matrix.md`, with the macOS column observed read-only, native manual checks still open, and exceptions PE-1, PE-2, PE-5, PE-6, PE-7 and deferral PD-1 awaiting product approval (`apps/jet-tauri/docs/wave-3.4.md`).
 
 Estimated effort: 8 to 14 engineer-weeks after Wave 2, with backend gap work included only where noted below.
 

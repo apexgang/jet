@@ -22,7 +22,7 @@ fn stage(home: &Path, version: &str) -> String {
 	let script = std::fs::read_to_string(crafts.join("fake-craft"))
 		.unwrap()
 		.replace(manifest.to_str().unwrap(), frozen.to_str().unwrap());
-	let digest = format!("{:x}", Sha256::digest(script.as_bytes()));
+	let digest = hex::encode(Sha256::digest(script.as_bytes()));
 	let mut declaration: Value =
 		serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
 	declaration["executable"] = json!(program);
@@ -57,6 +57,7 @@ async fn start(
 		.unwrap();
 	wire.send(&json!({"kind":"command","id":1,"command_id":Uuid::now_v7(),"command":{"type":"start_run","conversation_id":conversation.conversation_id,"craft":"fake","prompt":"Make a change"}})).await;
 	let admitted: Value = wire.receive().await;
+	assert_eq!(admitted["kind"], "command_result", "{admitted}");
 	let run = admitted["result"]["run_id"].as_str().unwrap().to_owned();
 	wait_for(wire, &run, "waiting_for_approval").await;
 	(conversation.conversation_id, run)
@@ -301,17 +302,31 @@ async fn only_signed_revocations_stop_a_digest_and_the_barrier_survives_restart(
     }).await.unwrap();
 }
 
+// Every wait is a named step under its own deadline (`assertions::STEP_BUDGET`), so
+// a stall says which step it was, and the daemon, living outside the guard,
+// still reports its stderr and Diagnostic log when a step fails. The guard
+// only bounds a hang in what is not a step (connecting, starting a Run):
+// longer than the thirteen steps' budgets combined, it never fires first.
 #[tokio::test]
 async fn active_digests_multiplex_runs_and_restart_without_switching_versions()
 {
-	tokio::time::timeout(Duration::from_secs(30), async {
-		let dir = tempfile::tempdir_in("/tmp").unwrap();
-		let home = dir.path().join("jet");
-		fixture::install(&home);
-		stage(&home, "v1");
-		let daemon = start_jetd(&home).await;
+	let dir = tempfile::tempdir_in("/tmp").unwrap();
+	let home = dir.path().join("jet");
+	fixture::install(&home);
+	stage(&home, "v1");
+	let daemon = start_jetd(&home).await;
+	tokio::time::timeout(assertions::STEP_BUDGET * 14, async {
 		let client_id = Uuid::new_v4();
 		let client = connect(&daemon, client_id).await;
+		client
+			.set_setting(
+				Uuid::now_v7(),
+				jet_protocol::SettingKey::EnergyLowPowerConcurrency,
+				jet_protocol::SettingScope::Plane,
+				jet_protocol::SettingValue::Count(3),
+			)
+			.await
+			.unwrap();
 		let mut wire = connect_raw(&daemon, client_id).await;
 		let mut runs = Vec::new();
 		for name in ["one", "two", "three"] {
@@ -357,5 +372,5 @@ async fn active_digests_multiplex_runs_and_restart_without_switching_versions()
 		}
 	})
 	.await
-	.unwrap();
+	.expect("the scenario hung somewhere no step covers");
 }

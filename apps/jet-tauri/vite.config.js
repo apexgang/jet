@@ -1,13 +1,16 @@
 import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 const repositoryRoot = decodeURIComponent(new URL("../../", import.meta.url).pathname);
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [sveltekit()],
+
+  // Component tests (`tests/*.component.test.ts`, happy-dom) mount Svelte
+  // components, which needs Svelte's browser build instead of its server one.
+  ...(process.env.VITEST ? { resolve: { conditions: ["browser"] } } : {}),
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

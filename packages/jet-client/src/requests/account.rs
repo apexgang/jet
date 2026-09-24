@@ -35,6 +35,7 @@ impl Client {
 		{
 			QueryResponse::AccountBindings(list) => Ok(list),
 			other @ (QueryResponse::GitDeliveries { .. }
+			| QueryResponse::CredentialStoreVerification { .. }
 			| QueryResponse::ExtensionCatalog(_)
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)

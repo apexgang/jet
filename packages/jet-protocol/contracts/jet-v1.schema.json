@@ -4710,6 +4710,26 @@
         "account"
       ]
     },
+    "CredentialProbeStep": {
+      "description": "One step of the create/read/delete round trip.",
+      "oneOf": [
+        {
+          "description": "Storing the probe item.",
+          "type": "string",
+          "const": "create"
+        },
+        {
+          "description": "Reading it back unchanged.",
+          "type": "string",
+          "const": "read"
+        },
+        {
+          "description": "Deleting it again.",
+          "type": "string",
+          "const": "delete"
+        }
+      ]
+    },
     "CredentialReference": {
       "description": "The opaque reference a Plane keeps for one binding's Credential, and the\nplace the secret it resolves to belongs.",
       "oneOf": [
@@ -4996,6 +5016,88 @@
           "required": [
             "status",
             "kind"
+          ]
+        }
+      ]
+    },
+    "CredentialStoreVerification": {
+      "description": "The result of proving that the platform credential store holds a\nCredential: one probe item created, read back, and deleted. Durable\nPairing waits for this, and the probe never prompts: a store that would\nneed the user is reported as locked.",
+      "oneOf": [
+        {
+          "description": "The store created the probe item, returned it unchanged, and\ndeleted it.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "description": "Which store did.",
+              "$ref": "#/$defs/CredentialStoreKind"
+            },
+            "outcome": {
+              "type": "string",
+              "const": "verified"
+            }
+          },
+          "required": [
+            "outcome",
+            "kind"
+          ]
+        },
+        {
+          "description": "The store is locked, so it holds nothing until the user unlocks it\nthrough the operating system. Nothing was created.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "description": "Which store is locked.",
+              "$ref": "#/$defs/CredentialStoreKind"
+            },
+            "outcome": {
+              "type": "string",
+              "const": "locked"
+            }
+          },
+          "required": [
+            "outcome",
+            "kind"
+          ]
+        },
+        {
+          "description": "The store could not be reached. Nothing was created.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "description": "Which store was expected.",
+              "$ref": "#/$defs/CredentialStoreKind"
+            },
+            "outcome": {
+              "type": "string",
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "outcome",
+            "kind"
+          ]
+        },
+        {
+          "description": "The store answered but did not complete `step`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "description": "Which store answered.",
+              "$ref": "#/$defs/CredentialStoreKind"
+            },
+            "outcome": {
+              "type": "string",
+              "const": "failed"
+            },
+            "step": {
+              "description": "The step of the round trip it did not complete.",
+              "$ref": "#/$defs/CredentialProbeStep"
+            }
+          },
+          "required": [
+            "outcome",
+            "kind",
+            "step"
           ]
         }
       ]
@@ -8279,6 +8381,19 @@
           ]
         },
         {
+          "description": "Prove that the platform credential store holds a Credential, by\ncreating, reading back, and deleting a probe item (Jet 1.44).",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "verify_credential_store"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
           "description": "Every Account binding on the Plane, with the state of the Credential\neach one resolves.",
           "type": "object",
           "properties": {
@@ -8932,6 +9047,24 @@
           "$ref": "#/$defs/CapabilitySnapshot",
           "required": [
             "type"
+          ]
+        },
+        {
+          "description": "Whether the platform credential store round-tripped a Credential.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "credential_store_verification"
+            },
+            "verification": {
+              "description": "How far the round trip got.",
+              "$ref": "#/$defs/CredentialStoreVerification"
+            }
+          },
+          "required": [
+            "type",
+            "verification"
           ]
         },
         {

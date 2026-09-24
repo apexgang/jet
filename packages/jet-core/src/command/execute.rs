@@ -28,6 +28,9 @@ impl Core {
 		actor: &Actor,
 		envelope: CommandEnvelope,
 	) -> Result<CommandOutcome, CoreError> {
+		// The deep check of the store waits for this Command, or abandons
+		// itself when it arrives between two tables (ADR-0077).
+		let _in_flight = self.command_in_flight();
 		// ASVS 8.3.2: no admission can slip between revocation's commit and
 		// invalidating live authority, including a replayed Command receipt.
 		let _access = self

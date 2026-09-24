@@ -9,6 +9,7 @@
 //! Nothing here is authoritative Plane state: it describes the machine, so
 //! it is observed, never stored.
 
+pub(crate) mod credential_store;
 pub(crate) mod probe;
 
 use crate::{CORE_VERSION, Core, command::Command, error::CoreError};
@@ -42,6 +43,14 @@ pub trait CapabilityProbe: std::fmt::Debug + Send + Sync {
 	fn observe(
 		&self,
 	) -> Pin<Box<dyn Future<Output = ObservedCapabilities> + Send + '_>>;
+
+	/// Proves the platform credential store round-trips a Credential: a
+	/// probe item is created, read back, and deleted (ADR-0076). This
+	/// writes into the store, so the core asks for it on demand and never
+	/// as part of an observation.
+	fn verify_credential_store(
+		&self,
+	) -> Pin<Box<dyn Future<Output = CredentialStoreVerification> + Send + '_>>;
 }
 
 /// What a [`CapabilityProbe`] saw. The core adds its own version, the time
@@ -168,6 +177,50 @@ pub enum CredentialStoreStatus {
 		/// Which store was expected.
 		kind: CredentialStoreKind,
 	},
+}
+
+/// The result of proving that the platform credential store holds a
+/// Credential: one probe item created, read back, and deleted. ADR-0076
+/// requires this before durable Pairing is enabled, so it is asked for on
+/// demand rather than with every observation, and it never prompts: a
+/// store that would need the user is reported as locked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialStoreVerification {
+	/// The store created the probe item, returned it unchanged, and
+	/// deleted it.
+	Verified {
+		/// Which store did.
+		kind: CredentialStoreKind,
+	},
+	/// The store is locked, so it holds nothing until the user unlocks it
+	/// through the operating system. Nothing was created.
+	Locked {
+		/// Which store is locked.
+		kind: CredentialStoreKind,
+	},
+	/// The store could not be reached. Nothing was created.
+	Unavailable {
+		/// Which store was expected.
+		kind: CredentialStoreKind,
+	},
+	/// The store answered but did not complete `step`.
+	Failed {
+		/// Which store answered.
+		kind: CredentialStoreKind,
+		/// The step of the round trip it did not complete.
+		step: CredentialProbeStep,
+	},
+}
+
+/// One step of the create/read/delete round trip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialProbeStep {
+	/// Storing the probe item.
+	Create,
+	/// Reading it back unchanged.
+	Read,
+	/// Deleting it again.
+	Delete,
 }
 
 /// Durable identity of one installed Jet Craft.
@@ -401,7 +454,8 @@ pub(crate) mod tests {
 	use tempfile::TempDir;
 
 	use crate::capability::{
-		CredentialStoreKind, DegradedCondition, ExternalTool, HarnessId,
+		CredentialStoreKind, CredentialStoreVerification, DegradedCondition,
+		ExternalTool, HarnessId,
 	};
 	use crate::test_support::{
 		FixedProbe, ManualClock, actor, equipped, register_repository, request,
@@ -478,6 +532,18 @@ pub(crate) mod tests {
 			panic!("expected QueryResult::Capabilities");
 		};
 		snapshot
+	}
+
+	async fn verify(core: &Core) -> CredentialStoreVerification {
+		let result = core
+			.query(&actor(), Query::VerifyCredentialStore)
+			.await
+			.unwrap();
+		let QueryResult::CredentialStoreVerification(verification) = result
+		else {
+			panic!("expected QueryResult::CredentialStoreVerification");
+		};
+		verification
 	}
 
 	async fn auto_commit(core: &Core, scope: SettingScope) -> ResolvedSetting {
@@ -558,6 +624,27 @@ pub(crate) mod tests {
 				stripped_snapshot()
 			)
 		);
+	}
+
+	/// The round trip writes into the person's keyring, so it is asked for
+	/// on its own: it answers what the probe found and leaves the last
+	/// observation as it was (ADR-0076, ADR-0086).
+	#[tokio::test]
+	async fn verifying_the_credential_store_answers_the_probe_alone() {
+		let dir = tempfile::tempdir().unwrap();
+		let probe = FixedProbe::new(equipped());
+		let core = start(&dir, Arc::clone(&probe)).await;
+		let locked = CredentialStoreVerification::Locked {
+			kind: CredentialStoreKind::SecretService,
+		};
+		probe.verify_with(locked);
+		probe.answer_with(stripped());
+
+		let verified = verify(&core).await;
+		let last =
+			capabilities(&core, CapabilityObservation::LastObserved).await;
+
+		assert_eq!((verified, last), (locked, equipped_snapshot()));
 	}
 
 	/// A client prepares a Command against the Capabilities it just read. The

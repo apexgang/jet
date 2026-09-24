@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prepare-delivery"
+description = "Enables the prepare_delivery command without any pre-configured scope."
+commands.allow = ["prepare_delivery"]
+
+[[permission]]
+identifier = "deny-prepare-delivery"
+description = "Denies the prepare_delivery command without any pre-configured scope."
+commands.deny = ["prepare_delivery"]

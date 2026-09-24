@@ -34,6 +34,7 @@ impl Client {
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::AccountBindings(_)
+			| QueryResponse::CredentialStoreVerification { .. }
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::AutoContinue(_)
@@ -98,6 +99,7 @@ impl Client {
 			| QueryResponse::ExtensionChange(_)
 			| QueryResponse::RemoteToolReview(_)
 			| QueryResponse::AccountBindings(_)
+			| QueryResponse::CredentialStoreVerification { .. }
 			| QueryResponse::Utility(_)
 			| QueryResponse::CraftInstallationPreview(_)
 			| QueryResponse::AutoContinue(_)

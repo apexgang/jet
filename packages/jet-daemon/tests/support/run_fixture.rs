@@ -115,7 +115,7 @@ fn install_craft(
 	std::fs::write(&program, &script).unwrap();
 	std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700))
 		.unwrap();
-	let installation = json!({"executable":program.canonicalize().unwrap(),"sha256":format!("{:x}", Sha256::digest(script.as_bytes())),"specification":specification});
+	let installation = json!({"executable":program.canonicalize().unwrap(),"sha256":hex::encode(Sha256::digest(script.as_bytes())),"specification":specification});
 	std::fs::write(manifest, installation.to_string()).unwrap();
 }
 fn quote(text: &str) -> String {

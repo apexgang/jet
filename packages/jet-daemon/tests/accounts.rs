@@ -99,7 +99,10 @@ async fn a_binding_and_its_reference_outlive_the_daemon_that_stored_them() {
 #[tokio::test]
 async fn binding_metadata_refuses_text_that_is_not_a_name() {
 	let dir = tempfile::tempdir().unwrap();
-	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	// The label is judged on a Plane that has a store; one without refuses
+	// the binding for the Capability before it reads the label.
+	let daemon =
+		start_jetd_with_credential_store(&dir.path().join(".jet")).await;
 	let client = connect(&daemon, Uuid::new_v4()).await;
 
 	let error = client

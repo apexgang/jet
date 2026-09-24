@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-planes"
+description = "Enables the list_planes command without any pre-configured scope."
+commands.allow = ["list_planes"]
+
+[[permission]]
+identifier = "deny-list-planes"
+description = "Denies the list_planes command without any pre-configured scope."
+commands.deny = ["list_planes"]

@@ -1,5 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 
+import type { PlaneHealth, PlaneId } from "./planes";
+
 export type PublicError = {
   category: string;
   code: string;
@@ -8,6 +10,10 @@ export type PublicError = {
   recoveryActions: PublicRecoveryAction[];
   restart: PublicRestart | null;
   revisionConflict: PublicRevisionConflict | null;
+  /** Set only for `protocol.feature_unavailable`. Shown only in Plane detail. */
+  protocolLimit: { requiredMinor: number; negotiatedMinor: number } | null;
+  /** The Plane whose command failed; recovery actions apply to it only. */
+  planeId: PlaneId | null;
 };
 
 export type PublicRecoveryAction =
@@ -39,6 +45,10 @@ export type PublicRevisionConflict = {
 
 export type ConnectionSnapshot = {
   state: "online" | "reconnecting";
+  feedId: string;
+  planeId: PlaneId;
+  planeIdentity: string | null;
+  health: PlaneHealth;
   coreVersion: string | null;
   daemonStarts: string | null;
   startedAtUnixMs: string | null;
@@ -158,6 +168,7 @@ export type MutationResult = {
 };
 
 export type ConversationRow = {
+  planeId: PlaneId;
   id: string;
   revision: string | null;
   title: string;
@@ -166,10 +177,10 @@ export type ConversationRow = {
 };
 
 export type ConversationPage = {
+  planeId: PlaneId;
   cursor: string;
   conversations: ConversationRow[];
   nextPage: string | null;
-  restoredId: string | null;
 };
 
 export type RunSummary = {
@@ -188,6 +199,8 @@ export type ConversationDetail = {
   workspaceId: string | null;
   workspaceRoot: string | null;
   runs: RunSummary[];
+  /** Set at creation; no Command changes it, so it is disclosed read-only. */
+  retention: "retain" | "forget_after_final_run";
 };
 
 export type ChangedFile = {
@@ -284,6 +297,7 @@ export type TerminalUpdate =
   | { type: "failed"; terminalId: string; error: PublicError };
 
 export type ConversationSearchResult = {
+  planeId: PlaneId;
   cursor: string;
   indexedThrough: string;
   hits: Array<{
@@ -361,14 +375,25 @@ export type ApprovalRetryAccepted = {
   message: string;
 };
 
-/** The only direct Tauri IPC adapter used by presentation code. */
+/**
+ * The core Tauri IPC adapter used by presentation code. Every Conversation- and
+ * Run-scoped call takes the opaque Plane handle of the row it acts on; `null`
+ * means this computer.
+ */
 export async function openPlaneFeed(
   receive: (update: PlaneUpdate) => void,
-  after: string,
+  after: string | null,
+  planeId: PlaneId | null = null,
+  reset = false,
 ): Promise<ConnectionSnapshot> {
   const onUpdate = new Channel<PlaneUpdate>();
   onUpdate.onmessage = receive;
-  return invoke<ConnectionSnapshot>("open_plane_feed", { onUpdate, after });
+  return invoke<ConnectionSnapshot>("open_plane_feed", { planeId, onUpdate, after, reset });
+}
+
+/** Stops a Plane feed natively; a stale feed ID never stops a newer feed. */
+export function closePlaneFeed(feedId: string): Promise<void> {
+  return invoke<void>("close_plane_feed", { feedId });
 }
 
 export function loadSetup(): Promise<SetupSnapshot> {
@@ -399,18 +424,28 @@ export function bindHarnessAccount(provider: string): Promise<MutationResult> {
   return invoke<MutationResult>("bind_harness_account", { provider });
 }
 
-export function loadConversations(nextPage: string | null = null): Promise<ConversationPage> {
-  return invoke<ConversationPage>("load_conversations", { nextPage });
+export function loadConversations(
+  nextPage: string | null = null,
+  planeId: PlaneId | null = null,
+): Promise<ConversationPage> {
+  return invoke<ConversationPage>("load_conversations", { planeId, nextPage });
 }
 
-export function searchConversations(text: string): Promise<ConversationSearchResult> {
-  return invoke<ConversationSearchResult>("search_conversations", { text });
+export function searchConversations(
+  text: string,
+  planeId: PlaneId | null = null,
+): Promise<ConversationSearchResult> {
+  return invoke<ConversationSearchResult>("search_conversations", { planeId, text });
 }
 
-export function loadConversation(conversationId: string): Promise<ConversationDetail> {
-  return invoke<ConversationDetail>("load_conversation", { conversationId });
+export function loadConversation(
+  conversationId: string,
+  planeId: PlaneId | null = null,
+): Promise<ConversationDetail> {
+  return invoke<ConversationDetail>("load_conversation", { conversationId, planeId });
 }
 
+/** New tasks run on this computer in Wave 3.1. */
 export function createConversation(projectId: string): Promise<ConversationRow> {
   return invoke<ConversationRow>("create_conversation", { projectId });
 }
@@ -419,44 +454,59 @@ export function startRun(
   conversationId: string,
   craft: string,
   prompt: string,
+  planeId: PlaneId | null = null,
 ): Promise<StartResult> {
-  return invoke<StartResult>("start_run", { conversationId, craft, prompt });
+  return invoke<StartResult>("start_run", { conversationId, craft, prompt, planeId });
 }
 
-export function submitTurn(conversationId: string, prompt: string): Promise<TurnResult> {
-  return invoke<TurnResult>("submit_turn", { conversationId, prompt });
+export function submitTurn(
+  conversationId: string,
+  prompt: string,
+  planeId: PlaneId | null = null,
+): Promise<TurnResult> {
+  return invoke<TurnResult>("submit_turn", { conversationId, prompt, planeId });
 }
 
 export function loadRunSupervision(
   conversationId: string,
   runId: string | null,
+  planeId: PlaneId | null = null,
 ): Promise<RunSupervision> {
-  return invoke<RunSupervision>("load_run_supervision", { conversationId, runId });
+  return invoke<RunSupervision>("load_run_supervision", { conversationId, runId, planeId });
 }
 
-export function withdrawTurn(conversationId: string, turnId: string): Promise<TurnQueueItem> {
-  return invoke<TurnQueueItem>("withdraw_turn", { conversationId, turnId });
+export function withdrawTurn(
+  conversationId: string,
+  turnId: string,
+  planeId: PlaneId | null = null,
+): Promise<TurnQueueItem> {
+  return invoke<TurnQueueItem>("withdraw_turn", { conversationId, turnId, planeId });
 }
 
-export function interruptTurn(runId: string): Promise<RunControlAccepted> {
-  return invoke<RunControlAccepted>("interrupt_turn", { runId });
+export function interruptTurn(
+  runId: string,
+  planeId: PlaneId | null = null,
+): Promise<RunControlAccepted> {
+  return invoke<RunControlAccepted>("interrupt_turn", { runId, planeId });
 }
 
-export function stopRun(runId: string): Promise<RunControlAccepted> {
-  return invoke<RunControlAccepted>("stop_run", { runId });
+export function stopRun(runId: string, planeId: PlaneId | null = null): Promise<RunControlAccepted> {
+  return invoke<RunControlAccepted>("stop_run", { runId, planeId });
 }
 
 export function authorizeApprovalRetry(
   runId: string,
   reviewId: string,
+  planeId: PlaneId | null = null,
 ): Promise<ApprovalRetryAccepted> {
-  return invoke<ApprovalRetryAccepted>("authorize_approval_retry", { runId, reviewId });
+  return invoke<ApprovalRetryAccepted>("authorize_approval_retry", { runId, reviewId, planeId });
 }
 
 export function loadWorkPanel(
   conversationId: string,
   runId: string,
   scope: WorkCheckpoint,
+  planeId: PlaneId | null = null,
 ): Promise<WorkPanelSnapshot> {
   return invoke<WorkPanelSnapshot>("load_work_panel", {
     conversationId,
@@ -465,9 +515,12 @@ export function loadWorkPanel(
     turn: scope.kind === "turn" ? scope.turn : null,
     fromTurn: scope.kind === "historical" ? scope.fromTurn : null,
     toTurn: scope.kind === "historical" ? scope.toTurn : null,
+    planeId,
   });
 }
 
+// Follow-up Work panel commands carry only native IDs. The shell executes them
+// on the Plane the Work panel was loaded from.
 export function loadMoreChanges(pageId: string): Promise<ChangePage> {
   return invoke<ChangePage>("load_more_changes", { pageId });
 }
@@ -496,14 +549,15 @@ export function openWorkspaceTerminal(
   conversationId: string,
   rows = 24,
   columns = 80,
+  planeId: PlaneId | null = null,
 ): Promise<WorkspaceTerminal> {
   return invoke<WorkspaceTerminal>("open_workspace_terminal", {
     conversationId,
     rows,
     columns,
+    planeId,
   });
 }
-
 export function closeWorkspaceTerminal(terminalId: string): Promise<WorkspaceTerminal> {
   return invoke<WorkspaceTerminal>("close_workspace_terminal", { terminalId });
 }

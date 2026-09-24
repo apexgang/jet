@@ -19,7 +19,7 @@ async fn developer_mode_installation_is_explicit_audited_and_persistent() {
 	let dir = tempfile::tempdir().unwrap();
 	let home = dir.path().join(".jet");
 	let artifact = b"local third-party Craft";
-	let sha256 = format!("{:x}", Sha256::digest(artifact));
+	let sha256 = hex::encode(Sha256::digest(artifact));
 	let artifact_name = format!(
 		"jet-craft-demo-{}-{}",
 		std::env::consts::OS,
@@ -104,7 +104,7 @@ sha256 = "{sha256}"
 			.any(|entry| entry.decision == "craft.installation_approved")
 	);
 	let updated_artifact = b"updated third-party Craft";
-	let updated_digest = format!("{:x}", Sha256::digest(updated_artifact));
+	let updated_digest = hex::encode(Sha256::digest(updated_artifact));
 	tokio::fs::write(&artifact_path, updated_artifact)
 		.await
 		.unwrap();

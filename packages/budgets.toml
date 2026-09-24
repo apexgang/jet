@@ -11,9 +11,12 @@ regression_percent = 15
 
 # One entry per measurement `jet-daemon/tests/budgets.rs` writes. `max`
 # limits are milliseconds and a regression is an increase; `min` limits are
-# rates and a regression is a decrease.
+# rates and a regression is a decrease. A `tolerance`, in the measurement's
+# unit, is drift that never counts as a regression: a ready time of a few
+# tens of milliseconds moves by whole milliseconds of process scheduling
+# alone, which `regression_percent` of it would call a regression.
 [limits]
-daemon_ready_ms = { max = 150 }
+daemon_ready_ms = { max = 150, tolerance = 10 }
 commit_64_events_p99_ms = { max = 10 }
 commit_256_kib_p99_ms = { max = 10 }
 sidebar_page_p95_ms = { max = 10 }
@@ -22,9 +25,10 @@ reconnect_10000_events_ms = { max = 100 }
 ingestion_events_per_second = { min = 10000 }
 
 # Measured and recorded in the baseline but never gated: the open is inside
-# the daemon's ready time, and the second start of the same Plane shows the
-# ready time without the day's first Recovery snapshot. They explain a
-# `daemon_ready_ms` regression; they do not fail the check themselves.
+# the daemon's ready time, and the second start of the same Plane follows a
+# kill, so it shows the ready time with the integrity check an unclean
+# shutdown earns (ADR-0077). They explain a `daemon_ready_ms` regression;
+# they do not fail the check themselves.
 [informational]
 store_open_ms = {}
-daemon_ready_again_ms = {}
+daemon_ready_unclean_ms = {}

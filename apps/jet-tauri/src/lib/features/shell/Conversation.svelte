@@ -1,13 +1,37 @@
 <script lang="ts">
+  import { landedTarget, paneTitle, settingsTargetForError } from "$lib/features/settings/model";
+  import PlanesPanel from "$lib/features/planes/PlanesPanel.svelte";
+  import SchedulesDestination from "$lib/features/schedules/SchedulesDestination.svelte";
   import type { DesktopSession } from "./session.svelte";
+  import { currentPlatform, shortcutAria } from "./shortcuts";
+  import SidebarToggle from "./SidebarToggle.svelte";
   import SetupPanel from "$lib/features/setup/SetupPanel.svelte";
+  import PlaneHealthNotice from "$lib/features/system/PlaneHealthNotice.svelte";
+  import { retentionLine } from "$lib/features/system/model";
+  import MoveToTrashDialog from "$lib/features/trash/MoveToTrashDialog.svelte";
+  import TrashView from "$lib/features/trash/TrashView.svelte";
+  import { TOMBSTONE_TEXT, bannerText, refusalLinkLabel, restoreActionText } from "$lib/features/trash/model";
 
   let { session }: { session: DesktopSession } = $props();
   let composer = $state<HTMLTextAreaElement>();
+  let moveTrigger = $state<HTMLElement | null>(null);
+  const platform = currentPlatform();
+
+  /** The selected task's own Jet Trash state; never inferred from the list. */
+  const trashBanner = $derived(
+    session.trash.bannerFor(session.selectedPlaneId, session.selectedConversationId),
+  );
+
+  const retention = $derived(
+    session.selectedConversationId &&
+      session.conversationDetail?.conversation.id === session.selectedConversationId
+      ? retentionLine(session.conversationDetail.retention)
+      : null,
+  );
 
   const status = $derived.by(() => {
     if (session.conversationFreshness === "cached") return "Offline cache";
-    if (session.connectionState !== "online") return "Reconnecting";
+    if (!session.selectedPlaneOnline) return "Reconnecting";
     if (session.conversationFreshness === "loading" || session.conversationBusy) return "Loading";
     if (session.supervision?.execution?.activity === "waiting_for_approval") return "Approval needed";
     if (session.supervision?.execution?.activity === "waiting_for_user") return "Waiting for you";
@@ -22,6 +46,37 @@
     if (lifecycle === "canceled") return "Canceled";
     if (lifecycle === "lost") return "Recovery needed";
     return "Ready";
+  });
+
+  /** The approval the task is waiting on, if any: the newest requested one. */
+  const pendingApproval = $derived(
+    session.timeline.findLast((entry) => entry.approval?.state === "requested")?.approval ?? null,
+  );
+
+  /**
+   * What the status region announces. The timeline itself is not live, so
+   * streamed output never floods a screen reader; only status changes are
+   * spoken. "Loading" is a transient refresh and is not announced.
+   */
+  const liveStatus = $derived.by(() => {
+    if (status === "Loading") return null;
+    if (status === "Approval needed" && pendingApproval) return `Approval needed: ${pendingApproval.tool}`;
+    if (status === "Completed") return "Run completed";
+    return `Task status: ${status}`;
+  });
+  /** The task view is what the destinations below leave to the `{:else}` branch. */
+  const taskView = $derived(
+    session.sidebarSelection !== "project" &&
+      session.sidebarSelection !== "planes" &&
+      session.sidebarSelection !== "schedules" &&
+      session.sidebarSelection !== "trash",
+  );
+
+  // AppShell renders the region outside what the compact overlay makes
+  // inert, so status changes are still spoken while the overlay is open.
+  $effect(() => {
+    if (!taskView) session.taskStatus = "";
+    else if (liveStatus !== null) session.taskStatus = liveStatus;
   });
 
   $effect(() => {
@@ -47,24 +102,26 @@
 
 {#if session.sidebarSelection === "project"}
   <SetupPanel {session} />
+{:else if session.sidebarSelection === "planes"}
+  <PlanesPanel {session} />
+{:else if session.sidebarSelection === "schedules"}
+  <SchedulesDestination standalone {session} />
+{:else if session.sidebarSelection === "trash"}
+  <TrashView {session} />
 {:else}
   <section class="conversation" aria-label="Current task">
     <header class="conversation-header">
-      <button
-        class="icon-button sidebar-toggle"
-        aria-label={session.sidebarPresented ? "Hide sidebar" : "Show sidebar"}
-        title={session.sidebarPresented ? "Hide sidebar" : "Show sidebar"}
-        onclick={() => (session.sidebarPresented = !session.sidebarPresented)}
-      >
-        Sidebar
-      </button>
+      <SidebarToggle {session} />
       <div class="conversation-title">
         <h1>{session.selectedConversationTitle}</h1>
         <p>
           {session.selectedProjectName}
           <span aria-hidden="true">·</span>
-          Runs on {session.scenario.plane.name}
+          Runs on {session.runsOnLabel}
         </p>
+        {#if retention}
+          <p class="retention-line" title={retention}>{retention}</p>
+        {/if}
       </div>
       <span
         class:working={status === "Working"}
@@ -73,22 +130,99 @@
       >
         {status}
       </span>
+      {#if status === "Sign-in needed" || status === "Quota paused"}
+        {@const target = landedTarget("accounts", session.selectedPlaneId)}
+        {#if target}
+          <button class="text-button" onclick={() => void session.openSettings(target)}>Open Agents settings</button>
+        {/if}
+      {/if}
       <button
         class="icon-button"
+        disabled={!session.canMoveToTrash}
+        title={session.selectedConversationId && !session.selectedPlaneOnline
+          ? `Reconnect to ${session.selectedPlaneLabel} to move this task to Jet Trash`
+          : undefined}
+        onclick={(event) => {
+          moveTrigger = event.currentTarget;
+          void session.openMoveToTrash();
+        }}
+      >
+        Move to Trash…
+      </button>
+      <button
+        class="icon-button work-panel-toggle"
+        aria-expanded={session.workPanelPresented}
         aria-label={session.workPanelPresented ? "Hide work panel" : "Show work panel"}
+        aria-keyshortcuts={shortcutAria("toggle-work-panel", platform)}
         title={session.workPanelPresented ? "Hide work panel" : "Show work panel"}
-        onclick={() => (session.workPanelPresented = !session.workPanelPresented)}
+        onclick={(event) => session.toggleWorkPanel("toggle", event.currentTarget)}
       >
         Work panel
       </button>
     </header>
 
-    <div class="timeline" aria-live="polite" aria-busy={session.conversationBusy}>
+    <div class="timeline" aria-busy={session.conversationBusy}>
       <div class="timeline-inner">
-        {#if session.conversationFreshness === "cached"}
+        <PlaneHealthNotice
+          health={session.health}
+          planeId={session.selectedPlaneId}
+          planeLabel={session.selectedPlaneLabel}
+          openSettings={(target) => void session.openSettings(target)}
+        />
+        {#if trashBanner.kind === "trashed" && session.selectedConversationId}
+          {@const conversationId = session.selectedConversationId}
+          {@const action = session.trash.rowAction(session.selectedPlaneId, conversationId)}
+          {@const actionText = restoreActionText(action, session.selectedPlaneLabel)}
+          <section class="notice trash-banner" aria-label="In Jet Trash">
+            <p role="status">{bannerText(trashBanner.entry, Date.now())}</p>
+            {#if !trashBanner.entry.restorable}
+              <p>{TOMBSTONE_TEXT}</p>
+            {/if}
+            {#if actionText}
+              <p role={action.kind === "refused" || action.kind === "uncertain" ? "alert" : "status"}>{actionText}</p>
+            {/if}
+            <div class="trash-banner-actions">
+              {#if trashBanner.entry.restorable}
+                <button
+                  class="text-button"
+                  disabled={!session.selectedPlaneOnline || action.kind === "restoring" || action.kind === "restored"}
+                  onclick={() => void session.trash.restore(session.selectedPlaneId, conversationId)}
+                >{action.kind === "uncertain" ? "Try again" : "Restore"}</button>
+              {/if}
+              {#if action.kind === "refused"}
+                {@const target = settingsTargetForError(action.error)}
+                {#if target}
+                  <button class="text-button" onclick={() => void session.openSettings(target)}>
+                    {refusalLinkLabel(target.section, paneTitle(target.pane))}
+                  </button>
+                {/if}
+              {/if}
+              <button class="text-button" onclick={() => session.select("trash")}>Open Jet Trash</button>
+            </div>
+          </section>
+        {/if}
+        {#if session.selectionUnavailable}
+          <div class="notice" role="status">
+            <p>{session.selectedPlaneLabel} is unavailable. This task will load when it reconnects.</p>
+            {#if session.pairAgainTarget(session.selectedPlaneError)}
+              <button class="text-button" onclick={() => session.pairAgain(session.selectedPlaneId)}>Pair again</button>
+            {/if}
+            <button class="text-button" onclick={() => session.openPlanes({ planeId: session.selectedPlaneId, focus: "detail" })}>
+              Open Planes
+            </button>
+            {#if session.selectedPlaneError}
+              {@const target = settingsTargetForError(session.selectedPlaneError)}
+              {#if target}
+                <button class="text-button" onclick={() => void session.openSettings(target)}>
+                  Open {paneTitle(target.pane)} settings
+                </button>
+              {/if}
+            {/if}
+          </div>
+        {:else if session.conversationFreshness === "cached"}
           <div class="notice">
             <strong>Showing cached state</strong>
-            <p>Jet will refresh this Conversation after the local Plane reconnects.</p>
+            <p>Jet will refresh this Conversation after {session.selectedPlaneLabel} reconnects.</p>
           </div>
         {/if}
 
@@ -140,12 +274,12 @@
                   <span class="approval-spacer"></span>
                   <button
                     disabled={!session.canInterruptTurn || session.controlBusy !== null}
-                    onclick={() => session.requestRunControl("interrupt_turn")}
+                    onclick={(event) => session.requestRunControl("interrupt_turn", event.currentTarget)}
                   >Interrupt Turn…</button>
                   <button
                     class="danger-action"
                     disabled={!session.canStopRun || session.controlBusy !== null}
-                    onclick={() => session.requestRunControl("stop_run")}
+                    onclick={(event) => session.requestRunControl("stop_run", event.currentTarget)}
                   >Stop Run…</button>
                 </div>
               </article>
@@ -179,21 +313,22 @@
           ></textarea>
           <button
             class="send-button"
-            disabled={!session.canSubmitDraft || session.conversationBusy || session.connectionState !== "online"}
+            disabled={!session.canSubmitDraft || session.conversationBusy || !session.selectedPlaneOnline}
             onclick={() => session.submitDraft()}
           >
             {session.conversationBusy ? "Sending" : "Send"}
           </button>
         </div>
-        <div class="context-row" aria-label="Task context">
+        <div class="context-row" role="group" aria-label="Task context">
           <span><small>Project</small>{session.selectedProjectName}</span>
           <span><small>Agent</small>{session.selectedHarnessName}</span>
-          <span><small>Runs on</small>{session.scenario.plane.name}</span>
+          <span><small>Runs on</small>{session.runsOnLabel}</span>
           <span class:over-limit={session.draftBytes > session.maximumPromptBytes} class="draft-limit">
             <small>Message</small>{session.draftBytes.toLocaleString()} / {session.maximumPromptBytes.toLocaleString()} bytes
           </span>
         </div>
       </div>
     </footer>
+    <MoveToTrashDialog {session} returnFocus={moveTrigger} />
   </section>
 {/if}

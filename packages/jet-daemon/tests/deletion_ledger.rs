@@ -10,30 +10,9 @@ use jet_protocol::{
 	CredentialSource, DeletionLedgerStatus, RecoveryState, SnapshotReason,
 };
 use pretty_assertions::assert_eq;
-use std::{path::Path, time::Duration};
-use support::start_jetd;
+use std::time::Duration;
+use support::{start_jetd, wait_for_snapshot};
 use uuid::Uuid;
-
-/// The first change of the day earns a snapshot as soon as the daemon
-/// wakes for maintenance, so it is there within moments of the Command.
-async fn wait_for_daily_snapshot(home: &Path) -> String {
-	for _ in 0..500 {
-		if let Ok(entries) = std::fs::read_dir(home.join("snapshots")) {
-			let mut names: Vec<String> = entries
-				.map(|entry| entry.unwrap().file_name().into_string().unwrap())
-				.filter(|name| {
-					name.starts_with("plane-")
-						&& name.ends_with("-daily.sqlite3")
-				})
-				.collect();
-			if let Some(name) = names.pop() {
-				return name;
-			}
-		}
-		tokio::time::sleep(Duration::from_millis(20)).await;
-	}
-	panic!("no daily snapshot was taken");
-}
 
 /// An unbinding is in the ledger before it is acknowledged, the status
 /// says so, and a purge takes a post-deletion snapshot and removes the
@@ -55,7 +34,7 @@ async fn a_deletion_is_ledgered_and_a_purge_removes_the_snapshots_before_it() {
 			)
 			.await
 			.unwrap();
-		let before = wait_for_daily_snapshot(&home).await;
+		let before = wait_for_snapshot(&home, SnapshotReason::Daily).await;
 		client
 			.unbind_account(Uuid::now_v7(), binding.binding_id)
 			.await

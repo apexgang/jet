@@ -60,9 +60,27 @@ fn walk(
 			let mut file = crate::extensions::native_config::file(&path)?
 				.take(*remaining + 1);
 			let mut digest = Sha256::new();
-			let count = io::copy(&mut file, &mut digest)?;
-			*remaining =
-				remaining.checked_sub(count).ok_or_else(extension_error)?;
+			let mut buffer = [0; 8192];
+			let mut streamed = 0u64;
+			loop {
+				let read = match file.read(&mut buffer) {
+					Ok(read) => read,
+					Err(error)
+						if error.kind() == io::ErrorKind::Interrupted =>
+					{
+						continue;
+					}
+					Err(error) => return Err(error),
+				};
+				if read == 0 {
+					break;
+				}
+				streamed += read as u64;
+				digest.update(&buffer[..read]);
+			}
+			*remaining = remaining
+				.checked_sub(streamed)
+				.ok_or_else(extension_error)?;
 			files.push(ExtensionFile {
 				path: path
 					.strip_prefix(root)
@@ -70,7 +88,7 @@ fn walk(
 					.to_str()
 					.ok_or_else(extension_error)?
 					.into(),
-				sha256: format!("{:x}", digest.finalize()),
+				sha256: hex::encode(digest.finalize()),
 			});
 		} else {
 			return Err(extension_error());

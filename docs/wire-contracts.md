@@ -68,6 +68,12 @@ audit actor. Older peers cannot admit the Commands or Queries, do not see
 the Setting, and are refused an audit page that names the actor. See
 [Retention](retention.md).
 
+## Credential store negotiation
+
+Jet 1.44 adds the `verify_credential_store` Query, the create/read/delete
+round trip ADR-0076 requires before durable Pairing. Older peers cannot
+admit it. See [Credential store](credential-store.md).
+
 ## Usage negotiation
 
 Jet 1.43 adds the `usage_history` Query and its Plane-local series. Older

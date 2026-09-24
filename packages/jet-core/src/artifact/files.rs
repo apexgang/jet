@@ -116,7 +116,7 @@ pub(crate) fn verify(
 		hash.update(&buffer[..read]);
 		remaining -= read as u64;
 	}
-	if format!("{:x}", hash.finalize()) != expected.sha256
+	if hex::encode(hash.finalize()) != expected.sha256
 		|| file.metadata().map_err(io_error)?.len() != expected.size
 	{
 		return Err(corrupt());

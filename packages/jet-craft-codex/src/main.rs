@@ -14,11 +14,14 @@ const PROVIDER: jet_craft_sdk::UtilityProvider =
 #[derive(Parser)]
 #[command(version, about)]
 struct Arguments {
+	/// Serve the Run's native MCP bridge on standard input/output.
+	#[arg(long, conflicts_with_all = ["socket", "utility", "utility_model", "review", "review_model", "extensions_v1"])]
+	remote_tools_socket: Option<std::path::PathBuf>,
 	/// Execute one isolated Craft extension v1 operation.
 	#[arg(long, conflicts_with_all = ["socket", "utility", "utility_model", "review", "review_model"])]
 	extensions_v1: bool,
 	/// Private, owner-only endpoint provisioned by the host.
-	#[arg(long, required_unless_present_any = jet_craft_sdk::ONE_SHOT_FLAGS)]
+	#[arg(long, required_unless_present_any = ["utility", "utility_model", "review", "review_model", "extensions_v1", "remote_tools_socket"])]
 	socket: Option<std::path::PathBuf>,
 	/// Execute exactly one isolated Utility v1 request on stdin/stdout.
 	#[arg(long, conflicts_with_all = ["socket", "utility_model", "review", "review_model", "extensions_v1"])]
@@ -52,6 +55,13 @@ impl Arguments {
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
 	let arguments = Arguments::parse();
+	if let Some(path) = &arguments.remote_tools_socket {
+		return if execution::remote_tools::stdio(path).await.is_ok() {
+			std::process::ExitCode::SUCCESS
+		} else {
+			std::process::ExitCode::FAILURE
+		};
+	}
 	if arguments.extensions_v1 {
 		return if jet_craft_sdk::serve_extensions(extensions::handle)
 			.await

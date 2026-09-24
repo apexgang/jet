@@ -8,10 +8,25 @@ commands.
 ## CI
 
 Core checks retain Linux and macOS coverage, Clippy, migrations, the dependency
-envelope, unit tests, integration tests, and doctests. Contract checks retain
-Rust, TypeScript, and Swift coverage. Each workflow first compares the complete
-change against the PR base or the push's previous commit. Unknown history runs
-all checks. Unrelated edits produce skipped jobs rather than absent required checks.
+envelope, unit tests, integration tests, and doctests. The Tauri app job runs
+the app's `just check` and `just audit` on Linux: contract freshness, Svelte and
+TypeScript checks, frontend tests and build, and Rust formatting, Clippy and
+tests against the locked `Cargo.lock`. It then audits npm and RustSec
+advisories. Its accepted exceptions are reviewed in
+[dependency advisories](../../apps/jet-tauri/docs/dependency-advisories.md).
+Contract checks retain Rust, TypeScript, and Swift coverage. Each workflow first
+compares the complete change against the PR base or the push's previous commit.
+Unknown history runs all checks.
+
+The main ruleset requires the `ubuntu-latest` and `macos-latest` checks. The
+`required` gate in `core.yml` reports both once the core and Tauri jobs finish.
+It passes only if change selection succeeded, every selected job passed, and
+every other job was skipped. The jobs cannot report these names themselves: a
+job skipped by its `if` never expands its matrix, so an edit outside
+`packages/` would leave both checks absent and block the pull request. Edits
+that select neither job, such as documentation or the Swift app, pass the gate
+without running either suite. Only the CodeQL workflow compiles the Swift app,
+and it is not required.
 
 Test runners append `ci/cargo.toml` to their Cargo configuration. Workspace
 code compiles without optimization or LTO, with 256 codegen units. Dependencies
@@ -33,6 +48,23 @@ The baseline is [run 35009475464](https://github.com/apexgang/jet/actions/runs/3
 Linux test compilation took 9m 54s and macOS took 21m 01s. The whole macOS job
 took 30m 23s. Compare the first cold run and a later cached run separately;
 cache restore time and the test suite itself still contribute to elapsed time.
+
+## Code scanning
+
+`codeql.yml` is an advanced CodeQL setup covering GitHub Actions, JavaScript
+and TypeScript, Python, Rust, and Swift on every pull request, every push to
+`main`, and a weekly schedule. It replaces GitHub's default setup, which could
+not analyze Swift: the Xcode project uses file system synchronized folders, so
+the Swift autobuilder found no target with Swift sources, and code scanning
+rejects CodeQL uploads from a workflow while default setup stays enabled. The
+Swift job runs on macOS and compiles the GUI (`xcodebuild`, macOS SDK, signing
+disabled) and the shared wire models (`just contracts-test-swift`) under the
+CodeQL tracer. A test in `.github/tests/test_automation.py` fails when a Swift
+source appears outside the roots that build step compiles, so a new Swift
+target needs a matching build command before CodeQL sees it. Analyses keep
+the `/language:<name>` categories default setup used, so existing alerts carry
+over. Keep default setup disabled in the repository's code security settings;
+re-enabling it silently rejects this workflow's uploads.
 
 ## Releases
 

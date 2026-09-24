@@ -12,6 +12,7 @@ use jet_protocol::{
 	SettingValue, ToolAvailability, WireError,
 };
 use pretty_assertions::assert_eq;
+use serde_json::{Value, json};
 use support::{connect, start_jetd, start_jetd_without_external_tools};
 use uuid::Uuid;
 
@@ -136,6 +137,83 @@ async fn a_command_that_needs_a_missing_tool_is_refused() {
 			},
 			vec![ToolAvailability::Missing; 4],
 			true,
+		)
+	);
+}
+
+/// ADR-0076 requires one create/read/delete round trip before durable
+/// Pairing is enabled, so a client can ask the Plane for exactly that and
+/// read what the Plane saw. The store here is the test's own Secret
+/// Service; macOS would speak to the Keychain of the machine running the
+/// test.
+#[cfg(not(target_os = "macos"))]
+#[tokio::test]
+async fn a_client_can_have_the_credential_store_verified() {
+	use jet_protocol::{
+		CredentialStoreKind, CredentialStoreStatus, CredentialStoreVerification,
+	};
+	use support::start_jetd_with_credential_store;
+
+	let dir = tempfile::tempdir().unwrap();
+	let daemon =
+		start_jetd_with_credential_store(&dir.path().join(".jet")).await;
+	let client = connect(&daemon, Uuid::new_v4()).await;
+
+	let verified = client.verify_credential_store().await.unwrap();
+	let observed = client
+		.capabilities(CapabilityObservation::Fresh)
+		.await
+		.unwrap()
+		.credential_store;
+
+	assert_eq!(
+		(verified, observed),
+		(
+			CredentialStoreVerification::Verified {
+				kind: CredentialStoreKind::SecretService
+			},
+			CredentialStoreStatus::Available {
+				kind: CredentialStoreKind::SecretService
+			}
+		)
+	);
+}
+
+/// A client that negotiated a minor without the verification Query is
+/// answered with a stable refusal rather than a probe it did not ask for
+/// (ADR-0019).
+#[tokio::test]
+async fn a_client_below_the_verification_minor_is_refused() {
+	let dir = tempfile::tempdir().unwrap();
+	let daemon = start_jetd(&dir.path().join(".jet")).await;
+	let mut older = support::hello(Uuid::new_v4());
+	older.minor = jet_protocol::CREDENTIAL_STORE_VERIFICATION_MINOR - 1;
+	let (mut connection, _) = support::handshake_raw(&daemon, &older).await;
+
+	connection
+		.send(&json!({
+			"kind":"query",
+			"id":1,
+			"query":{"type":"verify_credential_store"}
+		}))
+		.await;
+	let refused: Value = connection.receive().await;
+
+	assert_eq!(
+		(
+			refused["error"]["code"].as_str(),
+			refused["error"]["message"].as_str()
+		),
+		(
+			Some("protocol.unsupported_minor"),
+			Some(
+				format!(
+					"the credential store verification Query needs protocol \
+					 minor {}",
+					jet_protocol::CREDENTIAL_STORE_VERIFICATION_MINOR
+				)
+				.as_str()
+			)
 		)
 	);
 }

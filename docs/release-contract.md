@@ -45,7 +45,7 @@ one the matrix publishes.
 
 | Budget | Gate | Baseline |
 | --- | --- | --- |
-| Store, startup, reconnect, ingestion (ADR-0022) | `just budget-test` on a reference host, alone: `jet-daemon/tests/budgets.rs` seeds 10,000 Conversations and one million journal Events and writes `target/budgets/<os>-<arch>.json`; `just budget-check` fails a measurement over its limit in `budgets.toml` or more than 15% worse than the accepted one. Reconnect paging is measured at the store seam, in the store's bounded pages, without protocol framing | `budget-baseline.json`, per operating system and architecture, through `just budget-accept --justification` |
+| Store, startup, reconnect, ingestion (ADR-0022) | `just budget-test` on a reference host, alone: `jet-daemon/tests/budgets.rs` seeds 10,000 Conversations and one million journal Events and writes `target/budgets/<os>-<arch>.json`; `just budget-check` fails a measurement over its limit in `budgets.toml` or more than 15% worse than the accepted one, beyond any `tolerance` the limit names for scheduling jitter. Reconnect paging is measured at the store seam, in the store's bounded pages, without protocol framing | `budget-baseline.json`, per operating system and architecture, through `just budget-accept --justification` |
 | Binary size (ADR-0054) | `just release-check --target <label>` after `just release-package`; the `Release core executables` workflow on every `v*` tag | `release-baseline.json`, drift over 5% fails |
 | Idle resources (ADR-0055) | `just resource-test` on a reference host, alone: 35 MiB daemon RSS, 15 MiB per idle Craft, 8 MiB per helper, 0.2% combined CPU over five minutes, zero idle storage growth | Recorded in [resource-budgets.md](resource-budgets.md) |
 | Disk pressure (ADR-0079) | `jet-core` unit tests in `disk_pressure.rs`, `artifact/mod.rs`, and `checkpoint/mod.rs`: pressure rejects new Runs without poisoning retries or reads, the disposable budget reserves and releases uploads, and the current diff stays readable when pressure prevents Artifact ingestion | Behavioral, no measurement |
@@ -59,29 +59,32 @@ baseline.
 
 ## Recorded measurements
 
-Linux x86_64, development profile, on 2026-09-15, with 10,000
+Linux x86_64, development profile, on 2026-09-21, with 10,000
 Conversations and 1,000,000 Events:
 
 | Measurement | Value | Limit |
 | --- | ---: | ---: |
-| `daemon_ready_ms`, first start of the day | 2,099 | 150 |
-| `daemon_ready_again_ms`, second start | 535 | informational |
-| `store_open_ms` | 364 | informational |
-| `commit_64_events_p99_ms` | 2.4 | 10 |
-| `commit_256_kib_p99_ms` | 3.2 | 10 |
-| `sidebar_page_p95_ms` | 2.4 | 10 |
-| `blocks_500_p95_ms` | 3.5 | 15 |
-| `reconnect_10000_events_ms` | 76 | 100 |
-| `ingestion_events_per_second` | 53,816 | 10,000 |
+| `daemon_ready_ms`, first start of the day after a clean shutdown | 17 | 150 |
+| `daemon_ready_unclean_ms`, second start after a kill | 422 | informational |
+| `store_open_ms` | 1.5 | informational |
+| `commit_64_events_p99_ms` | 1.7 | 10 |
+| `commit_256_kib_p99_ms` | 2.7 | 10 |
+| `sidebar_page_p95_ms` | 1.9 | 10 |
+| `blocks_500_p95_ms` | 2.8 | 15 |
+| `reconnect_10000_events_ms` | 62 | 100 |
+| `ingestion_events_per_second` | 56,760 | 10,000 |
 
-Every store gate passes with room. The daemon's ready time does not:
-`Store::open` runs `PRAGMA quick_check` over the whole file on every open,
-which is most of the second start, and the first start of a day also
-copies and verifies the Recovery snapshot ADR-0097 asks for before the
-ready line is printed. Issue #152 owns bringing the ready time under its
-budget. `just budget-accept` never records a
-measurement over its limit, so `daemon_ready_ms` has no accepted value and
-`just budget-check` keeps failing until the daemon is faster. macOS has not
+Every gate passes with room, and the Linux label is accepted. Before
+#152 the ready time measured 2,099 ms on the first start of a day and
+535 ms on the second, because `Store::open` ran `PRAGMA quick_check` over
+the whole file on every open, the first start of a day copied and
+verified the day's Recovery snapshot before the ready line, and the
+search index walked every operational Event behind the last semantic one
+on every start. Now the check follows an unclean shutdown alone, which
+the write-ahead log SQLite leaves behind marks and which
+`daemon_ready_unclean_ms` still shows; the day's snapshot and the
+destructive maintenance it precedes run behind the ready line
+(ADR-0097); and semantic Events have an index of their own. macOS has not
 been measured yet; run the same recipe on the macOS reference host and
 accept its label.
 
@@ -89,7 +92,6 @@ accept its label.
 
 - `jetd` measures 17.08 MiB stripped on Linux x86_64 against its 12 MiB
   budget, so `just release-check` fails ([core-distribution.md](core-distribution.md)).
-- `daemon_ready_ms` misses its 150 ms budget as recorded above (#152).
 - The Codex Craft leaves three capabilities the Harness exposes unused:
   native resume, Model selection, and a No-Visa tool bridge. ADR-0104 makes
   them release blockers, marked as Craft gaps in the matrix (#154).

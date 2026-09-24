@@ -1,9 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
 [[permission]]
 identifier = "allow-create-conversation"
-description = "Allows creating a Conversation in a registered Project."
+description = "Enables the create_conversation command without any pre-configured scope."
 commands.allow = ["create_conversation"]
 
 [[permission]]
 identifier = "deny-create-conversation"
-description = "Denies creating Conversations."
+description = "Denies the create_conversation command without any pre-configured scope."
 commands.deny = ["create_conversation"]

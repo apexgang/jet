@@ -71,7 +71,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> CraftConnection<R, W> {
 				.await
 				.map_err(|_| CraftError::Disconnected)?;
 			if &preface != b"jet-craft\n" {
-				return Err(CraftError::InvalidMessage);
+				return Err(CraftError::invalid_message(
+					"invalid Craft preface",
+				));
 			}
 			let mut reader = FrameReader::new(read);
 			let mut writer = FrameWriter::new(write);
@@ -149,14 +151,18 @@ impl<R: AsyncRead + Unpin> CraftReceiver<R> {
 				if self.ready.protocol.version.minor < 9
 					|| !matches!(max_children, None | Some(0))
 				{
-					return Err(CraftError::InvalidMessage);
+					return Err(CraftError::invalid_message(
+						"constrain_subagents requires Craft 1.9 and a supported child limit",
+					));
 				}
 				"subagents_limit"
 			}
 			CraftCommand::ConfigureRemoteTools { .. }
 			| CraftCommand::RemoteToolResult { .. } => {
 				if self.ready.protocol.version.minor < 6 {
-					return Err(CraftError::InvalidMessage);
+					return Err(CraftError::invalid_message(
+						"remote tools commands require Craft 1.6",
+					));
 				}
 				"remote_tools"
 			}
@@ -169,19 +175,25 @@ impl<R: AsyncRead + Unpin> CraftReceiver<R> {
 						.iter()
 						.any(|c| c == "runs")
 				{
-					return Err(CraftError::InvalidMessage);
+					return Err(CraftError::invalid_message(
+						"start/acknowledge requires Craft 1.1 and the runs capability",
+					));
 				}
 				"turns"
 			}
 			CraftCommand::Recover { .. } => {
 				if self.ready.protocol.version.minor < 2 {
-					return Err(CraftError::InvalidMessage);
+					return Err(CraftError::invalid_message(
+						"recover requires Craft 1.2",
+					));
 				}
 				"turns"
 			}
 			CraftCommand::Interrupt { .. } => {
 				if self.ready.protocol.version.minor < 4 {
-					return Err(CraftError::InvalidMessage);
+					return Err(CraftError::invalid_message(
+						"interrupt requires Craft 1.4",
+					));
 				}
 				"turns"
 			}
@@ -202,7 +214,9 @@ impl<R: AsyncRead + Unpin> CraftReceiver<R> {
 					.iter()
 					.any(|name| name == feature))
 		{
-			return Err(CraftError::InvalidMessage);
+			return Err(CraftError::invalid_message(
+				"command requires an enabled feature or negotiated actions capability",
+			));
 		}
 		Ok(command)
 	}
@@ -215,14 +229,20 @@ impl<W: AsyncWrite + Unpin> CraftSender<W> {
 	/// Rejects oversized or malformed output and closes on a slow/disconnected peer.
 	pub async fn send(&mut self, event: &CraftEvent) -> Result<(), CraftError> {
 		if self.minor < 10 && matches!(event, CraftEvent::Model { .. }) {
-			return Err(CraftError::InvalidMessage);
+			return Err(CraftError::invalid_message(
+				"model event requires Craft 1.10",
+			));
 		}
 
 		if self.minor < 7 && matches!(event, CraftEvent::Usage { .. }) {
-			return Err(CraftError::InvalidMessage);
+			return Err(CraftError::invalid_message(
+				"usage event requires Craft 1.7",
+			));
 		}
 		if self.minor < 6 && matches!(event, CraftEvent::RemoteTool { .. }) {
-			return Err(CraftError::InvalidMessage);
+			return Err(CraftError::invalid_message(
+				"remote_tool event requires Craft 1.6",
+			));
 		}
 		if self.minor < 3
 			&& matches!(
@@ -231,7 +251,9 @@ impl<W: AsyncWrite + Unpin> CraftSender<W> {
 					| CraftEvent::TurnEnded { .. }
 					| CraftEvent::FileChanged { .. }
 			) {
-			return Err(CraftError::InvalidMessage);
+			return Err(CraftError::invalid_message(
+				"boundary/file event requires Craft 1.3",
+			));
 		}
 		if self.minor < 5
 			&& matches!(
@@ -240,12 +262,16 @@ impl<W: AsyncWrite + Unpin> CraftSender<W> {
 					| CraftEvent::RunTitle { .. }
 					| CraftEvent::ProcessTitle { .. }
 			) {
-			return Err(CraftError::InvalidMessage);
+			return Err(CraftError::invalid_message(
+				"title event requires Craft 1.5",
+			));
 		}
 		if self.minor < 8
 			&& matches!(event, CraftEvent::ApprovalRequested { .. })
 		{
-			return Err(CraftError::InvalidMessage);
+			return Err(CraftError::invalid_message(
+				"approval_requested event requires Craft 1.8",
+			));
 		}
 		send(&mut self.writer, event).await
 	}
@@ -350,10 +376,14 @@ async fn receive<R: AsyncRead + Unpin, T: DeserializeOwned>(
 	// accept only connection control; no implicit binary streams are open.
 	match reader.read().await.map_err(|_| CraftError::Disconnected)? {
 		Frame::Control { stream_id, payload } if stream_id.is_connection() => {
-			decode_control(&payload).map_err(|_| CraftError::InvalidMessage)
+			decode_control(&payload).map_err(|error| {
+				CraftError::invalid_control_message::<T>("receive", &error)
+			})
 		}
 		Frame::Control { .. } | Frame::Data { .. } => {
-			Err(CraftError::InvalidMessage)
+			Err(CraftError::invalid_message(
+				"receive requires a connection control frame",
+			))
 		}
 	}
 }
@@ -362,11 +392,13 @@ async fn send<W: AsyncWrite + Unpin, T: Serialize>(
 	writer: &mut FrameWriter<W>,
 	message: &T,
 ) -> Result<(), CraftError> {
-	let payload =
-		encode_control(message).map_err(|_| CraftError::InvalidMessage)?;
+	let payload = encode_control(message).map_err(|error| {
+		CraftError::invalid_control_message::<T>("encode", &error)
+	})?;
 	// Also validate locally generated collections before writing to the peer.
-	decode_control::<serde::de::IgnoredAny>(&payload)
-		.map_err(|_| CraftError::InvalidMessage)?;
+	decode_control::<serde::de::IgnoredAny>(&payload).map_err(|error| {
+		CraftError::invalid_control_message::<T>("send", &error)
+	})?;
 	timeout(IO_TIMEOUT, writer.write(&Frame::control(payload)))
 		.await
 		.map_err(|_| CraftError::Timeout)?

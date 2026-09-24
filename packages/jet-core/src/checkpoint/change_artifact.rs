@@ -116,7 +116,7 @@ pub(crate) async fn publish(
 	}
 	file.sync_all().await.map_err(failed)?;
 	drop(file);
-	let sha256 = format!("{:x}", hash.finalize());
+	let sha256 = hex::encode(hash.finalize());
 	let target = sha256.clone();
 	let availability = if pressure {
 		// Preserve checkpoint metadata and Run recovery even when payload writes pause.

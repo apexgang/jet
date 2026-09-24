@@ -128,6 +128,53 @@ pub enum CredentialStoreStatus {
 	},
 }
 
+/// The result of proving that the platform credential store holds a
+/// Credential: one probe item created, read back, and deleted. Durable
+/// Pairing waits for this, and the probe never prompts: a store that would
+/// need the user is reported as locked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum CredentialStoreVerification {
+	/// The store created the probe item, returned it unchanged, and
+	/// deleted it.
+	Verified {
+		/// Which store did.
+		kind: CredentialStoreKind,
+	},
+	/// The store is locked, so it holds nothing until the user unlocks it
+	/// through the operating system. Nothing was created.
+	Locked {
+		/// Which store is locked.
+		kind: CredentialStoreKind,
+	},
+	/// The store could not be reached. Nothing was created.
+	Unavailable {
+		/// Which store was expected.
+		kind: CredentialStoreKind,
+	},
+	/// The store answered but did not complete `step`.
+	Failed {
+		/// Which store answered.
+		kind: CredentialStoreKind,
+		/// The step of the round trip it did not complete.
+		step: CredentialProbeStep,
+	},
+}
+
+/// One step of the create/read/delete round trip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialProbeStep {
+	/// Storing the probe item.
+	Create,
+	/// Reading it back unchanged.
+	Read,
+	/// Deleting it again.
+	Delete,
+}
+
 /// One Craft installed on the Plane and the Harnesses it adapts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

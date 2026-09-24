@@ -7,14 +7,18 @@ use jet_client::TerminalEvent;
 use jet_protocol::{
     ArtifactAvailability, ArtifactVerifier, ChangeArtifact, ChangeDiff, ChangeOrigin, DiffScope,
     FileRevision, FileTarget, PageCursor, ReviewComment, RunLifecycle, Sha256Digest, TerminalState,
-    WorkingTree, WorkspaceTerminal,
+    WorkingTree, WorkspaceTerminal, WORKSPACE_TERMINALS_MINOR,
 };
 use serde::Serialize;
 use tauri::{ipc::Channel, State};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use super::{errors::PublicError, JetBridge};
+use super::{
+    errors::PublicError,
+    planes::{PlaneBinding, PlaneId},
+    JetBridge,
+};
 
 const MAX_BOUND_FILES: usize = 4_096;
 const MAX_PAGE_TOKENS: usize = 128;
@@ -29,18 +33,33 @@ pub(crate) struct WorkPanelState {
     files: Mutex<HashMap<Uuid, BoundFile>>,
     pages: Mutex<HashMap<Uuid, BoundPage>>,
     artifacts: Mutex<HashMap<Uuid, ArtifactRead>>,
-    active: Mutex<HashMap<Uuid, ActiveWork>>,
+    active: Mutex<HashMap<(PlaneId, Uuid), ActiveWork>>,
     edits: Mutex<HashMap<Uuid, PendingEdit>>,
-    reviews: Mutex<HashMap<Uuid, PendingReview>>,
+    reviews: Mutex<HashMap<(PlaneId, Uuid), PendingReview>>,
     opens: Mutex<HashMap<OpenKey, Uuid>>,
     closes: Mutex<HashMap<Uuid, Uuid>>,
-    known_terminals: Mutex<HashMap<Uuid, Uuid>>,
+    /// Terminal → (Plane it was listed on, its Workspace).
+    known_terminals: Mutex<HashMap<Uuid, (PlaneBinding, Uuid)>>,
     terminal_sessions: Arc<Mutex<HashMap<Uuid, TerminalSession>>>,
     terminal_offsets: Arc<Mutex<HashMap<Uuid, u64>>>,
 }
 
+/// The webview-supplied fields of one Work panel load.
+pub(crate) struct WorkPanelRequest {
+    pub(crate) conversation_id: String,
+    pub(crate) run_id: String,
+    pub(crate) scope_kind: String,
+    pub(crate) turn: Option<u32>,
+    pub(crate) from_turn: Option<u32>,
+    pub(crate) to_turn: Option<u32>,
+}
+
+// Every binding below keeps the Plane it was issued from. Follow-up commands
+// that take only these opaque IDs execute through that binding and nowhere
+// else (`plane.review_moved` when the Plane changed).
 #[derive(Clone)]
 struct BoundFile {
+    binding: PlaneBinding,
     conversation_id: Uuid,
     run_id: Uuid,
     target: FileTarget,
@@ -49,6 +68,7 @@ struct BoundFile {
 }
 
 struct BoundPage {
+    binding: PlaneBinding,
     conversation_id: Uuid,
     run_id: Uuid,
     target: Option<FileTarget>,
@@ -56,6 +76,7 @@ struct BoundPage {
 }
 
 struct ArtifactRead {
+    binding: PlaneBinding,
     conversation_id: Uuid,
     run_id: Uuid,
     sha256: String,
@@ -66,16 +87,19 @@ struct ArtifactRead {
 
 #[derive(Clone, Copy)]
 struct ActiveWork {
+    binding: PlaneBinding,
     run_id: Uuid,
     workspace_id: Option<Uuid>,
 }
 
 struct PendingEdit {
+    binding: PlaneBinding,
     command_id: Uuid,
     content: String,
 }
 
 struct PendingReview {
+    binding: PlaneBinding,
     command_id: Uuid,
     file_id: Uuid,
     line: u32,
@@ -84,12 +108,14 @@ struct PendingReview {
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 struct OpenKey {
+    plane: PlaneId,
     conversation_id: Uuid,
     rows: u16,
     columns: u16,
 }
 
 struct TerminalSession {
+    binding: PlaneBinding,
     generation: Uuid,
     actions: mpsc::Sender<TerminalAction>,
 }
@@ -229,100 +255,111 @@ pub(crate) enum TerminalUpdate {
 
 pub(crate) async fn load_work_panel(
     bridge: State<'_, JetBridge>,
-    conversation_id: String,
-    run_id: String,
-    scope_kind: String,
-    turn: Option<u32>,
-    from_turn: Option<u32>,
-    to_turn: Option<u32>,
+    request: WorkPanelRequest,
+    plane_id: Option<String>,
 ) -> Result<WorkPanelSnapshot, PublicError> {
-    let conversation_id = parse_id(&conversation_id, "conversation.identifier_invalid")?;
-    let run_id = parse_id(&run_id, "run.identifier_invalid")?;
-    let client = bridge
-        .client
-        .connect()
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    let conversation = client
-        .conversation(conversation_id)
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    let run = conversation
-        .runs
-        .iter()
-        .find(|run| run.run_id == run_id)
-        .ok_or_else(|| {
-            PublicError::invalid_input(
-                "run.conversation_mismatch",
-                "That Run does not belong to the selected Conversation.",
+    let conversation_id = parse_id(&request.conversation_id, "conversation.identifier_invalid")?;
+    let run_id = parse_id(&request.run_id, "run.identifier_invalid")?;
+    let scope = requested_scope(
+        &request.scope_kind,
+        request.turn,
+        request.from_turn,
+        request.to_turn,
+    )?;
+    let (binding, client) = bridge.plane(plane_id.as_deref())?;
+    async {
+        let client = client
+            .connect()
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        let conversation = client
+            .conversation(conversation_id)
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        let run = conversation
+            .runs
+            .iter()
+            .find(|run| run.run_id == run_id)
+            .ok_or_else(|| {
+                PublicError::invalid_input(
+                    "run.conversation_mismatch",
+                    "That Run does not belong to the selected Conversation.",
+                )
+            })?;
+        if matches!(scope, DiffScope::Final)
+            && !matches!(
+                run.lifecycle,
+                RunLifecycle::Completed
+                    | RunLifecycle::Failed
+                    | RunLifecycle::Canceled
+                    | RunLifecycle::Lost
             )
-        })?;
-    let scope = requested_scope(&scope_kind, turn, from_turn, to_turn)?;
-    if matches!(scope, DiffScope::Final)
-        && !matches!(
-            run.lifecycle,
-            RunLifecycle::Completed
-                | RunLifecycle::Failed
-                | RunLifecycle::Canceled
-                | RunLifecycle::Lost
-        )
-    {
-        return Err(PublicError::invalid_input(
-            "changes.final_unavailable",
-            "Final changes are available after this Run ends.",
-        ));
-    }
-    let diff = client
-        .change_diff(run_id, scope)
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    let target = file_target(&conversation.conversation.working_tree, diff.workspace_id);
-    let workspace_id = diff.workspace_id;
-    bridge.work_panel.remember_active(
-        conversation_id,
-        ActiveWork {
+        {
+            return Err(PublicError::invalid_input(
+                "changes.final_unavailable",
+                "Final changes are available after this Run ends.",
+            ));
+        }
+        let diff = client
+            .change_diff(run_id, scope)
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        let target = file_target(&conversation.conversation.working_tree, diff.workspace_id);
+        let workspace_id = diff.workspace_id;
+        let active = ActiveWork {
+            binding,
             run_id,
             workspace_id,
-        },
-    )?;
-    let files = bridge
-        .work_panel
-        .bind_files(conversation_id, run_id, target, &diff)?;
-    let next_page = bridge
-        .work_panel
-        .bind_page(conversation_id, run_id, target, diff.next_page)?;
-    let artifact_read_id = bridge
-        .work_panel
-        .bind_artifact(conversation_id, run_id, &diff)?;
-    let (terminals, terminal_issue) = match workspace_id {
-        Some(workspace_id) => match client.workspace_terminals(workspace_id).await {
-            Ok((_, terminals)) => {
-                bridge
-                    .work_panel
-                    .remember_terminals(workspace_id, &terminals)?;
-                (terminals.into_iter().map(terminal_view).collect(), None)
-            }
-            Err(error) => (Vec::new(), Some(PublicError::from_client(&error))),
-        },
-        None => (Vec::new(), None),
-    };
-    Ok(WorkPanelSnapshot {
-        run_id: run_id.to_string(),
-        scope: scope_name(&diff.scope),
-        cursor: diff.cursor.to_string(),
-        total_files: diff.total_files,
-        files,
-        next_page,
-        patch: diff.patch.clone(),
-        patch_truncated: diff.patch_truncated,
-        artifact: artifact_view(&diff.artifact),
-        artifact_read_id,
-        content_complete: diff.before.content_complete && diff.after.content_complete,
-        latest_turn: diff.latest_turn,
-        workspace_id: workspace_id.map(|id| id.to_string()),
-        terminals,
-        terminal_issue,
-    })
+        };
+        bridge.work_panel.remember_active(conversation_id, active)?;
+        let files = bridge
+            .work_panel
+            .bind_files(active, conversation_id, target, &diff)?;
+        let next_page =
+            bridge
+                .work_panel
+                .bind_page(active, conversation_id, target, diff.next_page)?;
+        let artifact_read_id = bridge
+            .work_panel
+            .bind_artifact(active, conversation_id, &diff)?;
+        let (terminals, terminal_issue) = match workspace_id {
+            Some(workspace_id) => match client.workspace_terminals(workspace_id).await {
+                Ok((_, terminals)) => {
+                    bridge
+                        .planes
+                        .observe_success(binding.plane, WORKSPACE_TERMINALS_MINOR);
+                    bridge
+                        .work_panel
+                        .remember_terminals(binding, workspace_id, &terminals)?;
+                    (terminals.into_iter().map(terminal_view).collect(), None)
+                }
+                Err(error) => (
+                    Vec::new(),
+                    Some(bridge.settle(&binding, PublicError::from_client(&error))),
+                ),
+            },
+            None => (Vec::new(), None),
+        };
+        Ok(WorkPanelSnapshot {
+            run_id: run_id.to_string(),
+            scope: scope_name(&diff.scope),
+            cursor: diff.cursor.to_string(),
+            total_files: diff.total_files,
+            files,
+            next_page,
+            patch: diff.patch.clone(),
+            patch_truncated: diff.patch_truncated,
+            artifact: artifact_view(&diff.artifact),
+            artifact_read_id,
+            content_complete: diff.before.content_complete && diff.after.content_complete,
+            latest_turn: diff.latest_turn,
+            workspace_id: workspace_id.map(|id| id.to_string()),
+            terminals,
+            terminal_issue,
+        })
+    }
+    .await
+    .map_err(|error| bridge.settle(&binding, error))
 }
 
 pub(crate) async fn load_more_changes(
@@ -333,32 +370,39 @@ pub(crate) async fn load_more_changes(
     let page = bridge.work_panel.take_page(page_id)?;
     bridge
         .work_panel
-        .require_active(page.conversation_id, page.run_id)?;
-    let diff = bridge
-        .client
-        .connect()
-        .await
-        .map_err(|error| PublicError::from_client(&error))?
-        .next_change_diff(page.cursor)
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    if diff.run_id != page.run_id {
-        return Err(PublicError::invalid_input(
-            "changes.page_mismatch",
-            "The changed-file page no longer belongs to this Run.",
-        ));
-    }
-    let files =
-        bridge
+        .require_active(page.binding.plane, page.conversation_id, page.run_id)?;
+    let client = bridge.bound(&page.binding)?;
+    async {
+        let diff = client
+            .connect()
+            .await
+            .map_err(|error| PublicError::from_client(&error))?
+            .next_change_diff(page.cursor)
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        if diff.run_id != page.run_id {
+            return Err(PublicError::invalid_input(
+                "changes.page_mismatch",
+                "The changed-file page no longer belongs to this Run.",
+            ));
+        }
+        let active = bridge
             .work_panel
-            .bind_files(page.conversation_id, page.run_id, page.target, &diff)?;
-    let next_page = bridge.work_panel.bind_page(
-        page.conversation_id,
-        page.run_id,
-        page.target,
-        diff.next_page,
-    )?;
-    Ok(ChangePageView { files, next_page })
+            .active_work(page.binding.plane, page.conversation_id)?;
+        let files =
+            bridge
+                .work_panel
+                .bind_files(active, page.conversation_id, page.target, &diff)?;
+        let next_page = bridge.work_panel.bind_page(
+            active,
+            page.conversation_id,
+            page.target,
+            diff.next_page,
+        )?;
+        Ok(ChangePageView { files, next_page })
+    }
+    .await
+    .map_err(|error| bridge.settle(&page.binding, error))
 }
 
 pub(crate) async fn load_patch_chunk(
@@ -369,15 +413,16 @@ pub(crate) async fn load_patch_chunk(
     let mut read = bridge.work_panel.take_artifact(read_id)?;
     bridge
         .work_panel
-        .require_active(read.conversation_id, read.run_id)?;
+        .require_active(read.binding.plane, read.conversation_id, read.run_id)?;
+    let binding = read.binding;
     let chunk = bridge
-        .client
+        .bound(&binding)?
         .connect()
         .await
-        .map_err(|error| PublicError::from_client(&error))?
+        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?
         .change_artifact(read.sha256.clone(), read.next_offset)
         .await
-        .map_err(|error| PublicError::from_client(&error))?;
+        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
     if chunk.offset != read.next_offset
         || chunk.artifact.sha256 != read.sha256
         || chunk.artifact.size != read.size
@@ -432,13 +477,13 @@ pub(crate) async fn load_work_file(
     // ASVS 5.3.2 and 8.3.1: the webview selects an opaque binding created
     // from Plane data; it never supplies a native path or widens authority.
     let file = bridge
-        .client
+        .bound(&bound.binding)?
         .connect()
         .await
-        .map_err(|error| PublicError::from_client(&error))?
+        .map_err(|error| bridge.settle(&bound.binding, PublicError::from_client(&error)))?
         .editable_file(bound.target, &bound.path)
         .await
-        .map_err(|error| PublicError::from_client(&error))?;
+        .map_err(|error| bridge.settle(&bound.binding, PublicError::from_client(&error)))?;
     if file.target != bound.target || file.path != bound.path {
         return Err(PublicError::invalid_input(
             "file.response_mismatch",
@@ -478,15 +523,17 @@ pub(crate) async fn save_work_file(
     })?;
     // ASVS 2.2.1, 5.1.4, and 8.3.1: size, file identity, and optimistic
     // revision are all validated at this native boundary before mutation.
-    let command_id = bridge.work_panel.edit_command(file_id, &content)?;
-    let saved = bridge
-        .client
+    let client = bridge.bound(&bound.binding)?;
+    let command_id = bridge
+        .work_panel
+        .edit_command(file_id, bound.binding, &content)?;
+    let saved = client
         .connect()
         .await
-        .map_err(|error| PublicError::from_client(&error))?
+        .map_err(|error| bridge.settle(&bound.binding, PublicError::from_client(&error)))?
         .apply_user_edit(command_id, bound.target, &bound.path, revision, &content)
         .await
-        .map_err(|error| PublicError::from_client(&error))?;
+        .map_err(|error| bridge.settle(&bound.binding, PublicError::from_client(&error)))?;
     bridge.work_panel.finish_edit(file_id, saved.clone())?;
     Ok(FileSavedView {
         file_id: file_id.to_string(),
@@ -509,15 +556,19 @@ pub(crate) async fn submit_file_review(
         ));
     }
     let bound = bridge.work_panel.bound_file(file_id)?;
-    let command_id =
-        bridge
-            .work_panel
-            .review_command(bound.conversation_id, file_id, line, &comment)?;
-    let turn = bridge
-        .client
+    let binding = bound.binding;
+    let client = bridge.bound(&binding)?;
+    let command_id = bridge.work_panel.review_command(
+        binding,
+        bound.conversation_id,
+        file_id,
+        line,
+        &comment,
+    )?;
+    let turn = client
         .connect()
         .await
-        .map_err(|error| PublicError::from_client(&error))?
+        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?
         .submit_review(
             command_id,
             bound.conversation_id,
@@ -528,8 +579,10 @@ pub(crate) async fn submit_file_review(
             }],
         )
         .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    bridge.work_panel.finish_review(bound.conversation_id)?;
+        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
+    bridge
+        .work_panel
+        .finish_review(binding.plane, bound.conversation_id)?;
     Ok(ReviewSubmittedView {
         turn_id: turn.turn_id.to_string(),
         state: turn_state(turn.state),
@@ -542,10 +595,18 @@ pub(crate) async fn open_workspace_terminal(
     conversation_id: String,
     rows: u16,
     columns: u16,
+    plane_id: Option<String>,
 ) -> Result<TerminalView, PublicError> {
     let conversation_id = parse_id(&conversation_id, "conversation.identifier_invalid")?;
     validate_dimensions(rows, columns)?;
-    let active = bridge.work_panel.active_work(conversation_id)?;
+    let (requested, _) = bridge.plane(plane_id.as_deref())?;
+    let active = bridge
+        .work_panel
+        .active_work(requested.plane, conversation_id)
+        .map_err(|error| bridge.settle(&requested, error))?;
+    // The Workspace comes from the Work panel load, so the terminal opens on
+    // the Plane that load was bound to.
+    let binding = active.binding;
     let workspace_id = active.workspace_id.ok_or_else(|| {
         PublicError::invalid_input(
             "terminal.workspace_required",
@@ -553,26 +614,27 @@ pub(crate) async fn open_workspace_terminal(
         )
     })?;
     let key = OpenKey {
+        plane: binding.plane,
         conversation_id,
         rows,
         columns,
     };
+    let client = bridge.bound(&binding)?;
     let command_id = bridge.work_panel.open_command(key)?;
-    let terminal = bridge
-        .client
+    let terminal = client
         .connect()
         .await
-        .map_err(|error| PublicError::from_client(&error))?
+        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?
         .open_terminal(command_id, workspace_id, rows, columns)
         .await
-        .map_err(|error| PublicError::from_client(&error))?;
+        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
     if terminal.workspace_id != workspace_id {
         return Err(PublicError::invalid_input(
             "terminal.workspace_mismatch",
             "The Plane returned a terminal from another Workspace.",
         ));
     }
-    bridge.work_panel.finish_open(key, &terminal)?;
+    bridge.work_panel.finish_open(key, binding, &terminal)?;
     Ok(terminal_view(terminal))
 }
 
@@ -583,24 +645,26 @@ pub(crate) async fn close_workspace_terminal(
     let terminal_id = parse_id(&terminal_id, "terminal.identifier_invalid")?;
     // ASVS 5.3.2 and 8.3.1: only a terminal returned for the active managed
     // Workspace can be attached; the webview cannot launch a host process.
-    bridge.work_panel.require_terminal(terminal_id)?;
+    let binding = bridge.work_panel.require_terminal(terminal_id)?;
+    let client = bridge.bound(&binding)?;
     bridge.work_panel.detach_terminal(terminal_id)?;
     let command_id = bridge.work_panel.close_command(terminal_id)?;
-    let terminal = bridge
-        .client
+    let terminal = client
         .connect()
         .await
-        .map_err(|error| PublicError::from_client(&error))?
+        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?
         .close_terminal(command_id, terminal_id)
         .await
-        .map_err(|error| PublicError::from_client(&error))?;
+        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
     if terminal.terminal_id != terminal_id {
         return Err(PublicError::invalid_input(
             "terminal.response_mismatch",
             "The Plane returned a different terminal than Jet closed.",
         ));
     }
-    bridge.work_panel.finish_close(terminal_id, &terminal)?;
+    bridge
+        .work_panel
+        .finish_close(terminal_id, binding, &terminal)?;
     Ok(terminal_view(terminal))
 }
 
@@ -610,18 +674,19 @@ pub(crate) async fn attach_workspace_terminal(
     on_update: Channel<TerminalUpdate>,
 ) -> Result<(), PublicError> {
     let terminal_id = parse_id(&terminal_id, "terminal.identifier_invalid")?;
-    bridge.work_panel.require_terminal(terminal_id)?;
+    let binding = bridge.work_panel.require_terminal(terminal_id)?;
     let after = bridge.work_panel.terminal_offset(terminal_id)?;
     let client = bridge
-        .client
+        .bound(&binding)?
         .connect()
         .await
-        .map_err(|error| PublicError::from_client(&error))?;
+        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
     let (actions, mut receive_actions) = mpsc::channel(32);
     let generation = Uuid::new_v4();
     bridge
         .work_panel
-        .start_terminal_session(terminal_id, generation, actions)?;
+        .start_terminal_session(terminal_id, binding, generation, actions)?;
+    let plane = binding.plane.to_string();
     let sessions = Arc::clone(&bridge.work_panel.terminal_sessions);
     let offsets = Arc::clone(&bridge.work_panel.terminal_offsets);
     tokio::spawn(async move {
@@ -700,7 +765,7 @@ pub(crate) async fn attach_workspace_terminal(
         if let Err(error) = result {
             let _ = on_update.send(TerminalUpdate::Failed {
                 terminal_id: terminal_id.to_string(),
-                error: PublicError::from_client(&error),
+                error: PublicError::from_client(&error).with_plane(plane),
             });
         }
         if let Ok(mut sessions) = sessions.lock() {
@@ -727,6 +792,8 @@ pub(crate) async fn send_terminal_input(
             "Terminal input must contain 1 to 65,536 UTF-8 bytes.",
         ));
     }
+    let binding = bridge.work_panel.session_binding(terminal_id)?;
+    bridge.bound(&binding)?;
     bridge
         .work_panel
         .terminal_action(terminal_id, TerminalAction::Input(input.into_bytes()))
@@ -741,6 +808,8 @@ pub(crate) async fn resize_workspace_terminal(
 ) -> Result<(), PublicError> {
     let terminal_id = parse_id(&terminal_id, "terminal.identifier_invalid")?;
     validate_dimensions(rows, columns)?;
+    let binding = bridge.work_panel.session_binding(terminal_id)?;
+    bridge.bound(&binding)?;
     bridge
         .work_panel
         .terminal_action(terminal_id, TerminalAction::Resize { rows, columns })
@@ -763,13 +832,15 @@ impl WorkPanelState {
     ) -> Result<(), PublicError> {
         let mut values = self.active.lock().map_err(|_| PublicError::internal())?;
         values.clear();
-        values.insert(conversation_id, active);
+        values.insert((active.binding.plane, conversation_id), active);
         drop(values);
         self.files
             .lock()
             .map_err(|_| PublicError::internal())?
             .retain(|_, file| {
-                file.conversation_id == conversation_id && file.run_id == active.run_id
+                file.binding == active.binding
+                    && file.conversation_id == conversation_id
+                    && file.run_id == active.run_id
             });
         self.pages
             .lock()
@@ -782,11 +853,15 @@ impl WorkPanelState {
         Ok(())
     }
 
-    fn active_work(&self, conversation_id: Uuid) -> Result<ActiveWork, PublicError> {
+    fn active_work(
+        &self,
+        plane: PlaneId,
+        conversation_id: Uuid,
+    ) -> Result<ActiveWork, PublicError> {
         self.active
             .lock()
             .map_err(|_| PublicError::internal())?
-            .get(&conversation_id)
+            .get(&(plane, conversation_id))
             .copied()
             .ok_or_else(|| {
                 PublicError::invalid_input(
@@ -796,8 +871,13 @@ impl WorkPanelState {
             })
     }
 
-    fn require_active(&self, conversation_id: Uuid, run_id: Uuid) -> Result<(), PublicError> {
-        if self.active_work(conversation_id)?.run_id == run_id {
+    fn require_active(
+        &self,
+        plane: PlaneId,
+        conversation_id: Uuid,
+        run_id: Uuid,
+    ) -> Result<(), PublicError> {
+        if self.active_work(plane, conversation_id)?.run_id == run_id {
             Ok(())
         } else {
             Err(PublicError::invalid_input(
@@ -809,18 +889,22 @@ impl WorkPanelState {
 
     fn bind_files(
         &self,
+        active: ActiveWork,
         conversation_id: Uuid,
-        run_id: Uuid,
         target: Option<FileTarget>,
         diff: &ChangeDiff,
     ) -> Result<Vec<ChangedFileView>, PublicError> {
+        let run_id = active.run_id;
         let mut bindings = self.files.lock().map_err(|_| PublicError::internal())?;
         let mut views = Vec::with_capacity(diff.files.len());
         for file in &diff.files {
             let id = bindings
                 .iter()
                 .find_map(|(id, existing)| {
-                    (existing.run_id == run_id && existing.path == file.path).then_some(*id)
+                    (existing.binding == active.binding
+                        && existing.run_id == run_id
+                        && existing.path == file.path)
+                        .then_some(*id)
                 })
                 .unwrap_or_else(Uuid::new_v4);
             if let Some(target) = target {
@@ -833,6 +917,7 @@ impl WorkPanelState {
                 bindings.insert(
                     id,
                     BoundFile {
+                        binding: active.binding,
                         conversation_id,
                         run_id,
                         target,
@@ -858,8 +943,8 @@ impl WorkPanelState {
 
     fn bind_page(
         &self,
+        active: ActiveWork,
         conversation_id: Uuid,
-        run_id: Uuid,
         target: Option<FileTarget>,
         cursor: Option<PageCursor>,
     ) -> Result<Option<String>, PublicError> {
@@ -874,8 +959,9 @@ impl WorkPanelState {
         pages.insert(
             id,
             BoundPage {
+                binding: active.binding,
                 conversation_id,
-                run_id,
+                run_id: active.run_id,
                 target,
                 cursor,
             },
@@ -898,8 +984,8 @@ impl WorkPanelState {
 
     fn bind_artifact(
         &self,
+        active: ActiveWork,
         conversation_id: Uuid,
-        run_id: Uuid,
         diff: &ChangeDiff,
     ) -> Result<Option<String>, PublicError> {
         if !diff.patch_truncated || diff.artifact.availability != ArtifactAvailability::Stored {
@@ -925,8 +1011,9 @@ impl WorkPanelState {
             .insert(
                 id,
                 ArtifactRead {
+                    binding: active.binding,
                     conversation_id,
-                    run_id,
+                    run_id: active.run_id,
                     sha256: diff.artifact.sha256.clone(),
                     size: diff.artifact.size,
                     next_offset: diff.patch.len() as u64,
@@ -970,7 +1057,7 @@ impl WorkPanelState {
                     "Reload Changes before opening this file.",
                 )
             })?;
-        self.require_active(file.conversation_id, file.run_id)?;
+        self.require_active(file.binding.plane, file.conversation_id, file.run_id)?;
         Ok(file)
     }
 
@@ -986,10 +1073,15 @@ impl WorkPanelState {
         Ok(())
     }
 
-    fn edit_command(&self, file_id: Uuid, content: &str) -> Result<Uuid, PublicError> {
+    fn edit_command(
+        &self,
+        file_id: Uuid,
+        binding: PlaneBinding,
+        content: &str,
+    ) -> Result<Uuid, PublicError> {
         let mut edits = self.edits.lock().map_err(|_| PublicError::internal())?;
         if let Some(pending) = edits.get(&file_id) {
-            if pending.content == content {
+            if pending.binding == binding && pending.content == content {
                 return Ok(pending.command_id);
             }
             return Err(PublicError::invalid_input(
@@ -1004,6 +1096,7 @@ impl WorkPanelState {
         edits.insert(
             file_id,
             PendingEdit {
+                binding,
                 command_id,
                 content: content.into(),
             },
@@ -1021,14 +1114,19 @@ impl WorkPanelState {
 
     fn review_command(
         &self,
+        binding: PlaneBinding,
         conversation_id: Uuid,
         file_id: Uuid,
         line: u32,
         comment: &str,
     ) -> Result<Uuid, PublicError> {
         let mut reviews = self.reviews.lock().map_err(|_| PublicError::internal())?;
-        if let Some(pending) = reviews.get(&conversation_id) {
-            if pending.file_id == file_id && pending.line == line && pending.comment == comment {
+        if let Some(pending) = reviews.get(&(binding.plane, conversation_id)) {
+            if pending.binding == binding
+                && pending.file_id == file_id
+                && pending.line == line
+                && pending.comment == comment
+            {
                 return Ok(pending.command_id);
             }
             return Err(PublicError::invalid_input(
@@ -1041,8 +1139,9 @@ impl WorkPanelState {
         }
         let command_id = Uuid::new_v4();
         reviews.insert(
-            conversation_id,
+            (binding.plane, conversation_id),
             PendingReview {
+                binding,
                 command_id,
                 file_id,
                 line,
@@ -1052,11 +1151,11 @@ impl WorkPanelState {
         Ok(command_id)
     }
 
-    fn finish_review(&self, conversation_id: Uuid) -> Result<(), PublicError> {
+    fn finish_review(&self, plane: PlaneId, conversation_id: Uuid) -> Result<(), PublicError> {
         self.reviews
             .lock()
             .map_err(|_| PublicError::internal())?
-            .remove(&conversation_id);
+            .remove(&(plane, conversation_id));
         Ok(())
     }
 
@@ -1064,7 +1163,12 @@ impl WorkPanelState {
         command_id(&self.opens, key)
     }
 
-    fn finish_open(&self, key: OpenKey, terminal: &WorkspaceTerminal) -> Result<(), PublicError> {
+    fn finish_open(
+        &self,
+        key: OpenKey,
+        binding: PlaneBinding,
+        terminal: &WorkspaceTerminal,
+    ) -> Result<(), PublicError> {
         self.opens
             .lock()
             .map_err(|_| PublicError::internal())?
@@ -1072,7 +1176,7 @@ impl WorkPanelState {
         self.known_terminals
             .lock()
             .map_err(|_| PublicError::internal())?
-            .insert(terminal.terminal_id, terminal.workspace_id);
+            .insert(terminal.terminal_id, (binding, terminal.workspace_id));
         Ok(())
     }
 
@@ -1083,6 +1187,7 @@ impl WorkPanelState {
     fn finish_close(
         &self,
         terminal_id: Uuid,
+        binding: PlaneBinding,
         terminal: &WorkspaceTerminal,
     ) -> Result<(), PublicError> {
         self.closes
@@ -1092,12 +1197,13 @@ impl WorkPanelState {
         self.known_terminals
             .lock()
             .map_err(|_| PublicError::internal())?
-            .insert(terminal.terminal_id, terminal.workspace_id);
+            .insert(terminal.terminal_id, (binding, terminal.workspace_id));
         Ok(())
     }
 
     fn remember_terminals(
         &self,
+        binding: PlaneBinding,
         workspace_id: Uuid,
         terminals: &[WorkspaceTerminal],
     ) -> Result<(), PublicError> {
@@ -1113,32 +1219,37 @@ impl WorkPanelState {
                     "The Plane returned a terminal from another Workspace.",
                 ));
             }
-            known.insert(terminal.terminal_id, terminal.workspace_id);
+            known.insert(terminal.terminal_id, (binding, terminal.workspace_id));
         }
         Ok(())
     }
 
-    fn require_terminal(&self, terminal_id: Uuid) -> Result<(), PublicError> {
-        let workspace_id = self
+    /// The Plane binding of a terminal listed for the active managed
+    /// Workspace, or `terminal.selection_expired`.
+    fn require_terminal(&self, terminal_id: Uuid) -> Result<PlaneBinding, PublicError> {
+        let known = self
             .known_terminals
             .lock()
             .map_err(|_| PublicError::internal())?
             .get(&terminal_id)
             .copied();
-        let active_workspace = self
+        let active = self
             .active
             .lock()
             .map_err(|_| PublicError::internal())?
             .values()
             .next()
-            .and_then(|active| active.workspace_id);
-        if workspace_id.is_some() && workspace_id == active_workspace {
-            Ok(())
-        } else {
-            Err(PublicError::invalid_input(
+            .copied();
+        match (known, active) {
+            (Some((binding, workspace_id)), Some(active))
+                if binding == active.binding && Some(workspace_id) == active.workspace_id =>
+            {
+                Ok(binding)
+            }
+            _ => Err(PublicError::invalid_input(
                 "terminal.selection_expired",
                 "Reload the Work panel before using this terminal.",
-            ))
+            )),
         }
     }
 
@@ -1154,6 +1265,7 @@ impl WorkPanelState {
     fn start_terminal_session(
         &self,
         terminal_id: Uuid,
+        binding: PlaneBinding,
         generation: Uuid,
         actions: mpsc::Sender<TerminalAction>,
     ) -> Result<(), PublicError> {
@@ -1170,11 +1282,26 @@ impl WorkPanelState {
         sessions.insert(
             terminal_id,
             TerminalSession {
+                binding,
                 generation,
                 actions,
             },
         );
         Ok(())
+    }
+
+    fn session_binding(&self, terminal_id: Uuid) -> Result<PlaneBinding, PublicError> {
+        self.terminal_sessions
+            .lock()
+            .map_err(|_| PublicError::internal())?
+            .get(&terminal_id)
+            .map(|session| session.binding)
+            .ok_or_else(|| {
+                PublicError::invalid_input(
+                    "terminal.not_attached",
+                    "Attach this terminal before sending input.",
+                )
+            })
     }
 
     async fn terminal_action(
@@ -1373,8 +1500,14 @@ fn too_many_pending() -> PublicError {
 #[cfg(test)]
 mod tests {
     use super::{all_zero, requested_scope, validate_dimensions, ActiveWork, WorkPanelState};
+    use crate::jet::planes::{PlaneBinding, PlaneId};
     use jet_protocol::DiffScope;
     use uuid::Uuid;
+
+    const LOCAL: PlaneBinding = PlaneBinding {
+        plane: PlaneId::Local,
+        identity: None,
+    };
 
     #[test]
     fn work_panel_boundary_rejects_unsafe_terminal_values() {
@@ -1400,22 +1533,78 @@ mod tests {
             .remember_active(
                 conversation,
                 ActiveWork {
+                    binding: LOCAL,
                     run_id: first_run,
                     workspace_id: None,
                 },
             )
             .unwrap();
-        assert!(state.require_active(conversation, first_run).is_ok());
+        assert!(state
+            .require_active(PlaneId::Local, conversation, first_run)
+            .is_ok());
         state
             .remember_active(
                 conversation,
                 ActiveWork {
+                    binding: LOCAL,
                     run_id: second_run,
                     workspace_id: None,
                 },
             )
             .unwrap();
-        assert!(state.require_active(conversation, first_run).is_err());
-        assert!(state.require_active(conversation, second_run).is_ok());
+        assert!(state
+            .require_active(PlaneId::Local, conversation, first_run)
+            .is_err());
+        assert!(state
+            .require_active(PlaneId::Local, conversation, second_run)
+            .is_ok());
+    }
+
+    #[test]
+    fn work_authority_is_bound_to_the_plane_it_was_loaded_from() {
+        let state = WorkPanelState::default();
+        let conversation = Uuid::from_u128(4);
+        let run = Uuid::from_u128(5);
+        let remote = PlaneBinding {
+            plane: PlaneId::Remote(Uuid::from_u128(2)),
+            identity: Some(Uuid::from_u128(20)),
+        };
+        state
+            .remember_active(
+                conversation,
+                ActiveWork {
+                    binding: remote,
+                    run_id: run,
+                    workspace_id: None,
+                },
+            )
+            .unwrap();
+        // The same Conversation and Run UUIDs on this computer are not the
+        // loaded Work panel.
+        assert!(state
+            .require_active(PlaneId::Local, conversation, run)
+            .is_err());
+        assert!(state
+            .require_active(remote.plane, conversation, run)
+            .is_ok());
+
+        // A pending edit keeps its Plane: the same body on another Plane is a
+        // different request, never a retry of this one.
+        let file = Uuid::from_u128(6);
+        let first = state.edit_command(file, remote, "text").unwrap();
+        assert_eq!(state.edit_command(file, remote, "text").unwrap(), first);
+        assert_eq!(
+            state.edit_command(file, LOCAL, "text").unwrap_err().code,
+            "user_edit.retry_mismatch"
+        );
+        let review = state
+            .review_command(remote, conversation, file, 1, "note")
+            .unwrap();
+        assert_ne!(
+            state
+                .review_command(LOCAL, conversation, file, 1, "note")
+                .unwrap(),
+            review
+        );
     }
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-pairing-gate"
+description = "Enables the set_pairing_gate command without any pre-configured scope."
+commands.allow = ["set_pairing_gate"]
+
+[[permission]]
+identifier = "deny-set-pairing-gate"
+description = "Denies the set_pairing_gate command without any pre-configured scope."
+commands.deny = ["set_pairing_gate"]

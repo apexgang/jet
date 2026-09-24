@@ -1,0 +1,14 @@
+# RustSec advisory policy for the Tauri shell, checked by `just audit` in CI.
+# Each ignored advisory is reviewed in ../docs/dependency-advisories.md. Remove
+# an entry as soon as an upgrade path exists.
+
+[advisories]
+version = 2
+# Vulnerabilities always fail. Unsound code fails wherever it appears in the
+# graph; unmaintained crates fail only when this crate depends on them directly.
+unsound = "all"
+unmaintained = "workspace"
+yanked = "deny"
+ignore = [
+    { id = "RUSTSEC-2024-0429", reason = "glib 0.18 VariantStrIter is unsound and fixed only in glib 0.20. Every Tauri 2 release pins gtk 0.18 and webkit2gtk 2.0.2, which require glib 0.18, and nothing in this graph calls Variant::array_iter_str or VariantStrIter. See docs/dependency-advisories.md." },
+]

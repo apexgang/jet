@@ -26,10 +26,15 @@ uuid.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 jet-craft-sdk.workspace = true
+hex.workspace = true
 sha2.workspace = true
 ed25519-dalek.workspace = true
 pretty_assertions.workspace = true
 tempfile.workspace = true
+
+# Tests serve a Secret Service of their own for the Plane under test.
+[target.'cfg(not(target_os = "macos"))'.dev-dependencies]
+zbus = { workspace = true, features = ["p2p"] }
 
 [lints]
 workspace = true

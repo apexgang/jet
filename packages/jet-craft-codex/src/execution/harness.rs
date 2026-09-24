@@ -27,20 +27,42 @@ pub(crate) fn initialize() -> String {
 	}))
 }
 
-pub(crate) fn start_thread() -> String {
+pub(crate) fn start_thread(
+	resume: Option<&jet_protocol::CraftResume>,
+	config: Option<Value>,
+) -> String {
+	let (method, mut params) = match resume {
+		Some(resume) => {
+			let mut params = json!({"threadId": resume.native_conversation});
+			if let Some(model) = &resume.model {
+				params["model"] = json!(model);
+			}
+			("thread/resume", params)
+		}
+		None => ("thread/start", json!({})),
+	};
+	if let Some(config) = config {
+		params["config"] = config;
+	}
 	format!(
 		"{}{}",
-		line(json!({"method": "initialized"})),
-		line(json!({"id": 1, "method": "thread/start", "params": {}})),
+		line(json!({"method":"initialized"})),
+		line(json!({"id":1,"method":method,"params":params}))
 	)
 }
 
-pub(crate) fn start_turn(request: u64, thread: &str, text: &str) -> String {
-	line(json!({
-		"id": request,
-		"method": "turn/start",
-		"params": {"threadId": thread, "input": [{"type": "text", "text": text}]},
-	}))
+pub(crate) fn start_turn(
+	request: u64,
+	thread: &str,
+	text: &str,
+	model: Option<&str>,
+) -> String {
+	let mut params =
+		json!({"threadId":thread,"input":[{"type":"text","text":text}]});
+	if let Some(model) = model {
+		params["model"] = json!(model);
+	}
+	line(json!({"id":request,"method":"turn/start","params":params}))
 }
 
 pub(crate) fn interrupt(request: u64, thread: &str, turn: &str) -> String {

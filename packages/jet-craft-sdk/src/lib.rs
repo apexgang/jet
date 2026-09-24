@@ -5,6 +5,7 @@
 //! against. See `docs/craft-protocol.md` for the language-neutral contract.
 
 mod connection;
+mod diagnostic;
 mod specification;
 
 pub use connection::{CraftConnection, CraftError, CraftReceiver, CraftSender};

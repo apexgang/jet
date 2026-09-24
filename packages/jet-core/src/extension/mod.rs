@@ -314,10 +314,9 @@ pub(crate) mod tests {
 			std::path::Path::new("/bin/cat").canonicalize().unwrap();
 		let pin = PinnedCraft {
 			id: "demo".into(),
-			sha256: format!(
-				"{:x}",
-				Sha256::digest(std::fs::read(&executable).unwrap())
-			),
+			sha256: hex::encode(Sha256::digest(
+				std::fs::read(&executable).unwrap(),
+			)),
 			executable,
 			adapter_state: "test".into(),
 		};

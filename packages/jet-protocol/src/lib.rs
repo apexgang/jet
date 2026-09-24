@@ -98,9 +98,10 @@ pub use audit::{
 	AuditTarget, SecurityAudit, SecurityState,
 };
 pub use capability::{
-	CapabilityObservation, CapabilitySnapshot, CredentialStoreKind,
-	CredentialStoreStatus, DegradedCondition, ExternalTool, ExternalToolStatus,
-	InstalledCraft, Platform, ToolAvailability,
+	CapabilityObservation, CapabilitySnapshot, CredentialProbeStep,
+	CredentialStoreKind, CredentialStoreStatus, CredentialStoreVerification,
+	DegradedCondition, ExternalTool, ExternalToolStatus, InstalledCraft,
+	Platform, ToolAvailability,
 };
 pub use conversation::event::{Actor, Event, EventOrigin};
 pub use conversation::{
@@ -139,9 +140,10 @@ pub use transport::frame::{
 pub use transport::handshake::{
 	ACCOUNT_BINDINGS_MINOR, AUTODELETE_MINOR, CHANGE_CHECKPOINTS_MINOR,
 	CODEC_JSON_V1, CONVERSATION_FORKS_MINOR, CRAFT_INSTALLATION_MINOR,
-	ClientHello, DELETION_LEDGER_MINOR, EXECUTION_CONTROL_MINOR,
-	EXECUTION_RECOVERY_MINOR, FENCED_READS_MINOR, IMPORTED_CONVERSATIONS_MINOR,
-	MANAGED_RUNS_MINOR, MULTIPLEXED_STREAMS_MINOR, NAMES_MINOR, PAIRING_MINOR,
+	CREDENTIAL_STORE_VERIFICATION_MINOR, ClientHello, DELETION_LEDGER_MINOR,
+	EXECUTION_CONTROL_MINOR, EXECUTION_RECOVERY_MINOR, FENCED_READS_MINOR,
+	IMPORTED_CONVERSATIONS_MINOR, MANAGED_RUNS_MINOR,
+	MULTIPLEXED_STREAMS_MINOR, NAMES_MINOR, PAIRING_MINOR,
 	PLANE_TRANSFER_MINOR, PREFACE, PROJECT_REMOVAL_MINOR, PROJECTS_MINOR,
 	PROTOCOL_MINOR, PROTOCOL_VERSION, REMOTE_AUTH_MINOR, RETENTION_MINOR,
 	SCHEDULES_MINOR, SEARCH_MINOR, SECURITY_AUDIT_MINOR,

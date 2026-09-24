@@ -101,7 +101,7 @@ pub use schedule::{
 mod status;
 mod store_recovery;
 pub use store_recovery::{
-	DeletedIdentityKind, DeletionLedger, DeletionRecord,
+	DeepCheckOutcome, DeletedIdentityKind, DeletionLedger, DeletionRecord,
 	IntegrityFailureReason, RecoveryMode, RecoverySnapshot, RecoveryStatus,
 	RestoredStore, SnapshotPurge, SnapshotReason,
 };
@@ -148,9 +148,10 @@ pub use audit::{
 	AuditSequence, AuditTarget,
 };
 pub use capability::{
-	CapabilityObservation, CapabilitySnapshot, CraftId, CredentialStoreKind,
-	CredentialStoreStatus, DegradedCondition, ExternalTool, ExternalToolStatus,
-	HarnessId, InstalledCraft, Platform, ToolAvailability,
+	CapabilityObservation, CapabilitySnapshot, CraftId, CredentialProbeStep,
+	CredentialStoreKind, CredentialStoreStatus, CredentialStoreVerification,
+	DegradedCondition, ExternalTool, ExternalToolStatus, HarnessId,
+	InstalledCraft, Platform, ToolAvailability,
 };
 pub use command::{Command, CommandEnvelope, CommandId, CommandOutcome};
 pub use conversation::import::{
@@ -330,9 +331,13 @@ pub struct Core {
 	/// begins a new audit epoch (ADR-0105).
 	security: tokio::sync::RwLock<SecurityState>,
 	/// Whether the store serves or answers reads only. Decided when the
-	/// store is opened, and changed only by restoring a snapshot
-	/// (ADR-0077). Workers wait on it before touching the store.
+	/// store is opened, changed by restoring a snapshot, and by the deep
+	/// check that finds damage while the Plane is idle (ADR-0077).
+	/// Workers wait on it before touching the store.
 	recovery: tokio::sync::watch::Sender<store_recovery::RecoveryMode>,
+	/// How many Commands are being executed right now: the deep check of
+	/// the store begins and goes on only while none is (ADR-0077).
+	commands_in_flight: std::sync::atomic::AtomicUsize,
 	started_at: SystemTime,
 	/// Serializes every Effect decision, so two workers never perform the
 	/// same durable request at once (ADR-0067).
