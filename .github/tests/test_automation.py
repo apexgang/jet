@@ -16,6 +16,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import changes
+import package_swift_app
 import release_assets
 import required
 
@@ -255,29 +256,31 @@ class ReleaseAssets(unittest.TestCase):
         self.generate()
         published = ({p.name: p for p in self.dist.glob('*.tar.gz')}
                      | {p.name: p for p in self.desktop.iterdir()}
-                     | {name: self.dist / name for name in ('jetd.rb', 'jet-app.rb', 'latest.json')})
+                     | {name: self.dist / name for name in ('jet.rb', 'jet-app.rb', 'latest.json')})
         sums = dict(reversed(line.split('  ')) for line in (self.dist / 'SHA256SUMS').read_text().splitlines())
         self.assertEqual(set(sums), set(published))
         self.assertEqual(len(sums), 6 + 12 + 3)
         for name, path in published.items():
             with self.subTest(asset=name):
                 self.assertEqual(sums[name], hashlib.sha256(path.read_bytes()).hexdigest())
-        formula = (self.dist / 'jetd.rb').read_text()
+        formula = (self.dist / 'jet.rb').read_text()
         cask = (self.dist / 'jet-app.rb').read_text()
         self.assertNotRegex(formula + cask, '@[A-Z_0-9]+@')
         self.assertNotIn(release_assets.UNBUILT, formula + cask)
         base = f'https://github.com/apexgang/jet/releases/download/{self.tag}'
-        for label in release_assets.DESKTOP:
+        # One formula for macOS and Linux, from this release's payloads.
+        for label in release_assets.LABELS:
             name = f'jet-core-{self.VERSION}-{label}.tar.gz'
             self.assertIn(f'url "{base}/{name}"', formula)
-            self.assertIn(sums[name], formula)
-        # The macOS payload is published, but `jetd` is the Linux formula.
-        self.assertNotIn('universal-apple-darwin', formula)
+            self.assertIn(f'sha256 "{sums[name]}"', formula)
+        self.assertNotIn('depends_on :macos', formula)
+        # The Swift app's release parses this line from the tap's formula.
+        self.assertEqual(re.findall(r'(?m)^  version "([0-9]+\.[0-9]+\.[0-9]+)"$', formula), [self.VERSION])
         self.assertIn(f'url "{base}/Jet_#{{version}}_#{{arch}}.AppImage"', cask)
         self.assertIn(f'arm64_linux:  "{sums[f"Jet_{self.VERSION}_aarch64.AppImage"]}"', cask)
         self.assertIn(f'x86_64_linux: "{sums[f"Jet_{self.VERSION}_amd64.AppImage"]}"', cask)
         self.assertIn(f'version "{self.VERSION}"', cask)
-        for rendered in ('jetd.rb', 'jet-app.rb'):
+        for rendered in ('jet.rb', 'jet-app.rb'):
             subprocess.run(['ruby', '-c', str(self.dist / rendered)], check=True, capture_output=True)
 
     def test_updater_manifest_carries_signature_contents_not_paths(self):
@@ -315,7 +318,7 @@ class ReleaseAssets(unittest.TestCase):
                 damage()
                 with self.assertRaisesRegex(ValueError, message):
                     self.generate()
-                self.assertFalse((self.dist / 'jetd.rb').exists())
+                self.assertFalse((self.dist / 'jet.rb').exists())
                 self.assertFalse((self.dist / 'latest.json').exists())
 
     def test_manifest_must_match_tag(self):
@@ -387,7 +390,7 @@ class ReleaseAssets(unittest.TestCase):
         self.write('.github/packaging/homebrew/jet-app.rb.in', 'cask "jet-app" do\n  version "@APP_VERSION@"\nend\n')
         with self.assertRaisesRegex(ValueError, 'APP_VERSION'):
             self.generate()
-        self.assertFalse((self.dist / 'jetd.rb').exists())
+        self.assertFalse((self.dist / 'jet.rb').exists())
 
     def test_invalid_and_mismatched_tags_are_rejected(self):
         for tag in ['main', 'v9999.0.0', 'v1.2.3/../../bad', 'v1.2.3";system("bad")']:
@@ -412,13 +415,15 @@ class ReleaseAssets(unittest.TestCase):
             pass
         self.bundles(label, desktop=desktop, signed=False)
         release_assets.render_test_tap(self.tag, dist, desktop, tap, 'file:///tmp/jet-assets/')
-        self.assertEqual(sorted(p.name for p in tap.iterdir()), ['jet-app.rb', 'jetd.rb'])
-        formula = (tap / 'jetd.rb').read_text()
+        self.assertEqual(sorted(p.name for p in tap.iterdir()), ['jet-app.rb', 'jet.rb'])
+        formula = (tap / 'jet.rb').read_text()
         cask = (tap / 'jet-app.rb').read_text()
         payload = dist / f'jet-core-{self.VERSION}-{label}.tar.gz'
         self.assertIn(f'url "file:///tmp/jet-assets/{payload.name}"', formula)
         self.assertIn(hashlib.sha256(payload.read_bytes()).hexdigest(), formula)
-        self.assertEqual(formula.count(release_assets.UNBUILT), 1)
+        # The macOS and Linux ARM payloads were not built here.
+        self.assertEqual(formula.count(release_assets.UNBUILT), 2)
+        self.assertIn(f'url "file:///tmp/jet-assets/jet-core-{self.VERSION}-universal-apple-darwin.tar.gz"', formula)
         appimage = desktop / f'Jet_{self.VERSION}_amd64.AppImage'
         self.assertIn(f'x86_64_linux: "{hashlib.sha256(appimage.read_bytes()).hexdigest()}"', cask)
         self.assertIn(f'arm64_linux:  "{release_assets.UNBUILT}"', cask)
@@ -430,44 +435,66 @@ class ReleaseAssets(unittest.TestCase):
 
 
 class HomebrewTemplates(unittest.TestCase):
-    """What the tap must keep true across edits to the templates (spec: formula jetd, cask jet-app)."""
+    """What the tap must keep true across edits to the templates (spec decision 2:
+    formula `apexgang/tap/jet` for macOS and Linux, Linux cask `apexgang/tap/jet-app`)."""
     TEMPLATES = ROOT / '.github/packaging/homebrew'
+    # publish-swift-cask.sh reads the core version with this pattern.
+    SWIFT_VERSION_LINE = r'(?m)^  version "([0-9]+\.[0-9]+\.[0-9]+)"$'
 
     def template(self, name):
         return (self.TEMPLATES / name).read_text()
 
-    def test_formula_is_jetd_and_guards_an_orphaned_service(self):
-        formula = self.template('jetd.rb.in')
-        self.assertIn('class Jetd < Formula', formula)
+    def test_formula_is_jet_for_both_platforms_and_guards_an_orphaned_service(self):
+        formula = self.template('jet.rb.in')
+        self.assertTrue(formula.startswith('class Jet < Formula\n'))
+        self.assertEqual(release_assets.FORMULAE, ('jet.rb.in', 'jet-app.rb.in'))
+        self.assertEqual(sorted(p.name for p in self.TEMPLATES.iterdir()), ['jet-app.rb.in', 'jet.rb.in'])
+        for label in release_assets.LABELS:
+            self.assertIn(f'url "@URL@/jet-core-@VERSION@-{label}.tar.gz"', formula)
+        self.assertNotRegex(formula, r'depends_on :(linux|macos)')
         self.assertIn('name macos: "com.apexgang.jet.homebrew", linux: "jet-homebrew"', formula)
         self.assertIn('ConditionFileIsExecutable=#{opt_bin}/jetd', formula)
-        self.assertIn('brew services start apexgang/tap/jetd', formula)
-        # `brew audit` rejects a `version` the release URL already carries.
-        self.assertNotRegex(formula, r'(?m)^\s*version ')
+        self.assertIn('brew services start apexgang/tap/jet\n', formula)
+        # The Swift app's release parses it, so it stays although `brew audit`
+        # calls it redundant; homebrew-check.yml skips only that audit.
+        self.assertIn('\n  version "@VERSION@"\n', formula)
 
-    def test_each_platform_gets_one_daemon_formula(self):
-        # The Swift app's release publishes the macOS daemon as `apexgang/tap/jet`
-        # from `jet.rb.in`, under the same binary and service names, so `jetd`
-        # must never also install on macOS.
-        formula = self.template('jetd.rb.in')
-        self.assertIn('\n  depends_on :linux\n', formula)
-        self.assertNotIn('on_macos', formula)
-        self.assertNotIn('universal-apple-darwin', formula)
-        self.assertEqual(release_assets.FORMULAE, ('jetd.rb.in', 'jet-app.rb.in'))
+    def test_the_swift_release_renders_its_macos_formula_from_it(self):
+        # package_swift_app.py (main's Swift release) cuts `  on_linux do` up to
+        # `  def install`, adds `depends_on :macos` after the license, and fills
+        # VERSION, URL and MACOS_SHA256. The tap's `jet` cask depends on it.
+        formula = package_swift_app.mac_formula('0.2.0', 'b' * 64, '1.0.42')
+        self.assertNotRegex(formula, '@[A-Z_0-9]+@')
+        self.assertEqual(re.findall(self.SWIFT_VERSION_LINE, formula), ['0.2.0'])
+        self.assertIn('  license "Apache-2.0"\n  depends_on :macos\n', formula)
+        self.assertIn('  on_macos do\n    url "https://github.com/apexgang/jet/releases/download/swift-v1.0.42/'
+                      'jet-core-0.2.0-universal-apple-darwin.tar.gz"\n    sha256 "' + 'b' * 64 + '"\n  end\n\n'
+                      '  def install\n', formula)
+        self.assertNotIn('linux-gnu', formula)
+        self.assertIn('ConditionFileIsExecutable=#{opt_bin}/jetd', formula)
+        self.assertIn('brew services start apexgang/tap/jet\n', formula)
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / 'jet.rb').write_text(formula)
+            subprocess.run(['ruby', '-c', str(Path(directory) / 'jet.rb')], check=True, capture_output=True)
 
-    def test_the_swift_release_keeps_its_macos_formula_template(self):
-        # package_swift_app.py renders `jet.rb.in` into the tap's `Formula/jet.rb`:
-        # it cuts `  on_linux do` up to `  def install`, adds `depends_on :macos`
-        # after the license, and fills VERSION, URL and MACOS_SHA256. The tap's
-        # `jet` cask depends on that formula.
-        template = self.template('jet.rb.in')
-        self.assertTrue(template.startswith('class Jet < Formula\n'))
-        self.assertIn('  version "@VERSION@"\n', template)
-        self.assertIn('  license "Apache-2.0"\n', template)
-        linux = template.index('  on_linux do\n')
-        macos = template[:linux] + template[template.index('  def install\n', linux):]
-        self.assertEqual(set(re.findall(r'@([A-Z_0-9]+)@', macos)), {'VERSION', 'URL', 'MACOS_SHA256'})
-        self.assertIn('  on_macos do\n    url "@URL@/jet-core-@VERSION@-universal-apple-darwin.tar.gz"\n', macos)
+    def test_no_jetd_formula_is_named_anywhere(self):
+        # Spec decision 2: the daemon formula is `jet`. Homebrew/core's
+        # unrelated go-jet also owns `opt/jet`, which is why the app requires
+        # `opt/jet/bin/jetd`, never a `jetd` keg.
+        needles = [f'{prefix}jetd{suffix}' for prefix, suffix in
+                   (('tap/', ''), ('Formula/', ''), ('opt/', '/'), ('', '.rb'))]
+        tracked = subprocess.run(['git', 'ls-files', '-z'], cwd=ROOT, capture_output=True, check=True).stdout
+        found = []
+        for name in tracked.decode().split('\0'):
+            path = ROOT / name
+            if not name or name.startswith('.agents/') or not path.is_file():
+                continue
+            try:
+                text = path.read_text()
+            except UnicodeDecodeError:
+                continue
+            found += [f'{name}: {needle}' for needle in needles if needle in text]
+        self.assertEqual(found, [])
 
     def test_every_template_a_script_names_exists(self):
         named = set()
@@ -480,10 +507,22 @@ class HomebrewTemplates(unittest.TestCase):
     def test_cask_is_linux_only_and_depends_on_the_tap_formula(self):
         cask = self.template('jet-app.rb.in')
         self.assertIn('cask "jet-app" do', cask)
-        self.assertIn('depends_on formula: "apexgang/tap/jetd"', cask)
+        self.assertIn('depends_on formula: "apexgang/tap/jet"\n', cask)
         self.assertIn('depends_on :linux', cask)
         self.assertIn('app_image "Jet_#{version}_#{arch}.AppImage", target: "Jet.AppImage"', cask)
-        self.assertIn('brew install apexgang/tap/jetd apexgang/tap/jet-app', cask)
+        self.assertIn('brew services start apexgang/tap/jet\n', cask)
+        self.assertIn('brew install apexgang/tap/jet apexgang/tap/jet-app\n', cask)
+        # Livecheck reads the latest release, never a page of the release list
+        # that Swift app releases, one per push under apps/jet, can fill. That
+        # release is a core one because Swift releases never take Latest and
+        # each stable core release does.
+        self.assertIn('  livecheck do\n    url :url\n    strategy :github_latest\n  end\n', cask)
+        swift = (ROOT / '.github/workflows/swift-release.yml').read_text()
+        self.assertEqual(swift.count('gh release create '), 1)
+        self.assertEqual(swift.count('--latest=false'), 1)
+        self.assertNotIn('gh release edit', swift)
+        publish = (ROOT / '.github/scripts/publish-release.sh').read_text()
+        self.assertIn('\n  gh release edit "$tag" --draft=false --latest\n', publish)
         # Homebrew upgrades the app and the daemon together (ADR-0026), and
         # legacy flight blocks are deprecated.
         for absent in ('auto_updates', 'postflight', 'preflight', '.jet"', '/.jet/'):
@@ -654,7 +693,7 @@ class ReleaseWorkflows(unittest.TestCase):
         # Publication takes only the signed artifacts.
         self.assertIn('          pattern: jet-desktop-linux-*\n', (self.WORKFLOWS / 'release.yml').read_text())
 
-    def run_step(self, workflow, name, env):
+    def run_step(self, workflow, name, env, cwd=None):
         """Runs a step's script with the shell GitHub gives it on Linux."""
         text = (self.WORKFLOWS / workflow).read_text()
         lines = text.splitlines()
@@ -671,10 +710,10 @@ class ReleaseWorkflows(unittest.TestCase):
         named = any(line.strip() == 'shell: bash' for line in lines[start:run]) or \
             re.search(r'(?m)^defaults:\n  run:\n(?:    .*\n)*?    shell: bash$', text)
         shell = ['bash', '--noprofile', '--norc', '-eo', 'pipefail'] if named else ['bash', '-e']
-        return subprocess.run([*shell, '-c', '\n'.join(body)], env=env, capture_output=True, text=True)
+        return subprocess.run([*shell, '-c', '\n'.join(body)], env=env, cwd=cwd, capture_output=True, text=True)
 
     def test_homebrew_install_trusts_the_tap_only_after_a_trust_refusal(self):
-        documented = 'install apexgang/tap/jetd apexgang/tap/jet-app'
+        documented = 'install apexgang/tap/jet apexgang/tap/jet-app'
         for refusal in ('', 'Error: Refusing to load cask jet-app from untrusted tap apexgang/tap.',
                         'Error: Download failed'):
             with self.subTest(refusal=refusal), tempfile.TemporaryDirectory() as directory:
@@ -712,6 +751,33 @@ esac
                     # Any other failure fails the step before brew is asked again.
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual(history, [documented])
+
+    def test_homebrew_check_installs_next_to_the_swift_apps_cask(self):
+        # In the real tap `apexgang/tap/jet` names the formula and the Swift
+        # app's cask, and `brew install` and `brew uninstall` load both. The
+        # local tap gets that cask after the style check, which must not lint a
+        # file the Swift release owns, and before anything installs.
+        add = "Add the Swift app's cask as the real tap has it"
+        names = [step.split('\n', 1)[0] for step in self.steps(self.jobs('homebrew-check.yml')[1]['install'])]
+        order = [names.index(f'name: {name}') for name in
+                 ('Check style and audit', add, 'Install with the documented command')]
+        self.assertEqual(order, sorted(order))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tap = root / 'Taps/apexgang/homebrew-tap'
+            (tap / 'Casks').mkdir(parents=True)
+            (root / 'bin').mkdir()
+            brew = root / 'bin/brew'
+            brew.write_text(f'#!/usr/bin/env bash\n[[ "$*" == "--repository apexgang/tap" ]] && echo {shlex.quote(str(tap))}\n')
+            brew.chmod(0o755)
+            env = {'PATH': f'{root / "bin"}:{Path(sys.executable).parent}:/usr/bin:/bin'}
+            result = self.run_step('homebrew-check.yml', add, env, cwd=ROOT)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(sorted(p.name for p in (tap / 'Casks').iterdir()), ['jet.rb'])
+            cask = (tap / 'Casks/jet.rb').read_text()
+            self.assertEqual(cask, package_swift_app.cask('1.0.1', '0' * 64))
+            self.assertIn('depends_on formula: "apexgang/tap/jet"\n', cask)
+            subprocess.run(['ruby', '-c', str(tap / 'Casks/jet.rb')], check=True, capture_output=True)
 
 
 class ReleaseRecipes(unittest.TestCase):

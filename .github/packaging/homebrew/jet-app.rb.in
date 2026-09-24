@@ -1,5 +1,7 @@
-# The Linux desktop client. `app_image` needs Homebrew 6.0 or later, and the
-# target must stay version-less so Homebrew 7 can move it into place.
+# The Linux desktop client. The macOS app is the Swift release's `jet` cask
+# (Casks/jet.rb), which depends on the same formula. `app_image` needs
+# Homebrew 6.0 or later, and the target must stay version-less so Homebrew 7
+# can move it into place.
 cask "jet-app" do
   arch arm: "aarch64", intel: "amd64"
 
@@ -12,13 +14,15 @@ cask "jet-app" do
   desc "Desktop client for coding agent conversations"
   homepage "https://github.com/apexgang/jet"
 
+  # Swift app releases are created with --latest=false and each stable core
+  # release is published with --latest, so the latest release is a core one.
   livecheck do
     url :url
     strategy :github_latest
   end
 
   # Never the bare name: homebrew/core's unrelated `jet` would satisfy it.
-  depends_on formula: "apexgang/tap/jetd"
+  depends_on formula: "apexgang/tap/jet"
   depends_on :linux
 
   app_image "Jet_#{version}_#{arch}.AppImage", target: "Jet.AppImage"
@@ -36,16 +40,16 @@ cask "jet-app" do
   ]
 
   caveats <<~EOS
-    Jet's daemon comes from the apexgang/tap/jetd formula. The app starts it
+    Jet's daemon comes from the apexgang/tap/jet formula. The app starts it
     with `brew services` when it is stopped; to start it yourself:
-      brew services start apexgang/tap/jetd
+      brew services start apexgang/tap/jet
     Stop it before uninstalling, and uninstall with --zap to also remove the
     launcher entry and the app's settings:
-      brew services stop apexgang/tap/jetd
+      brew services stop apexgang/tap/jet
       brew uninstall --zap --cask apexgang/tap/jet-app
 
     Homebrew trusts only the tap items named on the command line, so install
     the daemon and the app together, or run `brew trust apexgang/tap` first:
-      brew install apexgang/tap/jetd apexgang/tap/jet-app
+      brew install apexgang/tap/jet apexgang/tap/jet-app
   EOS
 end

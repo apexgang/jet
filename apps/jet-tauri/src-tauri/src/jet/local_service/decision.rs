@@ -59,7 +59,7 @@ pub(crate) struct Facts {
     pub(crate) autostart_file: bool,
     /// `systemctl --user show-environment` succeeded.
     pub(crate) systemd: bool,
-    /// A trusted Homebrew `jetd` keg and `brew`.
+    /// A trusted Homebrew `jet` keg's `jetd` and `brew`.
     pub(crate) keg: bool,
     /// The payload this build carries.
     pub(crate) bundled: Option<Release>,

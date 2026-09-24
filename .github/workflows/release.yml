@@ -191,7 +191,10 @@ jobs:
           ref: main
           path: homebrew-tap
           token: ${{ steps.app.outputs.token }}
-      - name: Update the daemon formula and the desktop cask
+      # Writes Formula/jet.rb and Casks/jet-app.rb. The Swift app's release
+      # writes Casks/jet.rb, and Formula/jet.rb for a newer core, under its own
+      # concurrency group; the script rebases onto its commits before pushing.
+      - name: Update the core formula and the Linux desktop cask
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/update-homebrew.sh

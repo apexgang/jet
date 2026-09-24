@@ -36,10 +36,11 @@ DESKTOP = {
 }
 APP = 'apps/jet-tauri'
 TEMPLATES = '.github/packaging/homebrew'
-# The tagged release renders these. `jet.rb.in` beside them is the macOS core
-# formula of the Swift app's release (`apexgang/tap/jet`), which renders it
-# itself.
-FORMULAE = ('jetd.rb.in', 'jet-app.rb.in')
+# The tagged release renders these: the core formula `apexgang/tap/jet` for
+# macOS and Linux, and the Linux desktop cask `apexgang/tap/jet-app`. The Swift
+# app's release also renders `jet.rb.in`, as a macOS-only formula
+# (`package_swift_app.py`), so its structure and `version` line must stay.
+FORMULAE = ('jet.rb.in', 'jet-app.rb.in')
 # A test tap renders labels it has no payload for with this checksum; nothing downloads them.
 UNBUILT = '0' * 64
 
@@ -216,7 +217,7 @@ def release_date(value):
 
 
 def render(values):
-    """Render the release's Homebrew templates: `jetd.rb.in` to `jetd.rb`, `jet-app.rb.in` to `jet-app.rb`."""
+    """Render the release's Homebrew templates: `jet.rb.in` to `jet.rb`, `jet-app.rb.in` to `jet-app.rb`."""
     rendered = {}
     for name in FORMULAE:
         template = ROOT / TEMPLATES / name

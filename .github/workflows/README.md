@@ -80,9 +80,12 @@ re-enabling it silently rejects this workflow's uploads.
    updater.
 4. `homebrew-check.yml` renders the formula and the cask against the x86_64
    artifacts, runs `brew style` and `brew audit --strict`, installs both from
-   a local tap with the documented command, runs the daemon under
+   a local tap with the documented command next to a copy of the Swift app's
+   `jet` cask, as the real tap holds it, runs the daemon under
    `brew services` in a systemd user session, and checks that uninstalling
-   leaves no restarting service behind.
+   leaves no restarting service behind. The formula's audit skips only
+   `version`: the Swift app's release parses the formula's `version` line,
+   which Homebrew otherwise reports as redundant with the release URLs.
 5. `desktop-e2e.yml` installs the signed x86_64 `.deb` on a fresh runner and
    drives the app through tauri-driver and WebKitWebDriver under Xvfb. The
    app must provision its service from the bundled payload, Settings ›
@@ -92,18 +95,23 @@ re-enabling it silently rejects this workflow's uploads.
    screenshots as `jet-desktop-e2e-<label>` (see
    [resource budgets](../../docs/resource-budgets.md#desktop-linux)).
 6. Once every gate passes, it uploads six core archives, six desktop bundles
-   with their signatures, `jetd.rb`, `jet-app.rb`, the updater's
+   with their signatures, `jet.rb`, `jet-app.rb`, the updater's
    `latest.json`, and a `SHA256SUMS` covering all of them into a draft
    release, then publishes the complete release. `latest.json` embeds each
    signature file's contents and dates the release by its tagged commit.
-7. For a stable release, Ape Bonker commits `Formula/jetd.rb` and
-   `Casks/jet-app.rb` to `apexgang/homebrew-tap` in one commit.
-   `brew install apexgang/tap/jetd` installs the compiled executables and
-   `brew services start apexgang/tap/jetd` starts the daemon.
-   `brew install apexgang/tap/jetd apexgang/tap/jet-app` also installs the
+7. For a stable release, Ape Bonker commits `Formula/jet.rb`, the core
+   formula for macOS and Linux, and `Casks/jet-app.rb`, the Linux desktop
+   cask, to `apexgang/homebrew-tap` in one commit. It replaces the macOS-only
+   formula the Swift app's release may have written at the same core version,
+   never touches that release's `Casks/jet.rb`, and rebases onto the Swift
+   release's tap commits before it pushes.
+   `brew install apexgang/tap/jet` installs the compiled executables and
+   `brew services start apexgang/tap/jet` starts the daemon. On Linux,
+   `brew install apexgang/tap/jet apexgang/tap/jet-app` also installs the
    desktop app. Name both, or run `brew trust apexgang/tap` first: Homebrew 6
    and later trust only the tap items named on the command line, and the cask
-   cannot load its formula otherwise.
+   cannot load its formula otherwise. Always use the full name:
+   homebrew/core's unrelated `jet` owns the bare one.
 
 The Actions secret `APE_BONKER_PRIVATE_KEY` holds Ape Bonker's private key.
 `RELEASE_APP_CLIENT_ID` identifies the installed app; the workflow defaults to
@@ -142,7 +150,12 @@ the original formula and cask, so rebuilt checksums cannot replace the
 published ones. Dispatch the workflow against a version tag, never a branch.
 Older releases cannot downgrade the formula or the cask after a newer stable
 release is published, and a tap that already holds a newer formula or cask
-keeps both unchanged.
+keeps both unchanged. The tap job compares the tag with the highest published
+stable `vMAJOR.MINOR.PATCH` release, not the release GitHub marks Latest.
+Swift app releases never take Latest, but each stable core release does as it
+publishes, a patch for an older version included. If another commit, such as
+the Swift release's, changes `Formula/jet.rb` or `Casks/jet-app.rb` while the
+job runs, the job fails without pushing; rerun it.
 
 Failed size gates retain build artifacts for seven days but prevent publication.
 The historical `jetd` size overage is documented in
@@ -175,14 +188,27 @@ stages and activates that payload and starts a user LaunchAgent. If a
 Homebrew-managed daemon already owns the Plane, the app connects to it.
 
 The release job uses Ape Bonker's existing GitHub App secret to publish
-`Casks/jet.rb` in `apexgang/homebrew-tap`. The cask depends on the tap's `jet`
-core formula. If the tap has no formula, or an older core version, this job
-publishes a macOS formula from the same archive. The tagged core release may
-later replace it with the full macOS and Linux formula. Rerunning the job uses
+`Casks/jet.rb` in `apexgang/homebrew-tap`. The cask depends on the tap's
+`apexgang/tap/jet` core formula. If the tap has no formula, or an older core
+version, this job publishes a macOS-only formula from the same archive and
+the same `jet.rb.in` template. The tagged core release replaces it with the
+full macOS and Linux formula at the same core version, and this job leaves
+that formula alone until a newer core version ships. The Linux desktop cask
+`Casks/jet-app.rb` belongs to the tagged core release. Rerunning the job uses
 the published checksums; an older run cannot downgrade either tap package.
 The DMG is ad-hoc signed and not notarized yet.
 macOS Gatekeeper may require approval to open it the first time. Once opened,
 core installation needs no separate download or command.
+
+This job builds with the core version on `main`. A run after the commit that
+bumps the version in `packages/Cargo.toml` leaves the tap with a macOS-only
+formula at the new version, and Linux installs and upgrades of
+`apexgang/tap/jet` and `apexgang/tap/jet-app` fail until that version's tag
+updates the tap. Push the `v*` tag at the version-bump commit and let its
+release finish before merging changes under `apps/jet/`. If the release or
+its tap job fails, rerun it; a patch release for an older version cannot
+replace the newer formula. See
+[Core distribution](../../docs/core-distribution.md) for the details.
 
 ## Validation
 

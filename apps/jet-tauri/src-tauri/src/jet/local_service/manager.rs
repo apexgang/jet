@@ -25,8 +25,9 @@ pub(crate) const UNIT_TEMPLATE: &str =
 pub(crate) const AUTOSTART_TEMPLATE: &str =
     include_str!("../../../../../../.github/packaging/linux/jetd-autostart.desktop");
 pub(crate) const UNIT_NAME: &str = "jetd.service";
-/// The formula's full name: never the bare `jetd` (ADR-0026 channel).
-pub(crate) const HOMEBREW_FORMULA: &str = "apexgang/tap/jetd";
+/// The formula's full name, never the bare `jet`: that one is homebrew/core's
+/// unrelated go-jet (ADR-0026 channel).
+pub(crate) const HOMEBREW_FORMULA: &str = "apexgang/tap/jet";
 
 /// `systemctl --user` answers within seconds; `start` waits for the job.
 pub(crate) const SYSTEMCTL_LIMIT: Duration = Duration::from_secs(30);
@@ -253,7 +254,7 @@ mod tests {
                 "/home/linuxbrew/.linuxbrew/bin/brew",
                 "services",
                 "start",
-                "apexgang/tap/jetd"
+                "apexgang/tap/jet"
             ]
         );
         let serve = serve(Path::new("/home/u/.jet"), Path::new("/home/u"));

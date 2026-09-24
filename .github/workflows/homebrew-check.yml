@@ -1,11 +1,13 @@
 # This workflow is managed by gh actions-lock.
-# Install the daemon formula and the desktop cask from a local `apexgang/tap`
-# before anything reaches the real tap. Both are rendered from the x86_64
-# artifacts the calling workflow built, with file:// URLs, then checked with
-# `brew style` and `brew audit --strict` and installed with the command the
-# cask documents. The daemon runs under `brew services` in a real systemd user
-# session. Uninstalling both must leave no restart loop behind: brew keeps the
-# unit it installed, and only the formula's executable condition stops it.
+# Install the core formula `jet` and the Linux desktop cask `jet-app` from a
+# local `apexgang/tap` before anything reaches the real tap. Both are rendered
+# from the x86_64 artifacts the calling workflow built, with file:// URLs, then
+# checked with `brew style` and `brew audit --strict` and installed with the
+# command the cask documents, next to a copy of the Swift app's `jet` cask as
+# the real tap holds it. The daemon runs under `brew services` in a real
+# systemd user session. Uninstalling both must leave no restart loop behind:
+# brew keeps the unit it installed, and only the formula's executable
+# condition stops it.
 name: Homebrew check
 
 on:
@@ -67,14 +69,29 @@ jobs:
           brew tap-new --no-git apexgang/tap
           tap=$(brew --repository apexgang/tap)
           mkdir -p "$tap/Formula" "$tap/Casks"
-          cp "$RUNNER_TEMP/jet-homebrew/tap/jetd.rb" "$tap/Formula/jetd.rb"
+          cp "$RUNNER_TEMP/jet-homebrew/tap/jet.rb" "$tap/Formula/jet.rb"
           cp "$RUNNER_TEMP/jet-homebrew/tap/jet-app.rb" "$tap/Casks/jet-app.rb"
-          cat "$tap/Formula/jetd.rb" "$tap/Casks/jet-app.rb"
+          cat "$tap/Formula/jet.rb" "$tap/Casks/jet-app.rb"
+      # The formula keeps its `version` line because the Swift app's release
+      # parses it. Homebrew's `audit_version` resource audit reports that line
+      # as redundant with the version it reads from the URLs; `--except`
+      # skips that one method and runs every other audit.
       - name: Check style and audit
         run: |
           brew style apexgang/tap
-          brew audit --strict --formula apexgang/tap/jetd
+          brew audit --strict --formula --except=version apexgang/tap/jet
           brew audit --strict --cask apexgang/tap/jet-app
+      # The real tap also holds the Swift app's macOS cask `jet`, so there
+      # `apexgang/tap/jet` names a formula and a cask. `brew install` and
+      # `brew uninstall` load both and take the formula with a warning. With
+      # the same cask here, the commands below see the name as users do. It is
+      # added after the style check because the Swift release, not this
+      # repository's templates, owns that file.
+      - name: Add the Swift app's cask as the real tap has it
+        run: |
+          tap=$(brew --repository apexgang/tap)
+          python3 -c 'import sys; sys.path.insert(0, ".github/scripts"); import package_swift_app; print(package_swift_app.cask("1.0.1", "0" * 64), end="")' > "$tap/Casks/jet.rb"
+          cat "$tap/Casks/jet.rb"
       # Since Homebrew 6 a tap is untrusted until an item in it is named on the
       # command line. The documented command names both, so the cask may load
       # its dependency. Should Homebrew refuse it over trust anyway, the
@@ -83,14 +100,14 @@ jobs:
       - name: Install with the documented command
         run: |
           log="$RUNNER_TEMP/brew-install.log"
-          if ! brew install apexgang/tap/jetd apexgang/tap/jet-app 2>&1 | tee "$log"; then
+          if ! brew install apexgang/tap/jet apexgang/tap/jet-app 2>&1 | tee "$log"; then
             grep -q 'untrusted tap' "$log"
-            echo '::warning::brew install apexgang/tap/jetd apexgang/tap/jet-app was refused over tap trust; retried after brew trust apexgang/tap. Update the documented install command.'
+            echo '::warning::brew install apexgang/tap/jet apexgang/tap/jet-app was refused over tap trust; retried after brew trust apexgang/tap. Update the documented install command.'
             brew trust apexgang/tap
-            brew install apexgang/tap/jetd apexgang/tap/jet-app
+            brew install apexgang/tap/jet apexgang/tap/jet-app
           fi
           brew trust --json=v1 || true
-          brew test apexgang/tap/jetd
+          brew test apexgang/tap/jet
           test -x "$HOME/Applications/Jet.AppImage"
       - name: Enable a systemd user session for the runner
         run: |
@@ -106,7 +123,7 @@ jobs:
           exit 1
       - name: Run the daemon with brew services
         run: |
-          brew services start apexgang/tap/jetd
+          brew services start apexgang/tap/jet
           status="$RUNNER_TEMP/jetd-status.json"
           for _ in $(seq 30); do
             if [[ -S "$HOME/.jet/runtime/jetd.sock" ]]; then
@@ -121,7 +138,7 @@ jobs:
           systemctl --user is-active jet-homebrew.service
       - name: Stop the daemon with brew services
         run: |
-          brew services stop apexgang/tap/jetd
+          brew services stop apexgang/tap/jet
           for _ in $(seq 30); do
             jetd core status > "$RUNNER_TEMP/jetd-status.json"
             jq -e '.owner.state == "free"' "$RUNNER_TEMP/jetd-status.json" && exit 0
@@ -133,7 +150,7 @@ jobs:
       # running when the cask and formula go, and its unit stays behind.
       - name: Uninstall while running and require no restart loop
         run: |
-          brew services start apexgang/tap/jetd
+          brew services start apexgang/tap/jet
           # jetd holds the lock before it writes its metadata, so wait for the
           # owner, not only the lock.
           for _ in $(seq 30); do
@@ -143,7 +160,7 @@ jobs:
           done
           jq -e '.owner.state == "held" and .owner.daemon.channel == "homebrew"' "$RUNNER_TEMP/jetd-status.json"
           brew uninstall --cask apexgang/tap/jet-app
-          brew uninstall apexgang/tap/jetd
+          brew uninstall apexgang/tap/jet
           unit=jet-homebrew.service
           test -f "$HOME/.config/systemd/user/$unit"
           test ! -e "$HOME/Applications/Jet.AppImage"

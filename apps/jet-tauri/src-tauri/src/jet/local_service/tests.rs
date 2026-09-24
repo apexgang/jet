@@ -184,7 +184,7 @@ fn play(
             _ => exit(0, ""),
         },
         "brew" => {
-            assert_eq!(args, ["services", "start", "apexgang/tap/jetd"]);
+            assert_eq!(args, ["services", "start", "apexgang/tap/jet"]);
             if !core.brew_ok {
                 return exit(1, "");
             }
@@ -256,6 +256,8 @@ struct World {
 struct Setup {
     bundled: bool,
     keg: bool,
+    /// homebrew/core's unrelated `jet` (go-jet) and `brew`, without Jet's keg.
+    go_jet: bool,
     configure: fn(&mut Core),
     /// The cross-instance lock, instead of `app-data/local-service.lock`
     /// in the scratch directory.
@@ -267,6 +269,7 @@ impl Default for Setup {
         Self {
             bundled: true,
             keg: false,
+            go_jet: false,
             configure: |_| (),
             lock_file: None,
         }
@@ -291,7 +294,14 @@ fn world(setup: Setup) -> World {
     }
     let prefix = base.join("linuxbrew");
     if setup.keg {
-        executable(&prefix.join("opt/jetd/bin/jetd"));
+        executable(&prefix.join("opt/jet/bin/jetd"));
+        executable(&prefix.join("bin/brew"));
+    }
+    if setup.go_jet {
+        let cellar = prefix.join("Cellar/jet/2.13.0");
+        executable(&cellar.join("bin/jet"));
+        fs::create_dir_all(prefix.join("opt")).unwrap();
+        std::os::unix::fs::symlink(&cellar, prefix.join("opt/jet")).unwrap();
         executable(&prefix.join("bin/brew"));
     }
     let app_data = base.join("app-data");
@@ -587,6 +597,28 @@ async fn a_stopped_gui_service_is_started() {
 }
 
 #[tokio::test]
+async fn homebrew_cores_unrelated_jet_is_never_taken_for_the_keg() {
+    // go-jet also links `opt/jet`, but has no `bin/jetd`: the bundled core
+    // is installed and `brew` never runs.
+    let world = world(Setup {
+        go_jet: true,
+        ..Setup::default()
+    });
+    let view = world.state.provision().await;
+    assert_eq!(view.phase, Phase::Running, "{view:?}");
+    assert_eq!(view.channel, Some(Channel::Gui));
+    assert_eq!(view.last_action, Some(Action::Installed));
+    assert!(
+        !world
+            .commands()
+            .iter()
+            .any(|command| command.starts_with("brew")),
+        "{:?}",
+        world.commands()
+    );
+}
+
+#[tokio::test]
 async fn a_stopped_homebrew_keg_is_started_with_brew_services() {
     let world = world(Setup {
         keg: true,
@@ -596,7 +628,7 @@ async fn a_stopped_homebrew_keg_is_started_with_brew_services() {
     assert_eq!(view.phase, Phase::Running, "{view:?}");
     assert_eq!(view.channel, Some(Channel::Homebrew));
     assert_eq!(view.last_action, Some(Action::Started));
-    assert!(world.ran("brew services start apexgang/tap/jetd"));
+    assert!(world.ran("brew services start apexgang/tap/jet"));
     assert!(!world.ran("jetd core stage --payload --home"));
     assert!(world
         .processes

@@ -74,7 +74,7 @@ export function serviceErrorText(error: PublicError | null): string {
     case "service.systemd_unavailable":
       return "Your system's service manager didn't accept the Jet service.";
     case "service.homebrew_start_failed":
-      return "Homebrew couldn't start the Jet service. Try brew services start apexgang/tap/jetd in a terminal.";
+      return "Homebrew couldn't start the Jet service. Try brew services start apexgang/tap/jet in a terminal.";
     case "service.payload_invalid":
       return "The Jet service included with this app is damaged. Reinstall Jet.";
     case "service.busy":

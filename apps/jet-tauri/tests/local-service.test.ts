@@ -268,6 +268,10 @@ describe("local service copy", () => {
     expect(serviceProblem(serviceView({ phase: "not_installed", channel: null }))?.title).toBe(
       "The Jet service isn't installed",
     );
+    // The formula's full name: homebrew/core's unrelated `jet` owns the bare one.
+    expect(serviceErrorText(failure("service.homebrew_start_failed"))).toContain(
+      "brew services start apexgang/tap/jet in a terminal",
+    );
     // An unknown code falls back to the shell's own sentence.
     expect(serviceErrorText(failure("service.future_code"))).toBe("service.future_code message");
   });

@@ -1,6 +1,10 @@
 class Jet < Formula
   desc "Run and manage coding agent conversations across machines"
   homepage "https://github.com/apexgang/jet"
+  # The Swift app's release parses this line from the formula it renders
+  # from this template and from the tap's Formula/jet.rb. The release URLs
+  # carry the same version, so homebrew-check.yml skips the audit that calls
+  # it redundant.
   version "@VERSION@"
   license "Apache-2.0"
 
@@ -42,9 +46,13 @@ class Jet < Formula
         <key>ExitTimeOut</key><integer>15</integer>
       </dict></plist>
     PLIST
+    # Uninstalling the jet-app cask autoremoves this formula but leaves the
+    # unit `brew services` installed. The condition turns the next restart of
+    # the removed executable into a skipped start instead of a restart loop.
     (prefix/"jet-homebrew.service").write <<~SERVICE
       [Unit]
       Description=Jet daemon
+      ConditionFileIsExecutable=#{opt_bin}/jetd
       [Service]
       ExecStart=#{opt_bin}/jetd serve --channel homebrew
       Environment="PATH=#{service_path}"
@@ -55,6 +63,16 @@ class Jet < Formula
       [Install]
       WantedBy=default.target
     SERVICE
+  end
+
+  # Homebrew prints no start hint for a service block that only names its
+  # definitions. Formulae installed as a dependency show no caveats at all,
+  # so the jet-app cask repeats this one.
+  def caveats
+    <<~EOS
+      To start the Jet daemon now and at login:
+        brew services start apexgang/tap/jet
+    EOS
   end
 
   service do

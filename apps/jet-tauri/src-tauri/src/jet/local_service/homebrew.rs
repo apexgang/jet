@@ -1,6 +1,9 @@
-//! The Homebrew-managed core: the `apexgang/tap/jetd` keg and the `brew`
+//! The Homebrew-managed core: the `apexgang/tap/jet` keg and the `brew`
 //! that can start its service. ADR-0026: the app may ask Homebrew to start
 //! its own service, but never stages, activates or updates that core.
+//!
+//! homebrew/core's unrelated `jet` (go-jet) links the same `opt/jet`, so a
+//! keg counts only when it has Jet's `bin/jetd`.
 use std::{
     ffi::OsString,
     fs,
@@ -36,11 +39,11 @@ pub(crate) fn prefixes(homebrew_prefix: Option<OsString>, user_home: &Path) -> V
     prefixes
 }
 
-/// The first prefix whose `opt/jetd/bin/jetd` and `bin/brew` are trusted.
+/// The first prefix whose `opt/jet/bin/jetd` and `bin/brew` are trusted.
 pub(crate) fn find(prefixes: &[PathBuf], owner_uid: u32) -> Option<Keg> {
     prefixes.iter().find_map(|prefix| {
         Some(Keg {
-            jetd: trusted_executable(&prefix.join("opt/jetd/bin/jetd"), owner_uid)?,
+            jetd: trusted_executable(&prefix.join("opt/jet/bin/jetd"), owner_uid)?,
             brew: trusted_executable(&prefix.join("bin/brew"), owner_uid)?,
         })
     })
@@ -103,11 +106,11 @@ mod tests {
         let prefixes = [root.path().join("missing"), prefix.clone()];
         assert_eq!(find(&prefixes, owner), None);
 
-        // opt/jetd is a link into the Cellar, as Homebrew makes it.
-        let cellar = prefix.join("Cellar/jetd/0.2.0");
+        // opt/jet is a link into the Cellar, as Homebrew makes it.
+        let cellar = prefix.join("Cellar/jet/0.2.0");
         executable(&cellar.join("bin/jetd"));
         fs::create_dir_all(prefix.join("opt")).unwrap();
-        std::os::unix::fs::symlink(&cellar, prefix.join("opt/jetd")).unwrap();
+        std::os::unix::fs::symlink(&cellar, prefix.join("opt/jet")).unwrap();
         assert_eq!(find(&prefixes, owner), None, "no brew yet");
 
         executable(&prefix.join("bin/brew"));
@@ -117,6 +120,25 @@ mod tests {
 
         // Owned by someone else (neither this user nor root).
         assert_eq!(find(&prefixes, owner.wrapping_add(1)).is_some(), owner == 0);
+    }
+
+    #[test]
+    fn homebrew_cores_unrelated_jet_is_not_a_keg() {
+        // go-jet installs `opt/jet/bin/jet`, never `jetd`.
+        let root = tempfile::tempdir().unwrap();
+        let prefixes = [root.path().join("brew")];
+        let prefix = &prefixes[0];
+        let owner = uid(root.path());
+        let cellar = prefix.join("Cellar/jet/2.13.0");
+        executable(&cellar.join("bin/jet"));
+        fs::create_dir_all(prefix.join("opt")).unwrap();
+        std::os::unix::fs::symlink(&cellar, prefix.join("opt/jet")).unwrap();
+        executable(&prefix.join("bin/brew"));
+        assert_eq!(find(&prefixes, owner), None);
+
+        // A `jetd` directory in its place is not an executable either.
+        fs::create_dir_all(cellar.join("bin/jetd")).unwrap();
+        assert_eq!(find(&prefixes, owner), None);
     }
 
     #[test]
