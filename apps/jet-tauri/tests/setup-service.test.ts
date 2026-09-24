@@ -74,7 +74,12 @@ const PLANES: PlanesSnapshot = {
       protocol: { exact: null, atLeast: 37, atMost: null },
     },
   ],
-  identity: { clientId: "00000000-0000-4000-8000-00000000000c", key: "unknown", fingerprint: null },
+  identity: {
+    clientId: "00000000-0000-4000-8000-00000000000c",
+    key: "unknown",
+    fingerprint: null,
+    notice: null,
+  },
   restoredSelection: null,
   notice: null,
   maximumRemotePlanes: 16,
