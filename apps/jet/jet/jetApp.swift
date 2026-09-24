@@ -50,6 +50,7 @@ struct jetApp: App {
         Window("Jet", id: "main") {
             ContentView(session: session)
         }
+        .defaultLaunchBehavior(.presented)
         .defaultSize(width: 1280, height: 800)
         .commands {
             JetCommands(session: session)

@@ -224,6 +224,11 @@ Goal: cover the confirmed onboarding, pairing, settings, and recovery scope.
 
 ### 3.4 Parity and adaptation
 
+Swift app status: the macOS adaptation pass was implemented on 2026-09-24 and
+is tracked in `docs/swift-wave-3-4-acceptance.md`. The iOS Simulator target
+builds. Running-window accessibility and visual checks, plus the cross-client
+Linux parity exit, remain open. No Tauri changes were made in this slice.
+
 - Close the semantic parity matrix between macOS and Linux.
 - Test narrow, default, wide, full-screen, multiple-display, dark, increased-contrast, reduced-motion, and reduced-transparency configurations.
 - Keep iOS compile-safe and defer remote-companion product work to its own approved plan.

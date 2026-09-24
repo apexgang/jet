@@ -1,5 +1,23 @@
 import SwiftUI
 
+private struct LegibleBarBackground: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        content.background {
+            if reduceTransparency {
+#if os(macOS)
+                Color(nsColor: .windowBackgroundColor)
+#else
+                Color(uiColor: .systemBackground)
+#endif
+            } else {
+                Rectangle().fill(.bar)
+            }
+        }
+    }
+}
+
 struct DesktopShellView: View {
     @Bindable var session: DesktopSession
 
@@ -11,6 +29,21 @@ struct DesktopShellView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
+#if os(macOS)
+        GeometryReader { geometry in
+            let compactWorkPanel = geometry.size.width < 1_100
+            workspace(compactWorkPanel: compactWorkPanel)
+                .onChange(of: compactWorkPanel) { _, isCompact in
+                    if isCompact { session.isWorkPanelPresented = false }
+                }
+        }
+        .frame(minWidth: 900, minHeight: 600)
+#else
+        workspace(compactWorkPanel: false)
+#endif
+    }
+
+    private func workspace(compactWorkPanel: Bool) -> some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(session: session)
 #if os(macOS)
@@ -26,14 +59,29 @@ struct DesktopShellView: View {
             }
         }
 #if os(macOS)
-        .inspector(isPresented: $session.isWorkPanelPresented) {
+        .inspector(isPresented: panelBinding(compactWorkPanel: compactWorkPanel, sheet: false)) {
             WorkPanelView(session: session)
                 .inspectorColumnWidth(min: 280, ideal: 340, max: 440)
         }
-        .frame(minWidth: 900, minHeight: 600)
+        .sheet(isPresented: panelBinding(compactWorkPanel: compactWorkPanel, sheet: true)) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Work details")
+                        .font(.headline)
+                    Spacer()
+                    Button("Done") { session.isWorkPanelPresented = false }
+                }
+                .padding()
+                Divider()
+                WorkPanelView(session: session)
+            }
+            .frame(minWidth: 520, idealWidth: 720, minHeight: 500, idealHeight: 650)
+            .accessibilityIdentifier("compact-work-panel")
+        }
 #endif
         .tint(Color(red: 41 / 255, green: 182 / 255, blue: 246 / 255))
         .toolbar {
+#if os(macOS)
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     session.isWorkPanelPresented.toggle()
@@ -45,6 +93,7 @@ struct DesktopShellView: View {
                 }
                 .help(session.isWorkPanelPresented ? "Hide Work Panel" : "Show Work Panel")
             }
+#endif
         }
         .task {
             await session.loadFoundationFixture()
@@ -102,6 +151,17 @@ struct DesktopShellView: View {
             )
         }
     }
+
+#if os(macOS)
+    private func panelBinding(compactWorkPanel: Bool, sheet: Bool) -> Binding<Bool> {
+        Binding(
+            get: { session.isWorkPanelPresented && compactWorkPanel == sheet },
+            set: { presented in
+                if compactWorkPanel == sheet { session.isWorkPanelPresented = presented }
+            }
+        )
+    }
+#endif
 }
 
 private struct SidebarView: View {
@@ -339,7 +399,7 @@ private struct PlaneStatusFooter: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(.bar)
+        .modifier(LegibleBarBackground())
         .accessibilityElement(children: .combine)
     }
 
@@ -404,20 +464,24 @@ private struct LiveConversationView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(session.selectedConversationTitle)
-                        .font(.headline)
-                    HStack(spacing: 6) {
-                        Text(session.selectedProjectName)
-                        Text("·")
-                        Text("Runs on \(session.selectedPlaneName)")
+            VStack(alignment: .leading, spacing: 5) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 14) {
+                        Text(session.selectedConversationTitle)
+                            .font(.headline)
+                            .fixedSize(horizontal: true, vertical: false)
+                        Spacer(minLength: 12)
+                        LiveStatusLabel(session: session)
                     }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(session.selectedConversationTitle)
+                            .font(.headline)
+                        LiveStatusLabel(session: session)
+                    }
+                }
+                Text("\(session.selectedProjectName) · Runs on \(session.selectedPlaneName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 12)
-                LiveStatusLabel(session: session)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 13)
@@ -433,14 +497,18 @@ private struct LiveConversationView: View {
 
 private struct LiveStatusLabel: View {
     let session: DesktopSession
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         Label(label, systemImage: symbol)
             .font(.caption.weight(.medium))
-            .foregroundStyle(color)
+            .foregroundStyle(contrast == .increased ? Color.primary : color)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
             .background(color.opacity(0.10), in: Capsule())
+            .overlay {
+                Capsule().stroke(contrast == .increased ? Color.primary : .clear, lineWidth: 1)
+            }
             .accessibilityLabel("Task status: \(label)")
     }
 
@@ -606,15 +674,11 @@ private struct ApprovalCardView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
-                GridRow {
-                    Text("Target").foregroundStyle(.secondary)
-                    Text(approval.target).textSelection(.enabled)
-                }
-                GridRow {
-                    Text("Consequence").foregroundStyle(.secondary)
-                    Text(approval.consequence)
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Target").foregroundStyle(.secondary)
+                Text(approval.target).textSelection(.enabled)
+                Text("Consequence").foregroundStyle(.secondary)
+                Text(approval.consequence)
             }
             .font(.caption)
 
@@ -636,27 +700,16 @@ private struct ApprovalCardView: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack {
-                if approval.canAuthorizeRetry {
-                    Button("Authorize one retry") {
-                        Task { await session.authorizeApprovalRetry(approval) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(session.supervisionOperation != nil)
-                } else if approval.state == .requested || approval.state == .unavailable {
-                    Text("Approve and Reject need the planned approval-decision protocol command.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    approvalDecision
+                    Spacer(minLength: 8)
+                    runControls
                 }
-                Spacer(minLength: 8)
-                Button("Interrupt Turn…") {
-                    session.requestRunControl(.interruptTurn)
+                VStack(alignment: .leading, spacing: 8) {
+                    approvalDecision
+                    runControls
                 }
-                .disabled(!session.canInterruptTurn || session.supervisionOperation != nil)
-                Button("Stop Run…", role: .destructive) {
-                    session.requestRunControl(.stopRun)
-                }
-                .disabled(!session.canStopRun || session.supervisionOperation != nil)
             }
         }
         .padding(16)
@@ -674,6 +727,34 @@ private struct ApprovalCardView: View {
         case .allowed: "Action allowed"
         case .denied: "Action denied"
         case .unavailable: "Decision needed"
+        }
+    }
+
+    @ViewBuilder
+    private var approvalDecision: some View {
+        if approval.canAuthorizeRetry {
+            Button("Authorize one retry") {
+                Task { await session.authorizeApprovalRetry(approval) }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(session.supervisionOperation != nil)
+        } else if approval.state == .requested || approval.state == .unavailable {
+            Text("Approve and Reject need the planned approval-decision protocol command.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var runControls: some View {
+        HStack(spacing: 8) {
+            Button("Interrupt Turn…") {
+                session.requestRunControl(.interruptTurn)
+            }
+            .disabled(!session.canInterruptTurn || session.supervisionOperation != nil)
+            Button("Stop Run…", role: .destructive) {
+                session.requestRunControl(.stopRun)
+            }
+            .disabled(!session.canStopRun || session.supervisionOperation != nil)
         }
     }
 }
@@ -731,36 +812,20 @@ private struct LiveComposerView: View {
                     .stroke(.separator, lineWidth: 1)
             }
 
-            HStack(spacing: 12) {
-                ContextValue(label: "Project", value: session.selectedProjectName)
-                ContextValue(label: "Agent", value: session.selectedHarnessName)
-                if session.selectedConversationID == nil, session.planes.count > 1 {
-                    Menu {
-                        ForEach(session.planes) { plane in
-                            Button {
-                                session.chooseNewTaskPlane(plane.id)
-                            } label: {
-                                if plane.id == session.newTaskPlaneRegistryID {
-                                    Label(plane.name, systemImage: "checkmark")
-                                } else {
-                                    Text(plane.name)
-                                }
-                            }
-                        }
-                    } label: {
-                        ContextValue(label: "Runs on", value: session.selectedPlaneName)
-                    }
-                    .menuStyle(.borderlessButton)
-                } else {
-                    ContextValue(label: "Runs on", value: session.selectedPlaneName)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    ContextValue(label: "Project", value: session.selectedProjectName)
+                    ContextValue(label: "Agent", value: session.selectedHarnessName)
+                    runsOnContext
+                    Spacer(minLength: 0)
+                    messageSize
                 }
-                Spacer(minLength: 0)
-                Text("\(session.draftBytes.formatted()) / \(JetTurnQueue.maximumPromptBytes.formatted()) bytes")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(
-                        session.draftBytes > JetTurnQueue.maximumPromptBytes ? .red : .secondary
-                    )
-                    .accessibilityLabel("Message size")
+                VStack(alignment: .leading, spacing: 6) {
+                    ContextValue(label: "Project", value: session.selectedProjectName)
+                    ContextValue(label: "Agent", value: session.selectedHarnessName)
+                    runsOnContext
+                    messageSize
+                }
             }
             .frame(maxWidth: 760)
         }
@@ -768,7 +833,40 @@ private struct LiveComposerView: View {
         .padding(.horizontal, 24)
         .padding(.top, 12)
         .padding(.bottom, 16)
-        .background(.bar)
+        .modifier(LegibleBarBackground())
+    }
+
+    @ViewBuilder
+    private var runsOnContext: some View {
+        if session.selectedConversationID == nil, session.planes.count > 1 {
+            Menu {
+                ForEach(session.planes) { plane in
+                    Button {
+                        session.chooseNewTaskPlane(plane.id)
+                    } label: {
+                        if plane.id == session.newTaskPlaneRegistryID {
+                            Label(plane.name, systemImage: "checkmark")
+                        } else {
+                            Text(plane.name)
+                        }
+                    }
+                }
+            } label: {
+                ContextValue(label: "Runs on", value: session.selectedPlaneName)
+            }
+            .menuStyle(.borderlessButton)
+        } else {
+            ContextValue(label: "Runs on", value: session.selectedPlaneName)
+        }
+    }
+
+    private var messageSize: some View {
+        Text("\(session.draftBytes.formatted()) / \(JetTurnQueue.maximumPromptBytes.formatted()) bytes")
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(
+                session.draftBytes > JetTurnQueue.maximumPromptBytes ? .red : .secondary
+            )
+            .accessibilityLabel("Message size")
     }
 }
 
@@ -777,20 +875,24 @@ private struct ConversationHeader: View {
     let scenario: DesktopFixtureScenario
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(scenario.conversation?.title ?? "New task")
-                    .font(.headline)
-                HStack(spacing: 6) {
-                    Text(session.selectedProjectName)
-                    Text("·")
-                    Text("Runs on \(scenario.plane.name)")
+        VStack(alignment: .leading, spacing: 5) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) {
+                    Text(scenario.conversation?.title ?? "New task")
+                        .font(.headline)
+                        .fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 12)
+                    StatusLabel(scenario: scenario)
                 }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(scenario.conversation?.title ?? "New task")
+                        .font(.headline)
+                    StatusLabel(scenario: scenario)
+                }
+            }
+            Text("\(session.selectedProjectName) · Runs on \(scenario.plane.name)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 12)
-            StatusLabel(scenario: scenario)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 13)
@@ -799,14 +901,18 @@ private struct ConversationHeader: View {
 
 private struct StatusLabel: View {
     let scenario: DesktopFixtureScenario
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         Label(label, systemImage: symbol)
             .font(.caption.weight(.medium))
-            .foregroundStyle(color)
+            .foregroundStyle(contrast == .increased ? Color.primary : color)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
             .background(color.opacity(0.10), in: Capsule())
+            .overlay {
+                Capsule().stroke(contrast == .increased ? Color.primary : .clear, lineWidth: 1)
+            }
             .accessibilityLabel("Task status: \(label)")
     }
 
@@ -1012,14 +1118,18 @@ private struct ComposerView: View {
                     .stroke(.separator, lineWidth: 1)
             }
 
-            HStack(spacing: 12) {
-                ContextValue(label: "Project", value: session.selectedProjectName)
-                ContextValue(
-                    label: "Agent",
-                    value: session.selectedHarnessName
-                )
-                ContextValue(label: "Runs on", value: scenario.plane.name)
-                Spacer(minLength: 0)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    ContextValue(label: "Project", value: session.selectedProjectName)
+                    ContextValue(label: "Agent", value: session.selectedHarnessName)
+                    ContextValue(label: "Runs on", value: scenario.plane.name)
+                    Spacer(minLength: 0)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    ContextValue(label: "Project", value: session.selectedProjectName)
+                    ContextValue(label: "Agent", value: session.selectedHarnessName)
+                    ContextValue(label: "Runs on", value: scenario.plane.name)
+                }
             }
             .frame(maxWidth: 760)
         }
@@ -1027,7 +1137,7 @@ private struct ComposerView: View {
         .padding(.horizontal, 24)
         .padding(.top, 12)
         .padding(.bottom, 16)
-        .background(.bar)
+        .modifier(LegibleBarBackground())
     }
 }
 
@@ -1129,9 +1239,11 @@ private struct WorkPanelView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
-                .background(.bar)
+                .modifier(LegibleBarBackground())
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("work-panel")
     }
 }
 
