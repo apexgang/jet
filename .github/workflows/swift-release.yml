@@ -1,4 +1,5 @@
-# This workflow is managed by gh actions-lock.
+# Action commits are pinned directly here. This workflow is intentionally not
+# enrolled in actions.lock because that mechanism rewrites SHA refs to tags.
 name: Release Swift app
 
 on:

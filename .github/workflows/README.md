@@ -122,5 +122,10 @@ core installation needs no separate download or command.
 
 Run `python3 -m unittest discover -s .github/tests -v`, `actionlint`, and
 `gh actions-lock --verify-local` after editing automation. Regenerate action
-pins with `gh actions-lock`. Run `just release-envelope` and `just fmt` from
+pins in enrolled workflows with `gh actions-lock`. Run `just release-envelope` and `just fmt` from
 `packages/` after moving release tooling or changing its inputs.
+
+`swift-release.yml` uses literal commit SHAs for every external action and is
+not enrolled in `actions.lock`: the lockfile tool rewrites those refs to tags,
+which would undo the required SHA pins. Verify its action SHAs against the
+upstream release tags when updating them.
