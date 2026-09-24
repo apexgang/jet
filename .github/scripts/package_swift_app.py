@@ -51,6 +51,7 @@ def mac_formula(core_version: str, digest: str, app_version: str) -> str:
     linux_start = template.index("  on_linux do\n")
     linux_end = template.index("  def install\n", linux_start)
     template = template[:linux_start] + template[linux_end:]
+    template = template.replace('  license "Apache-2.0"\n', '  license "Apache-2.0"\n  depends_on :macos\n')
     return (template.replace("@VERSION@", core_version)
             .replace("@URL@", f"https://github.com/apexgang/jet/releases/download/swift-v{app_version}")
             .replace("@MACOS_SHA256@", digest))

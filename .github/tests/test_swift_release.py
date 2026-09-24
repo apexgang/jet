@@ -64,6 +64,7 @@ class SwiftRelease(unittest.TestCase):
             self.assertIn(f"{digest}  {dmg.name}\n", (root / "dist/SHA256SUMS").read_text())
             self.assertIn(f'sha256 "{digest}"', (root / "dist/jet.rb").read_text())
             self.assertIn('version "0.2.0"', (root / "dist/jet-core.rb").read_text())
+            self.assertIn("depends_on :macos", (root / "dist/jet-core.rb").read_text())
             self.assertNotIn("on_linux do", (root / "dist/jet-core.rb").read_text())
 
             (core / "jetd").write_bytes(b"tampered")
