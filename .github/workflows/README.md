@@ -25,8 +25,8 @@ every other job was skipped. The jobs cannot report these names themselves: a
 job skipped by its `if` never expands its matrix, so an edit outside
 `packages/` would leave both checks absent and block the pull request. Edits
 that select neither job, such as documentation or the Swift app, pass the gate
-without running either suite. Only the CodeQL workflow compiles the Swift app,
-and it is not required.
+without running either suite. CodeQL compiles the Swift app on pull requests;
+the Swift release workflow builds it after changes land on `main`.
 
 Test runners append `ci/cargo.toml` to their Cargo configuration. Workspace
 code compiles without optimization or LTO, with 256 codegen units. Dependencies
@@ -95,6 +95,28 @@ Failed size gates retain build artifacts for seven days but prevent publication.
 The historical `jetd` size overage is documented in
 [Core distribution](../../docs/core-distribution.md); this workflow does not relax
 that budget. GUI signing and notarization remain separate distribution steps.
+
+## Swift app releases
+
+Changes under `apps/jet/` on `main` trigger `swift-release.yml` independently
+of core version tags. The same workflow runs when its packaging scripts or
+workflow change. Its run number sets the app version to `1.0.<run number>` and
+creates a `swift-v1.0.<run number>` release in this repository. It builds a
+universal macOS app and core payload from the same commit, bundles the payload
+inside `jet.app`, and publishes `jet-app-<version>.dmg` plus the macOS core
+archive. On first launch the app
+stages and activates that payload and starts a user LaunchAgent. If a
+Homebrew-managed daemon already owns the Plane, the app connects to it.
+
+The release job uses Ape Bonker's existing GitHub App secret to publish
+`Casks/jet.rb` in `apexgang/homebrew-tap`. The cask depends on the tap's `jet`
+core formula. If the tap has no formula, or an older core version, this job
+publishes a macOS formula from the same archive. The tagged core release may
+later replace it with the full macOS and Linux formula. Rerunning the job uses
+the published checksums; an older run cannot downgrade either tap package.
+The DMG is ad-hoc signed and not notarized yet.
+macOS Gatekeeper may require approval to open it the first time. Once opened,
+core installation needs no separate download or command.
 
 ## Validation
 

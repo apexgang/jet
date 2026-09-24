@@ -1,0 +1,105 @@
+# This workflow is managed by gh actions-lock.
+name: Release Swift app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/jet/**'
+      - '.github/workflows/swift-release.yml'
+      - '.github/scripts/package_swift_app.py'
+      - '.github/scripts/publish-swift-cask.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swift-app-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'apexgang/jet'
+    runs-on: macos-26
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    steps:
+      # ASVS 15.2.4: every external action resolves to a reviewed commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+      - name: Test the Swift app
+        run: >
+          xcodebuild -project apps/jet/jet.xcodeproj -scheme jet
+          -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/jet-swift-tests"
+          CODE_SIGNING_ALLOWED=NO test -only-testing:jetTests
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/target
+            !packages/target/dist
+          key: swift-core-${{ runner.os }}-${{ hashFiles('packages/Cargo.lock', 'packages/rust-toolchain.toml') }}-${{ hashFiles('packages/**') }}
+          restore-keys: swift-core-${{ runner.os }}-${{ hashFiles('packages/Cargo.lock', 'packages/rust-toolchain.toml') }}-
+      - name: Build the universal core payload
+        run: |
+          bash .github/scripts/setup-rust.sh release
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cd packages
+          just release-package --target aarch64-apple-darwin --target x86_64-apple-darwin
+      - name: Build and package the Swift app
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          version="1.0.${RUN_NUMBER}"
+          core_version=$(python3 -c 'import tomllib; print(tomllib.load(open("packages/Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          xcodebuild -project apps/jet/jet.xcodeproj -scheme jet -configuration Release \
+            -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/jet-swift-derived" \
+            ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO \
+            ENABLE_APP_SANDBOX=NO MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$RUN_NUMBER" build
+          python3 .github/scripts/package_swift_app.py \
+            --app "$RUNNER_TEMP/jet-swift-derived/Build/Products/Release/jet.app" \
+            --core "packages/target/dist/jet-core-${core_version}-universal-apple-darwin" \
+            --run-number "$RUN_NUMBER" --output swift-dist
+          ruby -c swift-dist/jet.rb
+          ruby -c swift-dist/jet-core.rb
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          version="1.0.${RUN_NUMBER}"
+          tag="swift-v${version}"
+          core_version=$(python3 -c 'import tomllib; print(tomllib.load(open("packages/Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          if gh release view "$tag" --json tagName >/dev/null 2>&1; then
+            gh release download "$tag" --pattern 'jet-app-*.dmg' --pattern 'jet-core-*-universal-apple-darwin.tar.gz' --dir swift-dist --clobber
+            python3 .github/scripts/package_swift_app.py --cask-for-dmg "swift-dist/jet-app-${version}.dmg" \
+              --core-archive "swift-dist/jet-core-${core_version}-universal-apple-darwin.tar.gz" \
+              --run-number "$RUN_NUMBER" --output swift-dist
+          else
+            gh release create "$tag" "swift-dist/jet-app-${version}.dmg" swift-dist/jet-core-*-universal-apple-darwin.tar.gz swift-dist/SHA256SUMS \
+              --target "$GITHUB_SHA" --title "Jet for macOS $version" \
+              --notes 'Universal macOS app and bundled Jet core. This build is not notarized.' \
+              --latest=false
+          fi
+      # ASVS 13.3.1/13.3.2: a secret mints a short-lived token scoped to the tap.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID || 'Iv23liPckhcRTwkS6Yxe' }}
+          private-key: ${{ secrets.APE_BONKER_PRIVATE_KEY }}
+          owner: apexgang
+          repositories: homebrew-tap
+          permission-contents: write
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: apexgang/homebrew-tap
+          ref: main
+          path: homebrew-tap
+          token: ${{ steps.app.outputs.token }}
+      - name: Publish Homebrew cask
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: bash .github/scripts/publish-swift-cask.sh "1.0.${RUN_NUMBER}"
