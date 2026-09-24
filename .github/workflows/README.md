@@ -82,12 +82,20 @@ re-enabling it silently rejects this workflow's uploads.
    a local tap with the documented command, runs the daemon under
    `brew services` in a systemd user session, and checks that uninstalling
    leaves no restarting service behind.
-5. Once every gate passes, it uploads six core archives, six desktop bundles
+5. `desktop-e2e.yml` installs the signed x86_64 `.deb` on a fresh runner and
+   drives the app through tauri-driver and WebKitWebDriver under Xvfb. The
+   app must provision its service from the bundled payload, Settings ›
+   Versions must show the service managed by the app, the UI must reconnect
+   after `systemctl --user kill jetd.service`, and a relaunch must change
+   nothing. The job uploads its launch, idle and reconnect measurements and
+   screenshots as `jet-desktop-e2e-<label>` (see
+   [resource budgets](../../docs/resource-budgets.md#desktop-linux)).
+6. Once every gate passes, it uploads six core archives, six desktop bundles
    with their signatures, `jetd.rb`, `jet-app.rb`, the updater's
    `latest.json`, and a `SHA256SUMS` covering all of them into a draft
    release, then publishes the complete release. `latest.json` embeds each
    signature file's contents and dates the release by its tagged commit.
-6. For a stable release, Ape Bonker commits `Formula/jetd.rb` and
+7. For a stable release, Ape Bonker commits `Formula/jetd.rb` and
    `Casks/jet-app.rb` to `apexgang/homebrew-tap` in one commit.
    `brew install apexgang/tap/jetd` installs the compiled executables and
    `brew services start apexgang/tap/jetd` starts the daemon.
@@ -130,10 +138,16 @@ that budget. macOS GUI signing and notarization remain separate distribution ste
 
 `packaging.yml` rehearses the Linux x86_64 half of a release on pull requests
 that touch packaging inputs, and on demand: it builds and gates the core
-payload, bundles the desktop app unsigned, and runs the Homebrew check. It uses
-no release secret and is not a required check. When only the size gate fails,
-the later jobs still run on the uploaded payload so one run reports every
-problem.
+payload, bundles the desktop app unsigned, drives the unsigned `.deb` through
+the desktop journey, and runs the Homebrew check. It uses no release secret
+and is not a required check. The journey also runs when it, the timing
+marks it reads, or the app's provisioning code changes. On every app change,
+`just e2e-dry-run` in `apps/jet-tauri`, part of the app's `just check`, runs
+it against fakes, and the app's tests run its page script against the real
+components. Dispatch `packaging.yml` by hand before the first `v*` tag, so
+the journey's first real run is not the one that gates `publish`. When only
+the size gate fails, the later jobs still run on the uploaded payload so one
+run reports every problem.
 
 ## Validation
 

@@ -1,9 +1,9 @@
 # This workflow is managed by gh actions-lock.
 # Rehearse the Linux x86_64 release on pull requests that change what it
 # packages or how: build and gate the core payload as release.yml does, bundle
-# the desktop app around it unsigned, and install both through a local
-# Homebrew tap. Nothing is published and no release secret is used. No job
-# here is a required check.
+# the desktop app around it unsigned, drive the installed bundle through the
+# desktop journey, and install both through a local Homebrew tap. Nothing is
+# published and no release secret is used. No job here is a required check.
 name: Packaging
 
 on:
@@ -16,9 +16,18 @@ on:
       - '.github/workflows/packaging.yml'
       - '.github/workflows/desktop-linux.yml'
       - '.github/workflows/homebrew-check.yml'
+      - '.github/workflows/desktop-e2e.yml'
       - 'apps/jet-tauri/src-tauri/tauri*.json'
       - 'apps/jet-tauri/justfile'
       - 'apps/jet-tauri/scripts/release/**'
+      # The journey itself, the timing marks it reads, and the provisioning
+      # it checks on a real runner. The shell and Settings views it reads
+      # are pinned on every app change by tests that run its page script
+      # against the real components (tests/e2e-page.component.test.ts).
+      - 'apps/jet-tauri/tests/e2e/**'
+      - 'apps/jet-tauri/src/lib/features/shell/timing.ts'
+      - 'apps/jet-tauri/src/lib/features/system/local-service.svelte.ts'
+      - 'apps/jet-tauri/src-tauri/src/jet/local_service/**'
       # Dependency and toolchain bumps: the Tauri CLI is the bundler that
       # names the bundles and builds the AppImage.
       - 'apps/jet-tauri/package.json'
@@ -111,10 +120,15 @@ jobs:
       sign: false
       labels: '["x86_64-unknown-linux-gnu"]'
 
-  # Slot for the desktop end-to-end journey and its measurements (Wave 4
-  # spec F): a job that needs desktop-linux, installs the unsigned .deb from
-  # `jet-desktop-linux-x86_64-unknown-linux-gnu` on a fresh runner, and
-  # uploads its measurements as a JSON artifact.
+  # The desktop journey and its measurements (Wave 4 spec F) on the unsigned
+  # x86_64 .deb, on a fresh runner.
+  desktop-e2e:
+    needs: desktop-linux
+    if: ${{ !cancelled() && needs.desktop-linux.result == 'success' }}
+    uses: ./.github/workflows/desktop-e2e.yml
+    with:
+      signed: false
+      labels: '["x86_64-unknown-linux-gnu"]'
 
   homebrew-check:
     needs: [package, desktop-linux]

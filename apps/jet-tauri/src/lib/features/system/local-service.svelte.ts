@@ -1,5 +1,6 @@
 import type { PublicError } from "$lib/jet/bridge";
 import { publicError } from "$lib/jet/errors";
+import { localServiceMark, mark } from "$lib/features/shell/timing";
 import {
   executeLocalServiceRollback,
   isProvisioning,
@@ -127,6 +128,8 @@ export class LocalServiceSession {
 
   private apply(view: LocalServiceView): void {
     const previous = this.view;
+    // The release journey reads which provisioning phases this window saw.
+    if (previous?.phase !== view.phase) mark(localServiceMark(view.phase));
     this.view = view;
     this.error = null;
     this.onChange(view, previous);

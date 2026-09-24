@@ -4,7 +4,7 @@ import type { Channel } from "@tauri-apps/api/core";
 
 import type { ConnectionSnapshot, PublicError, SetupSnapshot } from "../src/lib/jet/bridge";
 import type { LocalServiceView } from "../src/lib/jet/local-service";
-import type { PlanesSnapshot } from "../src/lib/jet/planes";
+import type { PlaneConnection, PlanesSnapshot } from "../src/lib/jet/planes";
 import { DEFAULT_PRESENTATION } from "../src/lib/jet/presentation";
 import { DesktopSession } from "../src/lib/features/shell/session.svelte";
 import { serviceView } from "./support/service";
@@ -98,6 +98,8 @@ function harness(options: Options) {
   const feeds: Array<Channel<unknown>> = [];
   let serviceChannel: Channel<LocalServiceView> | null = null;
   const setups = [...options.setups];
+  // The native registry, as `list_planes` reads it.
+  let registry: PlaneConnection = { state: "online" };
   vi.stubGlobal("window", { crypto: globalThis.crypto });
   mockIPC(async (command, args) => {
     const record = (args ?? {}) as Record<string, unknown>;
@@ -117,7 +119,7 @@ function harness(options: Options) {
         feeds.push(record.onUpdate as Channel<unknown>);
         return options.feedDown ? { ...CONNECTION, state: "reconnecting" } : CONNECTION;
       case "list_planes":
-        return PLANES;
+        return { ...PLANES, planes: [{ ...PLANES.planes[0], connection: registry }] };
       case "load_desktop_preferences":
         return { reopenLastTask: false, checkForUpdates: true };
       case "load_shell_presentation":
@@ -133,6 +135,8 @@ function harness(options: Options) {
     setupReads: () => calls.filter((command) => command === "load_setup").length,
     pushService: (view: LocalServiceView) => serviceChannel?.onmessage(view),
     pushFeed: (update: unknown) => feeds[0]?.onmessage(update),
+    /** What the native feed task sets before it sends its update. */
+    setRegistry: (connection: PlaneConnection) => (registry = connection),
   };
 }
 
@@ -153,6 +157,37 @@ describe("Setup and the local Jet service (wave 4 §A)", () => {
     expect(session.connectionState).toBe("reconnecting");
     ipc.pushFeed({ type: "connected", connection: CONNECTION });
     await settle();
+    expect(ipc.setupReads()).toBe(2);
+    session.disconnect();
+  });
+
+  it("shows the local Plane connected again when its feed resumes after jetd restarted", async () => {
+    const ipc = harness({ setups: [setup([{ id: "p1", name: "Jet", root: "/w" }])], service: serviceView() });
+    const session = new DesktopSession();
+    session.connect();
+    await settle();
+    ipc.pushFeed({ type: "resumed", after: "40" });
+    await settle();
+    expect(ipc.setupReads()).toBe(1);
+    expect(session.planes.aggregate?.detail).toBe("Connected");
+
+    // `systemctl --user kill jetd`: the open feed reports Reconnecting until
+    // the restarted daemon answers, then dials again and says resumed, never
+    // connected (`client.rs` `stream_updates`, `channels.rs`).
+    ipc.setRegistry({ state: "reconnecting", error: offline() });
+    ipc.pushFeed({ type: "reconnecting", error: offline() });
+    ipc.pushFeed({ type: "reconnecting", error: offline() });
+    await settle();
+    expect(session.connectionState).toBe("reconnecting");
+    expect(session.planes.aggregate?.detail).toBe("Reconnecting");
+
+    ipc.setRegistry({ state: "online" });
+    ipc.pushFeed({ type: "resumed", after: "40" });
+    await settle();
+    expect(session.connectionState).toBe("online");
+    expect(session.failure).toBeNull();
+    // The sidebar shows the registry: it reads it again.
+    expect(session.planes.aggregate?.detail).toBe("Connected");
     expect(ipc.setupReads()).toBe(2);
     session.disconnect();
   });

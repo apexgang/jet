@@ -131,8 +131,17 @@ jobs:
     needs: [package, desktop-linux]
     uses: ./.github/workflows/homebrew-check.yml
 
+  # Drives the signed x86_64 .deb through the desktop journey before anything
+  # is published. Its measurements are informational; its checks gate.
+  desktop-e2e:
+    needs: desktop-linux
+    uses: ./.github/workflows/desktop-e2e.yml
+    with:
+      signed: true
+      labels: '["x86_64-unknown-linux-gnu"]'
+
   publish:
-    needs: [package, desktop-linux, homebrew-check]
+    needs: [package, desktop-linux, homebrew-check, desktop-e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

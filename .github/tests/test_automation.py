@@ -105,8 +105,10 @@ class RequiredChecks(unittest.TestCase):
         for recipe in ('just install', 'just check', 'just audit'):
             self.assertIn(f'run: {recipe}', job)
         justfile = (ROOT / 'apps/jet-tauri/justfile').read_text()
-        self.assertIn('check: contracts frontend-check frontend-test frontend-build fmt clippy test',
-                      justfile)
+        check = re.search(r'(?m)^check: (.*)$', justfile).group(1).split()
+        for recipe in ('version-check', 'contracts', 'frontend-check', 'frontend-test', 'frontend-build',
+                       'fmt', 'clippy', 'test', 'e2e-dry-run'):
+            self.assertIn(recipe, check)
         self.assertIn('cd ../../packages && just contracts-check', justfile)
         self.assertIn('cargo clippy --locked', justfile)
         self.assertIn('cargo test --locked', justfile)
@@ -414,12 +416,55 @@ class ReleaseWorkflows(unittest.TestCase):
 
     def test_publication_waits_for_every_build_and_the_homebrew_check(self):
         release = (self.WORKFLOWS / 'release.yml').read_text()
-        self.assertIn('needs: [package, desktop-linux, homebrew-check]', release)
+        self.assertIn('needs: [package, desktop-linux, homebrew-check, desktop-e2e]', release)
         self.assertIn('uses: ./.github/workflows/desktop-linux.yml', release)
         self.assertIn('uses: ./.github/workflows/homebrew-check.yml', release)
         # Every tap writer shares one lock, so two pushes never race.
         self.assertEqual(release.count('group: homebrew-tap-jet'), 1)
         self.assertEqual(len(re.findall(r'(?m)^    concurrency:', release)), 1)
+
+    def job(self, workflow, name):
+        text = (self.WORKFLOWS / workflow).read_text()
+        return re.search(rf'(?ms)^  {name}:\n(.*?)(?=^  [\w-]+:\n|\Z)', text).group(1)
+
+    def test_desktop_journey_drives_the_bundles_before_anything_is_published(self):
+        # Wave 4 spec F: the unsigned rehearsal and the signed release both
+        # install the bundle desktop-linux built and drive it end to end.
+        for workflow, signed in (('packaging.yml', 'false'), ('release.yml', 'true')):
+            with self.subTest(workflow=workflow):
+                job = self.job(workflow, 'desktop-e2e')
+                self.assertIn('needs: desktop-linux', job)
+                self.assertIn('uses: ./.github/workflows/desktop-e2e.yml', job)
+                self.assertIn(f'signed: {signed}', job)
+        journey = (self.WORKFLOWS / 'desktop-e2e.yml').read_text()
+        self.assertIn('on:\n  workflow_call:', journey)
+        self.assertIn('permissions:\n  contents: read', journey)
+        self.assertRegex(journey, r'TAURI_DRIVER_VERSION: \d+\.\d+\.\d+\n')
+        self.assertIn('cargo install tauri-driver --version "$TAURI_DRIVER_VERSION" --locked', journey)
+        self.assertIn('name: jet-desktop-linux-${{ matrix.label }}', journey)
+        self.assertIn('xvfb-run', journey)
+        self.assertIn('bun tests/e2e/main.ts --dry-run', journey)
+        self.assertIn('sudo loginctl enable-linger', journey)
+        # Diagnostics on failure, and the measurements and screenshots always.
+        self.assertIn("if: ${{ failure() }}", journey)
+        self.assertIn('_SYSTEMD_USER_UNIT=jetd.service', journey)
+        upload = journey.split('actions/upload-artifact', 1)[1]
+        self.assertIn('if: ${{ !cancelled() }}', upload)
+        self.assertIn('path: ${{ runner.temp }}/jet-e2e', upload)
+        self.assertEqual(len(re.findall(r'(?m)^    timeout-minutes:', journey)), 1)
+        # The journey job has no secret and no write permission.
+        self.assertNotIn('secrets', journey)
+        self.assertNotIn('write', journey)
+        # A pull request that changes the journey, the marks it times or the
+        # provisioning it checks runs it before a tag does.
+        paths = re.findall(r"(?m)^      - '([^']+)'$", (self.WORKFLOWS / 'packaging.yml').read_text())
+        for path in ('.github/workflows/desktop-e2e.yml', 'apps/jet-tauri/tests/e2e/**',
+                     'apps/jet-tauri/src/lib/features/shell/timing.ts',
+                     'apps/jet-tauri/src/lib/features/system/local-service.svelte.ts',
+                     'apps/jet-tauri/src-tauri/src/jet/local_service/**'):
+            self.assertIn(path, paths)
+            if '*' not in path:
+                self.assertTrue((ROOT / path).is_file(), path)
 
     def test_packaging_rehearsal_runs_for_every_dependency_bump(self):
         # A Tauri CLI bump changes the bundle names release_assets.py expects;
