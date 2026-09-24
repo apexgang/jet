@@ -16,7 +16,13 @@ def classify(paths):
         'packages/jet-protocol/', 'apps/jet/jet/Protocol/',
         'apps/jet-tauri/src/lib/protocol/',
     )) for p in paths)
-    return {'core': core, 'contracts': contracts}
+    # The Tauri shell compiles jet-client and jet-protocol from their workspace,
+    # and its tests read the shared desktop fixture corpus.
+    tauri = shared or any(p.startswith((
+        'apps/jet-tauri/', 'packages/jet-client/', 'packages/jet-protocol/',
+        'fixtures/desktop/',
+    )) for p in paths)
+    return {'core': core, 'contracts': contracts, 'tauri': tauri}
 
 
 def main():
@@ -30,7 +36,7 @@ def main():
                                 check=True, capture_output=True)
         jobs = classify(result.stdout.decode().split('\0'))
     except (ValueError, UnicodeError, subprocess.CalledProcessError):
-        jobs = {'core': True, 'contracts': True}
+        jobs = {'core': True, 'contracts': True, 'tauri': True}
     with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
         for job, enabled in jobs.items():
             print(f'{job}={str(enabled).lower()}', file=output)

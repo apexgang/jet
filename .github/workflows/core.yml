@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       core: ${{ steps.changes.outputs.core }}
+      tauri: ${{ steps.changes.outputs.tauri }}
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Select checks
@@ -39,8 +40,8 @@ jobs:
         working-directory: .
         run: python3 -m unittest discover -s .github/tests -v
 
-  test:
-    name: ${{ matrix.os }}
+  core:
+    name: core (${{ matrix.os }})
     needs: changes
     if: needs.changes.outputs.core == 'true'
     strategy:
@@ -104,3 +105,79 @@ jobs:
             !packages/target/dist
             .github/.cache
           key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  # The Linux desktop client: contract freshness, Svelte and TypeScript checks,
+  # frontend tests and build, Rust formatting, lints and tests, then a
+  # dependency audit whose accepted exceptions are reviewed in
+  # apps/jet-tauri/docs/dependency-advisories.md.
+  tauri:
+    name: Tauri app
+    needs: changes
+    if: needs.changes.outputs.tauri == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: apps/jet-tauri
+    env:
+      # Core builds already fill the repository's Actions cache, so this job
+      # builds from scratch and skips state it could not reuse.
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install the WebKitGTK build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.4.2
+      - uses: extractions/setup-just@v4.0.0
+      - name: Set up Rust
+        working-directory: .
+        run: |
+          for file in apps/jet-tauri/rust-toolchain.toml packages/rust-toolchain.toml; do
+            python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["toolchain"]["channel"])' "$file"
+          done | sort -u | while read -r toolchain; do
+            rustup toolchain install "$toolchain" --profile minimal --component rustfmt --component clippy
+          done
+      - uses: taiki-e/install-action@v2.87.13
+        with:
+          tool: cargo-deny@0.20.2
+      - name: Install the locked frontend dependencies
+        id: install
+        run: just install
+      - name: Check contracts, the frontend and the Rust shell
+        run: just check
+      - name: Audit dependencies
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: just audit
+
+  # The main ruleset requires the ubuntu-latest and macos-latest contexts, so
+  # they come from this gate rather than from the jobs above. A job skipped by
+  # its `if` never expands its matrix: an edit outside packages/ would otherwise
+  # report `matrix.os` and leave the pull request blocked. The gate fails
+  # unless change selection succeeded, every selected job passed, and every
+  # other job was skipped.
+  required:
+    name: ${{ matrix.os }}
+    needs: [changes, core, tauri]
+    if: ${{ !cancelled() }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Require every selected job
+        working-directory: .
+        env:
+          SELECTION: ${{ needs.changes.result }}
+          CORE_SELECTED: ${{ needs.changes.outputs.core }}
+          CORE_RESULT: ${{ needs.core.result }}
+          TAURI_SELECTED: ${{ needs.changes.outputs.tauri }}
+          TAURI_RESULT: ${{ needs.tauri.result }}
+        run: python3 .github/scripts/required.py
