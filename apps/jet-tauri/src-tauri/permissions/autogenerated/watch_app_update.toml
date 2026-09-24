@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-watch-app-update"
+description = "Enables the watch_app_update command without any pre-configured scope."
+commands.allow = ["watch_app_update"]
+
+[[permission]]
+identifier = "deny-watch-app-update"
+description = "Denies the watch_app_update command without any pre-configured scope."
+commands.deny = ["watch_app_update"]

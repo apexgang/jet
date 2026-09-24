@@ -496,6 +496,41 @@ textarea:focus-visible {
   font-size: 11px;
 }
 
+.setup-failure .failure-actions {
+  display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+/* The local Jet service is being installed, updated or started (wave 4 §A). */
+.setup-provisioning {
+  display: grid;
+  gap: 18px;
+  width: min(100%, 880px);
+  margin: 0 auto;
+  padding: 54px 28px 28px;
+}
+
+.setup-provisioning .loading-bar {
+  height: 6px;
+  border-radius: 3px;
+}
+
+.setup-provisioning h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.setup-provisioning p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .setup-loading {
   display: grid;
   gap: 16px;

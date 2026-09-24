@@ -17,7 +17,9 @@ import {
   type WorkContext,
 } from "$lib/jet/settings";
 import { AutodeleteSession, type RulesBlock } from "$lib/features/autodelete/session.svelte";
+import { LocalServiceSession } from "$lib/features/system/local-service.svelte";
 import { SystemSession } from "$lib/features/system/session.svelte";
+import { AppUpdateSession } from "$lib/features/system/updates.svelte";
 import { AgentsSession } from "./agents-session.svelte";
 import { ExtensionsSession } from "./extensions-session.svelte";
 import {
@@ -142,6 +144,12 @@ export class SettingsSession {
     () => this.autodelete.planeRestarted(),
     () => void this.reload(),
   );
+  /**
+   * Safety › Versions: this computer's Jet service (whichever Plane is
+   * picked) and this app's updates. Both belong to the window, not a Plane.
+   */
+  readonly service = new LocalServiceSession();
+  readonly updates = new AppUpdateSession();
   /** Work › Retention › Auto-delete of the same Plane. */
   readonly autodelete = new AutodeleteSession({
     mutationBlock: () => this.autodeleteBlock(),
@@ -205,6 +213,8 @@ export class SettingsSession {
     this.extensions.dispose();
     this.system.dispose();
     this.autodelete.dispose();
+    this.service.dispose();
+    this.updates.dispose();
   }
 
   /** Reloads every section, then watches from the lowest section cursor. */

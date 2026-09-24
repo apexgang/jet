@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-execute-local-service-rollback"
+description = "Enables the execute_local_service_rollback command without any pre-configured scope."
+commands.allow = ["execute_local_service_rollback"]
+
+[[permission]]
+identifier = "deny-execute-local-service-rollback"
+description = "Denies the execute_local_service_rollback command without any pre-configured scope."
+commands.deny = ["execute_local_service_rollback"]

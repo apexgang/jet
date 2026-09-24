@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings-window",
-  "description": "Device preferences, navigation, read-only Plane summaries, and reviewed Plane setting, Account binding, Auto-continue, Craft and Harness extension changes for the Settings window, plus read-only Plane health, one bounded disposable-storage collection, auto-delete rules with task names for their candidates, reviewed Recovery snapshot restore and purge, the redacted Security audit, and a reviewed new audit epoch, the saved window layout's status (read-only) and Quit (Ctrl+Q); approvals and snapshots name only native tokens. Local Craft files and the audit evidence file are chosen in native dialogs opened by the shell, and no path crosses to the webview. It never receives Plane feeds or agent content, and grants no pairing, Plane, dialog, or window-core permission.",
+  "description": "Device preferences, navigation, read-only Plane summaries, and reviewed Plane setting, Account binding, Auto-continue, Craft and Harness extension changes for the Settings window, plus read-only Plane health, one bounded disposable-storage collection, auto-delete rules with task names for their candidates, reviewed Recovery snapshot restore and purge, the redacted Security audit, and a reviewed new audit epoch, the saved window layout's status (read-only) and Quit (Ctrl+Q), the local Jet service's state, its repair and a reviewed rollback, and signed app updates checked, followed, installed and restarted natively (the webview gets no updater permission); approvals and snapshots name only native tokens. Local Craft files and the audit evidence file are chosen in native dialogs opened by the shell, and no path crosses to the webview. It never receives Plane feeds or agent content, and grants no pairing, Plane, dialog, or window-core permission.",
   "windows": [
     "settings"
   ],
@@ -47,6 +47,16 @@
     "allow-load-security-audit",
     "allow-export-security-audit",
     "allow-load-shell-presentation",
-    "allow-quit-jet"
+    "allow-quit-jet",
+    "allow-load-local-service",
+    "allow-watch-local-service",
+    "allow-repair-local-service",
+    "allow-prepare-local-service-rollback",
+    "allow-execute-local-service-rollback",
+    "allow-load-app-update",
+    "allow-watch-app-update",
+    "allow-check-app-update",
+    "allow-install-app-update",
+    "allow-restart-after-update"
   ]
 }

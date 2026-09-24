@@ -4,6 +4,7 @@
   import type { DesktopSession } from "$lib/features/shell/session.svelte";
   import SidebarToggle from "$lib/features/shell/SidebarToggle.svelte";
   import { landedTarget } from "$lib/features/settings/model";
+  import { actionText, provisioningText, serviceProblem } from "$lib/features/system/service-model";
   import { LOCAL_PLANE } from "$lib/jet/planes";
 
   let { session }: { session: DesktopSession } = $props();
@@ -22,6 +23,28 @@
 
   /** Setup is this computer's Plane; its accounts are managed in Settings. */
   const accountsTarget = landedTarget("accounts", LOCAL_PLANE);
+
+  /** The local Jet service (Wave 4 §A), as this window's watcher last saw it. */
+  const service = $derived(session.service.view);
+  /** While the shell installs, updates or starts the service, Setup says so instead of "unavailable". */
+  const provisioning = $derived(
+    session.setup.kind !== "ready" && service !== null ? provisioningText(service.phase) : null,
+  );
+  const problem = $derived(service !== null ? serviceProblem(service) : null);
+  /**
+   * Repair re-runs the native decision table. Offered when it can install or
+   * start the service, and when a service this app or Homebrew manages
+   * stopped answering after it was set up.
+   */
+  const repairable = $derived(
+    service !== null &&
+      !session.service.provisioning &&
+      (service.canRepair ||
+        (session.setup.kind === "failed" &&
+          session.setup.error.category === "offline" &&
+          (service.channel === "gui" || service.channel === "homebrew"))),
+  );
+  const serviceNotice = $derived(service !== null ? actionText(service) : null);
 
   const removalReady = $derived(
     session.removalPreview !== null &&
@@ -113,20 +136,54 @@
     </button>
   </header>
 
-  {#if session.setup.kind === "loading"}
+  {#if provisioning}
+    <div class="setup-provisioning" role="status" aria-live="polite">
+      <span class="loading-bar" aria-hidden="true"></span>
+      <div>
+        <h2>Connecting to the local Jet service</h2>
+        <p>{provisioning}</p>
+      </div>
+    </div>
+  {:else if session.setup.kind === "loading"}
     <div class="setup-loading" aria-live="polite">
       <span class="loading-bar"></span>
       <span class="loading-bar short"></span>
       <span class="loading-bar"></span>
     </div>
   {:else if session.setup.kind === "failed"}
+    {@const code = problem ? problem.code : session.setup.error.code}
     <div class="setup-failure" role="alert">
       <div>
-        <h2>Local Plane unavailable</h2>
-        <p>{session.setup.error.message}</p>
-        <code>{session.setup.error.code}</code>
+        <h2>{problem?.title ?? "Local Plane unavailable"}</h2>
+        <p>{problem?.detail ?? session.setup.error.message}</p>
+        {#if code}<code>{code}</code>{/if}
+        {#if session.service.repairError}
+          <p class="section-error">{session.service.repairError.message} <code>{session.service.repairError.code}</code></p>
+        {/if}
       </div>
-      <button class="primary-button" onclick={() => session.refreshSetup()}>Try again</button>
+      <div class="failure-actions">
+        {#if repairable}
+          <button
+            class="primary-button"
+            disabled={session.service.repairing}
+            onclick={() => void session.service.repair()}
+          >
+            {session.service.repairing ? "Repairing…" : "Repair"}
+          </button>
+          <button class="secondary-button" onclick={() => session.refreshSetup()}>Try again</button>
+        {:else if problem}
+          <!-- Nothing to install or start: check the service again (a jetd started by hand is found). -->
+          <button
+            class="primary-button"
+            disabled={session.service.repairing}
+            onclick={() => void session.service.repair()}
+          >
+            {session.service.repairing ? "Checking…" : "Check again"}
+          </button>
+        {:else}
+          <button class="primary-button" onclick={() => session.refreshSetup()}>Try again</button>
+        {/if}
+      </div>
     </div>
   {:else}
     {@const setup = session.setup.snapshot}
@@ -146,6 +203,9 @@
           {/if}
           {#if capabilitiesIssue}
             <p class="service-warning">{capabilitiesIssue.error.message} <code>{capabilitiesIssue.error.code}</code></p>
+          {/if}
+          {#if serviceNotice}
+            <p class="service-notice" role="status">{serviceNotice}</p>
           {/if}
         </div>
         <span class:warning={serviceNeedsAttention} class:success={!serviceNeedsAttention} class="status-text">
