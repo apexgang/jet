@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A1000001304199A200809DA4 /* presentation-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = A1000002304199A200809DA4 /* presentation-v1.json */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		92982703304199A200809DA4 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -24,6 +28,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		A1000002304199A200809DA4 /* presentation-v1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "presentation-v1.json"; path = "../../fixtures/desktop/presentation-v1.json"; sourceTree = "<group>"; };
 		929826F1304199A200809DA4 /* jet.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = jet.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		92982702304199A200809DA4 /* jetTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = jetTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9298270C304199A200809DA4 /* jetUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = jetUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -88,6 +93,7 @@
 		929826E8304199A200809DA4 = {
 			isa = PBXGroup;
 			children = (
+				A1000002304199A200809DA4 /* presentation-v1.json */,
 				929826F3304199A200809DA4 /* jet */,
 				92982705304199A200809DA4 /* jetTests */,
 				9298270F304199A200809DA4 /* jetUITests */,
@@ -225,6 +231,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1000001304199A200809DA4 /* presentation-v1.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -287,6 +294,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = jet/jet-macos.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = W652976H6M;
@@ -332,6 +340,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = jet/jet-macos.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = W652976H6M;

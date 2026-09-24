@@ -96,6 +96,7 @@ emit-contracts root:
 	# Craft models serve the contract test; only clients need the Jet models.
 	python3 ../.github/scripts/wire-models.py "$contracts/craft-v1.schema.json" "$contracts/CraftModels.ts" "$contracts/CraftModels.swift"
 	python3 ../.github/scripts/wire-models.py "$contracts/jet-v1.schema.json" "$typescript/JetModels.ts" "$swift/JetModels.swift"
+	cp "$contracts/jet-v1.schema.json" "$swift/jet-v1.schema.json"
 
 # Fail when a committed contract no longer matches the Rust wire DTOs.
 contracts-check:

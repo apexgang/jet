@@ -57,6 +57,7 @@ async fn start(
 		.unwrap();
 	wire.send(&json!({"kind":"command","id":1,"command_id":Uuid::now_v7(),"command":{"type":"start_run","conversation_id":conversation.conversation_id,"craft":"fake","prompt":"Make a change"}})).await;
 	let admitted: Value = wire.receive().await;
+	assert_eq!(admitted["kind"], "command_result", "{admitted}");
 	let run = admitted["result"]["run_id"].as_str().unwrap().to_owned();
 	wait_for(wire, &run, "waiting_for_approval").await;
 	(conversation.conversation_id, run)
@@ -317,6 +318,15 @@ async fn active_digests_multiplex_runs_and_restart_without_switching_versions()
 	tokio::time::timeout(assertions::STEP_BUDGET * 14, async {
 		let client_id = Uuid::new_v4();
 		let client = connect(&daemon, client_id).await;
+		client
+			.set_setting(
+				Uuid::now_v7(),
+				jet_protocol::SettingKey::EnergyLowPowerConcurrency,
+				jet_protocol::SettingScope::Plane,
+				jet_protocol::SettingValue::Count(3),
+			)
+			.await
+			.unwrap();
 		let mut wire = connect_raw(&daemon, client_id).await;
 		let mut runs = Vec::new();
 		for name in ["one", "two", "three"] {

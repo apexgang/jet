@@ -16,6 +16,11 @@ This repository uses a single-context layout. See `docs/agents/domain.md`.
 
 When working on the Jet backend under `packages/`, read `packages/AGENTS.md`.
 
+### Jet Swift app
+
+When working on the native Swift app under `apps/jet/`, read
+`apps/jet/AGENTS.md`.
+
 ### Jet Tauri app
 
 When working on the cross-platform desktop app under `apps/jet-tauri/`, read

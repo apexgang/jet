@@ -441,4 +441,3 @@ export class PlaneCatalog {
     for (const planeId of this.generations.keys()) this.bump(planeId);
   }
 }
-

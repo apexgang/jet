@@ -65,6 +65,7 @@ pub(crate) enum KeyStoreError {
     /// No Secret Service on the bus, or a create/read/delete step failed.
     Unavailable,
     /// The unlock prompt was dismissed or timed out.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Locked,
     /// This build has no supported secure store (every non-Linux build).
     #[cfg_attr(target_os = "linux", allow(dead_code))]

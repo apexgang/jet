@@ -1,0 +1,43 @@
+set shell := ["bash", "-cu"]
+
+project := "jet.xcodeproj"
+scheme := "jet"
+macos_derived_data := "/tmp/jet-derived"
+ios_derived_data := "/tmp/jet-derived-ios"
+
+# Show the Swift app's available tasks.
+default:
+	@just --justfile "{{justfile_directory()}}/justfile" --list
+
+# Verify generated protocol bindings are current.
+contracts:
+	./scripts/check-generated-contracts.sh
+
+# Build the macOS app without code signing.
+build-macos:
+	xcodebuild -project "{{project}}" -scheme "{{scheme}}" \
+		-destination 'platform=macOS' -derivedDataPath "{{macos_derived_data}}" \
+		CODE_SIGNING_ALLOWED=NO build
+
+# Build the shared app code for the iOS Simulator without code signing.
+build-ios:
+	xcodebuild -project "{{project}}" -scheme "{{scheme}}" \
+		-destination 'generic/platform=iOS Simulator' \
+		-derivedDataPath "{{ios_derived_data}}" CODE_SIGNING_ALLOWED=NO build
+
+# Run the Swift unit tests on macOS.
+test:
+	xcodebuild -project "{{project}}" -scheme "{{scheme}}" \
+		-destination 'platform=macOS' -derivedDataPath "{{macos_derived_data}}" \
+		CODE_SIGNING_ALLOWED=NO test -only-testing:jetTests
+
+# Run the app-local contract, unit-test, and cross-platform build checks.
+check: contracts test build-ios
+
+# List Xcode project schemes and targets.
+list:
+	xcodebuild -list -project "{{project}}"
+
+# Show the scheme's available Xcode destinations.
+destinations:
+	xcodebuild -showdestinations -project "{{project}}" -scheme "{{scheme}}"
