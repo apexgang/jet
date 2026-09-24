@@ -63,6 +63,8 @@ import {
 import { openSettings, type SettingsTarget } from "$lib/jet/settings-window";
 import { PlaneCatalog } from "$lib/features/planes/catalog.svelte";
 import { PlaneHealth } from "$lib/features/system/health.svelte";
+import { LocalServiceSession } from "$lib/features/system/local-service.svelte";
+import { isProvisioning, type LocalServiceView } from "$lib/jet/local-service";
 import { TrashSession } from "$lib/features/trash/session.svelte";
 import type { PlaneNotice } from "$lib/features/system/model";
 import { needsPairing } from "$lib/features/planes/model";
@@ -168,6 +170,11 @@ export class DesktopSession implements FeedHandler {
     knownTitle: (planeId, conversationId) => this.catalog.find(planeId, conversationId)?.title ?? null,
     observe: (planeId, error) => this.observeOutcome(planeId, error),
   });
+  /**
+   * The local Jet service (Wave 4 §A): Setup shows its provisioning and
+   * repair, and re-reads the local Plane when the service is up again.
+   */
+  readonly service = new LocalServiceSession((view, previous) => this.serviceChanged(view, previous));
   scenario = $state<DesktopFixtureScenario>(fixtureForState("active"));
   sidebarSelection = $state<SidebarDestination>("conversation");
   /** Written only through `applySidebar`. */
@@ -281,6 +288,12 @@ export class DesktopSession implements FeedHandler {
   private presentationSaveFailing = false;
   private presentationSaveRequest = 0;
   private setupRequest = 0;
+  /**
+   * The startup generation whose Setup read failed, until a read succeeds:
+   * once the local service is up, that read is repeated with the startup's
+   * incomplete-setup redirect.
+   */
+  private startupSetupFailed: number | null = null;
   private restoreRequest = 0;
   private workRequest = 0;
   private workFileRequest = 0;
@@ -528,11 +541,51 @@ export class DesktopSession implements FeedHandler {
       this.loadPresentation(),
       this.loadReopenLastTask(),
       this.planes.refresh(),
+      this.service.start(),
     ]);
     this.reopenLastTask = reopenLastTask;
     this.applyStartupPresentation(presentation, reopenLastTask, generation);
     await this.refreshSetup(true, generation);
+    if (this.setup.kind === "failed") {
+      this.startupSetupFailed = generation;
+      this.showServiceProblem();
+    }
     await this.connectPlanes(reopenLastTask);
+  }
+
+  /**
+   * The local service changed. Up again (installed, started, updated or
+   * restarted): Setup re-reads the local Plane. Settled without running
+   * after a failed startup: Setup opens, where Repair is.
+   */
+  private serviceChanged(view: LocalServiceView, previous: LocalServiceView | null): void {
+    // The first view arrives before startup reads Setup itself.
+    if (previous === null) return;
+    if (view.phase === "running") {
+      if (previous.phase !== "running" || previous.runningVersion !== view.runningVersion) {
+        const startup = this.startupSetupFailed;
+        void this.refreshSetup(startup !== null, startup);
+      }
+      return;
+    }
+    if (!isProvisioning(view.phase)) this.showServiceProblem();
+  }
+
+  /** Opens Setup for a startup whose Setup read failed, unless the user moved on. */
+  private showServiceProblem(): void {
+    const view = this.service.view;
+    if (
+      view === null ||
+      view.phase === "running" ||
+      isProvisioning(view.phase) ||
+      this.setup.kind !== "failed" ||
+      this.startupSetupFailed === null ||
+      this.startupSetupFailed !== this.presentationGeneration
+    ) {
+      return;
+    }
+    this.sidebarSelection = "project";
+    this.applyPanel({ kind: "auto-close" });
   }
 
   /** The saved layout, or the defaults when the native read fails. */
@@ -703,6 +756,7 @@ export class DesktopSession implements FeedHandler {
   disconnect(): void {
     this.planes.closeAll();
     this.catalog.dispose();
+    this.service.dispose();
   }
 
   /**
@@ -808,6 +862,11 @@ export class DesktopSession implements FeedHandler {
     if (planeId !== LOCAL_PLANE) return;
     this.connection = snapshot.state === "online" ? snapshot : null;
     this.connectionState = snapshot.state;
+    // The local Plane answers now although startup's Setup read failed.
+    if (snapshot.state === "online" && this.setup.kind === "failed") {
+      const startup = this.startupSetupFailed;
+      void this.refreshSetup(startup !== null, startup);
+    }
   }
 
   /** FeedHandler: a Plane's feed could not be opened. */
@@ -830,6 +889,7 @@ export class DesktopSession implements FeedHandler {
       const snapshot = await loadSetup();
       if (request !== this.setupRequest) return;
       this.setup = { kind: "ready", snapshot };
+      this.startupSetupFailed = null;
       this.failure = null;
       const projectsAvailable = !snapshot.issues.some((issue) => issue.section === "projects");
       const accountsAvailable = !snapshot.issues.some((issue) => issue.section === "accounts");
@@ -2057,9 +2117,18 @@ export class DesktopSession implements FeedHandler {
           void this.loadSelectedConversation(false);
         }
         if (!local) break;
-        this.connection = update.connection;
-        this.connectionState = "online";
-        this.failure = null;
+        {
+          // The local Plane came back (wave 4 §A): Setup re-reads it rather
+          // than keep showing it unavailable.
+          const reconnected = this.connectionState === "reconnecting" || this.connectionState === "failed";
+          this.connection = update.connection;
+          this.connectionState = "online";
+          this.failure = null;
+          if (reconnected || this.setup.kind === "failed") {
+            const startup = this.startupSetupFailed;
+            void this.refreshSetup(startup !== null, startup);
+          }
+        }
         break;
       case "resumed":
         void this.catalog.load(planeId);

@@ -1,6 +1,9 @@
 mod jet;
 
-use jet::{presentation::PresentationState, window_state, JetBridge};
+use jet::{
+    local_service::LocalServiceState, presentation::PresentationState, updates::AppUpdateState,
+    window_state, JetBridge,
+};
 use tauri::{Manager, RunEvent, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -12,20 +15,43 @@ pub fn run() {
             let home_directory = app.path().home_dir()?;
             let app_data_directory = app.path().app_data_dir()?;
             // The bridge creates the app data directory (0700) first.
-            app.manage(JetBridge::for_local_plane(
+            let bridge = JetBridge::for_local_plane(&home_directory, &app_data_directory)?;
+            let service = LocalServiceState::for_app(
+                app.handle(),
+                &bridge,
                 &home_directory,
                 &app_data_directory,
-            )?);
+            );
+            // The updater plugin exists only in release builds that carry
+            // `plugins.updater`; development builds start without it.
+            let updates_configured = jet::updates::register(app.handle());
+            app.manage(AppUpdateState::for_app(
+                app.handle(),
+                updates_configured,
+                service.subscribe(),
+            ));
+            app.manage(service);
+            app.manage(bridge);
             app.manage(PresentationState::new(&app_data_directory));
             app.manage(window_state::WindowGeometryState::new(&app_data_directory));
             if let Some(window) = app.get_webview_window(window_state::MAIN_LABEL) {
                 window_state::present(&window, &app.state());
             }
+            // Provisioning runs in the background; setup never waits for it.
+            jet::local_service::launch(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
             if let Some(geometry) = window.try_state::<window_state::WindowGeometryState>() {
                 window_state::track(window, event, &geometry);
+            }
+            if matches!(event, WindowEvent::Destroyed) {
+                if let Some(service) = window.try_state::<LocalServiceState>() {
+                    service.window_destroyed(window.label());
+                }
+                if let Some(updates) = window.try_state::<AppUpdateState>() {
+                    updates.window_destroyed(window.label());
+                }
             }
             if matches!(event, WindowEvent::Destroyed)
                 && window.label() == jet::settings_window::SETTINGS_LABEL
@@ -130,6 +156,16 @@ pub fn run() {
             jet::window_mode::toggle_main_window_fullscreen,
             jet::window_mode::close_main_window,
             jet::window_mode::quit_jet,
+            jet::local_service::load_local_service,
+            jet::local_service::watch_local_service,
+            jet::local_service::repair_local_service,
+            jet::local_service::prepare_local_service_rollback,
+            jet::local_service::execute_local_service_rollback,
+            jet::updates::load_app_update,
+            jet::updates::watch_app_update,
+            jet::updates::check_app_update,
+            jet::updates::install_app_update,
+            jet::updates::restart_after_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the Jet desktop application")

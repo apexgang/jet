@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-watch-local-service"
+description = "Enables the watch_local_service command without any pre-configured scope."
+commands.allow = ["watch_local_service"]
+
+[[permission]]
+identifier = "deny-watch-local-service"
+description = "Denies the watch_local_service command without any pre-configured scope."
+commands.deny = ["watch_local_service"]

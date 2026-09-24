@@ -14,6 +14,7 @@ pub(crate) mod ledger;
 mod live_e2e;
 #[cfg(test)]
 mod live_system;
+pub(crate) mod local_service;
 pub(crate) mod local_store;
 pub(crate) mod notifications;
 pub(crate) mod pairing;
@@ -27,6 +28,7 @@ pub(crate) mod settings;
 pub(crate) mod settings_window;
 mod setup;
 pub(crate) mod system;
+pub(crate) mod updates;
 pub(crate) mod window_mode;
 pub(crate) mod window_state;
 mod work_panel;
@@ -515,7 +517,10 @@ mod manifest_tests {
     /// `resolve_conversation_names` reads task titles only (wave 3.3 §5).
     /// `load_shell_presentation` reads layout only (for the Window layout
     /// line), and `quit_jet` is Ctrl+Q in both windows (wave 3.4 §5).
-    const SHARED: [&str; 7] = [
+    /// The local service view and its repair back Setup and Settings ›
+    /// Versions (Wave 4 §A): a repair re-runs the native decision table,
+    /// which never downgrades and never touches another channel's core.
+    const SHARED: [&str; 10] = [
         "load_desktop_preferences",
         "load_shell_presentation",
         "quit_jet",
@@ -523,10 +528,13 @@ mod manifest_tests {
         "load_plane_detail",
         "collect_disposable_storage",
         "resolve_conversation_names",
+        "load_local_service",
+        "watch_local_service",
+        "repair_local_service",
     ];
 
     /// Commands only the Settings window may call.
-    const SETTINGS_ONLY: [&str; 31] = [
+    const SETTINGS_ONLY: [&str; 38] = [
         "watch_settings_navigation",
         "remember_settings_pane",
         "close_settings",
@@ -558,6 +566,13 @@ mod manifest_tests {
         "execute_recovery_action",
         "load_security_audit",
         "export_security_audit",
+        "prepare_local_service_rollback",
+        "execute_local_service_rollback",
+        "load_app_update",
+        "watch_app_update",
+        "check_app_update",
+        "install_app_update",
+        "restart_after_update",
     ];
 
     /// Wave 3.3 commands granted to the main window only.

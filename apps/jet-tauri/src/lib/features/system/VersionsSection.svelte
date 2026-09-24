@@ -3,15 +3,25 @@
   import type { SystemHealth } from "$lib/jet/system";
   import SectionState from "$lib/features/settings/SectionState.svelte";
   import { LANDED_SECTIONS, PANES, sectionHeadingId, withIssues } from "$lib/features/settings/model";
+  import AppUpdatesBlock from "./AppUpdatesBlock.svelte";
+  import LocalServiceBlock from "./LocalServiceBlock.svelte";
+  import type { LocalServiceSession } from "./local-service.svelte";
   import { credentialStoreText, formatWhen, negotiatedLine, startsText, toolText, unixMs } from "./model";
   import type { SystemSession } from "./session.svelte";
+  import type { AppUpdateSession } from "./updates.svelte";
 
   let {
     system,
+    service,
+    updates,
     planeLabel,
     onopen,
   }: {
     system: SystemSession;
+    /** This computer's Jet service, whichever Plane is picked. */
+    service: LocalServiceSession;
+    /** This app's own updates. */
+    updates: AppUpdateSession;
     /** The Plane picker's label, shown before health loads. */
     planeLabel: string;
     /** Shows another Settings section in this window. */
@@ -108,6 +118,9 @@
       </div>
     {/snippet}
   </SectionState>
+
+  <LocalServiceBlock {service} />
+  <AppUpdatesBlock {updates} />
 </section>
 
 <style>

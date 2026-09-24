@@ -5,10 +5,16 @@
 [Unit]
 Description=Jet daemon for this user's Plane
 Documentation=https://github.com/apexgang/jet
+# Nothing to start until `jetd core activate` made `current`; without this
+# a missing core would restart and fail every two seconds.
+ConditionFileIsExecutable=%h/.jet/core/current/jetd
 
 [Service]
 Type=simple
 ExecStart=%h/.jet/core/current/jetd serve --channel gui
+# Harnesses start their CLIs by name; `claude` and friends usually live in
+# ~/.local/bin, which the user manager's default PATH lacks.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 # jetd drains within ten seconds (ADR-0088); give it a little longer.
 TimeoutStopSec=15
 # Signal jetd alone. jetfueld helpers keep Runs and terminals alive across

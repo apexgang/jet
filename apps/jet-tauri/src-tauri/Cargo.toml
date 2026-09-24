@@ -40,6 +40,14 @@ tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process"
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-dialog = "2.7.3"
 tauri-plugin-notification = "2"
+# Signed app updates from the GitHub release (`jet/updates.rs`). Registered
+# only when the release configuration has `plugins.updater`; the webview gets
+# no updater permission. Linux bundles are the raw deb/rpm/AppImage, so the
+# v1 `zip` archives and the Windows/macOS system proxy are not needed.
+tauri-plugin-updater = { version = "2.12", default-features = false, features = ["rustls-tls"] }
+# Orders bundled and installed core versions (`jet/local_service`); already
+# in the graph through Tauri.
+semver = "1"
 
 # Freedesktop Secret Service for the pairing key (ADR-0076). The async-io
 # runtime feature adds no zbus feature beyond what notify-rust already
