@@ -30,6 +30,7 @@ use super::{
     unknown_plane, ConnectionView, Observed, PlaneId, DUPLICATES_LOCAL,
 };
 use crate::jet::{
+    deadline::{Deadlines, Wait},
     errors::PublicError,
     keystore::{Credential, IdentityKeys},
     pairing_transcript::identity_changed,
@@ -86,6 +87,7 @@ pub(crate) struct RemoteConnector {
     /// Set when the Plane is forgotten: no login happens after that, so a
     /// request that was in flight cannot reach the Plane again.
     closed: AtomicBool,
+    deadlines: Deadlines,
 }
 
 impl std::fmt::Debug for RemoteConnector {
@@ -106,6 +108,7 @@ pub(crate) struct ConnectorParts {
     pub(crate) spawner: Arc<dyn SshSpawner>,
     pub(crate) keys: Arc<IdentityKeys>,
     pub(crate) observed: Arc<Mutex<Observed>>,
+    pub(crate) deadlines: Deadlines,
 }
 
 impl RemoteConnector {
@@ -128,7 +131,12 @@ impl RemoteConnector {
                 ..Slot::default()
             }),
             closed: AtomicBool::new(false),
+            deadlines: parts.deadlines,
         }
+    }
+
+    pub(crate) fn deadlines(&self) -> &Deadlines {
+        &self.deadlines
     }
 
     fn show(&self, connection: ConnectionView) {
@@ -190,6 +198,7 @@ impl RemoteConnector {
             self.client_id,
             credential,
             Some(self.expected_identity),
+            &self.deadlines,
         )
         .await
         {
@@ -342,6 +351,10 @@ impl RemoteConnector {
 
 /// Unlocks the identity, spawns ssh and runs the signed remote login. With
 /// `expected`, a different `status.plane_id` is `plane.identity_changed`.
+/// `jet-client` bounds the signed handshake itself (15 s); the status read
+/// that follows waits at most the liveness deadline, since a link that
+/// stops answering would otherwise hold the connector's single-flight slot
+/// forever. The keyring unlock before ssh has its own prompt limit.
 pub(crate) async fn login(
     spawner: &dyn SshSpawner,
     keys: &IdentityKeys,
@@ -349,6 +362,7 @@ pub(crate) async fn login(
     client_id: Uuid,
     credential: Credential,
     expected: Option<Uuid>,
+    deadlines: &Deadlines,
 ) -> Result<(RemoteSession, PlaneStatus), PublicError> {
     // Before ssh starts: a keyring prompt inside the handshake would always
     // lose the server's 10-second nonce window.
@@ -363,7 +377,7 @@ pub(crate) async fn login(
         Ok(client) => Arc::new(client),
         Err(error) => return Err(handshake_failure(&error, child.as_mut()).await),
     };
-    let status = match client.status().await {
+    let status = match deadlines.bound(Wait::Liveness, client.status()).await {
         Ok(status) => status,
         Err(error) => return Err(request_failure(&error, child.as_mut()).await),
     };
@@ -501,6 +515,7 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::jet::{
+        deadline::{manual::ManualTimer, LIVENESS_DEADLINE, QUERY_DEADLINE},
         keystore::{
             tests::{CountingStore, Fail},
             IdentityKeys,
@@ -719,6 +734,10 @@ pub(crate) mod tests {
     }
 
     pub(crate) async fn harness(fail: Fail) -> Harness {
+        harness_on(fail, Deadlines::default()).await
+    }
+
+    pub(crate) async fn harness_on(fail: Fail, deadlines: Deadlines) -> Harness {
         let spawner = Arc::new(FakeSpawner::default());
         let store = Arc::new(CountingStore::new(Fail::Nothing));
         let keys = Arc::new(IdentityKeys::new(store.clone()));
@@ -738,6 +757,7 @@ pub(crate) mod tests {
                 spawner: spawner.clone(),
                 keys: keys.clone(),
                 observed: observed.clone(),
+                deadlines,
             },
             None,
         ));
@@ -847,6 +867,84 @@ pub(crate) mod tests {
         let observed = older_plane.observed.lock().unwrap();
         let protocol = serde_json::to_value(observed.knowledge.view()).unwrap();
         assert!(protocol["atLeast"].as_u64().unwrap() >= u64::from(REMOTE_AUTH_MINOR));
+    }
+
+    /// D6: the Plane accepts the signed login, then never answers its
+    /// status read. The login ends at the liveness deadline as a retryable
+    /// failure with backoff, releasing the single-flight slot instead of
+    /// holding it (and every request to this Plane) forever. `jet-client`
+    /// bounds the handshake itself.
+    #[tokio::test]
+    async fn a_login_whose_status_never_arrives_backs_off_at_the_deadline() {
+        let clock = Arc::new(ManualTimer::default());
+        let harness = harness_on(Fail::Nothing, Deadlines::on(clock.clone())).await;
+        let key = harness.key;
+        let (asked, status_seen) = tokio::sync::oneshot::channel();
+        harness.spawner.push(move |stream| async move {
+            let (mut reader, writer) = welcome(open(stream).await, &key).await;
+            let status = next_message(&mut reader).await;
+            let _ = asked.send(status.is_some());
+            // Hold the link open and never answer.
+            let _link = (reader, writer);
+            std::future::pending::<Option<i32>>().await
+        });
+        let (outcome, ()) = tokio::join!(harness.connector.connect(), async {
+            assert!(status_seen.await.unwrap());
+            clock.advance(LIVENESS_DEADLINE);
+        });
+        let error = outcome.err().unwrap();
+        assert_eq!(error.code, "transport.offline");
+        assert!(error.retryable);
+        assert!(!harness.connector.has_session().await);
+        assert!(matches!(
+            harness.observed.lock().unwrap().connection,
+            ConnectionView::Reconnecting { .. }
+        ));
+        // The failure is stored with backoff: nothing is spawned again yet.
+        assert_eq!(
+            harness.connector.connect().await.err().unwrap().code,
+            "transport.offline"
+        );
+        assert_eq!(harness.spawner.spawns(), 1);
+    }
+
+    /// D6: a request on a cached session that stops answering ends at its
+    /// deadline, and the session is dropped so the next request logs in
+    /// again rather than waiting on the same dead link.
+    #[tokio::test]
+    async fn a_hung_session_is_dropped_at_the_request_deadline() {
+        let clock = Arc::new(ManualTimer::default());
+        let harness = harness_on(Fail::Nothing, Deadlines::on(clock.clone())).await;
+        let key = harness.key;
+        let (asked, question_seen) = tokio::sync::oneshot::channel();
+        harness.spawner.push(move |stream| async move {
+            let (mut reader, mut writer) = welcome(open(stream).await, &key).await;
+            let (stream, message) = next_message(&mut reader).await.unwrap();
+            let id = request_id(&message);
+            reply(
+                &mut writer,
+                stream,
+                ServerMessage::QueryResult {
+                    id,
+                    result: QueryResponse::Status(status(PLANE)),
+                },
+            )
+            .await;
+            let question = next_message(&mut reader).await;
+            let _ = asked.send(question.is_some());
+            let _link = (reader, writer);
+            std::future::pending::<Option<i32>>().await
+        });
+        let client = crate::jet::client::PlaneClient::remote(harness.connector.clone(), CLIENT);
+        let connection = client.connect().await.unwrap();
+        assert!(harness.connector.has_session().await);
+        let (outcome, ()) = tokio::join!(connection.query(connection.projects()), async {
+            assert!(question_seen.await.unwrap());
+            clock.advance(QUERY_DEADLINE);
+        });
+        let error = PublicError::from_client(&outcome.unwrap_err());
+        assert_eq!((error.category, error.retryable), ("offline", true));
+        assert!(!harness.connector.has_session().await);
     }
 
     #[tokio::test]

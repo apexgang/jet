@@ -63,7 +63,7 @@ function plane(planeId: string, kind: "local" | "remote", label: string): Plane 
 function snapshot(planes: Plane[], restoredSelection: PlanesSnapshot["restoredSelection"] = null): PlanesSnapshot {
   return {
     planes,
-    identity: { clientId: "00000000-0000-4000-8000-00000000000c", key: "unknown", fingerprint: null },
+    identity: { clientId: "00000000-0000-4000-8000-00000000000c", key: "unknown", fingerprint: null, notice: null },
     restoredSelection,
     notice: null,
     maximumRemotePlanes: 16,

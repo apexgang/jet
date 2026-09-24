@@ -10,11 +10,12 @@ use jet_protocol::{
     WorkingTree, WorkspaceTerminal, WORKSPACE_TERMINALS_MINOR,
 };
 use serde::Serialize;
-use tauri::{ipc::Channel, State};
+use tauri::ipc::Channel;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use super::{
+    command_ids::{definite, settle_command},
     errors::PublicError,
     planes::{PlaneBinding, PlaneId},
     JetBridge,
@@ -92,10 +93,13 @@ struct ActiveWork {
     workspace_id: Option<Uuid>,
 }
 
+/// A save whose outcome is uncertain. The retry resends this exact body:
+/// the same content against the same expected revision (D4).
 struct PendingEdit {
     binding: PlaneBinding,
     command_id: Uuid,
     content: String,
+    revision: FileRevision,
 }
 
 struct PendingReview {
@@ -254,7 +258,7 @@ pub(crate) enum TerminalUpdate {
 }
 
 pub(crate) async fn load_work_panel(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     request: WorkPanelRequest,
     plane_id: Option<String>,
 ) -> Result<WorkPanelSnapshot, PublicError> {
@@ -266,14 +270,14 @@ pub(crate) async fn load_work_panel(
         request.from_turn,
         request.to_turn,
     )?;
-    let (binding, client) = bridge.plane(plane_id.as_deref())?;
+    let (binding, plane_client) = bridge.plane(plane_id.as_deref())?;
     async {
-        let client = client
+        let client = plane_client
             .connect()
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         let conversation = client
-            .conversation(conversation_id)
+            .query(client.conversation(conversation_id))
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         let run = conversation
@@ -301,7 +305,7 @@ pub(crate) async fn load_work_panel(
             ));
         }
         let diff = client
-            .change_diff(run_id, scope)
+            .query(client.change_diff(run_id, scope))
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         let target = file_target(&conversation.conversation.working_tree, diff.workspace_id);
@@ -323,21 +327,23 @@ pub(crate) async fn load_work_panel(
             .work_panel
             .bind_artifact(active, conversation_id, &diff)?;
         let (terminals, terminal_issue) = match workspace_id {
-            Some(workspace_id) => match client.workspace_terminals(workspace_id).await {
-                Ok((_, terminals)) => {
-                    bridge
-                        .planes
-                        .observe_success(binding.plane, WORKSPACE_TERMINALS_MINOR);
-                    bridge
-                        .work_panel
-                        .remember_terminals(binding, workspace_id, &terminals)?;
-                    (terminals.into_iter().map(terminal_view).collect(), None)
+            Some(workspace_id) => {
+                match client.query(client.workspace_terminals(workspace_id)).await {
+                    Ok((_, terminals)) => {
+                        bridge
+                            .planes
+                            .observe_success(binding.plane, WORKSPACE_TERMINALS_MINOR);
+                        bridge
+                            .work_panel
+                            .remember_terminals(binding, workspace_id, &terminals)?;
+                        (terminals.into_iter().map(terminal_view).collect(), None)
+                    }
+                    Err(error) => (
+                        Vec::new(),
+                        Some(bridge.settle(&binding, PublicError::from_client(&error))),
+                    ),
                 }
-                Err(error) => (
-                    Vec::new(),
-                    Some(bridge.settle(&binding, PublicError::from_client(&error))),
-                ),
-            },
+            }
             None => (Vec::new(), None),
         };
         Ok(WorkPanelSnapshot {
@@ -363,7 +369,7 @@ pub(crate) async fn load_work_panel(
 }
 
 pub(crate) async fn load_more_changes(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     page_id: String,
 ) -> Result<ChangePageView, PublicError> {
     let page_id = parse_id(&page_id, "changes.page_invalid")?;
@@ -371,13 +377,14 @@ pub(crate) async fn load_more_changes(
     bridge
         .work_panel
         .require_active(page.binding.plane, page.conversation_id, page.run_id)?;
-    let client = bridge.bound(&page.binding)?;
+    let plane_client = bridge.bound(&page.binding)?;
     async {
-        let diff = client
+        let client = plane_client
             .connect()
             .await
-            .map_err(|error| PublicError::from_client(&error))?
-            .next_change_diff(page.cursor)
+            .map_err(|error| PublicError::from_client(&error))?;
+        let diff = client
+            .query(client.next_change_diff(page.cursor))
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         if diff.run_id != page.run_id {
@@ -406,7 +413,7 @@ pub(crate) async fn load_more_changes(
 }
 
 pub(crate) async fn load_patch_chunk(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     artifact_read_id: String,
 ) -> Result<ArtifactChunkView, PublicError> {
     let read_id = parse_id(&artifact_read_id, "artifact.read_invalid")?;
@@ -415,12 +422,13 @@ pub(crate) async fn load_patch_chunk(
         .work_panel
         .require_active(read.binding.plane, read.conversation_id, read.run_id)?;
     let binding = read.binding;
-    let chunk = bridge
-        .bound(&binding)?
+    let plane_client = bridge.bound(&binding)?;
+    let client = plane_client
         .connect()
         .await
-        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?
-        .change_artifact(read.sha256.clone(), read.next_offset)
+        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
+    let chunk = client
+        .query(client.change_artifact(read.sha256.clone(), read.next_offset))
         .await
         .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
     if chunk.offset != read.next_offset
@@ -469,19 +477,20 @@ pub(crate) async fn load_patch_chunk(
 }
 
 pub(crate) async fn load_work_file(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     file_id: String,
 ) -> Result<EditableFileView, PublicError> {
     let file_id = parse_id(&file_id, "file.identifier_invalid")?;
     let bound = bridge.work_panel.bound_file(file_id)?;
     // ASVS 5.3.2 and 8.3.1: the webview selects an opaque binding created
     // from Plane data; it never supplies a native path or widens authority.
-    let file = bridge
-        .bound(&bound.binding)?
+    let plane_client = bridge.bound(&bound.binding)?;
+    let client = plane_client
         .connect()
         .await
-        .map_err(|error| bridge.settle(&bound.binding, PublicError::from_client(&error)))?
-        .editable_file(bound.target, &bound.path)
+        .map_err(|error| bridge.settle(&bound.binding, PublicError::from_client(&error)))?;
+    let file = client
+        .query(client.editable_file(bound.target, &bound.path))
         .await
         .map_err(|error| bridge.settle(&bound.binding, PublicError::from_client(&error)))?;
     if file.target != bound.target || file.path != bound.path {
@@ -503,7 +512,7 @@ pub(crate) async fn load_work_file(
 }
 
 pub(crate) async fn save_work_file(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     file_id: String,
     content: String,
 ) -> Result<FileSavedView, PublicError> {
@@ -523,17 +532,33 @@ pub(crate) async fn save_work_file(
     })?;
     // ASVS 2.2.1, 5.1.4, and 8.3.1: size, file identity, and optimistic
     // revision are all validated at this native boundary before mutation.
-    let client = bridge.bound(&bound.binding)?;
-    let command_id = bridge
-        .work_panel
-        .edit_command(file_id, bound.binding, &content)?;
-    let saved = client
+    let plane_client = bridge.bound(&bound.binding)?;
+    // Connect first: an edit that never reached the Plane (offline, a
+    // failed login, the connect deadline) must not lock the file to its
+    // content (D4). A pending edit left by an earlier uncertain save stays.
+    let client = plane_client
         .connect()
         .await
-        .map_err(|error| bridge.settle(&bound.binding, PublicError::from_client(&error)))?
-        .apply_user_edit(command_id, bound.target, &bound.path, revision, &content)
-        .await
         .map_err(|error| bridge.settle(&bound.binding, PublicError::from_client(&error)))?;
+    let (command_id, revision) =
+        bridge
+            .work_panel
+            .edit_command(file_id, bound.binding, &content, revision)?;
+    let outcome = client
+        .command(client.apply_user_edit(command_id, bound.target, &bound.path, revision, &content))
+        .await;
+    let saved = match outcome {
+        Ok(saved) => saved,
+        Err(error) => {
+            // `user_edit.stale_revision` and every other refusal end this
+            // edit: after a refresh the user may save anything again. Only
+            // an uncertain outcome keeps it for an exact retry (D4).
+            if definite(&error) {
+                bridge.work_panel.drop_edit(file_id)?;
+            }
+            return Err(bridge.settle(&bound.binding, PublicError::from_client(&error)));
+        }
+    };
     bridge.work_panel.finish_edit(file_id, saved.clone())?;
     Ok(FileSavedView {
         file_id: file_id.to_string(),
@@ -543,7 +568,7 @@ pub(crate) async fn save_work_file(
 }
 
 pub(crate) async fn submit_file_review(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     file_id: String,
     line: u32,
     comment: String,
@@ -557,7 +582,12 @@ pub(crate) async fn submit_file_review(
     }
     let bound = bridge.work_panel.bound_file(file_id)?;
     let binding = bound.binding;
-    let client = bridge.bound(&binding)?;
+    let plane_client = bridge.bound(&binding)?;
+    // As for edits: a review that never reached the Plane keeps nothing.
+    let client = plane_client
+        .connect()
+        .await
+        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
     let command_id = bridge.work_panel.review_command(
         binding,
         bound.conversation_id,
@@ -565,11 +595,8 @@ pub(crate) async fn submit_file_review(
         line,
         &comment,
     )?;
-    let turn = client
-        .connect()
-        .await
-        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?
-        .submit_review(
+    let outcome = client
+        .command(client.submit_review(
             command_id,
             bound.conversation_id,
             vec![ReviewComment {
@@ -577,12 +604,18 @@ pub(crate) async fn submit_file_review(
                 line,
                 comment,
             }],
-        )
-        .await
-        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
-    bridge
-        .work_panel
-        .finish_review(binding.plane, bound.conversation_id)?;
+        ))
+        .await;
+    if outcome
+        .as_ref()
+        .map_or_else(|error| definite(error), |_| true)
+    {
+        bridge
+            .work_panel
+            .finish_review(binding.plane, bound.conversation_id)?;
+    }
+    let turn =
+        outcome.map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
     Ok(ReviewSubmittedView {
         turn_id: turn.turn_id.to_string(),
         state: turn_state(turn.state),
@@ -591,7 +624,7 @@ pub(crate) async fn submit_file_review(
 }
 
 pub(crate) async fn open_workspace_terminal(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     conversation_id: String,
     rows: u16,
     columns: u16,
@@ -619,15 +652,18 @@ pub(crate) async fn open_workspace_terminal(
         rows,
         columns,
     };
-    let client = bridge.bound(&binding)?;
+    let plane_client = bridge.bound(&binding)?;
     let command_id = bridge.work_panel.open_command(key)?;
-    let terminal = client
+    let client = plane_client
         .connect()
         .await
-        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?
-        .open_terminal(command_id, workspace_id, rows, columns)
-        .await
         .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
+    let outcome = client
+        .command(client.open_terminal(command_id, workspace_id, rows, columns))
+        .await;
+    settle_command(&bridge.work_panel.opens, &key, &outcome)?;
+    let terminal =
+        outcome.map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
     if terminal.workspace_id != workspace_id {
         return Err(PublicError::invalid_input(
             "terminal.workspace_mismatch",
@@ -639,23 +675,26 @@ pub(crate) async fn open_workspace_terminal(
 }
 
 pub(crate) async fn close_workspace_terminal(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     terminal_id: String,
 ) -> Result<TerminalView, PublicError> {
     let terminal_id = parse_id(&terminal_id, "terminal.identifier_invalid")?;
     // ASVS 5.3.2 and 8.3.1: only a terminal returned for the active managed
     // Workspace can be attached; the webview cannot launch a host process.
     let binding = bridge.work_panel.require_terminal(terminal_id)?;
-    let client = bridge.bound(&binding)?;
+    let plane_client = bridge.bound(&binding)?;
     bridge.work_panel.detach_terminal(terminal_id)?;
     let command_id = bridge.work_panel.close_command(terminal_id)?;
-    let terminal = client
+    let client = plane_client
         .connect()
         .await
-        .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?
-        .close_terminal(command_id, terminal_id)
-        .await
         .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
+    let outcome = client
+        .command(client.close_terminal(command_id, terminal_id))
+        .await;
+    settle_command(&bridge.work_panel.closes, &terminal_id, &outcome)?;
+    let terminal =
+        outcome.map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
     if terminal.terminal_id != terminal_id {
         return Err(PublicError::invalid_input(
             "terminal.response_mismatch",
@@ -669,15 +708,15 @@ pub(crate) async fn close_workspace_terminal(
 }
 
 pub(crate) async fn attach_workspace_terminal(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     terminal_id: String,
     on_update: Channel<TerminalUpdate>,
 ) -> Result<(), PublicError> {
     let terminal_id = parse_id(&terminal_id, "terminal.identifier_invalid")?;
     let binding = bridge.work_panel.require_terminal(terminal_id)?;
     let after = bridge.work_panel.terminal_offset(terminal_id)?;
-    let client = bridge
-        .bound(&binding)?
+    let plane_client = bridge.bound(&binding)?;
+    let client = plane_client
         .connect()
         .await
         .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
@@ -691,9 +730,11 @@ pub(crate) async fn attach_workspace_terminal(
     let offsets = Arc::clone(&bridge.work_panel.terminal_offsets);
     tokio::spawn(async move {
         let result = async {
+            // Only the attach reply is bounded; the attachment is a stream.
             let mut attachment = client
-                .attach_terminal(terminal_id, after, TERMINAL_CREDIT)
-                .await?;
+                .query(client.attach_terminal(terminal_id, after, TERMINAL_CREDIT))
+                .await
+                .map_err(|error| *error)?;
             let _ = on_update.send(TerminalUpdate::Attached {
                 terminal_id: terminal_id.to_string(),
                 after: after.to_string(),
@@ -781,7 +822,7 @@ pub(crate) async fn attach_workspace_terminal(
 }
 
 pub(crate) async fn send_terminal_input(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     terminal_id: String,
     input: String,
 ) -> Result<(), PublicError> {
@@ -801,7 +842,7 @@ pub(crate) async fn send_terminal_input(
 }
 
 pub(crate) async fn resize_workspace_terminal(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     terminal_id: String,
     rows: u16,
     columns: u16,
@@ -817,7 +858,7 @@ pub(crate) async fn resize_workspace_terminal(
 }
 
 pub(crate) fn detach_workspace_terminal(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     terminal_id: String,
 ) -> Result<(), PublicError> {
     let terminal_id = parse_id(&terminal_id, "terminal.identifier_invalid")?;
@@ -1061,7 +1102,20 @@ impl WorkPanelState {
         Ok(file)
     }
 
+    /// Records the revision a load observed. A pending uncertain edit was
+    /// prepared against an older revision: it has either been applied or
+    /// can no longer apply (the Plane checks the expected revision), so it
+    /// no longer blocks a new save (D4).
     fn remember_revision(&self, id: Uuid, revision: FileRevision) -> Result<(), PublicError> {
+        {
+            let mut edits = self.edits.lock().map_err(|_| PublicError::internal())?;
+            if edits
+                .get(&id)
+                .is_some_and(|pending| pending.revision != revision)
+            {
+                edits.remove(&id);
+            }
+        }
         let mut files = self.files.lock().map_err(|_| PublicError::internal())?;
         let file = files.get_mut(&id).ok_or_else(|| {
             PublicError::invalid_input(
@@ -1073,16 +1127,19 @@ impl WorkPanelState {
         Ok(())
     }
 
+    /// The command ID and expected revision for saving `content`: those of
+    /// the pending uncertain edit when this is its exact retry, or new ones.
     fn edit_command(
         &self,
         file_id: Uuid,
         binding: PlaneBinding,
         content: &str,
-    ) -> Result<Uuid, PublicError> {
+        revision: FileRevision,
+    ) -> Result<(Uuid, FileRevision), PublicError> {
         let mut edits = self.edits.lock().map_err(|_| PublicError::internal())?;
         if let Some(pending) = edits.get(&file_id) {
             if pending.binding == binding && pending.content == content {
-                return Ok(pending.command_id);
+                return Ok((pending.command_id, pending.revision.clone()));
             }
             return Err(PublicError::invalid_input(
                 "user_edit.retry_mismatch",
@@ -1099,17 +1156,24 @@ impl WorkPanelState {
                 binding,
                 command_id,
                 content: content.into(),
+                revision: revision.clone(),
             },
         );
-        Ok(command_id)
+        Ok((command_id, revision))
     }
 
     fn finish_edit(&self, file_id: Uuid, revision: FileRevision) -> Result<(), PublicError> {
+        self.drop_edit(file_id)?;
+        self.remember_revision(file_id, revision)
+    }
+
+    /// The edit's outcome is known: the next save is a new request.
+    fn drop_edit(&self, file_id: Uuid) -> Result<(), PublicError> {
         self.edits
             .lock()
             .map_err(|_| PublicError::internal())?
             .remove(&file_id);
-        self.remember_revision(file_id, revision)
+        Ok(())
     }
 
     fn review_command(
@@ -1499,15 +1563,285 @@ fn too_many_pending() -> PublicError {
 
 #[cfg(test)]
 mod tests {
-    use super::{all_zero, requested_scope, validate_dimensions, ActiveWork, WorkPanelState};
-    use crate::jet::planes::{PlaneBinding, PlaneId};
-    use jet_protocol::DiffScope;
+    use super::{
+        all_zero, load_work_file, requested_scope, revision_label, save_work_file,
+        submit_file_review, validate_dimensions, ActiveWork, BoundFile, WorkPanelState,
+    };
+    use crate::jet::{
+        fake_plane::{answer, command_id, complete, exchange, next, refuse, remote_plane, wire},
+        planes::{PlaneBinding, PlaneId},
+    };
+    use jet_protocol::{
+        ClientMessage, CommandRequest, CommandResponse, DiffScope, EditableFile, ErrorCategory,
+        FileRevision, FileTarget, QueryRequest, QueryResponse,
+    };
     use uuid::Uuid;
 
     const LOCAL: PlaneBinding = PlaneBinding {
         plane: PlaneId::Local,
         identity: None,
     };
+    const WORKSPACE: Uuid = Uuid::from_u128(0x3e);
+    const TARGET: FileTarget = FileTarget::Workspace {
+        workspace_id: WORKSPACE,
+    };
+
+    fn revision(object: &str) -> FileRevision {
+        FileRevision {
+            object: object.repeat(40),
+            mode: "100644".into(),
+        }
+    }
+
+    /// Makes `binding`'s Work panel active and binds one editable file.
+    fn bind_file(state: &WorkPanelState, binding: PlaneBinding, loaded: FileRevision) -> Uuid {
+        let conversation = Uuid::from_u128(4);
+        let run = Uuid::from_u128(5);
+        state
+            .remember_active(
+                conversation,
+                ActiveWork {
+                    binding,
+                    run_id: run,
+                    workspace_id: Some(WORKSPACE),
+                },
+            )
+            .unwrap();
+        let id = Uuid::from_u128(6);
+        state.files.lock().unwrap().insert(
+            id,
+            BoundFile {
+                binding,
+                conversation_id: conversation,
+                run_id: run,
+                target: TARGET,
+                path: "src/lib.rs".into(),
+                revision: Some(loaded),
+            },
+        );
+        id
+    }
+
+    /// D4: an uncertain save is retried with its exact body, its content and
+    /// its expected revision, and blocks other content until a reload shows
+    /// the file moved on (the old edit then either applied or can't).
+    #[test]
+    fn an_uncertain_edit_retries_its_exact_body_until_a_reload_moves_the_file() {
+        let state = WorkPanelState::default();
+        let file = bind_file(&state, LOCAL, revision("a"));
+        let (first, sent) = state
+            .edit_command(file, LOCAL, "mine", revision("a"))
+            .unwrap();
+        assert_eq!(sent, revision("a"));
+        assert_eq!(
+            state
+                .edit_command(file, LOCAL, "other", revision("a"))
+                .unwrap_err()
+                .code,
+            "user_edit.retry_mismatch"
+        );
+        // Reloading the same revision keeps the uncertain edit.
+        state.remember_revision(file, revision("a")).unwrap();
+        assert_eq!(
+            state
+                .edit_command(file, LOCAL, "mine", revision("a"))
+                .unwrap(),
+            (first, revision("a"))
+        );
+        // A newer revision ends it: any content may be saved against it.
+        state.remember_revision(file, revision("b")).unwrap();
+        let (second, sent) = state
+            .edit_command(file, LOCAL, "other", revision("b"))
+            .unwrap();
+        assert_ne!(second, first);
+        assert_eq!(sent, revision("b"));
+    }
+
+    /// D4: any definite refusal ends the pending edit, even without a
+    /// reload: here disk pressure refuses the save, and the next save with
+    /// other content is a new request instead of `user_edit.retry_mismatch`.
+    #[tokio::test]
+    async fn a_refused_edit_no_longer_locks_its_content() {
+        let fake = remote_plane();
+        let binding = PlaneBinding {
+            plane: fake.plane,
+            identity: None,
+        };
+        let file = bind_file(&fake.bridge().work_panel, binding, revision("a"));
+        let serve = |refusal: Option<&'static str>| {
+            let fake = &fake;
+            async move {
+                let (mut reader, mut writer) = fake.accept().await;
+                let (stream, message) = next(&mut reader).await;
+                match refusal {
+                    Some(code) => {
+                        refuse(
+                            &mut writer,
+                            stream,
+                            &message,
+                            wire(ErrorCategory::Unavailable, code),
+                        )
+                        .await;
+                    }
+                    None => {
+                        complete(
+                            &mut writer,
+                            stream,
+                            &message,
+                            CommandResponse::UserEditApplied {
+                                target: TARGET,
+                                path: "src/lib.rs".into(),
+                                revision: revision("c"),
+                            },
+                        )
+                        .await;
+                    }
+                }
+                command_id(&message)
+            }
+        };
+        let (refused, first) = exchange(
+            save_work_file(fake.bridge(), file.to_string(), "mine".into()),
+            serve(Some("storage.disk_pressure")),
+        )
+        .await;
+        assert_eq!(refused.unwrap_err().code, "storage.disk_pressure");
+        let (saved, second) = exchange(
+            save_work_file(fake.bridge(), file.to_string(), "mine, shorter".into()),
+            serve(None),
+        )
+        .await;
+        assert!(saved.is_ok(), "{saved:?}");
+        assert!(second.is_some());
+        assert_ne!(second, first);
+    }
+
+    /// D4: `user_edit.stale_revision` ends the pending edit. After the
+    /// refresh the user saves new content under a new Command ID against the
+    /// new revision, instead of being stuck or forced to resend the stale
+    /// edit over the concurrent change.
+    #[tokio::test]
+    async fn a_stale_revision_refusal_lets_the_refreshed_file_be_saved() {
+        let fake = remote_plane();
+        let binding = PlaneBinding {
+            plane: fake.plane,
+            identity: None,
+        };
+        let file = bind_file(&fake.bridge().work_panel, binding, revision("a"));
+
+        let (refused, refused_id) = exchange(
+            save_work_file(fake.bridge(), file.to_string(), "mine".into()),
+            async {
+                let (mut reader, mut writer) = fake.accept().await;
+                let (stream, message) = next(&mut reader).await;
+                assert!(matches!(
+                    &message,
+                    ClientMessage::Command {
+                        command: CommandRequest::ApplyUserEdit { expected_revision, content, .. },
+                        ..
+                    } if *expected_revision == revision("a") && content == "mine"
+                ));
+                let id = command_id(&message);
+                refuse(
+                    &mut writer,
+                    stream,
+                    &message,
+                    wire(ErrorCategory::Conflict, "user_edit.stale_revision"),
+                )
+                .await;
+                id
+            },
+        )
+        .await;
+        assert_eq!(refused.unwrap_err().code, "user_edit.stale_revision");
+
+        let (loaded, _) = exchange(load_work_file(fake.bridge(), file.to_string()), async {
+            let (mut reader, mut writer) = fake.accept().await;
+            let (stream, message) = next(&mut reader).await;
+            assert!(matches!(
+                message,
+                ClientMessage::Query {
+                    query: QueryRequest::EditableFile { .. },
+                    ..
+                }
+            ));
+            let file = EditableFile {
+                cursor: 12,
+                target: TARGET,
+                path: "src/lib.rs".into(),
+                revision: revision("b"),
+                content: Some("theirs".into()),
+            };
+            answer(
+                &mut writer,
+                stream,
+                &message,
+                QueryResponse::EditableFile(file),
+            )
+            .await;
+        })
+        .await;
+        assert_eq!(loaded.unwrap().content.as_deref(), Some("theirs"));
+
+        let (saved, saved_id) = exchange(
+            save_work_file(fake.bridge(), file.to_string(), "theirs and mine".into()),
+            async {
+                let (mut reader, mut writer) = fake.accept().await;
+                let (stream, message) = next(&mut reader).await;
+                assert!(matches!(
+                    &message,
+                    ClientMessage::Command {
+                        command: CommandRequest::ApplyUserEdit { expected_revision, .. },
+                        ..
+                    } if *expected_revision == revision("b")
+                ));
+                let id = command_id(&message);
+                complete(
+                    &mut writer,
+                    stream,
+                    &message,
+                    CommandResponse::UserEditApplied {
+                        target: TARGET,
+                        path: "src/lib.rs".into(),
+                        revision: revision("c"),
+                    },
+                )
+                .await;
+                id
+            },
+        )
+        .await;
+        assert_eq!(saved.unwrap().revision, revision_label(&revision("c")));
+        assert_ne!(saved_id, refused_id, "the refused edit's ID is not reused");
+        assert!(fake.bridge().work_panel.edits.lock().unwrap().is_empty());
+    }
+
+    /// D4: a save that never reaches the Plane (here the local Plane is
+    /// offline) records no pending edit, so the next save of other content
+    /// is not refused with `user_edit.retry_mismatch`. The same holds for a
+    /// review comment.
+    #[tokio::test]
+    async fn a_save_that_never_reached_the_plane_does_not_lock_the_file() {
+        let setup = crate::jet::enrollment::tests::setup();
+        let bridge = &setup.bridge;
+        let file = bind_file(&bridge.work_panel, LOCAL, revision("a"));
+
+        for content in ["mine", "other"] {
+            let error = save_work_file(bridge, file.to_string(), content.into())
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, "transport.offline", "{content}");
+        }
+        assert!(bridge.work_panel.edits.lock().unwrap().is_empty());
+
+        for comment in ["first", "second"] {
+            let error = submit_file_review(bridge, file.to_string(), 1, comment.into())
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, "transport.offline", "{comment}");
+        }
+        assert!(bridge.work_panel.reviews.lock().unwrap().is_empty());
+    }
 
     #[test]
     fn work_panel_boundary_rejects_unsafe_terminal_values() {
@@ -1591,10 +1925,20 @@ mod tests {
         // A pending edit keeps its Plane: the same body on another Plane is a
         // different request, never a retry of this one.
         let file = Uuid::from_u128(6);
-        let first = state.edit_command(file, remote, "text").unwrap();
-        assert_eq!(state.edit_command(file, remote, "text").unwrap(), first);
+        let first = state
+            .edit_command(file, remote, "text", revision("a"))
+            .unwrap();
         assert_eq!(
-            state.edit_command(file, LOCAL, "text").unwrap_err().code,
+            state
+                .edit_command(file, remote, "text", revision("a"))
+                .unwrap(),
+            first
+        );
+        assert_eq!(
+            state
+                .edit_command(file, LOCAL, "text", revision("a"))
+                .unwrap_err()
+                .code,
             "user_edit.retry_mismatch"
         );
         let review = state

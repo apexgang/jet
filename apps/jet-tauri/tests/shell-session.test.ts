@@ -53,7 +53,7 @@ const LOCAL: Plane = {
 function planes(restoredSelection: PlanesSnapshot["restoredSelection"] = null): PlanesSnapshot {
   return {
     planes: [LOCAL],
-    identity: { clientId: "00000000-0000-4000-8000-00000000000c", key: "unknown", fingerprint: null },
+    identity: { clientId: "00000000-0000-4000-8000-00000000000c", key: "unknown", fingerprint: null, notice: null },
     restoredSelection,
     notice: null,
     maximumRemotePlanes: 16,
@@ -96,6 +96,8 @@ type Options = {
   /** Layout saves never answer. */
   saveHangs?: boolean;
   fullscreenFails?: boolean;
+  /** `start_run` results in order; a failure is thrown, `null` succeeds. */
+  startFails?: Array<PublicError | null>;
 };
 
 function harness(options: Options = {}) {
@@ -111,6 +113,7 @@ function harness(options: Options = {}) {
     ? new Promise<void>((resolve) => (releasePresentation = resolve))
     : Promise.resolve();
   const saveFails = [...(options.saveFails ?? [])];
+  const startFails = [...(options.startFails ?? [])];
   vi.stubGlobal("window", { crypto: globalThis.crypto });
   mockIPC(async (command, args) => {
     const { onUpdate, ...plain } = (args ?? {}) as Record<string, unknown>;
@@ -174,8 +177,11 @@ function harness(options: Options = {}) {
         rows = [...rows, conversation];
         return conversation;
       }
-      case "start_run":
+      case "start_run": {
+        const failed = startFails.shift();
+        if (failed) throw failed;
         return { runId: "run-new", message: "Started" };
+      }
       case "submit_turn":
         return { message: "Queued" };
       case "load_trash_banner":
@@ -278,7 +284,7 @@ describe("D17: a Plane event never selects a task behind New task", () => {
     session.draft = "Fix the build";
     await session.submitDraft();
     expect(calls.filter((call) => call.command === "create_conversation")).toEqual([
-      { command: "create_conversation", args: { projectId: "p1" } },
+      { command: "create_conversation", args: { projectId: "p1", attempt: expect.any(String) } },
     ]);
     const sends = calls.filter((call) => call.command === "start_run" || call.command === "submit_turn");
     expect(sends).toHaveLength(1);
@@ -342,6 +348,51 @@ describe("D17: a Plane event never selects a task behind New task", () => {
     session.connect();
     await settle(session);
     expect(session.selection).toEqual({ planeId: "local", conversationId: "l1" });
+  });
+});
+
+describe("D2: a composer Send keeps its attempt only while it is retried", () => {
+  const uncertain = failure("outcome_unknown", "command.outcome_unknown");
+
+  function attempts(calls: Array<{ command: string; args: Record<string, unknown> }>) {
+    return calls.filter((call) => call.command === "start_run").map((call) => call.args.attempt);
+  }
+
+  it("retries a failed Send under its attempt and sends later work under a new one", async () => {
+    const { calls } = harness({ startFails: [uncertain, null, null] });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+
+    session.draft = "continue";
+    await session.submitDraft();
+    expect(session.draft).toBe("continue");
+    await session.submitDraft();
+    expect(session.draft).toBe("");
+    session.draft = "continue";
+    await session.submitDraft();
+
+    const [failed, retried, later] = attempts(calls);
+    expect(failed).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(retried).toBe(failed);
+    expect(later).not.toBe(retried);
+  });
+
+  it("an edited draft is a new Send, even when it is edited back", async () => {
+    const { calls } = harness({ startFails: [uncertain, uncertain, null] });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+
+    session.draft = "continue";
+    await session.submitDraft();
+    session.draft = "continue.";
+    await session.submitDraft();
+    session.draft = "continue";
+    await session.submitDraft();
+
+    const sent = attempts(calls);
+    expect(new Set(sent).size).toBe(3);
   });
 });
 

@@ -1,5 +1,14 @@
 import type { ConversationRow, ConversationSearchResult, PublicError } from "$lib/jet/bridge";
-import type { FeatureName, FeatureSupport, Plane, PlaneId, ProtocolKnowledge } from "$lib/jet/planes";
+import type {
+  FeatureName,
+  FeatureSupport,
+  IdentityNotice,
+  Plane,
+  PlaneId,
+  PlanesSnapshot,
+  ProtocolKnowledge,
+  RegistryNotice,
+} from "$lib/jet/planes";
 
 /** One Plane-scoped section of the UI. Every failure keeps its own error. */
 export type Section<T> =
@@ -646,4 +655,34 @@ export function enrollmentFailureCopy(
     return `${destination} runs a Jet version that can't pair remotely. Update Jet there.`;
   }
   return planeErrorCopy(error, destination);
+}
+
+const REGISTRY_NOTICES: Readonly<Record<RegistryNotice, string>> = {
+  registry_reset: "Saved Planes couldn't be read and were reset. Add them again.",
+  registry_newer:
+    "Saved Planes were written by a newer version of Jet. Jet kept them unchanged and can't change them until you update.",
+  registry_unreadable:
+    "Jet couldn't read the saved Planes this time. They're kept unchanged; restart Jet to try again.",
+};
+
+const IDENTITY_NOTICES: Readonly<Record<IdentityNotice, string>> = {
+  identity_recovered:
+    "This computer's Jet identity file couldn't be read. Jet restored the identity from the keyring, so pairings still work.",
+  identity_replaced:
+    "This computer's Jet identity couldn't be read, so Jet created a new one. Pair remote Planes again.",
+  identity_unsaved:
+    "Jet couldn't save this computer's identity. Pairings made now stop working when Jet quits.",
+};
+
+/**
+ * What launch did to this computer's saved Planes and client identity, as
+ * one sentence each. A value this build doesn't know shows nothing.
+ */
+export function launchNotices(snapshot: Pick<PlanesSnapshot, "notice" | "identity">): string[] {
+  const notices: string[] = [];
+  const registry = snapshot.notice;
+  if (registry && Object.hasOwn(REGISTRY_NOTICES, registry)) notices.push(REGISTRY_NOTICES[registry]);
+  const identity = snapshot.identity.notice;
+  if (identity && Object.hasOwn(IDENTITY_NOTICES, identity)) notices.push(IDENTITY_NOTICES[identity]);
+  return notices;
 }

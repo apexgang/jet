@@ -225,6 +225,12 @@ impl SettingsWindowState {
         }
     }
 
+    /// The pane remembered at launch or since.
+    #[cfg(test)]
+    pub(crate) fn remembered(&self) -> SettingsTarget {
+        self.last.lock().unwrap().clone()
+    }
+
     fn set_pending(&self, target: SettingsTarget) -> Result<(), PublicError> {
         *self.pending.lock().map_err(|_| PublicError::internal())? = Some(target);
         Ok(())

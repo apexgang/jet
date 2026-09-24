@@ -3,6 +3,12 @@
 //! no pairing codes, and is written atomically with mode 0600 (the
 //! `identity.rs` pattern). Anything invalid resets the registry once, keeps
 //! the unreadable file as `planes.json.invalid`, and tells the user.
+//!
+//! Two cases keep the file untouched instead (D8): a registry written by a
+//! newer Jet (an app rollback must not drop every remote Plane), and a read
+//! that failed for another reason, such as a permission error, which may
+//! pass. Both load as an empty, read-only registry with a notice: nothing
+//! is written back until a later launch can read the file.
 use std::{
     fs::{self, OpenOptions},
     io::{self, ErrorKind, Read, Write},
@@ -26,6 +32,10 @@ pub(crate) const MAXIMUM_REMOTE_PLANES: usize = 16;
 /// Longest SSH address accepted from the webview.
 const MAXIMUM_DESTINATION: usize = 255;
 pub(crate) const REGISTRY_RESET: &str = "registry_reset";
+/// A newer Jet wrote the registry; it is kept as it is.
+pub(crate) const REGISTRY_NEWER: &str = "registry_newer";
+/// The registry could not be read this time; it is kept as it is.
+pub(crate) const REGISTRY_UNREADABLE: &str = "registry_unreadable";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StoredPlane {
@@ -99,6 +109,15 @@ pub(crate) fn validate_destination(value: &str) -> Result<(String, SshEndpoint),
     Ok((trimmed.to_owned(), endpoint))
 }
 
+/// Whether `bytes` is a registry of a version newer than this app reads.
+fn newer_version(bytes: &[u8]) -> bool {
+    #[derive(Deserialize)]
+    struct Versioned {
+        version: u32,
+    }
+    serde_json::from_slice::<Versioned>(bytes).is_ok_and(|file| file.version > VERSION)
+}
+
 fn canonical_uuid(value: &str) -> Option<Uuid> {
     let id = Uuid::parse_str(value).ok()?;
     (id.to_string() == value).then_some(id)
@@ -166,13 +185,22 @@ fn encode(stored: &Stored) -> Result<Vec<u8>, serde_json::Error> {
 
 pub(crate) struct RegistryFile {
     directory: PathBuf,
+    /// Set by a load that had to leave the file as it is: saving would
+    /// replace Planes this launch could not read.
+    read_only: bool,
 }
 
 impl RegistryFile {
     pub(crate) fn new(directory: &Path) -> Self {
         Self {
             directory: directory.to_owned(),
+            read_only: false,
         }
+    }
+
+    /// Whether saves are refused for this launch (`load`).
+    pub(crate) fn read_only(&self) -> bool {
+        self.read_only
     }
 
     fn path(&self) -> PathBuf {
@@ -180,8 +208,10 @@ impl RegistryFile {
     }
 
     /// The stored registry, and `registry_reset` when the file had to be set
-    /// aside. A missing file is an empty registry without a notice.
-    pub(crate) fn load(&self) -> (Stored, Option<&'static str>) {
+    /// aside. A missing file is an empty registry without a notice. A newer
+    /// registry or a failed read is left in place and makes this file
+    /// read-only for the launch (`registry_newer`, `registry_unreadable`).
+    pub(crate) fn load(&mut self) -> (Stored, Option<&'static str>) {
         let path = self.path();
         let read = (|| -> io::Result<Option<Vec<u8>>> {
             let file = match fs::File::open(&path) {
@@ -197,10 +227,20 @@ impl RegistryFile {
             Ok(None) => (Stored::default(), None),
             Ok(Some(bytes)) if bytes.len() as u64 <= MAXIMUM_BYTES => match parse(&bytes) {
                 Some(stored) => (stored, None),
+                None if newer_version(&bytes) => self.keep(REGISTRY_NEWER),
                 None => self.reset(),
             },
-            Ok(Some(_)) | Err(_) => self.reset(),
+            Ok(Some(_)) => self.reset(),
+            // A directory in its place can be set aside without losing data.
+            Err(error) if error.kind() == ErrorKind::IsADirectory => self.reset(),
+            Err(_) => self.keep(REGISTRY_UNREADABLE),
         }
+    }
+
+    /// Leaves the file as it is and refuses saves for this launch.
+    fn keep(&mut self, notice: &'static str) -> (Stored, Option<&'static str>) {
+        self.read_only = true;
+        (Stored::default(), Some(notice))
     }
 
     /// Sets the unreadable file aside (one slot, overwritten) and starts empty.
@@ -210,7 +250,11 @@ impl RegistryFile {
     }
 
     /// Writes atomically: a new 0600 temporary file, fsync, then rename.
+    /// Refused while the file is read-only for this launch.
     pub(crate) fn save(&self, stored: &Stored) -> io::Result<()> {
+        if self.read_only {
+            return Err(io::Error::from(ErrorKind::ReadOnlyFilesystem));
+        }
         let bytes = encode(stored).map_err(|_| io::Error::from(ErrorKind::InvalidData))?;
         if bytes.len() as u64 > MAXIMUM_BYTES {
             return Err(io::Error::from(ErrorKind::InvalidData));
@@ -258,7 +302,7 @@ mod tests {
     #[test]
     fn the_registry_round_trips_with_credentials_and_local_identity() {
         let directory = tempfile::tempdir().unwrap();
-        let file = RegistryFile::new(directory.path());
+        let mut file = RegistryFile::new(directory.path());
         assert_eq!(file.load(), (Stored::default(), None));
         let stored = Stored {
             local_identity: Some(Uuid::from_u128(1)),
@@ -292,7 +336,7 @@ mod tests {
     #[test]
     fn an_invalid_or_oversized_file_is_set_aside_with_a_notice() {
         let invalid_files = [
-            r#"{"version":2,"localIdentity":null,"planes":[]}"#.to_owned(),
+            r#"{"version":0,"localIdentity":null,"planes":[]}"#.to_owned(),
             r#"{"version":1,"localIdentity":null,"planes":[],"extra":1}"#.to_owned(),
             r#"{"version":1,"localIdentity":"nope","planes":[]}"#.to_owned(),
             r#"{"version":1,"localIdentity":null,"planes":[{"id":"00000000-0000-0000-0000-000000000002","destination":"-oProxyCommand=x","planeIdentity":"00000000-0000-0000-0000-000000000003","credential":"durable","addedAtUnixMs":1}]}"#.to_owned(),
@@ -303,7 +347,7 @@ mod tests {
         for contents in invalid_files {
             let directory = tempfile::tempdir().unwrap();
             fs::write(directory.path().join(FILE), &contents).unwrap();
-            let file = RegistryFile::new(directory.path());
+            let mut file = RegistryFile::new(directory.path());
             assert_eq!(
                 file.load(),
                 (Stored::default(), Some(REGISTRY_RESET)),
@@ -319,10 +363,60 @@ mod tests {
         }
     }
 
+    /// D8: a registry from a newer Jet is not set aside. It stays in place,
+    /// byte for byte, and nothing is written over it this launch.
+    #[test]
+    fn a_newer_registry_is_kept_read_only() {
+        let directory = tempfile::tempdir().unwrap();
+        let newer = r#"{"version":2,"localIdentity":null,"planes":[],"added":"later"}"#;
+        fs::write(directory.path().join(FILE), newer).unwrap();
+        let mut file = RegistryFile::new(directory.path());
+        assert_eq!(file.load(), (Stored::default(), Some(REGISTRY_NEWER)));
+        assert!(file.read_only());
+        assert!(!directory.path().join(INVALID).exists());
+        let error = file.save(&Stored::default()).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::ReadOnlyFilesystem);
+        assert_eq!(
+            fs::read_to_string(directory.path().join(FILE)).unwrap(),
+            newer
+        );
+        // Every launch says so again until a Jet that reads it runs.
+        let mut again = RegistryFile::new(directory.path());
+        assert_eq!(again.load().1, Some(REGISTRY_NEWER));
+    }
+
+    /// D8: a read that fails (here, permission denied) keeps the file as it
+    /// is instead of resetting the registry; a later launch reads it.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_read_keeps_the_registry_for_a_later_launch() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let stored = Stored {
+            local_identity: None,
+            planes: vec![plane(2, "alice@build-box", 20, Credential::Durable)],
+        };
+        RegistryFile::new(directory.path()).save(&stored).unwrap();
+        let path = directory.path().join(FILE);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::File::open(&path).is_ok() {
+            // Running as root: permissions do not apply.
+            return;
+        }
+        let mut file = RegistryFile::new(directory.path());
+        assert_eq!(file.load(), (Stored::default(), Some(REGISTRY_UNREADABLE)));
+        assert!(file.save(&Stored::default()).is_err());
+        assert!(!directory.path().join(INVALID).exists());
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(RegistryFile::new(directory.path()).load(), (stored, None));
+    }
+
     #[test]
     fn at_most_sixteen_remote_planes_are_stored() {
         let directory = tempfile::tempdir().unwrap();
-        let file = RegistryFile::new(directory.path());
+        let mut file = RegistryFile::new(directory.path());
         let planes: Vec<_> = (0..17u128)
             .map(|index| {
                 plane(

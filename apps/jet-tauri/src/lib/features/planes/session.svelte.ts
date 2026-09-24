@@ -19,7 +19,7 @@ import {
 } from "$lib/jet/planes";
 
 import { PlaneEnrollment } from "./enrollment.svelte";
-import { aggregateStatus, planeAttentionCount } from "./model";
+import { aggregateStatus, launchNotices, planeAttentionCount } from "./model";
 import { OwnerPairing } from "./pairing.svelte";
 
 /** Deep-link targets inside the Planes destination. */
@@ -186,10 +186,9 @@ export class PlanesSession {
     return this.plane(this.selectedPlaneId);
   }
 
-  get notice(): string | null {
-    return this.snapshot?.notice === "registry_reset" && !this.noticeDismissed
-      ? "Saved Planes couldn't be read and were reset. Add them again."
-      : null;
+  /** What launch did to the saved Planes and this computer's identity. */
+  get notices(): string[] {
+    return this.snapshot && !this.noticeDismissed ? launchNotices(this.snapshot) : [];
   }
 
   /** Reads the native registry snapshot. It never connects to a Plane. */

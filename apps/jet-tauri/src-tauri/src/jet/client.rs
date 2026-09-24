@@ -1,4 +1,13 @@
-use std::{future::Future, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    future::Future,
+    ops::Deref,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use jet_client::{Client, ClientError};
 use jet_protocol::{
@@ -11,6 +20,7 @@ use jet_protocol::{SettingKey, SettingScope};
 use serde::Deserialize;
 
 use super::{
+    deadline::{self, Deadlines, Wait},
     errors::{PublicError, ToPublic},
     planes::remote::RemoteConnector,
 };
@@ -30,6 +40,23 @@ pub(crate) enum ConnectError {
     Client(ClientError),
     /// Classified by the shell while reaching a remote Plane.
     Plane(PublicError),
+    /// A reconnect that failed after an earlier attempt of the same request
+    /// may have reached the Plane (`PlaneClient::with_reconnect`). Only the
+    /// Plane's own answer could settle that attempt, so this never does,
+    /// whatever the failure itself says (a refused handshake, an older
+    /// protocol).
+    Unconfirmed(Box<ConnectError>),
+}
+
+impl ConnectError {
+    /// Whether this failure settles a Command (`command_ids::definite`).
+    /// A shell-classified connect failure sent nothing it could settle.
+    pub(crate) fn definite(&self) -> bool {
+        match self {
+            Self::Client(error) => super::command_ids::definite(error),
+            Self::Plane(_) | Self::Unconfirmed(_) => false,
+        }
+    }
 }
 
 impl ToPublic for ConnectError {
@@ -37,6 +64,7 @@ impl ToPublic for ConnectError {
         match self {
             Self::Client(error) => PublicError::from_client(error),
             Self::Plane(error) => error.clone(),
+            Self::Unconfirmed(error) => error.to_public(),
         }
     }
 }
@@ -47,12 +75,20 @@ impl From<ClientError> for Box<ConnectError> {
     }
 }
 
+impl From<Box<ClientError>> for Box<ConnectError> {
+    fn from(error: Box<ClientError>) -> Self {
+        Box::new(ConnectError::Client(*error))
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct PlaneClient {
     transport: Transport,
     client_id: Uuid,
     reconnect_delays: Arc<[Duration]>,
     event_poll_delay: Duration,
+    /// How long a request may wait for this Plane (`deadline.rs`).
+    deadlines: Deadlines,
 }
 
 impl PlaneClient {
@@ -69,18 +105,32 @@ impl PlaneClient {
             client_id,
             reconnect_delays: reconnect_delays.into(),
             event_poll_delay,
+            deadlines: Deadlines::default(),
         }
     }
 
     /// A remote Plane: one cached session, one retry after a stale session,
-    /// and a slower event poll than the local socket.
+    /// and a slower event poll than the local socket. It keeps the
+    /// connector's deadlines.
     pub(crate) fn remote(connector: Arc<RemoteConnector>, client_id: Uuid) -> Self {
         Self {
+            deadlines: connector.deadlines().clone(),
             transport: Transport::Remote(connector),
             client_id,
             reconnect_delays: Arc::new([Duration::from_secs(1)]),
             event_poll_delay: Duration::from_secs(1),
         }
+    }
+
+    /// The same Plane with another deadline clock (tests).
+    #[cfg(test)]
+    pub(crate) fn with_deadlines(mut self, deadlines: Deadlines) -> Self {
+        self.deadlines = deadlines;
+        self
+    }
+
+    pub(crate) fn deadlines(&self) -> &Deadlines {
+        &self.deadlines
     }
 
     pub(crate) fn client_id(&self) -> Uuid {
@@ -104,38 +154,59 @@ impl PlaneClient {
 
     /// Runs `call` on a connection, reconnecting after a lost transport with
     /// the same arguments (so a mutation keeps its command ID). A stale
-    /// remote session is invalidated before the reconnect.
-    async fn with_reconnect<T, F, Fut>(&self, mut call: F) -> Result<T, Box<ConnectError>>
+    /// remote session is invalidated before the reconnect. Each attempt is
+    /// bounded by `wait`'s deadline, and an expired one is not retried: the
+    /// Plane is hung, not gone, and a Command's outcome is now unknown.
+    ///
+    /// Once an attempt ran and lost its transport, the request may have
+    /// reached the Plane, so a later failure that is not the Plane's answer
+    /// to it (a refused handshake from a replaced `jetd`, an older protocol)
+    /// is returned as `ConnectError::Unconfirmed`: the caller keeps the ID.
+    async fn with_reconnect<T, F, Fut>(
+        &self,
+        wait: Wait,
+        mut call: F,
+    ) -> Result<T, Box<ConnectError>>
     where
         F: FnMut(Arc<Client>) -> Fut,
         Fut: Future<Output = Result<T, ClientError>>,
     {
         let mut attempt = 0;
+        let mut maybe_sent = false;
         loop {
-            let (client, error) = match self.connect().await {
-                Ok(client) => match call(Arc::clone(&client)).await {
+            let (client, error) = match self.connect_client().await {
+                Ok(client) => match self.deadlines.bound(wait, call(Arc::clone(&client))).await {
                     Ok(value) => return Ok(value),
-                    Err(error) => (Some(client), Box::new(ConnectError::Client(error))),
+                    Err(error) => (Some(client), Box::new(ConnectError::Client(*error))),
                 },
                 Err(error) => (None, error),
             };
             let retry = reconnectable(&error);
             if retry {
                 if let Some(client) = &client {
-                    self.invalidate(client).await;
+                    self.invalidate_client(client).await;
                 }
             }
-            if !retry || attempt >= self.reconnect_delays.len() {
-                return Err(error);
+            if !retry || expired(&error) || attempt >= self.reconnect_delays.len() {
+                let answered = matches!(*error, ConnectError::Client(ClientError::Remote(_)));
+                return Err(if maybe_sent && !answered {
+                    Box::new(ConnectError::Unconfirmed(error))
+                } else {
+                    error
+                });
             }
+            maybe_sent |= client.is_some();
             self.wait_to_reconnect(attempt).await;
             attempt += 1;
         }
     }
 
     pub(crate) async fn status(&self) -> Result<PlaneStatus, Box<ConnectError>> {
-        self.with_reconnect(|client| async move { client.status().await })
-            .await
+        self.with_reconnect(
+            Wait::Liveness,
+            |client| async move { client.status().await },
+        )
+        .await
     }
 
     pub(crate) async fn register_project(
@@ -143,7 +214,7 @@ impl PlaneClient {
         command_id: Uuid,
         path: &str,
     ) -> Result<Project, Box<ConnectError>> {
-        self.with_reconnect(|client| {
+        self.with_reconnect(Wait::Command, |client| {
             let path = path.to_owned();
             async move { client.register_project(command_id, &path).await }
         })
@@ -156,7 +227,7 @@ impl PlaneClient {
         provider: &str,
         label: &str,
     ) -> Result<AccountBinding, Box<ConnectError>> {
-        self.with_reconnect(|client| {
+        self.with_reconnect(Wait::Command, |client| {
             let (provider, label) = (provider.to_owned(), label.to_owned());
             async move {
                 client
@@ -180,7 +251,7 @@ impl PlaneClient {
         typed_name: &str,
         disposal: ProjectDisposal,
     ) -> Result<ProjectRemoved, Box<ConnectError>> {
-        self.with_reconnect(|client| {
+        self.with_reconnect(Wait::Command, |client| {
             let (binding, disposal) = (binding.clone(), disposal.clone());
             let typed_name = typed_name.to_owned();
             async move {
@@ -196,7 +267,9 @@ impl PlaneClient {
         &self,
     ) -> Result<jet_protocol::CapabilitySnapshot, Box<ConnectError>> {
         let client = self.connect().await?;
-        Ok(client.capabilities(CapabilityObservation::Fresh).await?)
+        Ok(client
+            .query(client.capabilities(CapabilityObservation::Fresh))
+            .await?)
     }
 
     #[cfg(test)]
@@ -206,9 +279,9 @@ impl PlaneClient {
         key: SettingKey,
         scope: SettingScope,
     ) -> Result<(), Box<ConnectError>> {
-        self.with_reconnect(
-            |client| async move { client.clear_setting(command_id, key, scope).await },
-        )
+        self.with_reconnect(Wait::Command, |client| async move {
+            client.clear_setting(command_id, key, scope).await
+        })
         .await
     }
 
@@ -218,7 +291,7 @@ impl PlaneClient {
     {
         let mut reconnect_attempt = 0usize;
         loop {
-            let client = match self.connect().await {
+            let client = match self.connect_client().await {
                 Ok(client) => client,
                 Err(error) => {
                     let public = PublicError::from_client(&error);
@@ -234,7 +307,13 @@ impl PlaneClient {
             let mut resumed = false;
             let mut replay_through = 0;
             loop {
-                match client.events_after(cursor).await {
+                // A page that never arrives is a lost transport: the feed
+                // reports Reconnecting and dials again (`deadline.rs`).
+                match self
+                    .deadlines
+                    .bound(Wait::Liveness, client.events_after(cursor))
+                    .await
+                {
                     Ok(page) => {
                         if !resumed {
                             replay_through = page.cursor;
@@ -269,7 +348,7 @@ impl PlaneClient {
                             let _ = send(NativeUpdate::Failed { error: public });
                             return;
                         }
-                        self.invalidate(&client).await;
+                        self.invalidate_client(&client).await;
                         if !send(NativeUpdate::Reconnecting { error: public }) {
                             return;
                         }
@@ -282,14 +361,30 @@ impl PlaneClient {
         }
     }
 
-    /// A handshaken connection. Local Planes connect per request; a remote
-    /// Plane returns its cached session or makes one single-flight login.
-    pub(crate) async fn connect(&self) -> Result<Arc<Client>, Box<ConnectError>> {
+    /// A handshaken connection whose requests carry this Plane's deadlines.
+    /// Local Planes connect per request, within the liveness deadline (a
+    /// stopped `jetd` still accepts on its socket); a remote Plane returns
+    /// its cached session or makes one single-flight login, whose handshake
+    /// has its own deadline (`remote::login`).
+    pub(crate) async fn connect(&self) -> Result<Connection, Box<ConnectError>> {
+        Ok(Connection {
+            client: self.connect_client().await?,
+            plane: self.clone(),
+            expired: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    async fn connect_client(&self) -> Result<Arc<Client>, Box<ConnectError>> {
         match &self.transport {
-            Transport::Local { socket } => Client::connect_local(socket.as_ref(), self.client_id)
+            Transport::Local { socket } => self
+                .deadlines
+                .bound(
+                    Wait::Liveness,
+                    Client::connect_local(socket.as_ref(), self.client_id),
+                )
                 .await
                 .map(Arc::new)
-                .map_err(Into::into),
+                .map_err(|error| Box::new(ConnectError::Client(*error))),
             Transport::Remote(connector) => connector
                 .connect()
                 .await
@@ -299,7 +394,11 @@ impl PlaneClient {
 
     /// Drops a remote session that failed underneath a request. Local
     /// connections are per request, so there is nothing to drop.
-    pub(crate) async fn invalidate(&self, client: &Arc<Client>) {
+    pub(crate) async fn invalidate(&self, connection: &Connection) {
+        self.invalidate_client(&connection.client).await;
+    }
+
+    async fn invalidate_client(&self, client: &Arc<Client>) {
         if let Transport::Remote(connector) = &self.transport {
             connector.invalidate(client).await;
         }
@@ -337,11 +436,81 @@ impl PlaneClient {
     }
 }
 
+/// Whether a request or connect outlived its deadline.
+fn expired(error: &ConnectError) -> bool {
+    matches!(error, ConnectError::Client(error) if deadline::expired_wait(error).is_some())
+}
+
+/// A handshaken connection to one Plane. It dereferences to the protocol
+/// client; `query` and `command` bound one request by the Plane's deadlines
+/// (`deadline.rs`), which every Plane request of the shell goes through.
+#[derive(Clone)]
+pub(crate) struct Connection {
+    client: Arc<Client>,
+    plane: PlaneClient,
+    /// Set once a request here outlived its deadline: the peer is hung.
+    expired: Arc<AtomicBool>,
+}
+
+impl Deref for Connection {
+    type Target = Client;
+
+    fn deref(&self) -> &Client {
+        &self.client
+    }
+}
+
+impl Connection {
+    /// Awaits one Query (or a read-only transfer) for at most the Query
+    /// deadline. An expiry is a lost transport: offline and retryable.
+    pub(crate) async fn query<T>(
+        &self,
+        request: impl Future<Output = Result<T, ClientError>>,
+    ) -> Result<T, Box<ClientError>> {
+        self.bounded(Wait::Query, request).await
+    }
+
+    /// Awaits one Command for at most the Command deadline. An expiry
+    /// leaves the outcome unknown (`command.outcome_unknown`): callers keep
+    /// the Command ID, as for any lost transport, so a retry resends it.
+    pub(crate) async fn command<T>(
+        &self,
+        request: impl Future<Output = Result<T, ClientError>>,
+    ) -> Result<T, Box<ClientError>> {
+        self.bounded(Wait::Command, request).await
+    }
+
+    /// Once one request outlives its deadline the peer is hung, local or
+    /// remote alike: every later request on this connection fails at once
+    /// as offline (`Closed`, nothing is sent) instead of waiting a full
+    /// deadline each, which a flow of many reads would add up. A remote
+    /// session that stopped answering is also dropped (ssh is killed), so
+    /// the next connection logs in again instead of reusing the dead link.
+    async fn bounded<T>(
+        &self,
+        wait: Wait,
+        request: impl Future<Output = Result<T, ClientError>>,
+    ) -> Result<T, Box<ClientError>> {
+        if self.expired.load(Ordering::Acquire) {
+            return Err(Box::new(ClientError::Closed));
+        }
+        let result = self.plane.deadlines.bound(wait, request).await;
+        if let Err(error) = &result {
+            if deadline::expired_wait(error).is_some() {
+                self.expired.store(true, Ordering::Release);
+                self.plane.invalidate_client(&self.client).await;
+            }
+        }
+        result
+    }
+}
+
 fn reconnectable(error: &ConnectError) -> bool {
     match error {
         ConnectError::Client(error) => reconnectable_client(error),
         // The connector already applied its own retry and backoff policy.
         ConnectError::Plane(_) => false,
+        ConnectError::Unconfirmed(_) => false,
     }
 }
 
@@ -793,6 +962,145 @@ pub(crate) mod unit_tests {
     use uuid::Uuid;
 
     use super::{safe_event_kind, EventSummary, NativeUpdate, PlaneClient};
+    use crate::jet::{
+        deadline::{manual::ManualTimer, Deadlines, LIVENESS_DEADLINE, QUERY_DEADLINE},
+        errors::PublicError,
+    };
+
+    fn on_manual_clock(socket: std::path::PathBuf) -> (PlaneClient, std::sync::Arc<ManualTimer>) {
+        let clock = std::sync::Arc::new(ManualTimer::default());
+        let client = PlaneClient::new(
+            socket,
+            Uuid::from_u128(7),
+            [Duration::from_millis(1)],
+            Duration::from_millis(1),
+        )
+        .with_deadlines(Deadlines::on(clock.clone()));
+        (client, clock)
+    }
+
+    /// D6: a stopped `jetd` still accepts on its socket but never finishes
+    /// the handshake. The status read ends at the liveness deadline as a
+    /// retryable offline failure, and is not retried behind the caller.
+    #[tokio::test]
+    async fn a_stopped_local_jetd_is_offline_at_the_liveness_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("jetd.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let (client, clock) = on_manual_clock(socket);
+
+        let (status, stopped) = tokio::join!(client.status(), async {
+            let (stream, _) = listener.accept().await.unwrap();
+            clock.advance(LIVENESS_DEADLINE);
+            stream
+        });
+        let error = PublicError::from_client(&status.unwrap_err());
+        assert_eq!(
+            (error.category, error.code.as_str(), error.retryable),
+            ("offline", "transport.offline", true)
+        );
+        drop(stopped);
+        let mut next = Box::pin(listener.accept());
+        assert!(
+            crate::jet::deadline::tests::still_pending(&mut next).await,
+            "an expired wait is not retried"
+        );
+    }
+
+    /// D6: once a request on a connection outlives its deadline, the peer is
+    /// hung. A local `jetd` keeps its socket open, so without this each
+    /// later read of a many-read flow (Trash names, Autodelete lookups)
+    /// would wait a full deadline of its own; instead it fails at once as
+    /// offline, as it does on a remote Plane whose session was dropped.
+    #[tokio::test]
+    async fn a_connection_that_expired_fails_later_requests_at_once() {
+        use std::{future::Future, task::Poll};
+
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("jetd.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let (client, clock) = on_manual_clock(socket);
+        let client_id = client.client_id();
+        let (connection, (mut reader, _writer)) =
+            tokio::join!(client.connect(), accept(&listener, client_id));
+        let connection = connection.unwrap();
+
+        let (first, ()) = tokio::join!(connection.query(connection.status()), async {
+            let _ = next_message(&mut reader).await;
+            clock.advance(QUERY_DEADLINE);
+        });
+        let first = PublicError::from_client(&first.unwrap_err());
+        assert_eq!(first.code, "transport.offline");
+
+        let second = connection.query(connection.status());
+        tokio::pin!(second);
+        let Poll::Ready(second) =
+            std::future::poll_fn(|context| Poll::Ready(second.as_mut().poll(context))).await
+        else {
+            panic!("the second read waited for a deadline of its own");
+        };
+        let second = PublicError::from_client(&second.unwrap_err());
+        assert_eq!(
+            (second.code.as_str(), second.retryable),
+            ("transport.offline", true)
+        );
+    }
+
+    /// D6: a feed whose page never arrives reports Reconnecting at the
+    /// liveness deadline and dials again, instead of staying "Connected".
+    #[tokio::test]
+    async fn a_hung_feed_reports_reconnecting_and_dials_again() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("jetd.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let (client, clock) = on_manual_clock(socket);
+        let client_id = client.client_id();
+
+        let mut updates = Vec::new();
+        let ((), hung) = tokio::join!(
+            client.stream_updates(10, |update| {
+                let resumed_again = matches!(update, NativeUpdate::Resumed { .. })
+                    && updates.contains(&"reconnecting");
+                updates.push(match update {
+                    NativeUpdate::Resumed { .. } => "resumed",
+                    NativeUpdate::Event(_) => "event",
+                    NativeUpdate::Reconnecting { error } => {
+                        assert_eq!(error.code, "transport.offline");
+                        assert!(error.retryable);
+                        "reconnecting"
+                    }
+                    NativeUpdate::Failed { .. } => "failed",
+                });
+                !resumed_again
+            }),
+            async {
+                let (mut reader, writer) = accept(&listener, client_id).await;
+                let (_, page) = next_message(&mut reader).await;
+                assert_events_after(&page, 10);
+                // The Plane stops answering: no page, no close.
+                clock.advance(LIVENESS_DEADLINE);
+                let (mut again, mut writer_again) = accept(&listener, client_id).await;
+                let (stream, page) = next_message(&mut again).await;
+                assert_events_after(&page, 10);
+                let id = request_id(&page);
+                reply(
+                    &mut writer_again,
+                    stream,
+                    ServerMessage::QueryResult {
+                        id,
+                        result: QueryResponse::Events(EventPage {
+                            cursor: 10,
+                            events: Vec::new(),
+                        }),
+                    },
+                )
+                .await;
+                (reader, writer, again, writer_again)
+            }
+        );
+        drop(hung);
+        assert_eq!(updates, ["reconnecting", "resumed"]);
+    }
 
     #[test]
     fn event_kind_is_bounded_before_it_reaches_the_webview() {

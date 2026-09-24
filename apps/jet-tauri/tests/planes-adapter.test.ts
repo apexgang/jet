@@ -67,8 +67,8 @@ describe("Plane adapter", () => {
     await loadConversations();
     await searchConversations("fix");
     await loadConversation("c");
-    await startRun("c", "codex", "go");
-    await submitTurn("c", "more");
+    await startRun("c", "codex", "go", "a");
+    await submitTurn("c", "more", "a");
     await loadRunSupervision("c", null);
     await withdrawTurn("c", "t");
     await interruptTurn("r");
@@ -105,8 +105,8 @@ describe("Plane adapter", () => {
     await loadConversations("page-2", REMOTE);
     await searchConversations("fix", REMOTE);
     await loadConversation("c", REMOTE);
-    await startRun("c", "codex", "go", REMOTE);
-    await submitTurn("c", "more", REMOTE);
+    await startRun("c", "codex", "go", "a", REMOTE);
+    await submitTurn("c", "more", "a", REMOTE);
     await loadRunSupervision("c", "r", REMOTE);
     await withdrawTurn("c", "t", REMOTE);
     await interruptTurn("r", REMOTE);
@@ -119,7 +119,7 @@ describe("Plane adapter", () => {
     await prepareDeliveryAcknowledgement("c", "d", REMOTE);
     for (const call of calls) expect(call.args.planeId, call.command).toBe(REMOTE);
     expect(calls[0].args).toEqual({ planeId: REMOTE, nextPage: "page-2" });
-    expect(calls[3].args).toEqual({ conversationId: "c", craft: "codex", prompt: "go", planeId: REMOTE });
+    expect(calls[3].args).toEqual({ conversationId: "c", craft: "codex", prompt: "go", attempt: "a", planeId: REMOTE });
     expect(calls[10].args).toEqual({
       conversationId: "c",
       runId: "r",
