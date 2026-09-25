@@ -10,7 +10,8 @@
 export const SHELL_INTERACTIVE = "shell-interactive";
 /**
  * This computer's Plane feed came online: it opened online, or it was down
- * and then said `connected` or `resumed`. Marked every time.
+ * and then said `connected` or `resumed`. Marked once each time: a feed that
+ * dials again says `connected` then `resumed`, and that pair marks once.
  */
 export const LOCAL_PLANE_CONNECTED = "local-plane-connected";
 

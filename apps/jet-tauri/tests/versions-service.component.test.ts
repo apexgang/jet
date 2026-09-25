@@ -6,6 +6,11 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 
 import type { DesktopPreferences, DesktopPreferencesChange } from "../src/lib/jet/preferences";
 import type { AppUpdate } from "../src/lib/jet/updates";
+import type { Channel } from "@tauri-apps/api/core";
+import type { PublicError } from "../src/lib/jet/bridge";
+import type { LocalServiceView } from "../src/lib/jet/local-service";
+import type { PlaneDetail } from "../src/lib/jet/planes";
+import ConnectionsPane from "../src/lib/features/settings/ConnectionsPane.svelte";
 import GeneralPane from "../src/lib/features/settings/GeneralPane.svelte";
 import AppUpdatesBlock from "../src/lib/features/system/AppUpdatesBlock.svelte";
 import LocalServiceBlock from "../src/lib/features/system/LocalServiceBlock.svelte";
@@ -176,5 +181,155 @@ describe("Settings › Versions: App updates", () => {
     await settle();
     expect(document.body.textContent).toContain("Restart Jet with version 0.3.0?");
     expect(button("Later")).toBeDefined();
+  });
+});
+
+describe("Settings › Connections: the local service", () => {
+  const offline: PublicError = {
+    category: "offline",
+    code: "transport.offline",
+    message: "Jet can't reach this Plane.",
+    retryable: true,
+    recoveryActions: [],
+    restart: null,
+    revisionConflict: null,
+    protocolLimit: null,
+    planeId: "local",
+  };
+
+  /**
+   * Renders the pane over a local Plane whose reads follow `jetd`: the core
+   * version that answers, or null while no daemon runs, and the store state
+   * it reports (serving unless set). `push` sends a view from the native
+   * service watcher.
+   */
+  async function renderPane(jetd: { core: string | null; store?: string }, initial: LocalServiceView) {
+    let push: (view: LocalServiceView) => void = () => undefined;
+    const calls: string[] = [];
+    const plane = () => ({
+      planeId: "local",
+      kind: "local",
+      label: "This computer",
+      planeIdentity: null,
+      connection: jetd.core === null ? { state: "reconnecting", error: offline } : { state: "online" },
+      coreVersion: jetd.core,
+      credential: null,
+      security: "trusted",
+      store: jetd.store ?? "serving",
+      features: [],
+      protocol: { exact: null, atLeast: 37, atMost: null },
+    });
+    mockIPC((command, args) => {
+      calls.push(command);
+      switch (command) {
+        case "watch_local_service": {
+          const channel = (args as { onChange: Channel<LocalServiceView> }).onChange;
+          push = (view) => channel.onmessage(view);
+          return initial;
+        }
+        case "load_plane_detail": {
+          const detail: PlaneDetail = {
+            plane: plane() as PlaneDetail["plane"],
+            platform: "linux",
+            harnesses: [],
+            crafts: [],
+            degraded: [],
+            missingTools: [],
+            issues: jetd.core === null ? [{ section: "connection", error: offline }] : [],
+          };
+          return detail;
+        }
+        case "list_planes":
+          return {
+            planes: [plane()],
+            identity: { clientId: "00000000-0000-4000-8000-00000000000c", key: "unknown", fingerprint: null, notice: null },
+            restoredSelection: null,
+            notice: null,
+            maximumRemotePlanes: 16,
+          };
+        default:
+          return null;
+      }
+    });
+    const service = new LocalServiceSession();
+    render(ConnectionsPane, { service });
+    await settle();
+    expect(calls).toContain("watch_local_service");
+    return {
+      push: async (view: LocalServiceView) => {
+        push(view);
+        await settle();
+      },
+      reads: () => calls.filter((command) => command === "load_plane_detail").length,
+    };
+  }
+
+  const fact = (term: string) =>
+    [...document.querySelectorAll("dt")].find((candidate) => candidate.textContent === term)?.nextElementSibling
+      ?.textContent;
+
+  it("shows the core the local service activated without a refresh", async () => {
+    const jetd = { core: "0.2.0" as string | null };
+    const pane = await renderPane(jetd, serviceView());
+    expect(fact("Version")).toBe("0.2.0");
+    const before = pane.reads();
+
+    // Draining for the activation reports the same running version.
+    await pane.push(serviceView({ phase: "updating" }));
+    expect(pane.reads()).toBe(before);
+
+    // The service manager started the new core.
+    jetd.core = "0.3.0";
+    await pane.push(serviceView({ currentVersion: "0.3.0", runningVersion: "0.3.0", lastAction: "updated" }));
+    expect(pane.reads()).toBe(before + 1);
+    expect(fact("Version")).toBe("0.3.0");
+  });
+
+  it("shows a service that starts, or stops, after the pane opened", async () => {
+    const jetd = { core: null as string | null };
+    const pane = await renderPane(jetd, serviceView({ phase: "stopped", runningVersion: null, canRepair: true }));
+    expect(fact("Jet service")).toBe("Not reachable");
+    const before = pane.reads();
+
+    // Starting, nothing answers yet: there is nothing new to read.
+    await pane.push(serviceView({ phase: "starting", runningVersion: null }));
+    expect(pane.reads()).toBe(before);
+
+    jetd.core = "0.2.0";
+    await pane.push(serviceView({ lastAction: "started" }));
+    expect(pane.reads()).toBe(before + 1);
+    expect(fact("Jet service")).toBe("Running on this computer");
+    expect(fact("Version")).toBe("0.2.0");
+
+    // The daemon stops again: the pane no longer says it runs.
+    jetd.core = null;
+    await pane.push(serviceView({ phase: "stopped", runningVersion: null, canRepair: true }));
+    expect(pane.reads()).toBe(before + 2);
+    expect(fact("Jet service")).toBe("Not reachable");
+  });
+
+  it("reads the Plane again when a pass ends with the same core running again", async () => {
+    const jetd: { core: string | null; store?: string } = { core: "0.2.0" };
+    const pane = await renderPane(jetd, serviceView());
+    expect(fact("Storage")).toBe("Serving");
+    const before = pane.reads();
+
+    await pane.push(serviceView({ phase: "updating" }));
+    expect(pane.reads()).toBe(before);
+
+    // The activation failed after the old core drained; the service manager
+    // started that core again, and its new run is in recovery.
+    jetd.store = "read_only";
+    const failed: PublicError = {
+      ...offline,
+      category: "local_unavailable",
+      code: "service.install_failed",
+      message: "The Jet service couldn't be set up on this computer.",
+      planeId: null,
+    };
+    await pane.push(serviceView({ error: failed }));
+    expect(pane.reads()).toBe(before + 1);
+    expect(fact("Version")).toBe("0.2.0");
+    expect(fact("Storage")).toBe("Read-only recovery");
   });
 });

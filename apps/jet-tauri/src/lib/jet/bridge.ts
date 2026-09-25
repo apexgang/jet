@@ -56,7 +56,13 @@ export type ConnectionSnapshot = {
 };
 
 export type PlaneUpdate =
+  /**
+   * A fresh status read; `resumed` follows. Sent when the feed's first read
+   * failed and the Plane answered later, and each time the feed dials again
+   * after a drop, which may reach a restarted jetd (new `daemonStarts`).
+   */
   | { type: "connected"; connection: ConnectionSnapshot }
+  /** The first page of a connection arrived: Events after `after` follow. */
   | { type: "resumed"; after: string }
   | {
       type: "event";

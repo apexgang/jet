@@ -254,6 +254,14 @@ export class PlanesSession {
     await this.refresh();
   }
 
+  /**
+   * The Plane's daemon started again: a detail shown for it names the old
+   * start's versions and capabilities, so it is read again.
+   */
+  planeRestarted(planeId: PlaneId): void {
+    if (planeId === this.selectedPlaneId && this.detail?.planeId === planeId) void this.loadDetail();
+  }
+
   hasFeed(planeId: PlaneId): boolean {
     return this.feeds.has(planeId);
   }

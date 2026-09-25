@@ -346,7 +346,8 @@ describe("DesktopSession with Jet Trash", () => {
     await settle();
     expect(loads).toEqual([]);
 
-    // After a drop the feed dials again and says resumed, not connected.
+    // A drop that ends in resumed alone (no connected first) still reads
+    // the dropped Plane again.
     session.receive(REMOTE, { type: "reconnecting", error: failure("transport.offline", "offline", { planeId: REMOTE }) });
     expect(session.trash.sections[REMOTE]?.kind).toBe("offline");
     session.receive(REMOTE, { type: "resumed", after: "4" });

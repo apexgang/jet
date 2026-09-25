@@ -40,9 +40,9 @@ const CONNECTION: ConnectionSnapshot = {
   cursor: "40",
 } as ConnectionSnapshot;
 
-function setup(projects: SetupSnapshot["projects"]): SetupSnapshot {
+function setup(projects: SetupSnapshot["projects"], coreVersion = "0.2.0", daemonStarts = "1"): SetupSnapshot {
   return {
-    plane: { coreVersion: "0.2.0", daemonStarts: "1", platform: "linux" },
+    plane: { coreVersion, daemonStarts, platform: "linux" },
     capabilities: {
       harnesses: ["codex"],
       crafts: [],
@@ -100,6 +100,7 @@ function harness(options: Options) {
   const setups = [...options.setups];
   // The native registry, as `list_planes` reads it.
   let registry: PlaneConnection = { state: "online" };
+  let coreVersion = "0.2.0";
   vi.stubGlobal("window", { crypto: globalThis.crypto });
   mockIPC(async (command, args) => {
     const record = (args ?? {}) as Record<string, unknown>;
@@ -119,7 +120,7 @@ function harness(options: Options) {
         feeds.push(record.onUpdate as Channel<unknown>);
         return options.feedDown ? { ...CONNECTION, state: "reconnecting" } : CONNECTION;
       case "list_planes":
-        return { ...PLANES, planes: [{ ...PLANES.planes[0], connection: registry }] };
+        return { ...PLANES, planes: [{ ...PLANES.planes[0], connection: registry, coreVersion }] };
       case "load_desktop_preferences":
         return { reopenLastTask: false, checkForUpdates: true };
       case "load_shell_presentation":
@@ -135,8 +136,14 @@ function harness(options: Options) {
     setupReads: () => calls.filter((command) => command === "load_setup").length,
     pushService: (view: LocalServiceView) => serviceChannel?.onmessage(view),
     pushFeed: (update: unknown) => feeds[0]?.onmessage(update),
-    /** What the native feed task sets before it sends its update. */
-    setRegistry: (connection: PlaneConnection) => (registry = connection),
+    /**
+     * What the native feed task sets before it sends its update. A status
+     * read also records the core version it reports.
+     */
+    setRegistry: (connection: PlaneConnection, version = coreVersion) => {
+      registry = connection;
+      coreVersion = version;
+    },
   };
 }
 
@@ -161,7 +168,7 @@ describe("Setup and the local Jet service (wave 4 §A)", () => {
     session.disconnect();
   });
 
-  it("shows the local Plane connected again when its feed resumes after jetd restarted", async () => {
+  it("shows the local Plane connected again when a drop ends in resumed alone", async () => {
     const ipc = harness({ setups: [setup([{ id: "p1", name: "Jet", root: "/w" }])], service: serviceView() });
     const session = new DesktopSession();
     session.connect();
@@ -171,9 +178,9 @@ describe("Setup and the local Jet service (wave 4 §A)", () => {
     expect(ipc.setupReads()).toBe(1);
     expect(session.planes.aggregate?.detail).toBe("Connected");
 
-    // `systemctl --user kill jetd`: the open feed reports Reconnecting until
-    // the restarted daemon answers, then dials again and says resumed, never
-    // connected (`client.rs` `stream_updates`, `channels.rs`).
+    // The open feed reports Reconnecting until the Plane answers. A feed
+    // that dials again says connected first (next test); a resumed without
+    // it still ends the drop.
     ipc.setRegistry({ state: "reconnecting", error: offline() });
     ipc.pushFeed({ type: "reconnecting", error: offline() });
     ipc.pushFeed({ type: "reconnecting", error: offline() });
@@ -189,6 +196,40 @@ describe("Setup and the local Jet service (wave 4 §A)", () => {
     // The sidebar shows the registry: it reads it again.
     expect(session.planes.aggregate?.detail).toBe("Connected");
     expect(ipc.setupReads()).toBe(2);
+    session.disconnect();
+  });
+
+  it("shows the core local_service activated, once the feed dials the restarted jetd", async () => {
+    const ipc = harness({
+      setups: [setup([{ id: "p1", name: "Jet", root: "/w" }]), setup([{ id: "p1", name: "Jet", root: "/w" }], "0.3.0", "2")],
+      service: serviceView(),
+    });
+    const session = new DesktopSession();
+    session.connect();
+    await settle();
+    ipc.pushFeed({ type: "resumed", after: "40" });
+    await settle();
+    expect(session.setupSnapshot?.plane.coreVersion).toBe("0.2.0");
+    expect(session.planes.plane("local")?.coreVersion).toBe("0.2.0");
+
+    // Activating the bundled core drains jetd: the feed drops.
+    ipc.pushService(serviceView({ phase: "updating" }));
+    ipc.setRegistry({ state: "reconnecting", error: offline() });
+    ipc.pushFeed({ type: "reconnecting", error: offline() });
+    await settle();
+    expect(session.connectionState).toBe("reconnecting");
+
+    // systemd starts the new core. The feed dials it, reads its status
+    // (which the native registry records), says connected, then resumed.
+    ipc.setRegistry({ state: "online" }, "0.3.0");
+    ipc.pushFeed({ type: "connected", connection: { ...CONNECTION, coreVersion: "0.3.0", daemonStarts: "2" } });
+    ipc.pushFeed({ type: "resumed", after: "40" });
+    ipc.pushService(serviceView({ currentVersion: "0.3.0", runningVersion: "0.3.0", lastAction: "updated" }));
+    await settle();
+    expect(session.connectionState).toBe("online");
+    expect(session.planes.plane("local")?.coreVersion).toBe("0.3.0");
+    expect(session.setupSnapshot?.plane).toEqual({ coreVersion: "0.3.0", daemonStarts: "2", platform: "linux" });
+    expect(session.service.view?.runningVersion).toBe("0.3.0");
     session.disconnect();
   });
 

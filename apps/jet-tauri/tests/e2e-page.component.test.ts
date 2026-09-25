@@ -40,9 +40,9 @@ function offline(): PublicError {
   };
 }
 
-function setup(projects: SetupSnapshot["projects"] = []): SetupSnapshot {
+function setup(projects: SetupSnapshot["projects"] = [], coreVersion = "0.2.0", daemonStarts = "1"): SetupSnapshot {
   return {
-    plane: { coreVersion: "0.2.0", daemonStarts: "1", platform: "linux" },
+    plane: { coreVersion, daemonStarts, platform: "linux" },
     capabilities: {
       harnesses: ["codex"],
       crafts: [],
@@ -122,10 +122,11 @@ describe("the journey's page script in the main window", () => {
     expect(view.planeState).toBe("Connected");
   });
 
-  it("reads Connected again once the local feed resumes after jetd restarted", async () => {
+  it("reads Connected and the restarted core once the local feed dials jetd again", async () => {
     // The journey's reconnect step waits for exactly this after
     // `systemctl --user kill jetd.service`.
     let connection: { state: string; error?: PublicError } = { state: "online" };
+    let core = { version: "0.2.0", starts: "1" };
     mockIPC((command) => {
       switch (command) {
         case "open_plane_feed":
@@ -141,9 +142,9 @@ describe("the journey's page script in the main window", () => {
             cursor: "40",
           };
         case "list_planes":
-          return { ...PLANES, planes: [{ ...PLANES.planes[0], connection }] };
+          return { ...PLANES, planes: [{ ...PLANES.planes[0], connection, coreVersion: core.version }] };
         case "load_setup":
-          return setup();
+          return setup([], core.version, core.starts);
         case "load_conversations":
           return { planeId: "local", cursor: "40", conversations: [], nextPage: null };
         default:
@@ -151,11 +152,15 @@ describe("the journey's page script in the main window", () => {
       }
     });
     const session = new DesktopSession();
+    session.sidebarSelection = "project";
+    session.service.view = serviceView();
     // The feed is open, as it is in the app: the Recent reload that follows
     // `resumed` opens no other one.
     await session.planes.openFeed("local", null);
+    await session.refreshSetup();
     render(AppShell, { session });
     await settle();
+    expect(page<MainView>("main").setup?.localPlane?.coreVersion).toBe("0.2.0");
     const before = performance.now();
 
     connection = { state: "reconnecting", error: offline() };
@@ -163,12 +168,30 @@ describe("the journey's page script in the main window", () => {
     await settle();
     expect(page<MainView>("main").planeStatus).toBe("This computer Reconnecting");
 
+    // The feed dials the restarted jetd, reads its status (the native
+    // registry records it), says connected, then resumed.
     connection = { state: "online" };
+    core = { version: "0.3.0", starts: "2" };
+    session.receive("local", {
+      type: "connected",
+      connection: {
+        state: "online",
+        feedId: "feed-1",
+        planeId: "local",
+        planeIdentity: null,
+        health: { security: "trusted", store: "serving", ledger: "verified" },
+        coreVersion: "0.3.0",
+        daemonStarts: "2",
+        startedAtUnixMs: "2",
+        cursor: "40",
+      },
+    });
     session.receive("local", { type: "resumed", after: "40" });
     await settle();
     const view = page<MainView>("main");
     expect(view.planeStatus).toBe("This computer Connected");
     expect(view.planeState).toBe("Connected");
+    expect(view.setup?.localPlane?.coreVersion).toBe("0.3.0");
     expect(view.marks.filter((mark) => mark.name === "local-plane-connected" && mark.startTime >= before)).toHaveLength(1);
   });
 

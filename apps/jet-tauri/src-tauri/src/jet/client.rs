@@ -285,12 +285,25 @@ impl PlaneClient {
         .await
     }
 
+    /// Streams the Plane's Events after `cursor`, in order, until `send`
+    /// returns false or the feed fails for good.
+    ///
+    /// The caller has just read status, so the first dial pages at once.
+    /// Every later dial follows a drop the feed reported (`Reconnecting`)
+    /// and may reach a restarted `jetd` (a crash, a service manager restart,
+    /// or a core activation that drained it). That dial reads status on the
+    /// new connection before its first page and sends it as `Connected`, so
+    /// the caller learns a new daemon start, core version and health. The
+    /// status fence never moves `cursor`: paging goes on after the last Event
+    /// delivered, so none is skipped or sent twice across the drop.
     pub(crate) async fn stream_updates<F>(&self, mut cursor: u64, mut send: F)
     where
         F: FnMut(NativeUpdate) -> bool,
     {
         let mut reconnect_attempt = 0usize;
+        let mut first_dial = true;
         loop {
+            let redial = !std::mem::replace(&mut first_dial, false);
             let client = match self.connect_client().await {
                 Ok(client) => client,
                 Err(error) => {
@@ -303,6 +316,27 @@ impl PlaneClient {
                     continue;
                 }
             };
+
+            if redial {
+                // A status that never arrives is a lost transport, as a page is.
+                match self.deadlines.bound(Wait::Liveness, client.status()).await {
+                    Ok(status) => {
+                        if !send(NativeUpdate::Connected {
+                            status: Box::new(status),
+                        }) {
+                            return;
+                        }
+                    }
+                    Err(error) => {
+                        if !self.feed_lost(&client, &error, &mut send).await {
+                            return;
+                        }
+                        self.wait_to_reconnect(reconnect_attempt).await;
+                        reconnect_attempt = reconnect_attempt.saturating_add(1);
+                        continue;
+                    }
+                }
+            }
 
             let mut resumed = false;
             let mut replay_through = 0;
@@ -343,13 +377,7 @@ impl PlaneClient {
                         }
                     }
                     Err(error) => {
-                        let public = PublicError::from_client(&error);
-                        if !reconnectable_client(&error) {
-                            let _ = send(NativeUpdate::Failed { error: public });
-                            return;
-                        }
-                        self.invalidate_client(&client).await;
-                        if !send(NativeUpdate::Reconnecting { error: public }) {
+                        if !self.feed_lost(&client, &error, &mut send).await {
                             return;
                         }
                         self.wait_to_reconnect(reconnect_attempt).await;
@@ -359,6 +387,22 @@ impl PlaneClient {
                 }
             }
         }
+    }
+
+    /// A request on a feed's connection failed. A lost transport is
+    /// reported as `Reconnecting` and the feed dials again (true, unless the
+    /// receiver is gone); any other failure ends the feed with `Failed`.
+    async fn feed_lost<F>(&self, client: &Arc<Client>, error: &ClientError, send: &mut F) -> bool
+    where
+        F: FnMut(NativeUpdate) -> bool,
+    {
+        let public = PublicError::from_client(error);
+        if !reconnectable_client(error) {
+            let _ = send(NativeUpdate::Failed { error: public });
+            return false;
+        }
+        self.invalidate_client(client).await;
+        send(NativeUpdate::Reconnecting { error: public })
     }
 
     /// A handshaken connection whose requests carry this Plane's deadlines.
@@ -534,10 +578,22 @@ fn failure_update(error: PublicError) -> NativeUpdate {
 }
 
 pub(crate) enum NativeUpdate {
-    Resumed { after: u64 },
+    /// A feed dialed again after a drop and read status on the new
+    /// connection, before any page from it (`PlaneClient::stream_updates`).
+    Connected {
+        status: Box<PlaneStatus>,
+    },
+    /// The first page of a connection arrived; Events after `after` follow.
+    Resumed {
+        after: u64,
+    },
     Event(EventSummary),
-    Reconnecting { error: PublicError },
-    Failed { error: PublicError },
+    Reconnecting {
+        error: PublicError,
+    },
+    Failed {
+        error: PublicError,
+    },
 }
 
 pub(crate) struct EventSummary {
@@ -951,9 +1007,9 @@ pub(crate) mod unit_tests {
 
     use jet_protocol::{
         decode_control, encode_control, Actor, ClientHello, ClientMessage, CommandRequest,
-        CommandResponse, Event, EventPage, Frame, FrameReader, FrameWriter, PlaneStatus,
-        QueryRequest, QueryResponse, ServerHello, ServerMessage, SettingKey, SettingScope,
-        StreamId,
+        CommandResponse, ErrorCategory, Event, EventPage, Frame, FrameReader, FrameWriter,
+        PlaneStatus, QueryRequest, QueryResponse, ServerHello, ServerMessage, SettingKey,
+        SettingScope, StreamId,
     };
     use tokio::{
         io::AsyncReadExt,
@@ -965,6 +1021,7 @@ pub(crate) mod unit_tests {
     use crate::jet::{
         deadline::{manual::ManualTimer, Deadlines, LIVENESS_DEADLINE, QUERY_DEADLINE},
         errors::PublicError,
+        fake_plane::{refuse, wire},
     };
 
     fn on_manual_clock(socket: std::path::PathBuf) -> (PlaneClient, std::sync::Arc<ManualTimer>) {
@@ -1061,16 +1118,11 @@ pub(crate) mod unit_tests {
             client.stream_updates(10, |update| {
                 let resumed_again = matches!(update, NativeUpdate::Resumed { .. })
                     && updates.contains(&"reconnecting");
-                updates.push(match update {
-                    NativeUpdate::Resumed { .. } => "resumed",
-                    NativeUpdate::Event(_) => "event",
-                    NativeUpdate::Reconnecting { error } => {
-                        assert_eq!(error.code, "transport.offline");
-                        assert!(error.retryable);
-                        "reconnecting"
-                    }
-                    NativeUpdate::Failed { .. } => "failed",
-                });
+                if let NativeUpdate::Reconnecting { error } = &update {
+                    assert_eq!(error.code, "transport.offline");
+                    assert!(error.retryable);
+                }
+                updates.push(kind(&update));
                 !resumed_again
             }),
             async {
@@ -1080,6 +1132,7 @@ pub(crate) mod unit_tests {
                 // The Plane stops answering: no page, no close.
                 clock.advance(LIVENESS_DEADLINE);
                 let (mut again, mut writer_again) = accept(&listener, client_id).await;
+                answer_status(&mut again, &mut writer_again, status(10)).await;
                 let (stream, page) = next_message(&mut again).await;
                 assert_events_after(&page, 10);
                 let id = request_id(&page);
@@ -1099,7 +1152,206 @@ pub(crate) mod unit_tests {
             }
         );
         drop(hung);
-        assert_eq!(updates, ["reconnecting", "resumed"]);
+        assert_eq!(updates, ["reconnecting", "connected", "resumed"]);
+    }
+
+    /// A feed that dials again after a drop may reach a restarted `jetd`:
+    /// it reads status on the new connection before paging and reports it
+    /// as `Connected`. A status read that fails is a drop like any other,
+    /// and paging resumes after the last Event delivered, never at the
+    /// status fence, so the Events in between are not lost.
+    #[tokio::test]
+    async fn a_redial_reads_status_first_and_resumes_after_the_last_event() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("jetd.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let (client, _clock) = on_manual_clock(socket);
+        let client_id = client.client_id();
+        let restarted = PlaneStatus {
+            daemon_starts: 4,
+            core_version: "0.3.0".into(),
+            ..status(13)
+        };
+
+        let mut updates = Vec::new();
+        let mut sequences = Vec::new();
+        let mut resumed_after = Vec::new();
+        let mut statuses = Vec::new();
+        let ((), served) = tokio::join!(
+            client.stream_updates(10, |update| {
+                updates.push(kind(&update));
+                match update {
+                    NativeUpdate::Event(event) => sequences.push(event.sequence),
+                    NativeUpdate::Resumed { after } => resumed_after.push(after),
+                    NativeUpdate::Connected { status } => statuses.push(*status),
+                    NativeUpdate::Reconnecting { .. } | NativeUpdate::Failed { .. } => {}
+                }
+                sequences.last() != Some(&13)
+            }),
+            async {
+                // The first dial follows the caller's status read: it pages
+                // at once, then `jetd` goes away mid-poll.
+                let (mut reader, mut writer) = accept(&listener, client_id).await;
+                answer_events(&mut reader, &mut writer, 10, 11, vec![event(11)]).await;
+                let (_, poll) = next_message(&mut reader).await;
+                assert_events_after(&poll, 11);
+                drop((reader, writer));
+
+                // The next dial reaches a daemon that is still draining.
+                let (mut reader, writer) = accept(&listener, client_id).await;
+                let (_, query) = next_message(&mut reader).await;
+                assert_status_query(&query);
+                drop((reader, writer));
+
+                // The restarted daemon answers; its store moved on to 13.
+                let (mut reader, mut writer) = accept(&listener, client_id).await;
+                answer_status(&mut reader, &mut writer, restarted.clone()).await;
+                answer_events(&mut reader, &mut writer, 11, 13, vec![event(12), event(13)]).await;
+                (reader, writer)
+            }
+        );
+        drop(served);
+        assert_eq!(
+            updates,
+            [
+                "resumed",
+                "event",
+                "reconnecting",
+                "reconnecting",
+                "connected",
+                "resumed",
+                "event",
+                "event"
+            ]
+        );
+        assert_eq!(sequences, [11, 12, 13]);
+        assert_eq!(resumed_after, [10, 11]);
+        assert_eq!(statuses, [restarted]);
+    }
+
+    /// A redial's status read that the Plane refuses is not a lost
+    /// transport: the feed ends with `Failed`, as it does on a refused page,
+    /// and sends neither `Connected` nor `Resumed` for that dial.
+    #[tokio::test]
+    async fn a_refused_status_read_on_a_redial_ends_the_feed() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("jetd.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let (client, _clock) = on_manual_clock(socket);
+        let client_id = client.client_id();
+
+        let mut updates = Vec::new();
+        let mut failure = None;
+        let ((), served) = tokio::join!(
+            client.stream_updates(10, |update| {
+                updates.push(kind(&update));
+                if let NativeUpdate::Failed { error } = update {
+                    failure = Some(error);
+                }
+                // Stops a feed that wrongly dials a third time, rather than
+                // leave it waiting for a daemon that never answers.
+                updates
+                    .iter()
+                    .filter(|label| **label == "reconnecting")
+                    .count()
+                    < 2
+            }),
+            async {
+                let (mut reader, mut writer) = accept(&listener, client_id).await;
+                answer_events(&mut reader, &mut writer, 10, 11, vec![event(11)]).await;
+                let (_, poll) = next_message(&mut reader).await;
+                assert_events_after(&poll, 11);
+                drop((reader, writer));
+
+                let (mut reader, mut writer) = accept(&listener, client_id).await;
+                let (stream, query) = next_message(&mut reader).await;
+                assert_status_query(&query);
+                refuse(
+                    &mut writer,
+                    stream,
+                    &query,
+                    wire(ErrorCategory::Unavailable, "store.unavailable"),
+                )
+                .await;
+                (reader, writer)
+            }
+        );
+        drop(served);
+        assert_eq!(updates, ["resumed", "event", "reconnecting", "failed"]);
+        let failure = failure.unwrap();
+        assert_eq!(
+            (failure.code.as_str(), failure.retryable),
+            ("store.unavailable", false)
+        );
+    }
+
+    /// The first redial after a drop cannot connect: `jetd` exited and
+    /// nothing listens on its socket. The dial that connects next is still a
+    /// redial, so it reads status before its first page.
+    #[tokio::test]
+    async fn a_redial_that_cannot_connect_reads_status_on_the_next_dial() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("jetd.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let (client, _clock) = on_manual_clock(socket.clone());
+        let client_id = client.client_id();
+        let (relisten, relistened) = tokio::sync::oneshot::channel();
+        let mut relisten = Some(relisten);
+
+        let mut updates = Vec::new();
+        let mut statuses = Vec::new();
+        let ((), served) = tokio::join!(
+            client.stream_updates(10, |update| {
+                updates.push(kind(&update));
+                let last = matches!(&update, NativeUpdate::Event(event) if event.sequence == 12);
+                match update {
+                    NativeUpdate::Reconnecting { error } => assert!(error.retryable),
+                    NativeUpdate::Connected { status } => statuses.push(*status),
+                    NativeUpdate::Resumed { .. }
+                    | NativeUpdate::Event(_)
+                    | NativeUpdate::Failed { .. } => {}
+                }
+                // The refused dial was reported: the restarted daemon listens
+                // before the feed dials again.
+                let reconnects = updates.iter().filter(|label| **label == "reconnecting");
+                if reconnects.count() == 2 {
+                    if let Some(relisten) = relisten.take() {
+                        std::fs::remove_file(&socket).unwrap();
+                        let _ = relisten.send(UnixListener::bind(&socket).unwrap());
+                    }
+                }
+                !last && updates.len() < 8
+            }),
+            async move {
+                let (mut reader, mut writer) = accept(&listener, client_id).await;
+                answer_events(&mut reader, &mut writer, 10, 11, vec![event(11)]).await;
+                let (_, poll) = next_message(&mut reader).await;
+                assert_events_after(&poll, 11);
+                // `jetd` exits: its socket stays, but nothing listens on it.
+                drop(listener);
+                drop((reader, writer));
+
+                let listener = relistened.await.unwrap();
+                let (mut reader, mut writer) = accept(&listener, client_id).await;
+                answer_status(&mut reader, &mut writer, status(12)).await;
+                answer_events(&mut reader, &mut writer, 11, 12, vec![event(12)]).await;
+                (listener, reader, writer)
+            }
+        );
+        drop(served);
+        assert_eq!(
+            updates,
+            [
+                "resumed",
+                "event",
+                "reconnecting",
+                "reconnecting",
+                "connected",
+                "resumed",
+                "event"
+            ]
+        );
+        assert_eq!(statuses, [status(12)]);
     }
 
     #[test]
@@ -1266,7 +1518,9 @@ pub(crate) mod unit_tests {
             drop((reader, writer));
 
             let (mut reader, mut writer) = accept(&listener, client_id).await;
+            answer_status(&mut reader, &mut writer, status(12)).await;
             let (stream, resumed_events) = next_message(&mut reader).await;
+            // After the last Event delivered, not at the status fence.
             assert_events_after(&resumed_events, 11);
             let id = request_id(&resumed_events);
             reply(
@@ -1391,7 +1645,73 @@ pub(crate) mod unit_tests {
         ));
     }
 
-    fn assert_events_after(message: &ClientMessage, expected_cursor: u64) {
+    /// A label per update kind, for asserting a feed's sequence.
+    fn kind(update: &NativeUpdate) -> &'static str {
+        match update {
+            NativeUpdate::Connected { .. } => "connected",
+            NativeUpdate::Resumed { .. } => "resumed",
+            NativeUpdate::Event(_) => "event",
+            NativeUpdate::Reconnecting { .. } => "reconnecting",
+            NativeUpdate::Failed { .. } => "failed",
+        }
+    }
+
+    fn assert_status_query(message: &ClientMessage) {
+        assert!(
+            matches!(
+                message,
+                ClientMessage::Query {
+                    query: QueryRequest::Status,
+                    ..
+                }
+            ),
+            "expected a status read, got {message:?}"
+        );
+    }
+
+    /// Answers the next request, which must be a status read.
+    pub(crate) async fn answer_status(
+        reader: &mut FrameReader<OwnedReadHalf>,
+        writer: &mut FrameWriter<OwnedWriteHalf>,
+        status: PlaneStatus,
+    ) {
+        let (stream, query) = next_message(reader).await;
+        assert_status_query(&query);
+        let id = request_id(&query);
+        reply(
+            writer,
+            stream,
+            ServerMessage::QueryResult {
+                id,
+                result: QueryResponse::Status(status),
+            },
+        )
+        .await;
+    }
+
+    /// Answers the next request, which must page Events after `after`.
+    pub(crate) async fn answer_events(
+        reader: &mut FrameReader<OwnedReadHalf>,
+        writer: &mut FrameWriter<OwnedWriteHalf>,
+        after: u64,
+        cursor: u64,
+        events: Vec<Event>,
+    ) {
+        let (stream, query) = next_message(reader).await;
+        assert_events_after(&query, after);
+        let id = request_id(&query);
+        reply(
+            writer,
+            stream,
+            ServerMessage::QueryResult {
+                id,
+                result: QueryResponse::Events(EventPage { cursor, events }),
+            },
+        )
+        .await;
+    }
+
+    pub(crate) fn assert_events_after(message: &ClientMessage, expected_cursor: u64) {
         assert!(matches!(
             message,
             ClientMessage::Query {
@@ -1413,7 +1733,7 @@ pub(crate) mod unit_tests {
         }
     }
 
-    fn event(sequence: u64) -> Event {
+    pub(crate) fn event(sequence: u64) -> Event {
         Event {
             sequence,
             event_id: Uuid::from_u128(u128::from(sequence)),
