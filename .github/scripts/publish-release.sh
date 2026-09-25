@@ -11,10 +11,25 @@ python3 .github/scripts/release_assets.py --tag "$tag" --dist "$dist" --desktop 
 ruby -c "$dist/jet.rb"
 ruby -c "$dist/jet-app.rb"
 
+# The Linux app's updater reads releases/latest/download/latest.json, so a
+# stable core release must stay GitHub's Latest. Other workflows (the Swift
+# app's) create releases with --latest=false; fail loudly if one still took it.
+require_latest() {
+  [[ "$tag" == *-* ]] && return 0
+  local latest
+  latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+  # A newer core release may hold it when an older tag is rerun.
+  if [[ ! "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "GitHub's latest release is $latest, not a core release: the desktop updater would not find latest.json." >&2
+    exit 1
+  fi
+}
+
 # Assemble in a draft so users never see an incomplete release. Published
 # assets are immutable here; a rerun proceeds straight to repairing the tap.
 if gh release view "$tag" --json isDraft > "$RUNNER_TEMP/jet-release.json" 2>/dev/null; then
   if ! jq -e '.isDraft' "$RUNNER_TEMP/jet-release.json" >/dev/null; then
+    require_latest
     exit 0
   fi
 else
@@ -27,3 +42,4 @@ if [[ "$tag" == *-* ]]; then
 else
   gh release edit "$tag" --draft=false --latest
 fi
+require_latest

@@ -12,8 +12,9 @@
 //! automatic check runs, sees it progress and finish.
 //!
 //! Privacy: a check fetches `latest.json` from the GitHub release of
-//! apexgang/jet, so github.com learns this computer's address and app
-//! version. The one automatic check after launch follows the device
+//! apexgang/jet, so github.com learns this computer's address. The URL has
+//! no version placeholders and the plugin's User-Agent names only the
+//! plugin, so the request does not carry Jet's version. The one automatic check after launch follows the device
 //! preference "Check for updates automatically" (on by default,
 //! `preferences.rs`); "Check for updates" in Settings always asks first.
 use std::{

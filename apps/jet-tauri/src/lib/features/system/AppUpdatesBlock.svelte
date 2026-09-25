@@ -86,7 +86,7 @@
         </label>
         <p class="quiet">
           Jet checks once, shortly after it starts. The check asks github.com for the latest release, which shares this
-          computer's address and Jet version with GitHub. This choice is kept on this computer only.
+          computer's address with GitHub. This choice is kept on this computer only.
         </p>
         {#if updates.automatic.notice}<p role="status">{updates.automatic.notice}</p>{/if}
       {:else if updates.automatic.kind === "failed"}

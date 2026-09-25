@@ -513,9 +513,11 @@ class HomebrewTemplates(unittest.TestCase):
         self.assertIn('brew services start apexgang/tap/jet\n', cask)
         self.assertIn('brew install apexgang/tap/jet apexgang/tap/jet-app\n', cask)
         # Livecheck reads the latest release, never a page of the release list
-        # that Swift app releases, one per push under apps/jet, can fill. That
-        # release is a core one because Swift releases never take Latest and
-        # each stable core release does.
+        # that Swift app releases, one per push under apps/jet, can fill. Swift
+        # releases are created with --latest=false and each stable core release
+        # takes Latest; publish-release.sh fails if a non-core release still
+        # holds it (GitHub made the only Swift release Latest before any core
+        # release existed).
         self.assertIn('  livecheck do\n    url :url\n    strategy :github_latest\n  end\n', cask)
         swift = (ROOT / '.github/workflows/swift-release.yml').read_text()
         self.assertEqual(swift.count('gh release create '), 1)
@@ -523,6 +525,9 @@ class HomebrewTemplates(unittest.TestCase):
         self.assertNotIn('gh release edit', swift)
         publish = (ROOT / '.github/scripts/publish-release.sh').read_text()
         self.assertIn('\n  gh release edit "$tag" --draft=false --latest\n', publish)
+        # Checked after publishing and on a rerun of a published release.
+        self.assertEqual(publish.count('\n    require_latest\n'), 1)
+        self.assertTrue(publish.endswith('fi\nrequire_latest\n'))
         # Homebrew upgrades the app and the daemon together (ADR-0026), and
         # legacy flight blocks are deprecated.
         for absent in ('auto_updates', 'postflight', 'preflight', '.jet"', '/.jet/'):

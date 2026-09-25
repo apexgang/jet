@@ -562,9 +562,10 @@ delivery, Extension catalogs and Craft discovery; those belong to the core.
 Whether `brew services start` contacts the network is Homebrew's behaviour
 and was not checked.
 
-The note under the Settings toggle, and the comment at the top of
-`updates.rs`, say the check shares the Jet version with GitHub. The request
-does not carry it. The note overstates what is sent.
+The request goes to a fixed URL with the updater plugin's own User-Agent
+(`tauri-plugin-updater/<version>`), so it does not carry Jet's version; the
+note under the Settings toggle says only that GitHub learns this computer's
+address.
 
 ## Verification
 
