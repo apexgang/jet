@@ -17,10 +17,14 @@ jet-client.workspace = true
 jet-protocol.workspace = true
 jet-runtime.workspace = true
 jet-store.workspace = true
+# Named only to compile dependency log call sites out of release builds.
+log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+# Named only to compile dependency tracing call sites out of release builds.
+tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

@@ -7,3 +7,16 @@ await-holding-invalid-types = [
 ]
 
 large-error-threshold = 256
+
+# reqwest has no TLS provider of its own and panics building a client
+# without one. `jetd` installs ring at startup, and jet-core's
+# `https::client_builder` installs it again for every other caller. The
+# `Default` impls of `Client` and `ClientBuilder` reach the same panic, but
+# clippy resolves only inherent methods here and reports those paths as
+# unreachable, so they cannot be listed; the startup install covers them.
+disallowed-methods = [
+    { path = "reqwest::get", reason = "start from jet-core's https::client_builder" },
+    { path = "reqwest::Client::new", reason = "start from jet-core's https::client_builder" },
+    { path = "reqwest::Client::builder", reason = "start from jet-core's https::client_builder" },
+    { path = "reqwest::ClientBuilder::new", reason = "start from jet-core's https::client_builder" },
+]

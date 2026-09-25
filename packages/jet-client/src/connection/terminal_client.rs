@@ -284,10 +284,7 @@ pub(super) fn route(terminals: &Terminals, frame: &Frame) -> Result<bool, ()> {
 		matches!(
 			decode_control::<StreamControl>(payload),
 			Ok(StreamControl::TerminalFinished { .. })
-		) || matches!(
-			decode_control::<ServerMessage>(payload),
-			Ok(ServerMessage::Error { .. })
-		)
+		) || is_error(payload)
 	} else {
 		false
 	};

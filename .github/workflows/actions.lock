@@ -18,6 +18,10 @@ workflows:
         - 'extractions/setup-just@v4.0.0'
         - 'oven-sh/setup-bun@v2.2.0'
         - 'taiki-e/install-action@v2.87.13'
+    '.github/workflows/release-size.yml':
+        - 'actions/cache@v6.1.0'
+        - 'actions/checkout@v7.0.1'
+        - 'extractions/setup-just@v4.0.0'
     '.github/workflows/release.yml':
         - 'actions/cache@v6.1.0'
         - 'actions/checkout@v7.0.1'

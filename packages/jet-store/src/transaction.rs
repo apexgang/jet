@@ -11,7 +11,11 @@ use crate::{
 	plane,
 };
 use sqlx::{SqliteConnection, SqliteTransaction};
-use std::ops::{Deref, DerefMut};
+use std::{
+	future::Future,
+	ops::{Deref, DerefMut},
+	pin::Pin,
+};
 
 /// One consistent read snapshot of the store.
 pub struct ReadTransaction {
@@ -94,17 +98,11 @@ impl Store {
 		&self,
 		work: impl AsyncFnOnce(&mut ReadTransaction) -> Result<T, E>,
 	) -> Result<T, E> {
-		let transaction = self
-			.pool()
-			.begin_with("BEGIN DEFERRED")
-			.await
-			.map_err(StoreError::from)?;
-		let mut transaction = ReadTransaction { transaction };
+		// Only `work` is generic here: opening and releasing the snapshot
+		// are compiled once rather than again for every caller.
+		let mut transaction = self.begin_read().await?;
 		let result = work(&mut transaction).await;
-		// A read snapshot ends by releasing its read mark. Awaiting that
-		// rollback keeps it from outliving the call; a rollback that fails
-		// must not mask what the caller produced.
-		let _ = transaction.transaction.rollback().await;
+		transaction.release().await;
 		result
 	}
 
@@ -122,34 +120,66 @@ impl Store {
 		&self,
 		work: impl AsyncFnOnce(&mut WriteTransaction) -> Result<T, E>,
 	) -> Result<T, E> {
-		self.require_writable().map_err(E::from)?;
+		// Only `work` is generic here: opening, committing and abandoning
+		// the transaction are compiled once rather than again for every
+		// caller.
+		let mut transaction = self.begin_write().await?;
+		match work(&mut transaction).await {
+			Ok(value) => {
+				self.commit(transaction).await?;
+				Ok(value)
+			}
+			Err(error) => {
+				transaction.abandon().await;
+				Err(error)
+			}
+		}
+	}
+
+	async fn begin_read(&self) -> Result<ReadTransaction, StoreError> {
+		let transaction = self.pool().begin_with("BEGIN DEFERRED").await?;
+		Ok(ReadTransaction { transaction })
+	}
+
+	async fn begin_write(&self) -> Result<WriteTransaction, StoreError> {
+		self.require_writable()?;
 		// A write takes its lock up front. A deferred transaction that reads
 		// before it writes cannot upgrade, and SQLite refuses it outright
 		// rather than waiting on the busy handler.
-		let transaction = self
-			.pool()
-			.begin_with("BEGIN IMMEDIATE")
-			.await
-			.map_err(StoreError::from)?;
-		let mut transaction = WriteTransaction {
+		let transaction = self.pool().begin_with("BEGIN IMMEDIATE").await?;
+		Ok(WriteTransaction {
 			read: ReadTransaction { transaction },
 			audit_head: None,
 			deletions: vec![],
 			fences: vec![],
-		};
-		match work(&mut transaction).await {
-			Ok(value) => {
-				let head = transaction.audit_head;
-				// The ledger precedes the commit it describes. A crash in
-				// between leaves a deletion the ledger holds and the store
-				// does not, which the next open finishes; a commit first
-				// would leave a deletion a restoration could undo
-				// (ADR-0102).
-				let mut ledgered = None;
-				if !transaction.deletions.is_empty() {
-					let applied = match plane::deletions_applied(
-						transaction.read.connection(),
-					)
+		})
+	}
+
+	/// Commits what `work` built in `transaction`, with the ledgers that
+	/// must precede the commit and the head that must follow it.
+	///
+	/// Boxed, so its future is compiled once here rather than again in every
+	/// crate whose futures await a write.
+	fn commit(
+		&self,
+		transaction: WriteTransaction,
+	) -> Pin<Box<dyn Future<Output = Result<(), StoreError>> + Send + '_>> {
+		Box::pin(self.commit_unboxed(transaction))
+	}
+
+	async fn commit_unboxed(
+		&self,
+		mut transaction: WriteTransaction,
+	) -> Result<(), StoreError> {
+		let head = transaction.audit_head;
+		// The ledger precedes the commit it describes. A crash in between
+		// leaves a deletion the ledger holds and the store does not, which
+		// the next open finishes; a commit first would leave a deletion a
+		// restoration could undo (ADR-0102).
+		let mut ledgered = None;
+		if !transaction.deletions.is_empty() {
+			let applied =
+				match plane::deletions_applied(transaction.read.connection())
 					.await
 					.and_then(|applied| {
 						deletion::append(
@@ -159,34 +189,31 @@ impl Store {
 							&transaction.deletions,
 						)
 					}) {
-						Ok(applied) => applied,
-						Err(error) => {
-							let _ =
-								transaction.read.transaction.rollback().await;
-							return Err(E::from(error));
-						}
-					};
-					// The store commits how far it has applied the ledger
-					// with the deletion itself, which is what tells a copy
-					// of it which deletions it predates.
-					if let Err(error) = plane::record_deletions_applied(
-						transaction.read.connection(),
-						applied,
-					)
-					.await
-					{
-						let _ = transaction.read.transaction.rollback().await;
-						return Err(E::from(error));
+					Ok(applied) => applied,
+					Err(error) => {
+						transaction.abandon().await;
+						return Err(error);
 					}
-					ledgered = Some(applied);
-				}
-				// The fences precede the commit for the same reason
-				// (ADR-0070).
-				let mut fenced = None;
-				if !transaction.fences.is_empty() {
-					let applied = match plane::fences_applied(
-						transaction.read.connection(),
-					)
+				};
+			// The store commits how far it has applied the ledger with the
+			// deletion itself, which is what tells a copy of it which
+			// deletions it predates.
+			if let Err(error) = plane::record_deletions_applied(
+				transaction.read.connection(),
+				applied,
+			)
+			.await
+			{
+				transaction.abandon().await;
+				return Err(error);
+			}
+			ledgered = Some(applied);
+		}
+		// The fences precede the commit for the same reason (ADR-0070).
+		let mut fenced = None;
+		if !transaction.fences.is_empty() {
+			let applied =
+				match plane::fences_applied(transaction.read.connection())
 					.await
 					.and_then(|applied| {
 						authority::append(
@@ -196,62 +223,63 @@ impl Store {
 							&transaction.fences,
 						)
 					}) {
-						Ok(applied) => applied,
-						Err(error) => {
-							let _ =
-								transaction.read.transaction.rollback().await;
-							return Err(E::from(error));
-						}
-					};
-					if let Err(error) = plane::record_fences_applied(
-						transaction.read.connection(),
-						applied,
-					)
-					.await
-					{
-						let _ = transaction.read.transaction.rollback().await;
-						return Err(E::from(error));
+					Ok(applied) => applied,
+					Err(error) => {
+						transaction.abandon().await;
+						return Err(error);
 					}
-					fenced = Some(applied);
-				}
-				transaction
-					.read
-					.transaction
-					.commit()
-					.await
-					.map_err(|error| E::from(StoreError::from(error)))?;
-				// The head follows the commit it describes. A crash in
-				// between leaves the store one or more records ahead of the
-				// head, which the next start folds through and repairs; a
-				// head written first would name a record no commit ever
-				// made (ADR-0105).
-				if let Some(head) = head {
-					audit_head::write(&self.database, self.plane_id(), head)
-						.map_err(E::from)?;
-				}
-				if let Some(applied) = ledgered {
-					self.opened
-						.write()
-						.expect("store state is not poisoned")
-						.deletions_applied = Some(applied);
-				}
-				if let Some(applied) = fenced {
-					self.opened
-						.write()
-						.expect("store state is not poisoned")
-						.fences_applied = Some(applied);
-				}
-				self.snapshots.mark_dirty();
-				self.deep_checks.mark_dirty();
-				Ok(value)
+				};
+			if let Err(error) = plane::record_fences_applied(
+				transaction.read.connection(),
+				applied,
+			)
+			.await
+			{
+				transaction.abandon().await;
+				return Err(error);
 			}
-			Err(error) => {
-				// Dropping the transaction only enqueues its rollback;
-				// awaiting it releases the write lock before the caller sees
-				// the error.
-				let _ = transaction.read.transaction.rollback().await;
-				Err(error)
-			}
+			fenced = Some(applied);
 		}
+		transaction.read.transaction.commit().await?;
+		// The head follows the commit it describes. A crash in between
+		// leaves the store one or more records ahead of the head, which the
+		// next start folds through and repairs; a head written first would
+		// name a record no commit ever made (ADR-0105).
+		if let Some(head) = head {
+			audit_head::write(&self.database, self.plane_id(), head)?;
+		}
+		if let Some(applied) = ledgered {
+			self.opened
+				.write()
+				.expect("store state is not poisoned")
+				.deletions_applied = Some(applied);
+		}
+		if let Some(applied) = fenced {
+			self.opened
+				.write()
+				.expect("store state is not poisoned")
+				.fences_applied = Some(applied);
+		}
+		self.snapshots.mark_dirty();
+		self.deep_checks.mark_dirty();
+		Ok(())
+	}
+}
+
+impl ReadTransaction {
+	/// Ends a read snapshot by releasing its read mark. Awaiting that
+	/// rollback keeps it from outliving the call; a rollback that fails
+	/// must not mask what the caller produced.
+	async fn release(self) {
+		let _ = self.transaction.rollback().await;
+	}
+}
+
+impl WriteTransaction {
+	/// Rolls back every change. Dropping the transaction only enqueues its
+	/// rollback; awaiting it releases the write lock before the caller sees
+	/// the error.
+	async fn abandon(self) {
+		let _ = self.read.transaction.rollback().await;
 	}
 }
