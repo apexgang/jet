@@ -1,4 +1,5 @@
-# This workflow is managed by gh actions-lock.
+# Actions are pinned to full commit SHAs (repository policy); the comment
+# names the release tag each SHA was verified against.
 # Rehearse the Linux x86_64 release on pull requests that change what it
 # packages or how: build and gate the core payload as release.yml does, bundle
 # the desktop app around it unsigned, drive the installed bundle through the
@@ -74,12 +75,12 @@ jobs:
     outputs:
       payload: ${{ steps.upload.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: extractions/setup-just@v4.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
       - name: Set up Rust
         working-directory: .
         run: bash .github/scripts/setup-rust.sh release
-      - uses: actions/cache/restore@v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache
         with:
           path: |
@@ -103,7 +104,7 @@ jobs:
         if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
         working-directory: .
         run: python3 .github/scripts/cache_sources.py save
-      - uses: actions/cache/save@v6.1.0
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' }}
         with:
           path: |
@@ -113,7 +114,7 @@ jobs:
             !packages/target/dist
             .github/.cache
           key: ${{ steps.cache.outputs.cache-primary-key }}
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         id: upload
         if: ${{ !cancelled() }}
         with:

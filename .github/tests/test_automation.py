@@ -554,22 +554,20 @@ class ReleaseWorkflows(unittest.TestCase):
     WORKFLOWS = ROOT / '.github/workflows'
 
     def test_every_workflow_pins_its_actions(self):
-        lock = (self.WORKFLOWS / 'actions.lock').read_text()
+        # The repository requires full commit SHAs (sha_pinning_required);
+        # a tag reference fails the run at startup. Each pin names the tag
+        # it was verified against, and one action uses one commit everywhere.
+        self.assertFalse((self.WORKFLOWS / 'actions.lock').exists())
+        pins = {}
         for workflow in sorted(self.WORKFLOWS.glob('*.yml')):
             with self.subTest(workflow=workflow.name):
                 text = workflow.read_text()
-                actions = re.findall(r'uses: ([\w.-]+/[\w.-]+)(?:/[\w./-]+)?@(\S+)', text)
-                if not text.startswith('# This workflow is managed by gh actions-lock.\n'):
-                    # The Swift app's release pins literal commit SHAs instead,
-                    # which the lockfile tool would rewrite to tags.
-                    self.assertNotIn(f"'.github/workflows/{workflow.name}':", lock)
-                    self.assertTrue(actions)
-                    for action, ref in actions:
-                        self.assertRegex(ref, r'^[0-9a-f]{40}$', action)
-                    continue
-                self.assertIn(f"'.github/workflows/{workflow.name}':", lock)
-                for action in actions:
-                    self.assertIn(f"'{action[0]}@{action[1]}'", lock)
+                actions = re.findall(r'uses: ([\w.-]+/[\w.-]+)(?:/[\w./-]+)?@(\S+)(?: # (v\d+\.\d+\.\d+))?', text)
+                self.assertTrue(actions)
+                for action, ref, tag in actions:
+                    self.assertRegex(ref, r'^[0-9a-f]{40}$', action)
+                    self.assertTrue(tag, f'{action}@{ref} names no release tag')
+                    self.assertEqual(pins.setdefault(action, (ref, tag)), (ref, tag), action)
 
     def test_publication_waits_for_every_build_and_the_homebrew_check(self):
         release = (self.WORKFLOWS / 'release.yml').read_text()

@@ -21,9 +21,9 @@ emission is an optional `schema` feature; product builds link no `schemars`.
 The `Wire contracts` GitHub Actions workflow runs `contracts-check` and each
 `contracts-test-*` recipe on every pull request and push to `main`, with the
 Swift runner on macOS, so a stale contract fails the pull request's checks. The repository requires
-every workflow to pin its actions through `.github/workflows/actions.lock`;
-run `gh actions-lock` (the `github/gh-actions-lock` extension) after editing
-a workflow, or the run fails at startup.
+every workflow to pin its actions to full commit SHAs (see
+[CI and releases](../.github/workflows/README.md)); a tag reference fails the
+run at startup.
 
 The declarations are models, not permissive JSON decoders: validate the
 original frame against the schema, and populate `RawJSON` from original
