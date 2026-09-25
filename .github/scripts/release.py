@@ -8,8 +8,8 @@ Run from ``packages/`` through the justfile:
     just release-accept --target <...> --justification "<why>"
     just release-envelope
 
-``package`` builds ``jetd`` with the ``release`` profile and ``jetfueld`` and
-the bundled Crafts with ``release-small`` (ADR-0059), splits their symbols
+``package`` builds every executable with the profile release.toml names for
+it, ``release-small`` for all four (ADR-0059), splits their symbols
 into separate crash-symbol artifacts, strips them, merges two Apple targets
 into one universal payload, writes the ``manifest.json`` that ``jetd core
 stage`` verifies (ADR-0026), and archives payload and symbols separately.

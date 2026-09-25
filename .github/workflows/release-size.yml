@@ -1,0 +1,136 @@
+# Actions are pinned to full commit SHAs (repository policy); the comment
+# names the release tag each SHA was verified against.
+# Measure the release payload on every label release.yml publishes, so a pull
+# request that changes the core shows each executable's stripped size per
+# architecture slice against its ADR-0054 budget before a version tag does.
+# `just release-check` is the gate; the job summary lists every slice.
+name: Release sizes
+
+on:
+  pull_request:
+    paths:
+      - packages/**
+      - .github/packaging/**
+      - .github/scripts/release.py
+      - .github/scripts/setup-rust.sh
+      - .github/workflows/release-size.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: ${{ matrix.platform.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The runners and labels of release.yml's package job.
+        platform:
+          - runner: ubuntu-24.04
+            targets: x86_64-unknown-linux-gnu
+            label: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            targets: aarch64-unknown-linux-gnu
+            label: aarch64-unknown-linux-gnu
+          - runner: macos-15
+            targets: aarch64-apple-darwin x86_64-apple-darwin
+            label: universal-apple-darwin
+    runs-on: ${{ matrix.platform.runner }}
+    # Fat LTO links `jetd` as one module, twice for the universal payload.
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+        working-directory: packages
+    env:
+      TARGETS: ${{ matrix.platform.targets }}
+      LABEL: ${{ matrix.platform.label }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+      - name: Set up Rust
+        working-directory: .
+        run: bash .github/scripts/setup-rust.sh release
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/target
+            !packages/target/dist
+            .github/.cache
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-release-size-${{ matrix.platform.label }}-${{ hashFiles('packages/rust-toolchain.toml', 'packages/.cargo/config.toml', '.github/ci/cargo.toml') }}-${{ hashFiles('packages/**', 'docs/conformance-matrix.md') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-release-size-${{ matrix.platform.label }}-${{ hashFiles('packages/rust-toolchain.toml', 'packages/.cargo/config.toml', '.github/ci/cargo.toml') }}-
+      - name: Restore unchanged source timestamps
+        working-directory: .
+        run: python3 .github/scripts/cache_sources.py restore
+      - name: Install targets
+        run: |
+          for target in $TARGETS; do rustup target add "$target"; done
+      - name: Build, split symbols, strip, and package
+        run: |
+          args=()
+          for target in $TARGETS; do args+=(--target "$target"); done
+          just release-package "${args[@]}"
+      - name: Gate sizes, dependency seams, and profiles
+        run: just release-check --target "$LABEL" | tee "$RUNNER_TEMP/release-check.json"
+      - name: Summarize stripped sizes per slice
+        if: ${{ !cancelled() }}
+        working-directory: .
+        shell: python3 {0}
+        run: |
+          import json, os, tomllib
+          from pathlib import Path
+
+          MIB = 1024 * 1024
+          config = tomllib.loads(Path(".github/packaging/release.toml").read_text())
+          report_path = Path(os.environ["RUNNER_TEMP"]) / "release-check.json"
+          text = report_path.read_text() if report_path.exists() else ""
+          try:
+              report = json.loads(text)
+          except ValueError:
+              report = None
+          lines = [f"### `{os.environ['LABEL']}`", ""]
+          if not report:
+              lines.append("`just release-check` printed no report; see its step log.")
+          else:
+              # release.py sizes each Mach-O slice after `lipo -thin`.
+              lines += ["| Executable | Slice | Stripped bytes | MiB | Budget | Margin |",
+                        "| --- | --- | ---: | ---: | ---: | ---: |"]
+              for name, entry in report["executables"].items():
+                  limit = config["executables"][name]["limit_mib"] * MIB
+                  for arch, size in sorted(entry["slices"].items()):
+                      margin = limit - size
+                      state = "under" if margin >= 0 else "over"
+                      lines.append(f"| `{name}` | {arch} | {size:,} | {size / MIB:.2f} | "
+                                   f"{limit // MIB} MiB | {abs(margin):,} {state} |")
+              cap = config["budget"]["payload_mib"] * MIB
+              for arch, total in sorted(report["payload_bytes"].items()):
+                  lines.append(f"| payload | {arch} | {total:,} | {total / MIB:.2f} | "
+                               f"{cap // MIB} MiB | {abs(cap - total):,} "
+                               f"{'under' if total <= cap else 'over'} |")
+              lines.append("")
+              failures = report["failures"]
+              lines += [f"- {failure}" for failure in failures] or ["No release-check failures."]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("\n".join(lines) + "\n\n")
+      - name: Save source timestamps
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
+        working-directory: .
+        run: python3 .github/scripts/cache_sources.py save
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' }}
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/target
+            !packages/target/dist
+            .github/.cache
+          key: ${{ steps.cache.outputs.cache-primary-key }}

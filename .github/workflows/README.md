@@ -171,9 +171,15 @@ downgrades either. If another commit, such as the Swift release's, changes
 without pushing; rerun it.
 
 Failed size gates retain build artifacts for seven days but prevent publication.
-The historical `jetd` size overage is documented in
+Sizes and the profile each executable builds with are recorded in
 [Core distribution](../../docs/core-distribution.md); this workflow does not relax
-that budget. macOS GUI signing and notarization remain separate distribution steps.
+any budget. macOS GUI signing and notarization remain separate distribution steps.
+
+`release-size.yml` runs the same package and gate steps for the three labels on
+pull requests that change `packages/`, the packaging files, `release.py`, or
+`setup-rust.sh`, and lists every executable's stripped size per architecture
+slice in the job summary. It builds the profiles release.toml configures and
+fails when a slice is over its budget.
 
 `packaging.yml` rehearses the Linux x86_64 half of a release on pull requests
 that touch packaging inputs, and on demand: it builds and gates the core

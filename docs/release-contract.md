@@ -142,8 +142,6 @@ Not covered yet:
 
 ## What still fails the contract
 
-- `jetd` measures 17.08 MiB stripped on Linux x86_64 against its 12 MiB
-  budget, so `just release-check` fails ([core-distribution.md](core-distribution.md)).
 - The Codex Craft leaves three capabilities the Harness exposes unused:
   native resume, Model selection, and a No-Visa tool bridge. ADR-0104 makes
   them release blockers, marked as Craft gaps in the matrix (#154).

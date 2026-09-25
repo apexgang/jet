@@ -4,6 +4,7 @@ mod error;
 pub use error::ClientError;
 
 pub(crate) mod handshake;
+pub(crate) mod remote_tool;
 pub(crate) mod ssh;
 
 use jet_protocol::{
@@ -39,14 +40,17 @@ pub use terminal_client::{TerminalAttachment, TerminalEvent};
 const MAX_IN_FLIGHT_REQUESTS: usize = 256;
 
 /// A connected, handshaken Jet protocol client.
+///
+/// `M` is what its reader decodes each reply into; every public constructor
+/// reads the full [`ServerMessage`].
 #[derive(Debug)]
-pub struct Client {
+pub struct Client<M = ServerMessage> {
 	transfers: artifact_client::Transfers,
 	terminals: terminal_client::Terminals,
 	data_limit: usize,
 	pub(crate) ssh: Option<tokio::process::Child>,
 	outbound: mpsc::Sender<WriteRequest>,
-	pending: PendingReplies,
+	pending: PendingReplies<M>,
 	reader_task: JoinHandle<()>,
 	writer_task: JoinHandle<()>,
 	legacy_request: Semaphore,
@@ -56,12 +60,46 @@ pub struct Client {
 	minor: u32,
 }
 
-type PendingReplies = Arc<Mutex<HashMap<StreamId, PendingReply>>>;
+type PendingReplies<M> = Arc<Mutex<HashMap<StreamId, PendingReply<M>>>>;
 
 #[derive(Debug)]
-struct PendingReply {
-	reply: oneshot::Sender<ServerMessage>,
+struct PendingReply<M> {
+	reply: oneshot::Sender<M>,
 	_permit: OwnedSemaphorePermit,
+}
+
+/// What a connection's reader decodes each control reply into.
+///
+/// [`ServerMessage`] answers every request. A connection that sends only
+/// some requests reads a narrower reply instead, so it compiles decoders
+/// only for the replies it can use.
+pub(crate) trait Reply:
+	serde::de::DeserializeOwned + Send + 'static
+{
+	/// The error this reply carries when it ends the whole connection.
+	fn connection_error(&self) -> Option<&WireError>;
+
+	/// The reply every pending request receives when `error` ends the
+	/// connection.
+	fn disconnected(error: WireError) -> Self;
+}
+
+impl Reply for ServerMessage {
+	fn connection_error(&self) -> Option<&WireError> {
+		match self {
+			Self::Error { id: None, error } => Some(error),
+			Self::Error { id: Some(_), .. }
+			| Self::RemoteToolResult { .. }
+			| Self::TerminalAttached { .. }
+			| Self::TerminalResized { .. }
+			| Self::QueryResult { .. }
+			| Self::CommandResult { .. } => None,
+		}
+	}
+
+	fn disconnected(error: WireError) -> Self {
+		Self::Error { id: None, error }
+	}
 }
 
 struct WriteRequest {
@@ -121,13 +159,16 @@ impl Client {
 			crate::connection::handshake::local(read, write, client_id).await?;
 		Self::from_handshake(reader, writer, hello)
 	}
+}
 
+impl<M> Client<M> {
 	pub(crate) fn from_handshake<R, W>(
 		mut reader: FrameReader<R>,
 		mut writer: FrameWriter<W>,
 		hello: ServerHello,
 	) -> Result<Self, ClientError>
 	where
+		M: Reply,
 		R: AsyncRead + Unpin + Send + 'static,
 		W: AsyncWrite + Unpin + Send + 'static,
 	{
@@ -215,7 +256,9 @@ impl Client {
 	pub(crate) fn negotiated_minor(&self) -> u32 {
 		self.minor
 	}
+}
 
+impl Client {
 	/// Runs `query` and returns its snapshot.
 	pub(crate) async fn query(
 		&self,
@@ -294,7 +337,9 @@ impl Client {
 			}
 		}
 	}
+}
 
+impl<M> Client<M> {
 	fn next_id(&self) -> RequestId {
 		loop {
 			let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -320,7 +365,7 @@ impl Client {
 		&self,
 		stream_id: StreamId,
 		message: &T,
-	) -> Result<ServerMessage, ClientError> {
+	) -> Result<M, ClientError> {
 		// ASVS 15.2.2 and 15.4.4: bound both the pending-reply registry and
 		// the writer channel before encoding another untrusted exchange.
 		let permit = Arc::clone(&self.in_flight)
@@ -386,16 +431,16 @@ impl Client {
 	}
 }
 
-impl Drop for Client {
+impl<M> Drop for Client<M> {
 	fn drop(&mut self) {
 		self.reader_task.abort();
 		self.writer_task.abort();
 	}
 }
 
-async fn read_replies<R: AsyncRead + Unpin>(
+async fn read_replies<R: AsyncRead + Unpin, M: Reply>(
 	mut reader: FrameReader<R>,
-	pending: PendingReplies,
+	pending: PendingReplies<M>,
 	transfers: artifact_client::Transfers,
 	terminals: terminal_client::Terminals,
 ) {
@@ -417,11 +462,11 @@ async fn read_replies<R: AsyncRead + Unpin>(
 		let Frame::Control { stream_id, payload } = frame else {
 			break;
 		};
-		let Ok(reply) = decode_control::<ServerMessage>(&payload) else {
+		let Ok(reply) = decode_control::<M>(&payload) else {
 			break;
 		};
 		if stream_id.is_connection()
-			&& matches!(reply, ServerMessage::Error { id: None, .. })
+			&& let Some(error) = reply.connection_error()
 		{
 			let waiters: Vec<_> = pending
 				.lock()
@@ -429,8 +474,10 @@ async fn read_replies<R: AsyncRead + Unpin>(
 				.drain()
 				.map(|(_, pending)| pending.reply)
 				.collect();
+			// Only the error is cloned: cloning the whole reply would compile
+			// a clone of every reply shape for this one variant.
 			for waiter in waiters {
-				let _ = waiter.send(reply.clone());
+				let _ = waiter.send(M::disconnected(error.clone()));
 			}
 			break;
 		}
@@ -478,6 +525,16 @@ fn expect_reply_to<T: std::fmt::Debug>(
 			"reply to request {reply_id} while waiting for {id}: {result:?}"
 		)))
 	}
+}
+
+/// Whether `payload` is a [`ServerMessage::Error`]. The narrower reply decodes
+/// that kind exactly as [`ServerMessage`] does and rejects every kind it does
+/// not name, so routing need not compile a decoder for every reply.
+fn is_error(payload: &[u8]) -> bool {
+	matches!(
+		decode_control::<remote_tool::RemoteToolReply>(payload),
+		Ok(remote_tool::RemoteToolReply::Error { .. })
+	)
 }
 
 /// Classifies an error frame received while waiting for the reply to `id`.
