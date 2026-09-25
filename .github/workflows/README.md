@@ -231,15 +231,16 @@ replace the newer formula. See
 
 ## Validation
 
-Run `python3 -m unittest discover -s .github/tests -v`, `actionlint`, and
-`gh actions-lock --verify-local` after editing automation. The release tests
-run `ruby -c` on the rendered formula and cask, so they need Ruby, and sign
-and verify updater signatures with the `openssl` command (OpenSSL 3.0 or
-later). Regenerate action pins in enrolled workflows with `gh actions-lock`.
-Run `just release-envelope` and `just fmt` from `packages/` after moving
-release tooling or changing its inputs.
+Run `python3 -m unittest discover -s .github/tests -v` and `actionlint`
+after editing automation. The release tests run `ruby -c` on the rendered
+formula and cask, so they need Ruby, and sign and verify updater signatures
+with the `openssl` command (OpenSSL 3.0 or later). Run `just release-envelope`
+and `just fmt` from `packages/` after moving release tooling or changing its
+inputs.
 
-`swift-release.yml` uses literal commit SHAs for every external action and is
-not enrolled in `actions.lock`: the lockfile tool rewrites those refs to tags,
-which would undo the required SHA pins. Verify its action SHAs against the
-upstream release tags when updating them.
+The repository requires every external action to be pinned to a full commit
+SHA; a tag reference fails the run at startup. Each workflow writes
+`uses: owner/action@<sha> # vX.Y.Z`, and every workflow uses the same commit
+for an action. When updating a pin, resolve the release tag upstream (for
+example `gh api repos/<owner>/<action>/commits/<tag> --jq .sha`) and update
+every workflow that uses it; the automation tests check the shape.
