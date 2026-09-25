@@ -1,13 +1,4 @@
-use std::{
-    future::Future,
-    ops::Deref,
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{future::Future, ops::Deref, path::PathBuf, sync::Arc, time::Duration};
 
 use jet_client::{Client, ClientError};
 use jet_protocol::{
@@ -20,7 +11,7 @@ use jet_protocol::{SettingKey, SettingScope};
 use serde::Deserialize;
 
 use super::{
-    deadline::{self, Deadlines, Wait},
+    deadline::{self, Deadlines, RequestQueue, Wait},
     errors::{PublicError, ToPublic},
     planes::remote::RemoteConnector,
 };
@@ -175,7 +166,11 @@ impl PlaneClient {
         let mut maybe_sent = false;
         loop {
             let (client, error) = match self.connect_client().await {
-                Ok(client) => match self.deadlines.bound(wait, call(Arc::clone(&client))).await {
+                Ok((client, queue)) => match self
+                    .deadlines
+                    .bound_in(&queue, wait, call(Arc::clone(&client)))
+                    .await
+                {
                     Ok(value) => return Ok(value),
                     Err(error) => (Some(client), Box::new(ConnectError::Client(*error))),
                 },
@@ -304,8 +299,8 @@ impl PlaneClient {
         let mut first_dial = true;
         loop {
             let redial = !std::mem::replace(&mut first_dial, false);
-            let client = match self.connect_client().await {
-                Ok(client) => client,
+            let (client, queue) = match self.connect_client().await {
+                Ok(link) => link,
                 Err(error) => {
                     let public = PublicError::from_client(&error);
                     if !send(failure_update(public.clone())) || !public.retryable {
@@ -319,7 +314,11 @@ impl PlaneClient {
 
             if redial {
                 // A status that never arrives is a lost transport, as a page is.
-                match self.deadlines.bound(Wait::Liveness, client.status()).await {
+                match self
+                    .deadlines
+                    .bound_in(&queue, Wait::Liveness, client.status())
+                    .await
+                {
                     Ok(status) => {
                         if !send(NativeUpdate::Connected {
                             status: Box::new(status),
@@ -345,7 +344,7 @@ impl PlaneClient {
                 // reports Reconnecting and dials again (`deadline.rs`).
                 match self
                     .deadlines
-                    .bound(Wait::Liveness, client.events_after(cursor))
+                    .bound_in(&queue, Wait::Liveness, client.events_after(cursor))
                     .await
                 {
                     Ok(page) => {
@@ -411,14 +410,18 @@ impl PlaneClient {
     /// its cached session or makes one single-flight login, whose handshake
     /// has its own deadline (`remote::login`).
     pub(crate) async fn connect(&self) -> Result<Connection, Box<ConnectError>> {
+        let (client, queue) = self.connect_client().await?;
         Ok(Connection {
-            client: self.connect_client().await?,
+            client,
             plane: self.clone(),
-            expired: Arc::new(AtomicBool::new(false)),
+            queue,
         })
     }
 
-    async fn connect_client(&self) -> Result<Arc<Client>, Box<ConnectError>> {
+    /// A handshaken client and the queue its requests wait in: a fresh one
+    /// per local connection, the session's own for a remote Plane, where
+    /// Queries, Commands and the feed share one ssh link (`deadline.rs`).
+    async fn connect_client(&self) -> Result<(Arc<Client>, Arc<RequestQueue>), Box<ConnectError>> {
         match &self.transport {
             Transport::Local { socket } => self
                 .deadlines
@@ -427,10 +430,10 @@ impl PlaneClient {
                     Client::connect_local(socket.as_ref(), self.client_id),
                 )
                 .await
-                .map(Arc::new)
+                .map(|client| (Arc::new(client), RequestQueue::new()))
                 .map_err(|error| Box::new(ConnectError::Client(*error))),
             Transport::Remote(connector) => connector
-                .connect()
+                .connect_link()
                 .await
                 .map_err(|error| Box::new(ConnectError::Plane(error))),
         }
@@ -492,8 +495,9 @@ fn expired(error: &ConnectError) -> bool {
 pub(crate) struct Connection {
     client: Arc<Client>,
     plane: PlaneClient,
-    /// Set once a request here outlived its deadline: the peer is hung.
-    expired: Arc<AtomicBool>,
+    /// The order the Plane serves this connection's requests in; hung once
+    /// a request at its head outlived its deadline.
+    queue: Arc<RequestQueue>,
 }
 
 impl Deref for Connection {
@@ -524,24 +528,31 @@ impl Connection {
         self.bounded(Wait::Command, request).await
     }
 
-    /// Once one request outlives its deadline the peer is hung, local or
-    /// remote alike: every later request on this connection fails at once
-    /// as offline (`Closed`, nothing is sent) instead of waiting a full
-    /// deadline each, which a flow of many reads would add up. A remote
-    /// session that stopped answering is also dropped (ssh is killed), so
-    /// the next connection logs in again instead of reusing the dead link.
+    /// A request's deadline starts when the requests ahead of it on this
+    /// connection are answered (`deadline.rs`), so healthy work queued
+    /// behind a slow Query does not expire. Once the request at the head
+    /// outlives its deadline the peer is hung, local or remote alike: the
+    /// requests behind it expire with it, and every later request on this
+    /// connection fails at once as offline (`Closed`, nothing is sent)
+    /// instead of waiting a full deadline each, which a flow of many reads
+    /// would add up. A remote session that stopped answering is also
+    /// dropped (ssh is killed), so the next connection logs in again
+    /// instead of reusing the dead link.
     async fn bounded<T>(
         &self,
         wait: Wait,
         request: impl Future<Output = Result<T, ClientError>>,
     ) -> Result<T, Box<ClientError>> {
-        if self.expired.load(Ordering::Acquire) {
+        if self.queue.is_hung() {
             return Err(Box::new(ClientError::Closed));
         }
-        let result = self.plane.deadlines.bound(wait, request).await;
+        let result = self
+            .plane
+            .deadlines
+            .bound_in(&self.queue, wait, request)
+            .await;
         if let Err(error) = &result {
             if deadline::expired_wait(error).is_some() {
-                self.expired.store(true, Ordering::Release);
                 self.plane.invalidate_client(&self.client).await;
             }
         }

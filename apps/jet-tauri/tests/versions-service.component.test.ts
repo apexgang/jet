@@ -119,7 +119,7 @@ describe("Settings › Versions: App updates", () => {
     mockIPC((command, args) => {
       switch (command) {
         case "watch_app_update":
-          return { currentVersion: "0.2.0", state: { kind: "idle", upToDate: false } };
+          return { revision: 0, currentVersion: "0.2.0", state: { kind: "idle", upToDate: false } };
         case "load_desktop_preferences":
           return stored;
         case "set_desktop_preferences": {
@@ -154,7 +154,7 @@ describe("Settings › Versions: App updates", () => {
   });
 
   it("explains a disabled updater and hides its controls", async () => {
-    updatesIpc({ currentVersion: "0.2.0", state: { kind: "disabled", reason: "homebrew" } });
+    updatesIpc({ revision: 0, currentVersion: "0.2.0", state: { kind: "disabled", reason: "homebrew" } });
     render(AppUpdatesBlock, { updates: new AppUpdateSession() });
     await settle();
     expect(document.body.textContent).toContain("Homebrew keeps this copy of Jet up to date.");
@@ -163,7 +163,7 @@ describe("Settings › Versions: App updates", () => {
   });
 
   it("offers a check and the automatic-check preference with its privacy note", async () => {
-    updatesIpc({ currentVersion: "0.2.0", state: { kind: "idle", upToDate: false } });
+    updatesIpc({ revision: 0, currentVersion: "0.2.0", state: { kind: "idle", upToDate: false } });
     render(AppUpdatesBlock, { updates: new AppUpdateSession() });
     await settle();
     expect(button("Check for updates")).toBeDefined();
@@ -174,7 +174,7 @@ describe("Settings › Versions: App updates", () => {
   });
 
   it("asks before restarting into an installed update", async () => {
-    updatesIpc({ currentVersion: "0.2.0", state: { kind: "ready", version: "0.3.0" } });
+    updatesIpc({ revision: 0, currentVersion: "0.2.0", state: { kind: "ready", version: "0.3.0" } });
     render(AppUpdatesBlock, { updates: new AppUpdateSession() });
     await settle();
     await fireEvent.click(button("Restart Jet…")!);
@@ -331,5 +331,129 @@ describe("Settings › Connections: the local service", () => {
     expect(pane.reads()).toBe(before + 1);
     expect(fact("Version")).toBe("0.2.0");
     expect(fact("Storage")).toBe("Read-only recovery");
+  });
+});
+
+describe("Settings › Versions: focus and announcements (finding 13)", () => {
+  const liveRegion = (block: string) =>
+    document.querySelector<HTMLElement>(`.${block} [role="status"][aria-live="polite"]`)?.textContent?.trim();
+  const focused = () => (document.activeElement as HTMLElement | null)?.textContent?.trim() ?? null;
+
+  /** The shell as the webview sees it: `push` publishes the next state to the watcher. */
+  function updatesShell(initial: AppUpdate["state"], onCommand: (command: string) => AppUpdate["state"] | null = () => null) {
+    let watcher: Channel<AppUpdate> | null = null;
+    let revision = 1;
+    let state = initial;
+    const view = (): AppUpdate => ({ revision, currentVersion: "0.2.0", state });
+    mockIPC((command, args) => {
+      switch (command) {
+        case "watch_app_update":
+          watcher = (args as { onChange: Channel<AppUpdate> }).onChange;
+          return view();
+        case "load_desktop_preferences":
+          return { reopenLastTask: true, checkForUpdates: true };
+        default: {
+          const next = onCommand(command);
+          if (next) {
+            state = next;
+            revision += 1;
+          }
+          return view();
+        }
+      }
+    });
+    return {
+      push: async (next: AppUpdate["state"]) => {
+        state = next;
+        revision += 1;
+        watcher!.onmessage(view());
+        await settle();
+      },
+    };
+  }
+
+  it("announces each update step once, not every percent of the download", async () => {
+    const shell = updatesShell({ kind: "downloading", version: "0.3.0", downloaded: 10, total: 100 });
+    render(AppUpdatesBlock, { updates: new AppUpdateSession() });
+    await settle();
+    const spoken = liveRegion("app-updates");
+    expect(spoken).toBe("Downloading Jet 0.3.0…");
+    await shell.push({ kind: "downloading", version: "0.3.0", downloaded: 60, total: 100 });
+    expect(liveRegion("app-updates")).toBe(spoken);
+    // The progress stays visible outside the live region.
+    expect(document.querySelector("progress")?.getAttribute("value")).toBe("60");
+    expect(document.body.textContent).toContain("60%");
+    await shell.push({ kind: "ready", version: "0.3.0" });
+    expect(liveRegion("app-updates")).toBe("Jet 0.3.0 is installed. Restart Jet to use it.");
+  });
+
+  it("keeps focus on the update action while it moves from Install to Restart", async () => {
+    const shell = updatesShell({ kind: "available", version: "0.3.0", dateUnixMs: null }, (command) =>
+      command === "install_app_update" ? { kind: "downloading", version: "0.3.0", downloaded: 0, total: 100 } : null,
+    );
+    render(AppUpdatesBlock, { updates: new AppUpdateSession() });
+    await settle();
+    const install = button("Install Jet 0.3.0")!;
+    install.focus();
+    await fireEvent.click(install);
+    await settle();
+    expect(focused()).toBe("Installing…");
+    await shell.push({ kind: "ready", version: "0.3.0" });
+    expect(focused()).toBe("Restart Jet…");
+  });
+
+  it("moves focus to the heading when the update controls go away", async () => {
+    const shell = updatesShell({ kind: "idle", upToDate: false });
+    render(AppUpdatesBlock, { updates: new AppUpdateSession() });
+    await settle();
+    button("Check for updates")!.focus();
+    await shell.push({ kind: "disabled", reason: "homebrew" });
+    expect(document.activeElement?.id).toBe("app-updates-heading");
+  });
+
+  it("announces a failed service pass and keeps focus through a Repair", async () => {
+    let push: (view: LocalServiceView) => void = () => undefined;
+    let finish: () => void = () => undefined;
+    const failed: PublicError = {
+      category: "local_unavailable",
+      code: "service.start_timeout",
+      message: "The Jet service was started but didn't answer in time.",
+      retryable: true,
+      recoveryActions: [],
+      restart: null,
+      revisionConflict: null,
+      protocolLimit: null,
+      planeId: null,
+    };
+    mockIPC(async (command, args) => {
+      switch (command) {
+        case "watch_local_service":
+          push = (args as { onChange: Channel<LocalServiceView> }).onChange.onmessage;
+          return serviceView({ revision: 1, phase: "failed", runningVersion: null, canRepair: true, error: failed });
+        case "repair_local_service":
+          push(serviceView({ revision: 2, phase: "checking", runningVersion: null }));
+          await new Promise<void>((resolve) => (finish = resolve));
+          push(serviceView({ revision: 3, lastAction: "started" }));
+          return serviceView({ revision: 3, lastAction: "started" });
+        default:
+          return null;
+      }
+    });
+    render(LocalServiceBlock, { service: new LocalServiceSession() });
+    await settle();
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("didn't answer in time");
+
+    const repair = button("Repair")!;
+    repair.focus();
+    await fireEvent.click(repair);
+    await settle();
+    // The pass runs: the same button stays, busy, and keeps focus.
+    expect(focused()).toBe("Repairing…");
+    expect(document.activeElement?.getAttribute("aria-disabled")).toBe("true");
+    finish();
+    await settle();
+    // Running again: Repair is gone, and focus lands on the block's heading.
+    expect(button("Repair")).toBeUndefined();
+    expect(document.activeElement?.id).toBe("local-service-heading");
   });
 });

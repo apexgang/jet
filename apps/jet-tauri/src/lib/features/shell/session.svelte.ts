@@ -166,6 +166,17 @@ function newSendAttempt(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+/**
+ * The request a composer Send was first sent as. A retry of an uncertain
+ * Send resends exactly this, whatever the task shows now: an uncertain Run
+ * start retried as a Turn (or the reverse) would send the prompt twice.
+ */
+type KeptSend =
+  | { kind: "start"; conversationId: string; planeId: string; craft: string }
+  | { kind: "submit"; conversationId: string; planeId: string };
+
+type SendAttempt = { id: string; send: KeptSend | null };
+
 /** How long Ctrl+W and Ctrl+Q wait for a pending layout save before closing. */
 export const FLUSH_BEFORE_CLOSE_MS = 500;
 
@@ -204,9 +215,10 @@ export class DesktopSession implements FeedHandler {
    * it, so it is kept only while the user may retry that Send unchanged: a
    * retry is then answered with what the Plane already did. A successful
    * Send or any edit of the draft clears it, so a later Send is new work
-   * even with the same text.
+   * even with the same text. Once sent, it is bound to the request it was
+   * sent as (`KeptSend`); a Send to another task is new work.
    */
-  private sendAttempt: string | null = null;
+  private sendAttempt: SendAttempt | null = null;
   actionNotice = $state<string | null>(null);
   /** The saved window layout; nothing is saved while it is loading. */
   presentation = $state<PresentationLoad>({ kind: "loading" });
@@ -1261,7 +1273,7 @@ export class DesktopSession implements FeedHandler {
     }
     this.conversationBusy = true;
     this.actionNotice = null;
-    const attempt = (this.sendAttempt ??= newSendAttempt());
+    let attempt = (this.sendAttempt ??= { id: newSendAttempt(), send: null });
     try {
       // New task always creates a task, whatever is still selected (D17).
       const creating = this.sidebarSelection === "new-task" || !this.selectedConversationId;
@@ -1274,7 +1286,7 @@ export class DesktopSession implements FeedHandler {
         if (this.selectedConversationId) this.clearSelectedConversation();
         // New tasks run on this computer in Wave 3.1.
         this.selectedPlaneId = LOCAL_PLANE;
-        const conversation = await createConversation(this.selectedProjectId, attempt);
+        const conversation = await createConversation(this.selectedProjectId, attempt.id);
         this.catalog.upsert(conversation);
         conversationId = conversation.id;
         this.selectedConversationId = conversation.id;
@@ -1284,10 +1296,22 @@ export class DesktopSession implements FeedHandler {
       }
 
       const planeId = this.selectedPlaneId;
-      if (this.hasLiveRun) {
-        await submitTurn(conversationId, prompt, attempt, planeId);
+      let kept = attempt.send;
+      if (kept && (kept.conversationId !== conversationId || kept.planeId !== planeId)) {
+        // The same draft sent to another task is new work.
+        attempt = this.sendAttempt = { id: newSendAttempt(), send: null };
+        kept = null;
+      }
+      const send: KeptSend =
+        kept ??
+        (this.hasLiveRun
+          ? { kind: "submit", conversationId, planeId }
+          : { kind: "start", conversationId, planeId, craft });
+      attempt.send = send;
+      if (send.kind === "submit") {
+        await submitTurn(send.conversationId, prompt, attempt.id, send.planeId);
       } else {
-        await startRun(conversationId, craft, prompt, attempt, planeId);
+        await startRun(send.conversationId, send.craft, prompt, attempt.id, send.planeId);
       }
       this.health.succeeded(planeId);
       this.draft = "";

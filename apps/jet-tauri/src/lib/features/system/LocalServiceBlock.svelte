@@ -3,6 +3,7 @@
 
   import SettingsDialog from "$lib/features/settings/SettingsDialog.svelte";
   import type { LocalServiceSession } from "./local-service.svelte";
+  import { keepFocus } from "./keep-focus";
   import {
     actionText,
     channelText,
@@ -10,6 +11,7 @@
     phaseText,
     provisioningText,
     rollbackLines,
+    rollbackRefusedNote,
     serviceErrorText,
   } from "./service-model";
 
@@ -25,6 +27,22 @@
   /** Progress and outcomes are spoken without moving focus. */
   const liveText = $derived(view === null ? "" : (provisioningText(view.phase) ?? actionText(view) ?? ""));
   const manager = $derived(view === null ? null : managerText(view.manager));
+  /** Which button started this window's pass, so it keeps its place and name. */
+  let repairKind = $state<"repair" | "check">("repair");
+  /**
+   * Repair (or Check again) stays while its own pass runs, so focus stays on
+   * it; it is `aria-disabled` then, since `disabled` would drop focus. When
+   * it goes, `keepFocus` moves focus to the next control or the heading.
+   */
+  const repair = $derived.by((): { kind: "repair" | "check"; label: string } | null => {
+    if (view === null) return null;
+    if (service.repairing) return { kind: repairKind, label: repairKind === "repair" ? "Repairing…" : "Checking…" };
+    if (view.canRepair) return { kind: "repair", label: "Repair" };
+    if (view.phase !== "running" && !service.provisioning) return { kind: "check", label: "Check again" };
+    return null;
+  });
+
+  const heading = () => document.getElementById(HEADING_ID);
 
   function dialogTitle(): string {
     switch (dialog.kind) {
@@ -41,7 +59,7 @@
   }
 </script>
 
-<div class="local-service">
+<div class="local-service" use:keepFocus={heading}>
   <h3 id={HEADING_ID} tabindex="-1">Jet service on this computer</h3>
   {#if view === null}
     {#if service.error}
@@ -78,7 +96,8 @@
 
     <p class="quiet" role="status" aria-live="polite">{liveText}</p>
     {#if view.error}
-      <p class="notice critical">{serviceErrorText(view.error)} <code>{view.error.code}</code></p>
+      <!-- A failed pass is announced when it appears, wherever focus is. -->
+      <p class="notice critical" role="alert">{serviceErrorText(view.error)} <code>{view.error.code}</code></p>
     {/if}
     {#if service.repairError}
       <p class="notice critical" role="status">
@@ -87,13 +106,18 @@
     {/if}
 
     <div class="actions">
-      {#if view.canRepair}
-        <button class="secondary-button" disabled={working} onclick={() => void service.repair()}>
-          {service.repairing ? "Repairing…" : "Repair"}
-        </button>
-      {:else if view.phase !== "running" && !service.provisioning}
-        <button class="secondary-button" disabled={working} onclick={() => void service.repair()}>
-          {service.repairing ? "Checking…" : "Check again"}
+      {#if repair}
+        <button
+          class="secondary-button"
+          aria-disabled={working}
+          aria-busy={service.repairing}
+          onclick={() => {
+            if (working || repair === null) return;
+            repairKind = repair.kind;
+            void service.repair();
+          }}
+        >
+          {repair.label}
         </button>
       {/if}
       {#if view.canRollback && view.previousVersion}
@@ -132,7 +156,7 @@
       {/if}
     {:else if dialog.kind === "refused"}
       <p role="alert">{serviceErrorText(dialog.error)} <code>{dialog.error.code}</code></p>
-      <p class="dialog-note">Nothing was changed.</p>
+      <p class="dialog-note">{rollbackRefusedNote(dialog.error)}</p>
     {/if}
     {#snippet footer()}
       {#if dialog.kind === "review" || dialog.kind === "sending"}

@@ -3,6 +3,7 @@ import { publicError } from "$lib/jet/errors";
 import { localServiceMark, mark } from "$lib/features/shell/timing";
 import {
   executeLocalServiceRollback,
+  isCurrentView,
   isProvisioning,
   prepareLocalServiceRollback,
   repairLocalService,
@@ -37,8 +38,6 @@ export class LocalServiceSession {
 
   private started = false;
   private disposed = false;
-  /** Set once a pushed view arrived, so an older initial answer never replaces it. */
-  private pushed = false;
   /** Bumped when the rollback dialog closes. */
   private dialogRequest = 0;
   private onChange: (view: LocalServiceView, previous: LocalServiceView | null) => void;
@@ -59,10 +58,10 @@ export class LocalServiceSession {
     try {
       const initial = await watchLocalService((view) => {
         if (this.disposed || !isView(view)) return;
-        this.pushed = true;
         this.apply(view);
       });
-      if (!this.disposed && !this.pushed && isView(initial)) this.apply(initial);
+      // A view pushed before this answer arrived has a higher revision.
+      if (!this.disposed && isView(initial)) this.apply(initial);
     } catch (error: unknown) {
       if (!this.disposed) this.error = publicError(error);
     }
@@ -126,8 +125,10 @@ export class LocalServiceSession {
     this.rollback = { kind: "closed" };
   }
 
+  /** Shows `view` unless a newer one is shown already (a reply can cross a push). */
   private apply(view: LocalServiceView): void {
     const previous = this.view;
+    if (!isCurrentView(view, previous)) return;
     // The release journey reads which provisioning phases this window saw.
     if (previous?.phase !== view.phase) mark(localServiceMark(view.phase));
     this.view = view;
@@ -138,5 +139,10 @@ export class LocalServiceSession {
 
 /** A shell answer this session can show (a missing one is ignored). */
 function isView(value: unknown): value is LocalServiceView {
-  return typeof value === "object" && value !== null && typeof (value as { phase?: unknown }).phase === "string";
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { phase?: unknown }).phase === "string" &&
+    typeof (value as { revision?: unknown }).revision === "number"
+  );
 }

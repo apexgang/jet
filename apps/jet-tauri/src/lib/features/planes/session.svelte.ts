@@ -281,10 +281,18 @@ export class PlanesSession {
     const generation = ++this.feedGeneration;
     this.feeds.set(planeId, { generation, feedId: null });
     const current = () => this.feeds.get(planeId)?.generation === generation;
+    // The feed task runs before this call answers, so a drop and a redial's
+    // status can arrive first. Its snapshot is then older than what they
+    // said (perhaps an earlier daemon start) and is not applied over them.
+    let superseded = false;
     try {
       const snapshot = await openPlaneFeed(
         (update) => {
-          if (current()) this.handler.receive(planeId, update);
+          if (!current()) return;
+          if (update.type === "connected" || update.type === "reconnecting" || update.type === "failed") {
+            superseded = true;
+          }
+          this.handler.receive(planeId, update);
         },
         after,
         planeId,
@@ -295,7 +303,7 @@ export class PlanesSession {
         return;
       }
       this.feeds.set(planeId, { generation, feedId: snapshot.feedId });
-      this.handler.opened(planeId, snapshot);
+      if (!superseded) this.handler.opened(planeId, snapshot);
     } catch (error: unknown) {
       if (current()) this.handler.openFailed(planeId, publicError(error));
     }

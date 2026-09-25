@@ -99,9 +99,15 @@ re-enabling it silently rejects this workflow's uploads.
    `latest.json`, and a `SHA256SUMS` covering all of them into a draft
    release, then publishes the complete release. `latest.json` embeds each
    signature file's contents and dates the release by its tagged commit.
+   GitHub's Latest, which the updater and the `jet-app` cask's livecheck
+   read, goes to the highest published stable `vMAJOR.MINOR.PATCH` release,
+   so a patch for an older version publishes without taking it. The job
+   fails if any other release holds Latest.
 7. For a stable release, Ape Bonker commits `Formula/jet.rb`, the core
    formula for macOS and Linux, and `Casks/jet-app.rb`, the Linux desktop
-   cask, to `apexgang/homebrew-tap` in one commit. It replaces the macOS-only
+   cask, of the highest published stable release to `apexgang/homebrew-tap`
+   in one commit. That is usually the tagged release; for a patch to an
+   older version it is the newer release. It replaces the macOS-only
    formula the Swift app's release may have written at the same core version,
    never touches that release's `Casks/jet.rb`, and rebases onto the Swift
    release's tap commits before it pushes.
@@ -145,17 +151,24 @@ the key they shipped with.
 Prerelease tags must also match the workspace version. They publish prerelease
 assets without modifying the stable formula or cask, and the updater never
 offers them because it reads the latest stable release. Rerun failed jobs to
-retry a tap update. A full rerun keeps published assets intact and downloads
-the original formula and cask, so rebuilt checksums cannot replace the
-published ones. Dispatch the workflow against a version tag, never a branch.
-Older releases cannot downgrade the formula or the cask after a newer stable
-release is published, and a tap that already holds a newer formula or cask
-keeps both unchanged. The tap job compares the tag with the highest published
-stable `vMAJOR.MINOR.PATCH` release, not the release GitHub marks Latest.
-Swift app releases never take Latest, but each stable core release does as it
-publishes, a patch for an older version included. If another commit, such as
-the Swift release's, changes `Formula/jet.rb` or `Casks/jet-app.rb` while the
-job runs, the job fails without pushing; rerun it.
+retry a tap update. A rerun of the publish job for a published release
+downloads no artifacts, which expire after seven days, keeps the published
+assets intact, and only checks that the highest stable release holds Latest;
+if it fails there, run `gh release edit <that tag> --latest`. The tap job
+always downloads the published formula and cask, so rebuilt checksums cannot
+replace the published ones. Dispatch the workflow against a version tag,
+never a branch.
+
+The tap jobs of all core releases share one concurrency group, and GitHub
+keeps only one pending job per group: a newer pending job cancels an older
+one. Each run therefore brings the tap to the highest published stable
+`vMAJOR.MINOR.PATCH` release rather than to its own tag, and whichever run
+goes ahead leaves the tap current; rerunning any stable release's tap job
+repairs it. Swift app releases and prereleases never count. A tap that
+already holds a newer formula or cask keeps both unchanged, so nothing
+downgrades either. If another commit, such as the Swift release's, changes
+`Formula/jet.rb` or `Casks/jet-app.rb` while the job runs, the job fails
+without pushing; rerun it.
 
 Failed size gates retain build artifacts for seven days but prevent publication.
 The historical `jetd` size overage is documented in

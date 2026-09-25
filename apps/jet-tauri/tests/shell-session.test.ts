@@ -99,6 +99,10 @@ type Options = {
   fullscreenFails?: boolean;
   /** `start_run` results in order; a failure is thrown, `null` succeeds. */
   startFails?: Array<PublicError | null>;
+  /** Updates the first feed sends before `open_plane_feed` answers. */
+  beforeOpen?: PlaneUpdate[];
+  /** `submit_turn` results in order; a failure is thrown, `null` succeeds. */
+  submitFails?: Array<PublicError | null>;
 };
 
 function harness(options: Options = {}) {
@@ -115,6 +119,7 @@ function harness(options: Options = {}) {
     : Promise.resolve();
   const saveFails = [...(options.saveFails ?? [])];
   const startFails = [...(options.startFails ?? [])];
+  const submitFails = [...(options.submitFails ?? [])];
   // What the native registry and Setup report for this computer's core.
   let local = LOCAL;
   let setup = options.setup ?? SETUP;
@@ -125,6 +130,7 @@ function harness(options: Options = {}) {
     switch (command) {
       case "open_plane_feed":
         feeds.push(onUpdate as Channel<PlaneUpdate>);
+        if (feeds.length === 1) for (const update of options.beforeOpen ?? []) feeds[0].onmessage(update);
         return {
           state: "online",
           feedId: `feed-${feeds.length}`,
@@ -186,8 +192,11 @@ function harness(options: Options = {}) {
         if (failed) throw failed;
         return { runId: "run-new", message: "Started" };
       }
-      case "submit_turn":
+      case "submit_turn": {
+        const failed = submitFails.shift();
+        if (failed) throw failed;
         return { message: "Queued" };
+      }
       case "load_trash_banner":
       case "load_conversation_trash":
         return { kind: "absent" };
@@ -406,6 +415,37 @@ describe("a Plane feed that dials again after a drop", () => {
   });
   const marks = () => performance.getEntriesByName(LOCAL_PLANE_CONNECTED, "mark").length;
 
+  it("keeps a redial's status that arrived before the feed's own opening answer", async () => {
+    // The first page failed at once and the feed dialed a restarted jetd:
+    // its `connected` crossed the older snapshot `open_plane_feed` returns.
+    const { feeds } = harness({
+      beforeOpen: [{ type: "reconnecting", error: offline }, redialed("2", "0.3.0")],
+    });
+    const session = new DesktopSession();
+    const restarts = vi.spyOn(session as unknown as { planeRestarted(planeId: string): void }, "planeRestarted");
+    session.connect();
+    await settle(session);
+    feeds[0]?.onmessage({ type: "resumed", after: "40" });
+    await settle(session);
+    expect(session.connection).toMatchObject({ daemonStarts: "2", coreVersion: "0.3.0" });
+    expect(session.connectionState).toBe("online");
+    // The older answer is not a second restart back to the first start.
+    expect(restarts).not.toHaveBeenCalled();
+    feeds[0]?.onmessage({ type: "reconnecting", error: offline });
+    feeds[0]?.onmessage(redialed("2", "0.3.0"));
+    await settle(session);
+    expect(restarts).not.toHaveBeenCalled();
+  });
+
+  it("still applies the opening answer when only Events came first", async () => {
+    const { feeds } = harness({ beforeOpen: [{ type: "resumed", after: "40" }] });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    expect(session.connection).toMatchObject({ daemonStarts: "1", coreVersion: "0.2.0" });
+    expect(feeds).toHaveLength(1);
+  });
+
   it("runs restart handling once when it reaches a restarted jetd, and shows the new core", async () => {
     performance.clearMarks();
     const { calls, feeds, restartCore } = harness();
@@ -508,6 +548,74 @@ describe("D2: a composer Send keeps its attempt only while it is retried", () =>
 
     const sent = attempts(calls);
     expect(new Set(sent).size).toBe(3);
+  });
+
+  it("resends an uncertain Run start as a start, even once a Run shows up", async () => {
+    const { calls } = harness({ startFails: [uncertain, null] });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+
+    session.draft = "continue";
+    await session.submitDraft();
+    const conversation = session.selectedConversationId;
+    // The start may have applied: the Run it made is now live.
+    withActiveRun(session);
+    session.supervision!.execution!.run.conversationId = conversation!;
+    expect(session.hasLiveRun).toBe(true);
+    await session.submitDraft();
+
+    const [failed, retried] = attempts(calls);
+    expect(retried).toBe(failed);
+    expect(calls.filter((call) => call.command === "submit_turn")).toHaveLength(0);
+    expect(calls.filter((call) => call.command === "start_run").at(-1)?.args).toMatchObject({
+      conversationId: conversation,
+      craft: "craft",
+      prompt: "continue",
+    });
+  });
+
+  it("resends an uncertain Turn as a Turn, even once its Run has ended", async () => {
+    const { calls } = harness({ submitFails: [uncertain, null] });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    session.draft = "continue";
+    await session.submitDraft(); // creates the task and starts its Run
+    session.draft = "and then";
+    withActiveRun(session);
+    session.supervision!.execution!.run.conversationId = session.selectedConversationId!;
+    await session.submitDraft();
+    // The Run ended meanwhile.
+    session.supervision!.execution!.run.lifecycle = "completed";
+    expect(session.hasLiveRun).toBe(false);
+    await session.submitDraft();
+
+    const turns = calls.filter((call) => call.command === "submit_turn").map((call) => call.args.attempt);
+    expect(turns).toHaveLength(2);
+    expect(turns[1]).toBe(turns[0]);
+    expect(calls.filter((call) => call.command === "start_run")).toHaveLength(1);
+  });
+
+  it("sends to another task under a new attempt", async () => {
+    const { calls } = harness({ startFails: [uncertain, null] });
+    const session = new DesktopSession();
+    session.connect();
+    await settle(session);
+    session.draft = "continue";
+    await session.submitDraft();
+    const first = session.selectedConversationId;
+    const other = first === "l1" ? "l2" : "l1";
+    // The user picks another task and sends the same draft there.
+    session.selectedConversationId = other;
+    session.sidebarSelection = "conversation";
+    session.conversationDetail = null;
+    session.supervision = null;
+    await session.submitDraft();
+    const starts = calls.filter((call) => call.command === "start_run").map((call) => call.args);
+    expect(starts[0]).toMatchObject({ conversationId: first });
+    expect(starts[1]).toMatchObject({ conversationId: other });
+    expect(starts[1].attempt).not.toBe(starts[0].attempt);
   });
 });
 

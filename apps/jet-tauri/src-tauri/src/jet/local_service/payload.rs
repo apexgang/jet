@@ -132,7 +132,7 @@ pub(crate) async fn extract(
     bundled: &BundledPayload,
     scratch: &Path,
 ) -> Result<Extracted, PublicError> {
-    let tar = tar.ok_or_else(codes::payload_invalid)?;
+    let tar = tar.ok_or_else(codes::tar_missing)?;
     let archive = fs::metadata(&bundled.archive).map_err(|_| codes::payload_invalid())?;
     if !archive.is_file() || archive.len() > MAX_ARCHIVE_BYTES {
         return Err(codes::payload_invalid());

@@ -88,7 +88,9 @@ archive, stages and activates it under `~/.jet/core`, and installs the
 systemd user unit or the autostart entry described in
 [Versions under the Jet home](#versions-under-the-jet-home), so these
 installs run the `gui` channel. The bundles are signed for the Tauri updater, and `latest.json`
-on the latest release lists them.
+on the latest release lists them. GitHub's latest release is always the
+highest stable core version: a patch for an older version publishes without
+taking it, so the updater always offers the newest version.
 
 The Linux-only `apexgang/tap/jet-app` cask installs the AppImage and depends
 on `apexgang/tap/jet`, so the Homebrew channel owns the daemon, `brew services`

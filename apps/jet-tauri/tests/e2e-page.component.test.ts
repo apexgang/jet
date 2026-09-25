@@ -341,7 +341,7 @@ describe("the journey's page script in the Settings window", () => {
   }
 
   it("finds Safety and system and reads the Jet service and App updates blocks", async () => {
-    settingsIpc({ currentVersion: "0.2.0", state: { kind: "disabled", reason: "development_build" } });
+    settingsIpc({ revision: 0, currentVersion: "0.2.0", state: { kind: "disabled", reason: "development_build" } });
     render(SettingsApp);
     await settle();
     let view = page<SettingsView>("settings");
@@ -373,7 +373,7 @@ describe("the journey's page script in the Settings window", () => {
   });
 
   it("reads an enabled App updates status", async () => {
-    settingsIpc({ currentVersion: "0.2.0", state: { kind: "idle", upToDate: true } });
+    settingsIpc({ revision: 0, currentVersion: "0.2.0", state: { kind: "idle", upToDate: true } });
     render(SettingsApp);
     await settle();
     await fireEvent.click(
@@ -387,7 +387,7 @@ describe("the journey's page script in the Settings window", () => {
   });
 
   it("reads a signed build that can't update itself as off", async () => {
-    settingsIpc({ currentVersion: "0.2.0", state: { kind: "disabled", reason: "unsupported_install" } });
+    settingsIpc({ revision: 0, currentVersion: "0.2.0", state: { kind: "disabled", reason: "unsupported_install" } });
     render(SettingsApp);
     await settle();
     await fireEvent.click(

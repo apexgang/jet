@@ -2,7 +2,6 @@
 //! computer, never Plane policy, and never grant daemon authority.
 
 use std::{
-    fs,
     io::Read,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -103,7 +102,7 @@ fn parse(value: serde_json::Value) -> Result<PreferencesChange, PublicError> {
 /// or unreadable.
 fn load(path: &Path) -> DesktopPreferences {
     let mut bytes = Vec::new();
-    let read = fs::File::open(path)
+    let read = super::local_store::open_regular(path)
         .and_then(|file| file.take(MAX_PREFERENCES_BYTES + 1).read_to_end(&mut bytes));
     if read.is_err() || bytes.len() as u64 > MAX_PREFERENCES_BYTES {
         return DesktopPreferences::default();
@@ -200,6 +199,7 @@ pub(crate) async fn set_desktop_preferences(
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::fs;
 
     #[test]
     fn preference_changes_are_exact_and_camel_case() {

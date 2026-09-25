@@ -44,7 +44,7 @@ could report: nothing is installed, or `status` failed.
 | --- | --- | --- |
 | held, `homebrew` | any | Keep. App updates are off |
 | held, `development` | any | Keep |
-| held, `gui` | bundled release newer than `current` | Stage and activate. systemd brings `jetd` back (`Restart=always`); in autostart mode the app starts it |
+| held, `gui` | bundled release newer than `current` | Stage and activate. systemd brings `jetd` back (`Restart=always`); when it does not within 15 s (the unit does not supervise that daemon, or hit its start limit), `systemctl --user reset-failed` and `start jetd.service`. In autostart mode the app starts it |
 | held, `gui` | otherwise | Keep. With systemd and no autostart file, write and enable the unit for later logins. Never start or restart |
 | held, metadata missing or unknown | any | Keep, channel unknown |
 | unknown, socket answers | any | Keep, channel unknown |
@@ -71,6 +71,13 @@ Rules around the table:
 - After any start the pass waits up to 15 s for the socket, then observes
   again. Each socket probe is bounded at 5 s, so a daemon that accepts and
   never answers counts as unreachable.
+- When `jetd core activate` or `rollback` exits 4 (`service.drain_timeout`),
+  it has already sent the daemon `SIGTERM` and `current` did not move. The
+  pass then waits up to 60 s: once the Plane is free it starts the
+  unchanged `current` (a detached `jetd`, or `reset-failed` and `start`
+  under systemd); a daemon that answers again is left alone. The view keeps
+  `service.drain_timeout`, whose copy now says the version was not changed
+  rather than "nothing was changed".
 
 **The payload.** The release overlay bundles the unmodified release archive
 `jet-core-<version>-<label>.tar.gz` as the resource `jet-core.tar.gz`,
@@ -95,7 +102,12 @@ longer restarts and fails every two seconds, and
 `Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin`, because
 Harness CLIs such as `claude` usually live in `~/.local/bin`.
 `KillMode=process` and `Restart=always` are unchanged. systemd counts as
-available when `systemctl --user show-environment` succeeds. A unit left by
+available when `systemctl --user show-environment` succeeds. `systemctl` and
+`tar` are looked up in `/usr/bin` and `/bin`, then in every absolute
+`$PATH` directory (NixOS and Guix profiles). Each candidate is
+canonicalized and must be a regular executable file owned by root or this
+user. Without a `tar` the pass fails with `service.tar_missing` rather
+than `service.payload_invalid`. A unit left by
 an older build is rewritten only when this build's template differs. A
 detached `jetd` gets the unit's `PATH` and none of the AppImage runtime's
 variables (`APPDIR`, `APPIMAGE`, `ARGV0`, `OWD`, or `PATH` entries inside the
@@ -169,6 +181,7 @@ update check in a task spawned from `.setup()`, which never waits for it.
 `service.start_failed`, `service.systemd_unavailable`,
 `service.homebrew_start_failed`, `service.payload_invalid`,
 `service.status_failed`, `service.owner_unknown`, `service.update_refused`,
+`service.tar_missing`,
 `service.rollback_unavailable`, `service.rollback_failed`, `service.busy`,
 `service.lock_unavailable`, `service.review_expired`, `service.review_stale`.
 `jetd core` exit 3 maps to a refusal code, exit 4 to
@@ -183,11 +196,24 @@ update check in a task spawned from `.setup()`, which never waits for it.
   `check_app_update`, `install_app_update`, `restart_after_update`.
 - Updates are off, with the reason shown, in this order of precedence: a
   build without updater configuration ("development build", which covers
-  every development build and every unsigned pull-request or test bundle),
-  a binary whose bundle type is not deb, rpm or AppImage, and a local service
-  on the `homebrew` channel. The Homebrew check follows the service view
+  every development build and every unsigned pull-request or test bundle);
+  a binary whose bundle type is not deb, rpm or AppImage, or an AppImage
+  binary without `$APPIMAGE` (an extracted `squashfs-root`); the `jet-app`
+  cask's AppImage (`$APPIMAGE` canonicalizes under a Homebrew prefix, or to
+  `~/Applications/Jet.AppImage` while `<prefix>/Caskroom/jet-app` exists);
+  a local service on the `homebrew` channel; and `service_unknown` while no
+  settled service view names a channel ("Jet is still checking who manages
+  it on this computer"). Unknown covers the launch pass before it settles,
+  a first pass that starts `brew services`, and a daemon whose owner
+  metadata is missing. A view that is still working keeps the channel of
+  the settled view before it, so a Repair does not flicker updates off.
+  "Nothing installed" counts as known. The checks follow the service view
   live. A download already under way, or an installed update waiting for
   its restart, still finishes.
+- "Restart Jet" goes through Tauri's restart, which launches `$APPIMAGE`
+  when it is set. A deb or rpm binary therefore clears `APPIMAGE` and
+  `APPDIR`, which it can only have inherited, first thing in `run`, before
+  Tauri reads them.
 - Install downloads the bundle (30 minute limit). The plugin verifies its
   minisign signature against the configured key. `requireSignedVersion`
   rejects a signature whose `version:` field does not match the announced
@@ -197,7 +223,8 @@ update check in a task spawned from `.setup()`, which never waits for it.
   password for `sudo -S`, then plain `sudo`. "Restart Jet…" asks first
   ("Every Jet window closes and opens again.").
 - One automatic check runs 10 s after the launch provisioning pass when the
-  device preference "Check for updates automatically" is on. It is on by
+  device preference "Check for updates automatically" is on, read both
+  before and after the delay, so turning it off in the first 10 s stops it. It is on by
   default and stored as `checkForUpdates` in `desktop-preferences.json`.
   "Check for updates" in Settings always checks. See the privacy inventory
   for what a check sends. `set_desktop_preferences` now merges a change of
@@ -206,8 +233,15 @@ update check in a task spawned from `.setup()`, which never waits for it.
 - Every Settings window follows the state through its own watcher, so a
   window opened during an install, or while the automatic check runs, sees
   it progress and finish.
+- `LocalServiceView` and `AppUpdateView` carry a `revision` that only goes
+  up (the update view's is the sum of its own change count and the service
+  view's revision). Each window drops a view older than the one it shows,
+  so a Repair or Check reply that crosses a newer pushed view no longer
+  overwrites it.
 - Stable codes: `update.offline`, `update.release_unavailable` (any non-2xx
-  answer, retryable), `update.release_invalid`, `update.check_failed`,
+  answer, retryable), `update.release_invalid` (also a `latest.json` body
+  that is not JSON, which the plugin reports as a decode error of its HTTP
+  client and used to show as offline), `update.check_failed`,
   `update.download_failed`, `update.signature_invalid`,
   `update.package_install_failed`, `update.install_failed`,
   `update.disabled`, `update.busy`, `update.not_available`,
@@ -385,7 +419,17 @@ request, so it is never sent for different work.
   `submit_turn` take a required `attempt` UUID, one per composer Send
   (`conversation.attempt_invalid` when malformed). The webview keeps it only
   across unchanged retries and clears it on success or any draft edit, so a
-  later Send of the same text is a new request.
+  later Send of the same text is a new request. A kept attempt is bound to
+  the kind (Run start or Turn), task, Plane and Craft it was first sent as,
+  and a retry resends exactly that, even when the task now shows a live Run
+  (or none). A Send of the same draft to another task gets a new attempt.
+  The shell refuses an attempt kept for another kind or task with
+  `conversation.attempt_conflict` before contacting the Plane, so neither
+  side can send the prompt twice.
+- Kept IDs are capped at 256 per kind of request. When the map is full,
+  the oldest ID older than the Command deadline (180 s) is evicted and its
+  retry becomes a new request; only while all 256 are younger is a new
+  request refused with `client.too_many_pending_commands`.
 - D3, `setup.rs`. While a bind ID is kept, the next bind reads the Plane's
   account bindings first and drops the ID when that provider has none.
   Project register and remove grants get a fresh ID after a definite
@@ -393,6 +437,8 @@ request, so it is never sent for different work.
   reconnect handshake included, is `ConnectError::Unconfirmed` and never
   definite.
 - Work-panel terminal open and close and file review follow the same rule.
+  A save's late answer settles only its own Command ID, so it no longer
+  clears a newer pending edit of the same file.
 
 **Stuck edits (D4).** A pending edit records its expected revision, and a
 retry resends the exact body. A definite refusal, `user_edit.stale_revision`
@@ -413,7 +459,11 @@ names, so a stale one cannot block the save. The Planes panel says which of
 Loading the identity can no longer fail launch.
 
 **Plane registry (D8).** A `planes.json` from a newer Jet, or one this launch
-cannot read (a permission error, for example), stays untouched. The
+cannot read (a permission error, for example), stays untouched. A FIFO,
+socket or device in the place of `planes.json` or any other app data file
+is opened non-blocking and treated as damaged (`local_store::open_regular`);
+it used to block launch in the read. `planes.json` is then set aside with
+`registry_reset`, like a directory. The
 registry is read-only for the launch, the Planes panel shows
 `registry_newer` or `registry_unreadable`, and changes fail with
 `plane.registry_read_only`. Add Plane checks this before any ssh or pairing
@@ -427,6 +477,18 @@ step. A directory in the file's place is still set aside, with
 | Liveness: local connect and handshake, `PlaneClient::status`, the status read that ends a remote login, one event-feed page | 30 s | `transport.offline`, retryable. A feed reports Reconnecting and dials again; a remote login backs off |
 | Query: any other read on an open connection | 90 s | `transport.offline`, retryable |
 | Command | 180 s | `command.outcome_unknown`. The ID is kept, so a retry resends the same request |
+
+`jetd` serves one connection's requests one at a time, in arrival order,
+and a remote Plane's Queries, Commands and event feed share one ssh
+session. A request's deadline therefore starts when it reaches the head of
+its connection's queue (`RequestQueue` in `deadline.rs`), not when it is
+sent: a feed page or status read queued behind a slow but healthy Query
+waits for it instead of expiring at 30 s and dropping the session, and
+with it the Query. Only the head can expire. When it does, the peer is
+hung: every request queued behind it expires at once and the session is
+dropped once. A hung peer is detected within the head request's own
+deadline, so up to 90 s (a Query) or 180 s (a Command) rather than 30 s
+when one of those is at the head.
 
 The core bounds each of its own network steps at 30 s, and Craft discovery
 makes two in sequence, so Queries get 90 s. Commands that work before they
@@ -482,12 +544,49 @@ selected task again, but it cannot tell that `jetd` restarted, so health
 keeps its last summary and version displays stay stale until the next
 `connected`.
 
+### Review fixes (2026-09-25)
+
+A review of this branch found the defects below, and each fix has a test.
+The remote queued-session test was run against the old deadline timing and
+failed; the new Vitest cases failed against the old webview code. The other
+Rust tests exercise paths the old code did not have or asserted the
+opposite of, and were not re-run against it.
+
+- Remote Planes: one expired request no longer drops the shared ssh
+  session under healthy work queued with it (see Deadlines, D6).
+- Composer retries resend the request an attempt was first sent as (D2).
+- App updates stay off while the service channel is unknown, for the
+  cask's AppImage, and for an AppImage binary without `$APPIMAGE`; "Restart
+  Jet" cannot launch an inherited `$APPIMAGE`; the automatic check re-reads
+  its preference after the delay; an undecodable `latest.json` is
+  `update.release_invalid` (App updates).
+- A drained daemon that systemd does not bring back is started through the
+  unit, and a daemon that outlived a drain timeout is started again once
+  it leaves (Automatic core installation).
+- FIFOs in the app data directory no longer block launch (D8). Uncertain
+  Command IDs can be evicted after 180 s. `systemctl` and `tar` are found
+  on `$PATH`, and a missing `tar` has its own code.
+- Views carry a `revision`, so stale Repair and Check replies are dropped.
+- The redial snapshot: the native feed can send `reconnecting`, `failed` or
+  a redial's `connected` before `open_plane_feed` answers. The webview no
+  longer applies the older opening snapshot over them, which had brought
+  back an old `daemonStarts` and a false restart.
+- Settings › Versions: the App updates live region announces phase
+  changes only ("Downloading Jet X…" once; the percentage and the progress
+  bar sit outside it). One action button changes through Check, Install
+  and Restart and keeps focus, marked busy rather than disabled while work
+  runs. When a focused control disappears, focus moves to the first control
+  left in the block or to its heading (`keep-focus.ts`). A failed service
+  pass is `role="alert"`, and Repair stays in place as "Repairing…" during
+  its own pass.
+
 ## Boundaries
 
 - No Jet protocol call was added. Provisioning uses `jetd core` locally,
   and app updates use the Tauri updater and GitHub.
 - Every process and file action is native, with fixed argument lists from
-  absolute `systemctl`, `tar` and `brew` paths and the chosen `jetd`. The
+  canonical, trusted `systemctl`, `tar` and `brew` paths and the chosen
+  `jetd`. The
   webview passes no path, command or version.
 - The main window can read, watch and repair the service. Only the Settings
   window can roll it back or touch updates.
@@ -650,6 +749,15 @@ proposed ceilings. The journey has never run in CI, so there is no desktop
 measurement. `just e2e-dry-run`, part of `just check`, runs it against a fake
 driver, a scratch home and `sleep` processes.
 
+### Review fixes, 2026-09-25
+
+From `apps/jet-tauri` with `RUSTUP_TOOLCHAIN=1.98.1` and a short
+`TMPDIR`: `just version-check`, `bun run check` (0 errors, 0 warnings),
+`bun run test` (655 tests in 53 files), `bun run build`, `cargo fmt
+--check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test
+--locked` (412 passed, 3 ignored) and `just e2e-dry-run` all passed.
+Nothing was run against real systemd, Homebrew, GitHub or a remote Plane.
+
 ## Remaining work and unverified items
 
 Blocking a release:
@@ -699,18 +807,23 @@ Known limits:
 - Bundled Crafts are unusable after the core payload installs (#210).
 - Payload trust rests on the bundle and its updater signature.
   `jetd core stage` checks only the manifest's own digests.
-- A cask AppImage counts as Homebrew-managed only through the daemon's
-  channel. If a GUI-managed core on the same computer runs instead, the
-  updater stays on and would replace `~/Applications/Jet.AppImage`.
-- In autostart mode, if `jetd core activate` fails after it stopped the
-  daemon, nothing restarts it in that pass. The next launch or Repair starts
-  the old `current`.
+- A cask AppImage is recognised by its path: under a Homebrew prefix, or
+  `~/Applications/Jet.AppImage` while the Caskroom holds `jet-app`. An
+  AppImage the user copied to that path while the cask is installed is
+  indistinguishable and does not update itself. How Homebrew 6's
+  `app_image` artifact places the file (a move or a link into the
+  Caskroom) was not observed.
+- After a drain timeout the pass waits at most 60 s for the daemon to
+  leave. A daemon still draining after that is not started again in that
+  pass; the next launch or Repair starts the old `current`.
 - A deb or rpm update from an app started in a terminal can end in the
   plugin's plain `sudo` prompt on that terminal and wait without limit, with
   the updater busy.
 - `checking` is bounded but can last minutes in the worst case: 60 s for
-  another instance's lock, 20 s status, 5 s probes, and 120 s each for
-  extraction, stage and activate.
+  another instance's lock, 20 s status, 5 s probes, 120 s each for
+  extraction, stage and activate, 15 s more for systemd to restart a
+  drained daemon before the app starts the unit, and 60 s after a drain
+  timeout.
 - A root-owned or unwritable `local-service.lock`, for example after
   running the app with `sudo`, fails every pass with
   `service.lock_unavailable`, and the message does not name the file.
@@ -719,8 +832,13 @@ Known limits:
   applied.
 - A Command that runs past 180 s reports `command.outcome_unknown`; what
   `jetd` does with a duplicate of a Command still running was not checked.
-  A Query or Command expiry also drops the shared remote ssh session.
-  Half-open ssh links are caught only by these deadlines.
+  Half-open ssh links are caught only by these deadlines, within the
+  deadline of whatever request is at the head of the session's queue.
+- The request queue models `jetd`'s order from the shell's side. A request
+  whose caller stops waiting leaves the queue at once, although `jetd`
+  still serves it, so the next request's deadline can start early; and two
+  requests started in the same instant may reach the wire in the other
+  order. Either can end one wait early; neither was seen in tests.
 - Add Plane stays enabled while the registry is read-only; it is refused at
   once.
 - Launch still fails if Tauri cannot resolve the home or app data

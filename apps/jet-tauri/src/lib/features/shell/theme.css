@@ -427,7 +427,7 @@ textarea:focus-visible {
   color: var(--on-accent);
 }
 
-.primary-button:hover:not(:disabled) {
+.primary-button:hover:not(:disabled, [aria-disabled="true"]) {
   background: var(--accent-strong);
 }
 
@@ -437,7 +437,7 @@ textarea:focus-visible {
   color: var(--text);
 }
 
-.secondary-button:hover:not(:disabled) {
+.secondary-button:hover:not(:disabled, [aria-disabled="true"]) {
   border-color: var(--border-hover);
   background: var(--hover);
 }
@@ -459,14 +459,19 @@ textarea:focus-visible {
   color: var(--on-danger);
 }
 
-.danger-button:hover:not(:disabled) {
+.danger-button:hover:not(:disabled, [aria-disabled="true"]) {
   background: var(--danger-fill-hover);
 }
 
 .primary-button:disabled,
 .secondary-button:disabled,
 .danger-button:disabled,
-.text-button:disabled {
+.text-button:disabled,
+/* Busy but still focused: a control whose action is under way keeps focus. */
+.primary-button[aria-disabled="true"],
+.secondary-button[aria-disabled="true"],
+.danger-button[aria-disabled="true"],
+.text-button[aria-disabled="true"] {
   opacity: 0.45;
 }
 
@@ -2342,6 +2347,10 @@ kbd {
   .secondary-button:disabled,
   .danger-button:disabled,
   .text-button:disabled,
+  .primary-button[aria-disabled="true"],
+  .secondary-button[aria-disabled="true"],
+  .danger-button[aria-disabled="true"],
+  .text-button[aria-disabled="true"],
   .approval-actions button:disabled,
   .run-controls button:disabled,
   .control-confirmation button:disabled,

@@ -39,11 +39,11 @@ use uuid::Uuid;
 
 pub(crate) use self::{
     core_cli::{safe_version, Channel},
-    decision::LocalServiceView,
+    decision::{LocalServiceView, Phase},
 };
 use self::{
     core_cli::{CoreStatus, Owner},
-    decision::{Action, Facts, Outcome, OwnerFact, Phase, Plan, Release, Via},
+    decision::{Action, Facts, Outcome, OwnerFact, Plan, Release, Via},
     homebrew::Keg,
     payload::{BundledPayload, Extracted},
     process::{Clock, Processes, Reachability},
@@ -60,6 +60,10 @@ const PROBE_LIMIT: Duration = Duration::from_secs(5);
 const POLL: Duration = Duration::from_millis(500);
 /// How long a pass waits for another app instance's pass.
 const LOCK_DEADLINE: Duration = Duration::from_secs(60);
+/// How long a pass waits for a daemon that `jetd core` signalled but gave
+/// up waiting for (`service.drain_timeout`) to leave the Plane, before it
+/// starts `current` again.
+const DRAIN_EXIT_WAIT: Duration = Duration::from_secs(60);
 /// A rollback review is usable once, within this time (as `ledger.rs`).
 const REVIEW_LIFETIME: Duration = Duration::from_secs(10 * 60);
 /// Cross-process serialization, in the app data directory.
@@ -101,6 +105,13 @@ impl ServiceSettings {
                     target: target.to_owned(),
                 })
         });
+        // The bridge created the app data directory, so it is ours.
+        let owner_uid = fs::metadata(app_data_directory)
+            .map(|metadata| metadata.uid())
+            .unwrap_or(u32::MAX);
+        let search = std::env::var_os("PATH");
+        let tool =
+            |name: &str, fixed: &[&str]| manager::locate(name, fixed, search.as_deref(), owner_uid);
         Self {
             jet_home: user_home.join(".jet"),
             user_home: user_home.to_owned(),
@@ -113,12 +124,9 @@ impl ServiceSettings {
             lock_file: app_data_directory.join(LOCK_FILE),
             bundled,
             homebrew_prefixes: homebrew::prefixes(std::env::var_os("HOMEBREW_PREFIX"), user_home),
-            // The bridge created the app data directory, so it is ours.
-            owner_uid: fs::metadata(app_data_directory)
-                .map(|metadata| metadata.uid())
-                .unwrap_or(u32::MAX),
-            systemctl: manager::locate(&["/usr/bin/systemctl", "/bin/systemctl"]),
-            tar: manager::locate(&["/usr/bin/tar", "/bin/tar"]),
+            owner_uid,
+            systemctl: tool("systemctl", &["/usr/bin/systemctl", "/bin/systemctl"]),
+            tar: tool("tar", &["/usr/bin/tar", "/bin/tar"]),
         }
     }
 
@@ -278,8 +286,7 @@ impl LocalServiceState {
                 ..service.current().working(Phase::Failed)
             },
         };
-        service.publish(view.clone());
-        view
+        service.publish(view)
     }
 
     /// Reviews a rollback after a fresh status read: only a GUI-managed
@@ -337,7 +344,7 @@ impl LocalServiceState {
                 ..outcome
             },
         );
-        service.publish(view.clone());
+        let view = service.publish(view);
         match returned {
             Some(error) => Err(error),
             None => Ok(view),
@@ -350,12 +357,19 @@ impl Service {
         self.view.borrow().clone()
     }
 
-    fn publish(&self, view: LocalServiceView) {
+    /// Publishes `view` when it differs from the current one, with the
+    /// next revision, and returns the view as published.
+    fn publish(&self, mut view: LocalServiceView) -> LocalServiceView {
         self.view.send_if_modified(|current| {
-            let changed = *current != view;
+            view.revision = current.revision;
+            if *current == view {
+                return false;
+            }
+            view.revision = current.revision.saturating_add(1);
             *current = view;
-            changed
+            true
         });
+        self.current()
     }
 
     /// The cross-process lock, held until the returned file is dropped.
@@ -645,13 +659,15 @@ impl<'a> Run<'a> {
                 if *via == Via::Systemd {
                     let _ = self.refresh_unit().await;
                 }
-                self.stage_and_activate(version).await?;
-                // Activation drained the daemon; systemd restarts it
-                // (`Restart=always`), otherwise this app starts it.
-                if *via == Via::Spawn {
-                    self.spawn()?;
+                if let Err(error) = self.stage_and_activate(version).await {
+                    // The daemon was told to stop but outlived the wait:
+                    // nothing else may bring it back in autostart mode.
+                    if error.code == codes::drain_timeout().code {
+                        self.recover_from_drain_timeout(*via).await;
+                    }
+                    return Err(error);
                 }
-                service.wait_until_reachable().await?;
+                self.restart_after_drain(*via).await?;
                 Ok(Some(Action::Updated))
             }
             Plan::Start { update, via } => {
@@ -821,6 +837,59 @@ impl<'a> Run<'a> {
         }
     }
 
+    /// Brings the daemon back after `jetd core` drained it for an
+    /// activation or a rollback. Under systemd, `Restart=always` restarts a
+    /// daemon the unit supervises; one it does not (started by hand or by
+    /// an older app while the unit existed), or one that hit its start
+    /// limit, does not come back, so the unit is then reset and started.
+    /// In autostart mode this app starts it.
+    async fn restart_after_drain(&mut self, via: Via) -> Result<(), PublicError> {
+        match via {
+            Via::Spawn => self.spawn()?,
+            Via::Systemd => {
+                if self.service.wait_until_reachable().await.is_ok() {
+                    return Ok(());
+                }
+                self.systemd_start().await?;
+            }
+        }
+        self.service.wait_until_reachable().await
+    }
+
+    /// `jetd core` signalled the daemon to drain but stopped waiting for it
+    /// (`service.drain_timeout`); `current` did not move. The daemon still
+    /// stops once its work ends, and in autostart mode, or under a unit
+    /// that does not supervise it, nothing would start it again. Waits a
+    /// bounded time for the Plane to be free, then starts `current`. A
+    /// daemon that answers again (systemd restarted it) or still holds the
+    /// Plane at the end is left alone; Repair starts it later.
+    async fn recover_from_drain_timeout(&mut self, via: Via) {
+        let service = self.service;
+        let jetd = self.settings().current_jetd();
+        let home = self.settings().jet_home.clone();
+        let started = service.clock.now();
+        loop {
+            if service.probe().await {
+                return;
+            }
+            let free = core_cli::status(self.processes(), &jetd, &home)
+                .await
+                .is_ok_and(|status| status.owner == Owner::Free);
+            if free {
+                let _ = match via {
+                    Via::Spawn => self.spawn(),
+                    Via::Systemd => self.systemd_start().await,
+                };
+                let _ = service.wait_until_reachable().await;
+                return;
+            }
+            if service.clock.now().saturating_duration_since(started) >= DRAIN_EXIT_WAIT {
+                return;
+            }
+            service.clock.sleep(POLL).await;
+        }
+    }
+
     /// A detached `current/jetd serve --channel gui` for this session.
     fn spawn(&self) -> Result<(), PublicError> {
         let settings = self.settings();
@@ -842,26 +911,46 @@ impl<'a> Run<'a> {
         {
             return Err(codes::review_stale());
         }
-        let systemd = self.systemd().await && manager::exists(&self.settings().unit_path());
+        let via = if self.systemd().await && manager::exists(&self.settings().unit_path()) {
+            Via::Systemd
+        } else {
+            Via::Spawn
+        };
         let jetd = self.settings().current_jetd();
         // Refused, timed out draining, or failed: `current` did not move.
-        core_cli::rollback(self.processes(), &jetd, &self.settings().jet_home).await?;
-        let restarted = match (systemd, &status.owner) {
-            // The drained daemon comes back through `Restart=always`.
-            (true, Owner::Held { .. }) => Ok(()),
-            (true, Owner::Free) => self.systemd_start().await,
-            (false, _) => self.spawn(),
+        if let Err(error) =
+            core_cli::rollback(self.processes(), &jetd, &self.settings().jet_home).await
+        {
+            if error.code == codes::drain_timeout().code {
+                self.recover_from_drain_timeout(via).await;
+            }
+            return Err(error);
+        }
+        let restarted = match (via, &status.owner) {
+            // A drained daemon: systemd may bring it back itself.
+            (_, Owner::Held { .. }) => self.restart_after_drain(via).await,
+            (Via::Systemd, Owner::Free) => match self.systemd_start().await {
+                Ok(()) => service.wait_until_reachable().await,
+                Err(error) => Err(error),
+            },
+            (Via::Spawn, Owner::Free) => match self.spawn() {
+                Ok(()) => service.wait_until_reachable().await,
+                Err(error) => Err(error),
+            },
         };
-        let error = match restarted {
-            Ok(()) => service.wait_until_reachable().await.err(),
-            Err(error) => Some(error),
-        };
+        let error = restarted.err();
         Ok(Outcome {
             action: Some(Action::RolledBack),
             error,
             ..Outcome::default()
         })
     }
+}
+
+/// Where Homebrew on Linux may live (`homebrew.rs`), for the app updater:
+/// the `jet-app` cask's AppImage is Homebrew's to update.
+pub(crate) fn homebrew_prefixes(user_home: &Path) -> Vec<PathBuf> {
+    homebrew::prefixes(std::env::var_os("HOMEBREW_PREFIX"), user_home)
 }
 
 /// Runs short filesystem work off the async workers.

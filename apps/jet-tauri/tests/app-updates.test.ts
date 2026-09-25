@@ -44,7 +44,7 @@ function failure(code: string): PublicError {
   };
 }
 
-const update = (state: AppUpdateState): AppUpdate => ({ currentVersion: "0.2.0", state });
+const update = (state: AppUpdateState, revision = 0): AppUpdate => ({ revision, currentVersion: "0.2.0", state });
 
 type Script = {
   state: AppUpdateState;
@@ -63,25 +63,34 @@ function ipc(script: Script) {
   const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
   let preferences = script.preferences ?? { reopenLastTask: false, checkForUpdates: true };
   let watcher: Channel<AppUpdate> | null = null;
+  // The shell's revision: every published state gets the next one.
+  let revision = 1;
+  const publish = (state: AppUpdateState) => {
+    script.state = state;
+    revision += 1;
+    watcher?.onmessage(update(state, revision));
+  };
   vi.stubGlobal("window", { crypto: globalThis.crypto });
   mockIPC(async (command, args) => {
     const { onChange, ...plain } = (args ?? {}) as Record<string, unknown>;
     calls.push({ command, args: plain });
     switch (command) {
       case "load_app_update":
-        return update(script.state);
+        return update(script.state, revision);
       case "watch_app_update":
         watcher = onChange as Channel<AppUpdate>;
-        return update(script.state);
+        return update(script.state, revision);
       case "check_app_update":
         if (script.check && "code" in script.check) throw script.check;
-        script.state = script.check ?? script.state;
-        return update(script.state);
+        // As the shell does: `checking`, then the answer, both through the watcher.
+        publish({ kind: "checking" });
+        await Promise.resolve();
+        publish(script.check ?? script.state);
+        return update(script.state, revision);
       case "install_app_update": {
-        for (const state of script.install?.progress ?? []) watcher?.onmessage(update(state));
-        script.state = script.install?.result ?? script.state;
-        watcher?.onmessage(update(script.state));
-        return update(script.state);
+        for (const state of script.install?.progress ?? []) publish(state);
+        publish(script.install?.result ?? script.state);
+        return update(script.state, revision);
       }
       case "restart_after_update":
         if (script.restartFails) throw failure("update.not_ready");
@@ -100,10 +109,7 @@ function ipc(script: Script) {
     calls,
     preferences: () => preferences,
     /** A state the shell reached without this window asking. */
-    push: (state: AppUpdateState) => {
-      script.state = state;
-      watcher?.onmessage(update(state));
-    },
+    push: publish,
   };
 }
 
@@ -123,6 +129,8 @@ describe("app update adapter", () => {
     expect((await checkAppUpdate()).state.kind).toBe("available");
     expect((await installAppUpdate()).state).toEqual({ kind: "ready", version: "0.3.0" });
     expect(seen).toEqual([
+      { kind: "checking" },
+      { kind: "available", version: "0.3.0", dateUnixMs: null },
       { kind: "downloading", version: "0.3.0", downloaded: 10, total: 100 },
       { kind: "ready", version: "0.3.0" },
     ]);
@@ -238,7 +246,7 @@ describe("AppUpdateSession", () => {
       if (command === "watch_app_update") {
         watcher = (args as { onChange: Channel<AppUpdate> }).onChange;
         await held;
-        return update({ kind: "idle", upToDate: false });
+        return update({ kind: "idle", upToDate: false }, 1);
       }
       if (command === "load_desktop_preferences") return { reopenLastTask: true, checkForUpdates: true };
       throw new Error(command);
@@ -246,10 +254,41 @@ describe("AppUpdateSession", () => {
     const session = new AppUpdateSession();
     const started = session.start();
     await flush();
-    watcher!.onmessage(update({ kind: "checking" }));
+    watcher!.onmessage(update({ kind: "checking" }, 2));
     release();
     await started;
     expect(session.update?.state.kind).toBe("checking");
+  });
+
+  it("drops a Check reply older than a state the watcher already pushed", async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let watcher: Channel<AppUpdate> | null = null;
+    vi.stubGlobal("window", { crypto: globalThis.crypto });
+    mockIPC(async (command, args) => {
+      switch (command) {
+        case "watch_app_update":
+          watcher = (args as { onChange: Channel<AppUpdate> }).onChange;
+          return update({ kind: "idle", upToDate: false }, 1);
+        case "check_app_update":
+          await held;
+          return update({ kind: "available", version: "0.3.0", dateUnixMs: null }, 3);
+        case "load_desktop_preferences":
+          return { reopenLastTask: true, checkForUpdates: true };
+        default:
+          throw new Error(command);
+      }
+    });
+    const session = new AppUpdateSession();
+    await session.start();
+    const checking = session.check();
+    await flush();
+    watcher!.onmessage(update({ kind: "available", version: "0.3.0", dateUnixMs: null }, 3));
+    // Homebrew took over the service after the check ended.
+    watcher!.onmessage(update({ kind: "disabled", reason: "homebrew" }, 4));
+    release();
+    await checking;
+    expect(session.update).toMatchObject({ revision: 4, state: { kind: "disabled", reason: "homebrew" } });
   });
 
   it("closes the confirmation when the restart is refused", async () => {
@@ -268,6 +307,7 @@ describe("app update copy", () => {
     expect(updateDisabledText("homebrew")).toMatch(/Homebrew/);
     expect(updateDisabledText("development_build")).toBe("This is a development build, so it doesn't update itself.");
     expect(updateDisabledText("unsupported_install")).toMatch(/\.deb, \.rpm or AppImage/);
+    expect(updateDisabledText("service_unknown")).toMatch(/still checking who manages it/);
   });
 
   it("describes every state", () => {
@@ -275,8 +315,9 @@ describe("app update copy", () => {
     expect(updateStatusText(update({ kind: "available", version: "0.3.0", dateUnixMs: null }))).toBe(
       "Jet 0.3.0 is available. You have 0.2.0.",
     );
+    // Progress is not part of the spoken line.
     expect(updateStatusText(update({ kind: "downloading", version: "0.3.0", downloaded: 25, total: 100 }))).toBe(
-      "Downloading Jet 0.3.0: 25%",
+      "Downloading Jet 0.3.0…",
     );
     expect(updateStatusText(update({ kind: "downloading", version: "0.3.0", downloaded: 25, total: null }))).toBe(
       "Downloading Jet 0.3.0…",

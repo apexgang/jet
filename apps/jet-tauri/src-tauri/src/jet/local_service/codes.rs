@@ -14,7 +14,7 @@ pub(crate) fn channel_owned() -> PublicError {
 pub(crate) fn drain_timeout() -> PublicError {
     PublicError::unavailable(
         "service.drain_timeout",
-        "The Jet service didn't stop in time, so nothing was changed.",
+        "The Jet service didn't stop in time, so its version wasn't changed.",
         true,
     )
 }
@@ -24,6 +24,15 @@ pub(crate) fn install_failed() -> PublicError {
     PublicError::local_unavailable(
         "service.install_failed",
         "The Jet service couldn't be set up on this computer.",
+        true,
+    )
+}
+
+/// The system `tar` that unpacks the bundled payload was not found.
+pub(crate) fn tar_missing() -> PublicError {
+    PublicError::local_unavailable(
+        "service.tar_missing",
+        "Jet needs the tar program to set up its service. Install tar, then try Repair.",
         true,
     )
 }
@@ -153,10 +162,11 @@ mod tests {
 
     #[test]
     fn service_codes_are_safe_and_categorized() {
-        let cases: [(PublicError, &str, bool); 17] = [
+        let cases: [(PublicError, &str, bool); 18] = [
             (channel_owned(), "conflict", false),
             (drain_timeout(), "unavailable", true),
             (install_failed(), "internal", true),
+            (tar_missing(), "internal", true),
             (start_timeout(), "unavailable", true),
             (start_failed(), "internal", true),
             (systemd_unavailable(), "unavailable", true),

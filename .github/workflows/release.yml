@@ -148,7 +148,15 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7.0.1
+      # A published release keeps its assets, so a rerun after the artifacts
+      # expire downloads nothing and only checks GitHub's Latest.
+      - name: Check whether the release is published
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/publish-release.sh --check
       - uses: actions/download-artifact@v8.0.1
+        if: ${{ steps.release.outputs.published != 'true' }}
         with:
           pattern: jet-core-*
           merge-multiple: true
@@ -156,6 +164,7 @@ jobs:
       # publish-release.sh reads the bundles from here, apart from the core's
       # exact archive set.
       - uses: actions/download-artifact@v8.0.1
+        if: ${{ steps.release.outputs.published != 'true' }}
         with:
           pattern: jet-desktop-linux-*
           merge-multiple: true
@@ -191,7 +200,9 @@ jobs:
           ref: main
           path: homebrew-tap
           token: ${{ steps.app.outputs.token }}
-      # Writes Formula/jet.rb and Casks/jet-app.rb. The Swift app's release
+      # Brings Formula/jet.rb and Casks/jet-app.rb to the highest published
+      # stable release, which need not be this tag: this group keeps one
+      # pending job and cancels the older one. The Swift app's release
       # writes Casks/jet.rb, and Formula/jet.rb for a newer core, under its own
       # concurrency group; the script rebases onto its commits before pushing.
       - name: Update the core formula and the Linux desktop cask

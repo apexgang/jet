@@ -20,6 +20,7 @@ import {
   phaseText,
   provisioningText,
   rollbackLines,
+  rollbackRefusedNote,
   serviceErrorText,
   serviceProblem,
 } from "../src/lib/features/system/service-model";
@@ -113,7 +114,7 @@ describe("LocalServiceSession", () => {
     const { push } = ipc(async (command) => {
       if (command === "watch_local_service") {
         await held;
-        return serviceView({ phase: "checking" });
+        return serviceView({ revision: 1, phase: "checking" });
       }
       throw new Error(command);
     });
@@ -121,12 +122,12 @@ describe("LocalServiceSession", () => {
     const session = new LocalServiceSession((view, previous) => changes.push([view.phase, previous?.phase ?? null]));
     const started = session.start();
     await flush();
-    push(serviceView({ phase: "installing" }));
+    push(serviceView({ revision: 2, phase: "installing" }));
     release();
     await started;
     expect(session.view?.phase).toBe("installing");
     expect(session.provisioning).toBe(true);
-    push(serviceView({ phase: "running", lastAction: "installed" }));
+    push(serviceView({ revision: 3, phase: "running", lastAction: "installed" }));
     expect(session.view?.phase).toBe("running");
     expect(session.provisioning).toBe(false);
     expect(changes).toEqual([
@@ -137,7 +138,34 @@ describe("LocalServiceSession", () => {
     // Registered once per window.
     await session.start();
     session.dispose();
-    push(serviceView({ phase: "failed" }));
+    push(serviceView({ revision: 4, phase: "failed" }));
+    expect(session.view?.phase).toBe("running");
+  });
+
+  it("drops a Repair reply older than a view the watcher already pushed", async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const { push } = ipc(async (command) => {
+      if (command === "watch_local_service") return serviceView({ revision: 1, phase: "failed", canRepair: true });
+      if (command === "repair_local_service") {
+        await held;
+        // The pass ended at revision 3; the reply crossed a newer push.
+        return serviceView({ revision: 3, lastAction: "started" });
+      }
+      throw new Error(command);
+    });
+    const session = new LocalServiceSession();
+    await session.start();
+    const repairing = session.repair();
+    await flush();
+    push(serviceView({ revision: 3, lastAction: "started" }));
+    // Another window's pass began after this one ended.
+    push(serviceView({ revision: 4, phase: "checking" }));
+    release();
+    await repairing;
+    expect(session.view).toMatchObject({ revision: 4, phase: "checking" });
+    // A later view still applies.
+    push(serviceView({ revision: 5, phase: "running" }));
     expect(session.view?.phase).toBe("running");
   });
 
@@ -272,6 +300,10 @@ describe("local service copy", () => {
     expect(serviceErrorText(failure("service.homebrew_start_failed"))).toContain(
       "brew services start apexgang/tap/jet in a terminal",
     );
+    // A drain that timed out was asked to stop: only the version is kept.
+    expect(serviceErrorText(failure("service.drain_timeout"))).not.toMatch(/nothing was changed/i);
+    expect(rollbackRefusedNote(failure("service.drain_timeout"))).toBe("The version wasn't changed.");
+    expect(rollbackRefusedNote(failure("service.review_stale"))).toBe("Nothing was changed.");
     // An unknown code falls back to the shell's own sentence.
     expect(serviceErrorText(failure("service.future_code"))).toBe("service.future_code message");
   });

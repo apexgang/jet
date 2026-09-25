@@ -6,7 +6,6 @@ use jet_protocol::Event;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fs,
     io::{self, Read},
     path::{Path, PathBuf},
     sync::Mutex,
@@ -119,7 +118,7 @@ fn parse(value: serde_json::Value) -> Result<NotificationPreferences, PublicErro
 
 fn read_bounded(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    fs::File::open(path)?
+    super::local_store::open_regular(path)?
         .take(limit + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() as u64 > limit {
@@ -453,6 +452,7 @@ async fn read_fences(bridge: &JetBridge) -> Result<Vec<(PlaneId, u64)>, PublicEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     #[test]
     fn only_authoritative_attention_events_produce_generic_cues() {
         let mut event = jet_protocol::Event {

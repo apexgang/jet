@@ -150,7 +150,7 @@ fn parse_target(
 /// corrupt or names a section outside its pane.
 fn load_remembered(path: &Path) -> SettingsTarget {
     let mut bytes = Vec::new();
-    let read = fs::File::open(path).and_then(|file| {
+    let read = super::local_store::open_regular(path).and_then(|file| {
         file.take(MAX_SETTINGS_FILE_BYTES + 1)
             .read_to_end(&mut bytes)
     });

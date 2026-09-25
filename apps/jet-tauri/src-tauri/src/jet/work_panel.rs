@@ -554,12 +554,14 @@ pub(crate) async fn save_work_file(
             // edit: after a refresh the user may save anything again. Only
             // an uncertain outcome keeps it for an exact retry (D4).
             if definite(&error) {
-                bridge.work_panel.drop_edit(file_id)?;
+                bridge.work_panel.drop_edit(file_id, command_id)?;
             }
             return Err(bridge.settle(&bound.binding, PublicError::from_client(&error)));
         }
     };
-    bridge.work_panel.finish_edit(file_id, saved.clone())?;
+    bridge
+        .work_panel
+        .finish_edit(file_id, command_id, saved.clone())?;
     Ok(FileSavedView {
         file_id: file_id.to_string(),
         revision: revision_label(&saved),
@@ -1162,17 +1164,27 @@ impl WorkPanelState {
         Ok((command_id, revision))
     }
 
-    fn finish_edit(&self, file_id: Uuid, revision: FileRevision) -> Result<(), PublicError> {
-        self.drop_edit(file_id)?;
+    fn finish_edit(
+        &self,
+        file_id: Uuid,
+        command_id: Uuid,
+        revision: FileRevision,
+    ) -> Result<(), PublicError> {
+        self.drop_edit(file_id, command_id)?;
         self.remember_revision(file_id, revision)
     }
 
-    /// The edit's outcome is known: the next save is a new request.
-    fn drop_edit(&self, file_id: Uuid) -> Result<(), PublicError> {
-        self.edits
-            .lock()
-            .map_err(|_| PublicError::internal())?
-            .remove(&file_id);
+    /// The edit sent as `command_id` has a known outcome: the next save is
+    /// a new request. A newer pending edit that replaced it on this file
+    /// (after a reload showed a newer revision) keeps its own ID.
+    fn drop_edit(&self, file_id: Uuid, command_id: Uuid) -> Result<(), PublicError> {
+        let mut edits = self.edits.lock().map_err(|_| PublicError::internal())?;
+        if edits
+            .get(&file_id)
+            .is_some_and(|pending| pending.command_id == command_id)
+        {
+            edits.remove(&file_id);
+        }
         Ok(())
     }
 
@@ -1655,6 +1667,24 @@ mod tests {
             .unwrap();
         assert_ne!(second, first);
         assert_eq!(sent, revision("b"));
+
+        // The first save's late refusal settles only its own ID: the newer
+        // uncertain edit stays pending for its exact retry.
+        state.drop_edit(file, first).unwrap();
+        assert_eq!(
+            state
+                .edit_command(file, LOCAL, "other", revision("b"))
+                .unwrap(),
+            (second, revision("b"))
+        );
+        state.drop_edit(file, second).unwrap();
+        assert_ne!(
+            state
+                .edit_command(file, LOCAL, "other", revision("b"))
+                .unwrap()
+                .0,
+            second
+        );
     }
 
     /// D4: any definite refusal ends the pending edit, even without a

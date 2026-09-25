@@ -514,19 +514,20 @@ class HomebrewTemplates(unittest.TestCase):
         self.assertIn('brew install apexgang/tap/jet apexgang/tap/jet-app\n', cask)
         # Livecheck reads the latest release, never a page of the release list
         # that Swift app releases, one per push under apps/jet, can fill. Swift
-        # releases are created with --latest=false and each stable core release
-        # takes Latest; publish-release.sh fails if a non-core release still
-        # holds it (GitHub made the only Swift release Latest before any core
-        # release existed).
+        # releases are created with --latest=false, and publish-release.sh
+        # gives Latest to the highest stable core release, never to a patch for
+        # an older version, and fails if any other release holds it (GitHub
+        # made the only Swift release Latest before any core release existed).
+        # test_publish_release.py runs it.
         self.assertIn('  livecheck do\n    url :url\n    strategy :github_latest\n  end\n', cask)
         swift = (ROOT / '.github/workflows/swift-release.yml').read_text()
         self.assertEqual(swift.count('gh release create '), 1)
         self.assertEqual(swift.count('--latest=false'), 1)
         self.assertNotIn('gh release edit', swift)
         publish = (ROOT / '.github/scripts/publish-release.sh').read_text()
-        self.assertIn('\n  gh release edit "$tag" --draft=false --latest\n', publish)
+        self.assertEqual(publish.count('gh release edit "$tag" --draft=false --latest\n'), 1)
         # Checked after publishing and on a rerun of a published release.
-        self.assertEqual(publish.count('\n    require_latest\n'), 1)
+        self.assertEqual(publish.count('\n  require_latest\n'), 1)
         self.assertTrue(publish.endswith('fi\nrequire_latest\n'))
         # Homebrew upgrades the app and the daemon together (ADR-0026), and
         # legacy flight blocks are deprecated.
@@ -617,6 +618,26 @@ class ReleaseWorkflows(unittest.TestCase):
             self.assertIn(path, paths)
             if '*' not in path:
                 self.assertTrue((ROOT / path).is_file(), path)
+
+    def test_packaging_rehearsal_runs_when_its_inputs_change(self):
+        # GitHub's path filters: `*` stops at a slash, `**` does not.
+        patterns = [re.escape(path).replace(r'\*\*', '.*').replace(r'\*', '[^/]*') for path in
+                    re.findall(r"(?m)^      - '([^']+)'$", (self.WORKFLOWS / 'packaging.yml').read_text())]
+        # The just recipes that package and gate the payload, the release
+        # profiles, and `jetd core describe`, which writes the manifest.
+        inputs = {'packages/justfile', 'packages/Cargo.toml', 'packages/jet-daemon/src/main.rs',
+                  'packages/jet-daemon/src/installation/mod.rs'}
+        # Every script the rehearsal's workflows run or import.
+        for workflow in ('packaging.yml', 'desktop-linux.yml', 'homebrew-check.yml', 'desktop-e2e.yml'):
+            text = (self.WORKFLOWS / workflow).read_text()
+            inputs.update(re.findall(r'\.github/scripts/[\w-]+\.\w+', text))
+            inputs.update(f'.github/scripts/{module}.py' for module in
+                          re.findall(r'sys\.path\.insert\(0, "\.github/scripts"\); import (\w+)', text))
+        self.assertIn('.github/scripts/package_swift_app.py', inputs)
+        for path in sorted(inputs):
+            with self.subTest(path=path):
+                self.assertTrue((ROOT / path).is_file())
+                self.assertTrue(any(re.fullmatch(pattern, path) for pattern in patterns))
 
     def test_packaging_rehearsal_runs_for_every_dependency_bump(self):
         # A Tauri CLI bump changes the bundle names release_assets.py expects;

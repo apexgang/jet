@@ -33,8 +33,6 @@ export class AppUpdateSession {
 
   private started = false;
   private disposed = false;
-  /** Set once a pushed state arrived, so an older initial answer never replaces it. */
-  private pushed = false;
 
   /** Registers this window's watcher and reads the preference; later calls do nothing. */
   async start(): Promise<void> {
@@ -49,14 +47,12 @@ export class AppUpdateSession {
 
   /** Follows the native update state; a second call replaces this window's watcher. */
   async watch(): Promise<void> {
-    this.pushed = false;
     try {
       const initial = await watchAppUpdate((update) => {
-        if (this.disposed) return;
-        this.pushed = true;
-        this.show(update);
+        if (!this.disposed) this.show(update);
       });
-      if (!this.disposed && !this.pushed) this.show(initial);
+      // A state pushed before this answer arrived has a higher revision.
+      if (!this.disposed) this.show(initial);
     } catch (error: unknown) {
       if (!this.disposed) this.error = publicError(error);
     }
@@ -143,7 +139,9 @@ export class AppUpdateSession {
     }
   }
 
+  /** Shows `update` unless a newer state is shown already (a reply can cross a push). */
   private show(update: AppUpdate): void {
+    if (this.update !== null && update.revision < this.update.revision) return;
     this.update = update;
     this.error = null;
   }

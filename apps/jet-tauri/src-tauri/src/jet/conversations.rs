@@ -69,6 +69,43 @@ struct SubmitRequest {
     attempt: Uuid,
 }
 
+impl ConversationCommands {
+    /// Refuses a composer Send whose `attempt` is still kept for another
+    /// kind of request or another target: an uncertain Run start retried as
+    /// a Turn (or the reverse) would send the prompt twice (finding 2). The
+    /// webview resends a kept attempt exactly as it was first sent.
+    fn check_attempt(
+        &self,
+        kind: SendKind,
+        target: SendTarget,
+        attempt: Uuid,
+    ) -> Result<(), PublicError> {
+        let started_elsewhere = self.start.holds(|kept, request| {
+            request.attempt == attempt && (kind != SendKind::Start || *kept != target)
+        })?;
+        let submitted_elsewhere = self.submit.holds(|kept, request| {
+            request.attempt == attempt && (kind != SendKind::Submit || *kept != target)
+        })?;
+        if started_elsewhere || submitted_elsewhere {
+            return Err(attempt_conflict());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SendKind {
+    Start,
+    Submit,
+}
+
+fn attempt_conflict() -> PublicError {
+    PublicError::conflict(
+        "conversation.attempt_conflict",
+        "This message is still being confirmed as a different request. Edit the draft to send it as a new one.",
+    )
+}
+
 impl ConversationState {
     pub(crate) fn new(app_data_directory: &Path) -> Self {
         let selection_path = app_data_directory.join(SELECTION_FILE);
@@ -374,6 +411,14 @@ pub(crate) async fn start_run(
     validate_token(&craft, "craft.identifier_invalid")?;
     let (binding, plane_client) = bridge.plane(plane_id.as_deref())?;
     async {
+        let target = SendTarget {
+            plane: binding.plane,
+            conversation_id,
+        };
+        bridge
+            .conversations
+            .commands
+            .check_attempt(SendKind::Start, target, attempt)?;
         let client = plane_client
             .connect()
             .await
@@ -392,10 +437,6 @@ pub(crate) async fn start_run(
                 "Choose a Craft that is installed on this Plane.",
             ));
         }
-        let target = SendTarget {
-            plane: binding.plane,
-            conversation_id,
-        };
         let request = StartRequest {
             craft: craft.clone(),
             prompt: prompt.clone(),
@@ -433,6 +474,10 @@ pub(crate) async fn submit_turn(
             plane: binding.plane,
             conversation_id,
         };
+        bridge
+            .conversations
+            .commands
+            .check_attempt(SendKind::Submit, target, attempt)?;
         let client = plane_client
             .connect()
             .await
@@ -649,7 +694,8 @@ mod tests {
 
     use super::{
         create_conversation, parse_selection, retention_name, submit_turn, validate_prompt,
-        validate_search, validate_token, ConversationState, SendTarget, StartRequest,
+        validate_search, validate_token, ConversationCommands, ConversationState, SendKind,
+        SendTarget, StartRequest, SubmitRequest,
     };
     use crate::jet::{
         command_ids::PendingCommands,
@@ -665,6 +711,67 @@ mod tests {
     /// One Send of the composer, and a later one.
     const SEND: Uuid = Uuid::from_u128(0xa1);
     const LATER_SEND: Uuid = Uuid::from_u128(0xa2);
+
+    /// Finding 2: a Send whose outcome is uncertain keeps its attempt bound
+    /// to the kind and target it was first sent as. Retried as the other
+    /// kind (a Run start as a Turn after the Run appeared, or the reverse)
+    /// or on another task, it would carry a new Command ID and deliver the
+    /// prompt twice, so it is refused; the exact retry still passes.
+    #[test]
+    fn a_kept_attempt_is_bound_to_its_kind_and_target() {
+        let commands = ConversationCommands::default();
+        let task = SendTarget {
+            plane: PlaneId::Local,
+            conversation_id: TASK,
+        };
+        let other_task = SendTarget {
+            plane: PlaneId::Local,
+            conversation_id: Uuid::from_u128(0xc9),
+        };
+        commands
+            .start
+            .id(
+                task,
+                StartRequest {
+                    craft: "claude".into(),
+                    prompt: "Ship it".into(),
+                    attempt: SEND,
+                },
+            )
+            .unwrap();
+        let refused = |kind, target| {
+            commands
+                .check_attempt(kind, target, SEND)
+                .err()
+                .map(|error| error.code)
+        };
+        assert_eq!(
+            refused(SendKind::Submit, task).as_deref(),
+            Some("conversation.attempt_conflict")
+        );
+        assert_eq!(
+            refused(SendKind::Start, other_task).as_deref(),
+            Some("conversation.attempt_conflict")
+        );
+        assert_eq!(refused(SendKind::Start, task), None);
+        assert!(commands
+            .check_attempt(SendKind::Submit, task, LATER_SEND)
+            .is_ok());
+
+        let commands = ConversationCommands::default();
+        commands
+            .submit
+            .id(
+                task,
+                SubmitRequest {
+                    prompt: "Ship it".into(),
+                    attempt: SEND,
+                },
+            )
+            .unwrap();
+        assert!(commands.check_attempt(SendKind::Start, task, SEND).is_err());
+        assert!(commands.check_attempt(SendKind::Submit, task, SEND).is_ok());
+    }
 
     /// Serves one `submit_turn` and answers its Command with `reply`, or
     /// admits the Turn. Returns the Command ID the shell sent.

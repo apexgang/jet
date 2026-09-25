@@ -7,7 +7,7 @@ import type { PublicError } from "./bridge";
  * installs natively; the webview has no updater permission. A check contacts
  * github.com.
  */
-export type AppUpdateDisabledReason = "homebrew" | "development_build" | "unsupported_install";
+export type AppUpdateDisabledReason = "homebrew" | "development_build" | "unsupported_install" | "service_unknown";
 
 export type AppUpdateState =
   | { kind: "disabled"; reason: AppUpdateDisabledReason }
@@ -20,7 +20,11 @@ export type AppUpdateState =
   | { kind: "ready"; version: string }
   | { kind: "failed"; error: PublicError };
 
-export type AppUpdate = { currentVersion: string; state: AppUpdateState };
+/**
+ * `revision` increases with every state the shell publishes; a reply or push
+ * with a lower one than the state shown is older and is dropped.
+ */
+export type AppUpdate = { revision: number; currentVersion: string; state: AppUpdateState };
 
 export const loadAppUpdate = () => invoke<AppUpdate>("load_app_update");
 

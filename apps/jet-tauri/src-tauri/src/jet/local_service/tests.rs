@@ -52,6 +52,11 @@ struct Core {
     payload_version: String,
     /// Forces `activate`'s exit code and output.
     activate: Option<(i32, &'static str)>,
+    /// Forces `rollback`'s exit code and output.
+    rollback: Option<(i32, &'static str)>,
+    /// After a forced drain timeout (exit 4), the signalled daemon finishes
+    /// draining and exits.
+    drain_exits: bool,
     /// `tar` exits 2 (a damaged archive, a noexec cache).
     tar_fails: bool,
     brew_ok: bool,
@@ -70,6 +75,8 @@ impl Core {
             comes_up: true,
             payload_version: BUNDLED.into(),
             activate: None,
+            rollback: None,
+            drain_exits: false,
             tar_fails: false,
             brew_ok: true,
         }
@@ -205,6 +212,7 @@ fn play(
                 ),
                 "activate" => {
                     if let Some((code, stdout)) = core.activate {
+                        drain_timed_out(&mut core, socket, code);
                         return exit(code, stdout);
                     }
                     let version = args[3].clone();
@@ -215,6 +223,10 @@ fn play(
                     )
                 }
                 "rollback" => {
+                    if let Some((code, stdout)) = core.rollback {
+                        drain_timed_out(&mut core, socket, code);
+                        return exit(code, stdout);
+                    }
                     let Some(previous) = core.previous.clone() else {
                         return exit(3, r#"{"status":"refused","code":"no_previous_version"}"#);
                     };
@@ -228,6 +240,15 @@ fn play(
             }
         }
         other => panic!("unexpected program {other}"),
+    }
+}
+
+/// `jetd core` gave up waiting for the drain (exit 4); the signalled daemon
+/// may exit afterwards.
+fn drain_timed_out(core: &mut Core, socket: &FakeReachability, code: i32) {
+    if code == 4 && core.drain_exits {
+        core.owner = Held::Free;
+        socket.set(false);
     }
 }
 
@@ -262,6 +283,8 @@ struct Setup {
     /// The cross-instance lock, instead of `app-data/local-service.lock`
     /// in the scratch directory.
     lock_file: Option<PathBuf>,
+    /// No system `tar` was found.
+    no_tar: bool,
 }
 
 impl Default for Setup {
@@ -272,6 +295,7 @@ impl Default for Setup {
             go_jet: false,
             configure: |_| (),
             lock_file: None,
+            no_tar: false,
         }
     }
 }
@@ -323,7 +347,7 @@ fn world(setup: Setup) -> World {
         homebrew_prefixes: vec![prefix],
         owner_uid: std::os::unix::fs::MetadataExt::uid(&fs::metadata(base).unwrap()),
         systemctl: Some(PathBuf::from("/usr/bin/systemctl")),
-        tar: Some(PathBuf::from("/usr/bin/tar")),
+        tar: (!setup.no_tar).then(|| PathBuf::from("/usr/bin/tar")),
     };
     let mut core = Core::new(jet_home);
     (setup.configure)(&mut core);
@@ -459,6 +483,37 @@ async fn a_fresh_computer_gets_the_bundled_service_under_systemd() {
     assert!(world.processes.detached_argvs().is_empty());
 }
 
+/// Finding 12: every published view carries a higher revision than the one
+/// before, and a Repair's reply carries the revision it was published
+/// with, so a window can drop a reply older than a view it was pushed.
+#[tokio::test]
+async fn every_published_view_has_a_higher_revision() {
+    let world = world(Setup::default());
+    let pushed = Arc::new(Mutex::new(Vec::new()));
+    let sink = pushed.clone();
+    let initial = world.state.watch("main", move |view| {
+        sink.lock().unwrap().push(view.revision);
+        true
+    });
+    assert_eq!(initial.revision, 0);
+    let first = world.state.provision().await;
+    let second = world.state.provision().await;
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    let pushed = pushed.lock().unwrap().clone();
+    assert!(
+        pushed.windows(2).all(|pair| pair[0] < pair[1]),
+        "{pushed:?}"
+    );
+    assert!(first.revision > 0);
+    assert!(second.revision > first.revision);
+    assert_eq!(pushed.last(), Some(&second.revision));
+    assert_eq!(world.state.view().revision, second.revision);
+    let json = serde_json::to_value(&second).unwrap();
+    assert_eq!(json["revision"], second.revision);
+}
+
 #[tokio::test]
 async fn without_systemd_the_app_writes_autostart_and_starts_jetd_itself() {
     let world = world(Setup {
@@ -551,6 +606,63 @@ async fn an_older_gui_daemon_is_updated_and_systemd_restarts_it() {
     assert!(!world.ran("systemctl --user start jetd.service"));
     assert!(!world.ran("systemctl --user daemon-reload"));
     assert!(world.processes.detached_argvs().is_empty());
+}
+
+/// Finding 4: a unit file exists, but systemd does not supervise the
+/// daemon (it was started by hand), so nothing restarts it after the
+/// activation drained it. The pass resets and starts the unit.
+#[tokio::test]
+async fn an_update_starts_a_daemon_systemd_did_not_restart() {
+    let world = world(Setup {
+        configure: |core| {
+            installed(core, "0.1.0");
+            core.owner = Held::Gui("0.1.0".into());
+        },
+        ..Setup::default()
+    });
+    manager::write_if_changed(&world.unit(), manager::UNIT_TEMPLATE.as_bytes(), 0o644).unwrap();
+
+    let view = world.state.provision().await;
+
+    assert_eq!(view.phase, Phase::Running, "{view:?}");
+    assert_eq!(view.last_action, Some(Action::Updated));
+    assert_eq!(view.error, None);
+    assert_eq!(view.running_version.as_deref(), Some("0.2.0"));
+    assert!(world.ran("systemctl --user reset-failed jetd.service"));
+    assert!(world.ran("systemctl --user start jetd.service"));
+    assert!(world.processes.detached_argvs().is_empty());
+}
+
+/// Finding 10: in autostart mode `jetd core activate` signalled the daemon,
+/// gave up waiting (exit 4), and the daemon exited afterwards. The pass
+/// starts the unchanged `current` again instead of leaving no service, and
+/// still reports why it was not updated.
+#[tokio::test]
+async fn after_a_drain_timeout_the_old_version_is_started_again() {
+    let world = world(Setup {
+        configure: |core| {
+            core.systemd = false;
+            installed(core, "0.1.0");
+            core.owner = Held::Gui("0.1.0".into());
+            core.activate = Some((4, r#"{"status":"drain_timeout"}"#));
+            core.drain_exits = true;
+        },
+        ..Setup::default()
+    });
+    manager::write_if_changed(
+        &world.autostart(),
+        manager::AUTOSTART_TEMPLATE.as_bytes(),
+        0o644,
+    )
+    .unwrap();
+
+    let view = world.state.provision().await;
+
+    assert_eq!(code(&view), Some("service.drain_timeout"));
+    assert_eq!(view.phase, Phase::Running, "{view:?}");
+    assert_eq!(view.current_version.as_deref(), Some("0.1.0"));
+    assert_eq!(view.running_version.as_deref(), Some("0.1.0"));
+    assert_eq!(world.processes.detached_argvs().len(), 1);
 }
 
 #[tokio::test]
@@ -820,6 +932,20 @@ async fn a_socket_that_never_answers_ends_the_pass() {
     assert_eq!(next.error, None);
 }
 
+/// Finding 11: without a system `tar` the bundled payload cannot be
+/// unpacked; the pass says so instead of calling the payload damaged.
+#[tokio::test]
+async fn a_missing_tar_has_its_own_code() {
+    let world = world(Setup {
+        no_tar: true,
+        ..Setup::default()
+    });
+    let view = world.state.provision().await;
+    assert_eq!(view.phase, Phase::Failed, "{view:?}");
+    assert_eq!(code(&view), Some("service.tar_missing"));
+    assert!(view.can_repair);
+}
+
 #[tokio::test]
 async fn a_payload_for_another_version_is_refused_before_staging() {
     let world = world(Setup {
@@ -893,6 +1019,65 @@ async fn reviewed_rollback_switches_back_and_sticks() {
     assert_eq!(next.current_version.as_deref(), Some("0.1.0"));
     assert_eq!(next.last_action, None);
     assert!(!world.ran("jetd core activate --version 0.2.0 --home"));
+}
+
+/// Finding 4 for a rollback: systemd does not supervise the drained
+/// daemon, so the pass starts the unit with the previous version.
+#[tokio::test]
+async fn a_rollback_starts_a_daemon_systemd_did_not_restart() {
+    let world = world(Setup {
+        configure: |core| {
+            installed(core, "0.1.0");
+            installed(core, "0.2.0");
+            core.owner = Held::Gui("0.2.0".into());
+        },
+        ..Setup::default()
+    });
+    manager::write_if_changed(&world.unit(), manager::UNIT_TEMPLATE.as_bytes(), 0o644).unwrap();
+    let review = world.state.prepare_rollback().await.unwrap();
+    let review_id = serde_json::to_value(&review).unwrap()["reviewId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let view = world.state.execute_rollback(&review_id).await.unwrap();
+
+    assert_eq!(view.phase, Phase::Running, "{view:?}");
+    assert_eq!(view.error, None);
+    assert_eq!(view.running_version.as_deref(), Some("0.1.0"));
+    assert!(world.ran("systemctl --user start jetd.service"));
+}
+
+/// Finding 10 for a rollback: the drain timed out and the daemon exited
+/// later; the unchanged `current` is started again and the refusal says
+/// the version was not changed.
+#[tokio::test]
+async fn a_rollback_drain_timeout_starts_the_service_again() {
+    let world = world(Setup {
+        configure: |core| {
+            core.systemd = false;
+            installed(core, "0.1.0");
+            installed(core, "0.2.0");
+            core.owner = Held::Gui("0.2.0".into());
+            core.rollback = Some((4, r#"{"status":"drain_timeout"}"#));
+            core.drain_exits = true;
+        },
+        ..Setup::default()
+    });
+    let review = world.state.prepare_rollback().await.unwrap();
+    let review_id = serde_json::to_value(&review).unwrap()["reviewId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let error = world.state.execute_rollback(&review_id).await.unwrap_err();
+
+    assert_eq!(error.code, "service.drain_timeout");
+    assert!(!error.message.contains("nothing was changed"));
+    let view = world.state.view();
+    assert_eq!(view.phase, Phase::Running, "{view:?}");
+    assert_eq!(view.current_version.as_deref(), Some("0.2.0"));
+    assert_eq!(world.processes.detached_argvs().len(), 1);
 }
 
 #[tokio::test]

@@ -18,7 +18,7 @@ use uuid::Uuid;
 /// is larger than `max`. The size is checked before reading, and the read
 /// itself stops after `max + 1` bytes in case the file grew in between.
 pub(crate) fn read_bounded(path: &Path, max: u64) -> io::Result<Option<Vec<u8>>> {
-    let file = match fs::File::open(path) {
+    let file = match open_regular(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
@@ -28,6 +28,31 @@ pub(crate) fn read_bounded(path: &Path, max: u64) -> io::Result<Option<Vec<u8>>>
     }
     read_limited(file, max).map(Some)
 }
+
+/// Opens `path` for reading only when it is a regular file. A FIFO, socket
+/// or device in its place would block the read (and launch) or never end,
+/// so it is `InvalidData`, as damaged content is; a directory is
+/// `IsADirectory`. The open itself never waits: on Linux it is
+/// non-blocking, which changes nothing for a regular file.
+pub(crate) fn open_regular(path: &Path) -> io::Result<fs::File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(target_os = "linux")]
+    options.custom_flags(O_NONBLOCK);
+    let file = options.open(path)?;
+    let kind = file.metadata()?.file_type();
+    if kind.is_dir() {
+        Err(io::Error::from(io::ErrorKind::IsADirectory))
+    } else if kind.is_file() {
+        Ok(file)
+    } else {
+        Err(io::Error::from(io::ErrorKind::InvalidData))
+    }
+}
+
+/// `O_NONBLOCK` on every Linux architecture this app builds for.
+#[cfg(target_os = "linux")]
+const O_NONBLOCK: i32 = 0o4000;
 
 fn read_limited(reader: impl Read, max: u64) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
@@ -134,6 +159,33 @@ mod tests {
         let error = read_limited(grown, 1024).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert_eq!(read_limited(&b"12345"[..], 5).unwrap(), b"12345");
+    }
+
+    /// Finding 8: a FIFO in a file's place (`client-id`, `planes.json`)
+    /// used to block the read, and launch with it, until a writer came.
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_is_damaged_content_and_never_blocks() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("client-id");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let (done, finished) = std::sync::mpsc::channel();
+        let reader = path.clone();
+        std::thread::spawn(move || {
+            let _ = done.send(read_bounded(&reader, 64).map_err(|error| error.kind()));
+        });
+        let read = finished
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("reading a FIFO must not block");
+        assert_eq!(read, Err(io::ErrorKind::InvalidData));
+        assert_eq!(
+            open_regular(directory.path()).unwrap_err().kind(),
+            io::ErrorKind::IsADirectory
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@
 
   import SettingsDialog from "$lib/features/settings/SettingsDialog.svelte";
   import type { AppUpdateSession } from "./updates.svelte";
+  import { keepFocus } from "./keep-focus";
   import { downloadPercent, updateStatusText } from "./service-model";
 
   let { updates }: { updates: AppUpdateSession } = $props();
@@ -15,9 +16,32 @@
   const state = $derived(update?.state ?? null);
   const busy = $derived(updates.busy !== null);
   const percent = $derived(state?.kind === "downloading" ? downloadPercent(state.downloaded, state.total) : null);
+
+  /**
+   * The one main action. It stays the same button while the state moves on
+   * (Check → Checking… → Install → Installing… → Restart), so focus stays on
+   * it; while its work is under way it is `aria-disabled`, not `disabled`,
+   * which would drop focus to the page.
+   */
+  const primary = $derived.by(() => {
+    switch (state?.kind) {
+      case "available":
+        return { label: `Install Jet ${state.version}`, waiting: busy, run: () => void updates.install() };
+      case "downloading":
+        return { label: "Installing…", waiting: true, run: () => undefined };
+      case "ready":
+        return { label: "Restart Jet…", waiting: busy, run: () => updates.requestRestart() };
+      case "checking":
+        return { label: "Checking…", waiting: true, run: () => undefined };
+      default:
+        return { label: "Check for updates", waiting: busy, run: () => void updates.check() };
+    }
+  });
+
+  const heading = () => document.getElementById(HEADING_ID);
 </script>
 
-<div class="app-updates">
+<div class="app-updates" use:keepFocus={heading}>
   <h3 id={HEADING_ID} tabindex="-1">App updates</h3>
   {#if update === null || state === null}
     {#if updates.error}
@@ -31,18 +55,22 @@
       <span class="loading-bar short" aria-hidden="true"></span>
     {/if}
   {:else}
+    <!-- Spoken once per state: download progress stays out of this region. -->
     <p role="status" aria-live="polite">
       {updateStatusText(update)}
       {#if state.kind === "failed"}<code>{state.error.code}</code>{/if}
     </p>
     {#if state.kind === "downloading"}
-      <progress
-        aria-label={`Downloading Jet ${state.version}`}
-        max={state.total ?? undefined}
-        value={state.total === null ? undefined : state.downloaded}
-      >
-        {percent === null ? "" : `${percent}%`}
-      </progress>
+      <div class="progress">
+        <progress
+          aria-label={`Downloading Jet ${state.version}`}
+          max={state.total ?? undefined}
+          value={state.total === null ? undefined : state.downloaded}
+        >
+          {percent === null ? "" : `${percent}%`}
+        </progress>
+        {#if percent !== null}<span class="quiet" aria-hidden="true">{percent}%</span>{/if}
+      </div>
     {/if}
     {#if updates.error}
       <p class="notice critical" role="status">{updates.error.message} <code>{updates.error.code}</code></p>
@@ -50,23 +78,19 @@
 
     {#if state.kind !== "disabled"}
       <div class="actions">
+        <button
+          class="primary-button"
+          aria-disabled={primary.waiting}
+          aria-busy={state.kind === "checking" || state.kind === "downloading"}
+          onclick={() => {
+            if (!primary.waiting) primary.run();
+          }}
+        >
+          {primary.label}
+        </button>
         {#if state.kind === "available"}
-          <button class="primary-button" disabled={busy} onclick={() => void updates.install()}>
-            Install Jet {state.version}
-          </button>
-        {:else if state.kind === "downloading"}
-          <button class="primary-button" disabled aria-busy="true">Installing…</button>
-        {:else if state.kind === "ready"}
-          <button class="primary-button" disabled={busy} onclick={() => updates.requestRestart()}>Restart Jet…</button>
-        {/if}
-        {#if state.kind === "idle" || state.kind === "failed" || state.kind === "checking" || state.kind === "available"}
-          <button
-            class="secondary-button"
-            disabled={busy || state.kind === "checking"}
-            aria-busy={state.kind === "checking"}
-            onclick={() => void updates.check()}
-          >
-            {state.kind === "checking" ? "Checking…" : "Check for updates"}
+          <button class="secondary-button" disabled={busy} onclick={() => void updates.check()}>
+            Check for updates
           </button>
         {/if}
       </div>
@@ -140,6 +164,12 @@
     margin-left: 4px;
     color: var(--quiet);
     font-size: 11px;
+  }
+
+  .progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
   progress {

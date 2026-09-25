@@ -25,6 +25,11 @@ export type LocalServiceManager = "systemd" | "autostart" | "brew_services";
 export type LocalServiceAction = "installed" | "updated" | "started" | "rolled_back";
 
 export type LocalServiceView = {
+  /**
+   * Increases with every view the shell publishes. A reply or push with a
+   * lower revision than one already shown is older and is dropped.
+   */
+  revision: number;
   phase: LocalServicePhase;
   /** The owner's channel, or the one provisioning chose; null when unknown. */
   channel: LocalServiceChannel | null;
@@ -52,6 +57,11 @@ export type LocalServiceRollbackReview = {
   currentVersion: string;
   previousVersion: string;
 };
+
+/** Whether `next` is at least as new as `shown`, which a window may replace with it. */
+export function isCurrentView(next: { revision: number }, shown: { revision: number } | null): boolean {
+  return shown === null || next.revision >= shown.revision;
+}
 
 /** Phases while the shell works on the service; nothing can be started twice. */
 export function isProvisioning(phase: LocalServicePhase): boolean {

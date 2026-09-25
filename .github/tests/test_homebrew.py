@@ -29,9 +29,12 @@ args = sys.argv[1:]
 if args[:2] == ['release', 'download']:
     patterns = [args[i + 1] for i, arg in enumerate(args) if arg == '--pattern']
     assert patterns == ['jet.rb', 'jet-app.rb'], patterns
+    assert args[args.index('--repo') + 1] == 'apexgang/jet', args
     target = pathlib.Path(args[args.index('--dir') + 1])
     target.mkdir(parents=True, exist_ok=True)
-    published = pathlib.Path(os.environ['TEST_PUBLISHED'])
+    published = pathlib.Path(os.environ['TEST_PUBLISHED']) / args[2]
+    with open(os.environ['TEST_DOWNLOADS'], 'a') as log:
+        log.write(args[2] + '\\n')
     for name in patterns:
         shutil.copyfile(published / name, target / name)
 elif args[:2] == ['release', 'list']:
@@ -116,15 +119,26 @@ class HomebrewPublication(unittest.TestCase):
                        env=self.environment, check=True, capture_output=True, text=True)
 
     def update(self, version, listed, fresh=True, check=True):
-        """Runs update-homebrew.sh for tag `v<version>` with `listed` as the repository's releases."""
+        """Runs update-homebrew.sh for tag `v<version>` with `listed` as the repository's releases.
+
+        Every listed core release publishes its own formula and cask; the
+        result's `downloaded` names the releases the script downloaded.
+        """
         workspace = self.root / 'core'
         if fresh:
             self.checkout(workspace)
-        for name, text in rendered(version).items():
-            (self.published / name).write_text(text)
+        for release in json.loads(listed):
+            match = re.fullmatch(r'v([0-9]+\.[0-9]+\.[0-9]+)', release['tagName'])
+            if match:
+                (self.published / release['tagName']).mkdir(exist_ok=True)
+                for name, text in rendered(match[1]).items():
+                    (self.published / release['tagName'] / name).write_text(text)
+        downloads = self.root / 'downloads'
+        downloads.write_text('')
         env = dict(self.environment, GITHUB_REF_NAME=f'v{version}', RUNNER_TEMP=str(self.root / 'tmp'),
-                   TEST_PUBLISHED=str(self.published), TEST_RELEASES=listed)
+                   TEST_PUBLISHED=str(self.published), TEST_RELEASES=listed, TEST_DOWNLOADS=str(downloads))
         result = subprocess.run(['bash', str(SCRIPT)], cwd=workspace, env=env, capture_output=True, text=True)
+        result.downloaded = downloads.read_text().split()
         if check:
             self.assertEqual(result.returncode, 0, result.stderr)
         return result
@@ -167,26 +181,29 @@ class HomebrewPublication(unittest.TestCase):
     def test_never_downgrades_and_skips_both_when_either_is_newer(self):
         self.update('0.2.0', releases('v0.2.0'))
         kept = self.remote_head()
-        # An older tag: skipped by the highest stable core release, and by the
-        # tap's versions when that release is not listed.
+        # An older tag brings the tap to the highest stable core release, which
+        # it already holds; when that release is not listed, the tap's
+        # versions keep it.
         result = self.update('0.1.0', releases('v0.1.0', 'v0.2.0', 'swift-v1.0.9'))
-        self.assertIn('latest stable core release is v0.2.0', result.stdout)
+        self.assertEqual(result.downloaded, ['v0.2.0'])
+        self.assertIn('already has this release', result.stdout)
         result = self.update('0.1.0', releases('v0.1.0', 'swift-v1.0.9'))
+        self.assertEqual(result.downloaded, ['v0.1.0'])
         self.assertIn("the tap's Formula/jet.rb is newer", result.stdout)
         self.assertEqual(self.remote_head(), kept)
 
-        # Versions compare numerically, and drafts, prereleases and Swift app
-        # tags never count as the latest core release.
-        result = self.update('0.9.0', releases('v0.9.0', 'v0.10.0'))
-        self.assertIn('latest stable core release is v0.10.0', result.stdout)
-        self.assertEqual(self.remote_head(), kept)
-        self.update('0.3.0', releases('v0.2.0', 'v0.3.0', 'v1.0.0-beta', 'swift-v1.0.9',
-                                      drafts=('v0.9.0',), prereleases=('v0.4.0-rc.1',)))
+        # Drafts, prereleases and Swift app tags never count as the latest
+        # core release.
+        result = self.update('0.3.0', releases('v0.2.0', 'v0.3.0', 'v1.0.0-beta', 'swift-v1.0.9',
+                                               drafts=('v0.9.0',), prereleases=('v0.4.0-rc.1',)))
+        self.assertEqual(result.downloaded, ['v0.3.0'])
         self.assertEqual(self.remote_file('Formula/jet.rb'), rendered('0.3.0')['jet.rb'])
         kept = self.remote_head()
         result = self.update('0.3.0', releases('swift-v1.0.9', drafts=('v0.3.0',)), check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('No stable core release', result.stderr)
+        self.assertEqual(result.downloaded, [])
+        self.assertEqual(self.remote_head(), kept)
 
         # A newer cask alone also skips both.
         seed = self.checkout(self.root / 'maintainer')
@@ -198,6 +215,34 @@ class HomebrewPublication(unittest.TestCase):
         self.assertIn("the tap's Casks/jet-app.rb is newer", result.stdout)
         self.assertEqual(self.remote_head(), kept)
         self.assertEqual(self.remote_file('Formula/jet.rb'), rendered('0.3.0')['jet.rb'])
+
+        # Versions compare numerically: 0.10.0 is newer than the cask's 0.9.0.
+        result = self.update('0.9.0', releases('v0.9.0', 'v0.10.0'))
+        self.assertEqual(result.downloaded, ['v0.10.0'])
+        self.assertEqual(self.git(self.remote, 'log', '-1', '--format=%s', 'main'), 'Updated Jet to v0.10.0')
+        self.assertEqual(self.remote_file('Formula/jet.rb'), rendered('0.10.0')['jet.rb'])
+        self.assertEqual(self.remote_file('Casks/jet-app.rb'), rendered('0.10.0')['jet-app.rb'])
+
+    def test_any_run_brings_the_tap_to_the_highest_release(self):
+        # The tap jobs share one concurrency group, and GitHub keeps one
+        # pending job per group: a backport tagged after v0.3.1 cancels
+        # v0.3.1's pending tap job. The backport's run publishes v0.3.1's
+        # formula and cask in one commit instead of skipping.
+        self.update('0.3.0', releases('v0.3.0'))
+        result = self.update('0.2.5', releases('v0.3.0', 'v0.3.1', 'v0.2.5'))
+        self.assertEqual(result.downloaded, ['v0.3.1'])
+        self.assertIn('Updating the tap to v0.3.1, the latest stable core release, for v0.2.5', result.stdout)
+        head = self.remote_head()
+        self.assertEqual(self.git(self.remote, 'log', '-1', '--format=%s', head), 'Updated Jet to v0.3.1')
+        self.assertEqual(self.changed(head), ['Casks/jet-app.rb', 'Formula/jet.rb'])
+        self.assertEqual(self.remote_file('Formula/jet.rb'), rendered('0.3.1')['jet.rb'])
+        self.assertEqual(self.remote_file('Casks/jet-app.rb'), rendered('0.3.1')['jet-app.rb'])
+
+        # A rerun of v0.3.1's own job then changes nothing.
+        result = self.update('0.3.1', releases('v0.3.0', 'v0.3.1', 'v0.2.5'))
+        self.assertIn('Skipped v0.3.1: the tap already has this release', result.stdout)
+        self.assertNotIn('Updating the tap', result.stdout)
+        self.assertEqual(self.remote_head(), head)
 
     def test_a_swift_release_after_a_version_bump_leaves_linux_without_a_formula_until_that_tag(self):
         # The release-order rule in docs/core-distribution.md. The Swift

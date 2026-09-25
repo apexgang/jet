@@ -12,6 +12,11 @@ on:
       - '.github/packaging/**'
       - '.github/scripts/release*.py'
       - '.github/scripts/*homebrew*'
+      # The build's toolchain and cache setup, and the Swift app's cask that
+      # homebrew-check.yml installs next to this release's formula.
+      - '.github/scripts/setup-rust.sh'
+      - '.github/scripts/cache_sources.py'
+      - '.github/scripts/package_swift_app.py'
       - '.github/workflows/release.yml'
       - '.github/workflows/packaging.yml'
       - '.github/workflows/desktop-linux.yml'
@@ -20,6 +25,12 @@ on:
       - 'apps/jet-tauri/src-tauri/tauri*.json'
       - 'apps/jet-tauri/justfile'
       - 'apps/jet-tauri/scripts/release/**'
+      # The recipes that package and gate the core payload, the release
+      # profiles, and `jetd core describe`, which writes its manifest.
+      - 'packages/justfile'
+      - 'packages/Cargo.toml'
+      - 'packages/jet-daemon/src/main.rs'
+      - 'packages/jet-daemon/src/installation/**'
       # The journey itself, the timing marks it reads, and the provisioning
       # it checks on a real runner. The shell and Settings views it reads
       # are pinned on every app change by tests that run its page script

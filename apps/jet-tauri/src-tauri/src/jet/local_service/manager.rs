@@ -44,12 +44,31 @@ pub(crate) fn autostart_path(config_home: &Path) -> PathBuf {
     config_home.join("autostart/jetd.desktop")
 }
 
-/// The first of the usual absolute locations that is a file.
-pub(crate) fn locate(candidates: &[&str]) -> Option<PathBuf> {
-    candidates
+/// A system tool (`systemctl`, `tar`): the first of `fixed` (the usual
+/// absolute locations), then `name` in each absolute directory of `path`
+/// (`$PATH`), so NixOS and Guix, which keep tools in their profiles, work.
+/// Each candidate is canonicalized and must be a regular executable file
+/// owned by root or `owner_uid`, so another local user cannot plant one in
+/// a shared directory on `$PATH`. Relative `$PATH` entries are skipped.
+pub(crate) fn locate(
+    name: &str,
+    fixed: &[&str],
+    path: Option<&std::ffi::OsStr>,
+    owner_uid: u32,
+) -> Option<PathBuf> {
+    let searched = path
+        .map(|path| std::env::split_paths(path).collect::<Vec<_>>())
+        .unwrap_or_default();
+    fixed
         .iter()
         .map(PathBuf::from)
-        .find(|path| fs::metadata(path).is_ok_and(|metadata| metadata.is_file()))
+        .chain(
+            searched
+                .into_iter()
+                .filter(|directory| directory.is_absolute())
+                .map(|directory| directory.join(name)),
+        )
+        .find_map(|candidate| super::homebrew::trusted_executable(&candidate, owner_uid))
 }
 
 pub(crate) fn systemctl(systemctl: &Path, args: &[&str]) -> Invocation {
@@ -174,6 +193,47 @@ pub(crate) fn exists(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Finding 11: tools outside `/usr/bin` and `/bin` (a NixOS or Guix
+    /// profile) are found on `$PATH`, canonical, and only as executable
+    /// regular files; relative `$PATH` entries are ignored.
+    #[test]
+    fn system_tools_are_found_on_the_path_too() {
+        let directory = tempfile::tempdir().unwrap();
+        let uid = std::os::unix::fs::MetadataExt::uid(&fs::metadata(directory.path()).unwrap());
+        let store = directory.path().join("store/tar-1.35/bin");
+        fs::create_dir_all(&store).unwrap();
+        let tool = store.join("tar");
+        fs::write(&tool, b"#!/bin/sh\n").unwrap();
+        fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).unwrap();
+        let profile = directory.path().join("profile/bin");
+        fs::create_dir_all(&profile).unwrap();
+        std::os::unix::fs::symlink(&tool, profile.join("tar")).unwrap();
+        let plain = directory.path().join("plain");
+        fs::create_dir_all(&plain).unwrap();
+        fs::write(plain.join("tar"), b"not executable").unwrap();
+        fs::create_dir_all(plain.join("systemctl")).unwrap();
+
+        let path = std::env::join_paths([
+            PathBuf::from("relative/bin"),
+            plain.clone(),
+            profile.clone(),
+        ])
+        .unwrap();
+        let missing = "/nonexistent/bin/tar";
+        assert_eq!(
+            locate("tar", &[missing], Some(&path), uid),
+            Some(fs::canonicalize(&tool).unwrap())
+        );
+        assert_eq!(locate("systemctl", &[missing], Some(&path), uid), None);
+        assert_eq!(locate("tar", &[missing], None, uid), None);
+        // A fixed location still comes first.
+        let fixed = tool.to_string_lossy().into_owned();
+        assert_eq!(
+            locate("tar", &[&fixed], Some(&path), uid),
+            Some(fs::canonicalize(&tool).unwrap())
+        );
+    }
 
     /// The unit refuses to start without an activated core, gives Harness
     /// CLIs in `~/.local/bin` a PATH, and keeps helpers alive (Wave 4 §A).

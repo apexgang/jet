@@ -19,6 +19,9 @@
 //! `preferences.rs`); "Check for updates" in Settings always asks first.
 use std::{
     collections::HashMap,
+    fs,
+    future::Future,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -94,31 +97,107 @@ pub(crate) enum DisabledReason {
     DevelopmentBuild,
     /// Not running from a deb, rpm or AppImage bundle.
     UnsupportedInstall,
+    /// No settled view of the local service names its channel yet (the
+    /// launch pass is still running, or the daemon's owner is unknown), so
+    /// Homebrew may be managing this Jet.
+    ServiceUnknown,
 }
 
-/// Why updates are off, if they are.
-pub(crate) fn disabled_reason(
-    configured: bool,
-    installable: bool,
-    channel: Option<ServiceChannel>,
-) -> Option<DisabledReason> {
-    if !configured {
-        Some(DisabledReason::DevelopmentBuild)
-    } else if !installable {
-        Some(DisabledReason::UnsupportedInstall)
-    } else if channel == Some(ServiceChannel::Homebrew) {
-        Some(DisabledReason::Homebrew)
-    } else {
-        None
+/// How this copy of Jet was installed, as far as the updater is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Install {
+    /// A deb, an rpm, or an AppImage the plugin can replace in place.
+    Updatable,
+    /// Anything else, including an AppImage extracted to `squashfs-root`
+    /// (the bundle type says AppImage but no `$APPIMAGE` names a file).
+    Unsupported,
+    /// The `jet-app` cask's AppImage: Homebrew replaces it.
+    Homebrew,
+}
+
+/// The `jet-app` cask and the version-less target it installs.
+const CASK: &str = "jet-app";
+const CASK_APPIMAGE: &str = "Applications/Jet.AppImage";
+
+/// How this binary was installed. `appimage` is `$APPIMAGE` as Tauri read
+/// it (`app.env()`); `homebrew_prefixes` and `user_home` find the cask.
+pub(crate) fn install_kind(
+    bundle: Option<BundleType>,
+    appimage: Option<&Path>,
+    homebrew_prefixes: &[PathBuf],
+    user_home: &Path,
+) -> Install {
+    match (bundle, appimage) {
+        (Some(BundleType::Deb | BundleType::Rpm), _) => Install::Updatable,
+        (Some(BundleType::AppImage), Some(appimage)) => {
+            if homebrew_appimage(appimage, homebrew_prefixes, user_home) {
+                Install::Homebrew
+            } else {
+                Install::Updatable
+            }
+        }
+        _ => Install::Unsupported,
     }
 }
 
-/// Bundles the plugin can replace in place.
-pub(crate) fn installable(bundle: Option<BundleType>) -> bool {
-    matches!(
-        bundle,
-        Some(BundleType::Deb | BundleType::Rpm | BundleType::AppImage)
-    )
+/// Whether the running AppImage is Homebrew's: it lies under a Homebrew
+/// prefix (the Caskroom included), or it is the cask's
+/// `~/Applications/Jet.AppImage` while the Caskroom records `jet-app`. A copy
+/// the user placed at that same path while the cask is installed is
+/// indistinguishable, and is treated as Homebrew's.
+fn homebrew_appimage(appimage: &Path, homebrew_prefixes: &[PathBuf], user_home: &Path) -> bool {
+    let canonical = fs::canonicalize(appimage).unwrap_or_else(|_| appimage.to_owned());
+    let under_prefix = homebrew_prefixes.iter().any(|prefix| {
+        let prefix = fs::canonicalize(prefix).unwrap_or_else(|_| prefix.clone());
+        canonical.starts_with(prefix)
+    });
+    let cask_target = fs::canonicalize(user_home.join(CASK_APPIMAGE))
+        .is_ok_and(|target| target == canonical)
+        && homebrew_prefixes
+            .iter()
+            .any(|prefix| prefix.join("Caskroom").join(CASK).is_dir());
+    under_prefix || cask_target
+}
+
+/// Why updates are off, if they are. `service` is the local service's view:
+/// updates stay off until a settled view names a channel other than
+/// Homebrew, or shows that nothing is installed.
+pub(crate) fn disabled_reason(
+    configured: bool,
+    install: Install,
+    service: &LocalServiceView,
+) -> Option<DisabledReason> {
+    if !configured {
+        return Some(DisabledReason::DevelopmentBuild);
+    }
+    match install {
+        Install::Unsupported => return Some(DisabledReason::UnsupportedInstall),
+        Install::Homebrew => return Some(DisabledReason::Homebrew),
+        Install::Updatable => {}
+    }
+    match service.known_channel() {
+        Some(Some(ServiceChannel::Homebrew)) => Some(DisabledReason::Homebrew),
+        Some(_) => None,
+        None => Some(DisabledReason::ServiceUnknown),
+    }
+}
+
+/// Whether `$APPIMAGE` and `$APPDIR` in this process's environment can
+/// only have been inherited: a deb or rpm binary is never an AppImage, and
+/// Tauri's restart would launch whatever `$APPIMAGE` names.
+pub(crate) fn inherited_appimage_variables(bundle: Option<BundleType>) -> bool {
+    bundle != Some(BundleType::AppImage)
+}
+
+/// Clears `$APPIMAGE` and `$APPDIR` inherited from an AppImage that
+/// started this deb or rpm binary, before Tauri reads them, so "Restart
+/// Jet" relaunches this binary rather than that AppImage. Called first in
+/// `run`, before any thread starts.
+pub(crate) fn clear_inherited_appimage_variables() {
+    if inherited_appimage_variables(tauri::utils::platform::bundle_type()) {
+        std::env::remove_var("APPIMAGE");
+        std::env::remove_var("APPDIR");
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -159,6 +238,10 @@ pub(crate) enum UpdatePhase {
 pub(crate) struct AppUpdateView {
     current_version: &'static str,
     state: UpdatePhase,
+    /// Goes up whenever the update state or the service view it follows
+    /// changes, so a window drops an older reply (a Check's) that lands
+    /// after a newer pushed view.
+    revision: u64,
 }
 
 /// Where updates come from; the plugin in production, scripted in tests.
@@ -182,9 +265,10 @@ pub(crate) struct AppUpdateState {
 
 struct Updates {
     source: Option<Arc<dyn UpdateSource>>,
-    installable: bool,
+    install: Install,
     service: watch::Receiver<LocalServiceView>,
-    phase: watch::Sender<UpdatePhase>,
+    /// The phase, and how many times it changed.
+    phase: watch::Sender<(UpdatePhase, u64)>,
     /// One view watcher per window label (`watch_app_update`).
     watchers: Mutex<HashMap<String, AbortHandle>>,
     pending: Mutex<Option<Arc<dyn PendingUpdate>>>,
@@ -196,16 +280,16 @@ struct Updates {
 impl AppUpdateState {
     pub(crate) fn new(
         source: Option<Arc<dyn UpdateSource>>,
-        installable: bool,
+        install: Install,
         service: watch::Receiver<LocalServiceView>,
         restart: Box<dyn Fn() + Send + Sync>,
     ) -> Self {
         Self {
             inner: Arc::new(Updates {
                 source,
-                installable,
+                install,
                 service,
-                phase: watch::channel(UpdatePhase::Idle { up_to_date: false }).0,
+                phase: watch::channel((UpdatePhase::Idle { up_to_date: false }, 0)).0,
                 watchers: Mutex::new(HashMap::new()),
                 pending: Mutex::new(None),
                 busy: tokio::sync::Mutex::new(()),
@@ -214,57 +298,74 @@ impl AppUpdateState {
         }
     }
 
-    /// Production: the plugin when `configured`, this binary's bundle type,
-    /// and a restart through the event loop (window geometry is saved on
-    /// the way out).
+    /// Production: the plugin when `configured`, how this binary was
+    /// installed, and a restart through the event loop (window geometry is
+    /// saved on the way out).
     pub(crate) fn for_app(
         app: &AppHandle,
         configured: bool,
         service: watch::Receiver<LocalServiceView>,
+        user_home: &Path,
     ) -> Self {
         let source = configured
             .then(|| Arc::new(PluginSource { app: app.clone() }) as Arc<dyn UpdateSource>);
         let restart = app.clone();
+        let appimage = app.env().appimage.map(PathBuf::from);
         Self::new(
             source,
-            installable(bundle_type()),
+            install_kind(
+                bundle_type(),
+                appimage.as_deref(),
+                &super::local_service::homebrew_prefixes(user_home),
+                user_home,
+            ),
             service,
             Box::new(move || restart.request_restart()),
         )
     }
 
     fn disabled(&self) -> Option<DisabledReason> {
-        let channel = self.inner.service.borrow().channel;
-        disabled_reason(self.inner.source.is_some(), self.inner.installable, channel)
+        disabled_reason(
+            self.inner.source.is_some(),
+            self.inner.install,
+            &self.inner.service.borrow(),
+        )
     }
 
     fn phase(&self) -> UpdatePhase {
-        self.inner.phase.borrow().clone()
+        self.inner.phase.borrow().0.clone()
     }
 
     fn set(&self, phase: UpdatePhase) {
-        self.inner.phase.send_if_modified(|current| {
-            let changed = *current != phase;
+        self.inner.phase.send_if_modified(|(current, changes)| {
+            if *current == phase {
+                return false;
+            }
             *current = phase;
-            changed
+            *changes = changes.saturating_add(1);
+            true
         });
     }
 
     pub(crate) fn view(&self) -> AppUpdateView {
-        let phase = self.phase();
+        let (phase, changes) = self.inner.phase.borrow().clone();
+        let service = self.inner.service.borrow().clone();
         // An update already on its way or installed still waits for its
         // restart, whatever the service channel says now.
         let underway = matches!(
             phase,
             UpdatePhase::Ready { .. } | UpdatePhase::Downloading { .. }
         );
-        let state = match self.disabled() {
+        let disabled = disabled_reason(self.inner.source.is_some(), self.inner.install, &service);
+        let state = match disabled {
             Some(reason) if !underway => UpdatePhase::Disabled { reason },
             _ => phase,
         };
         AppUpdateView {
             current_version: env!("CARGO_PKG_VERSION"),
             state,
+            // Both counters only go up, so their sum does too.
+            revision: changes.saturating_add(service.revision),
         }
     }
 
@@ -294,7 +395,9 @@ impl AppUpdateState {
                     break;
                 }
                 let view = state.view();
-                if view != last {
+                // A revision alone (a service change the update state does
+                // not follow) is not worth a message.
+                if view.state != last.state {
                     last = view.clone();
                     if !send(view) {
                         break;
@@ -442,15 +545,30 @@ pub(crate) async fn after_launch(app: &AppHandle) {
     ) else {
         return;
     };
-    if !bridge.preferences.check_for_updates().unwrap_or(false) {
-        return;
-    }
     let updates = updates.inner().clone();
-    if updates.disabled().is_some() {
+    automatic_check(
+        &updates,
+        || bridge.preferences.check_for_updates().unwrap_or(false),
+        tokio::time::sleep(AUTOMATIC_DELAY),
+    )
+    .await;
+}
+
+/// Waits out `delay`, then checks once if the preference `wanted` allows it
+/// then: the user may turn it off during the delay (finding 6). A check
+/// while updates are off (`check`) contacts nothing.
+async fn automatic_check(
+    updates: &AppUpdateState,
+    wanted: impl Fn() -> bool,
+    delay: impl Future<Output = ()>,
+) {
+    if !wanted() {
         return;
     }
-    tokio::time::sleep(AUTOMATIC_DELAY).await;
-    let _ = updates.check().await;
+    delay.await;
+    if wanted() && updates.disabled().is_none() {
+        let _ = updates.check().await;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -519,7 +637,10 @@ impl PendingUpdate for PluginUpdate {
 fn check_error(error: tauri_plugin_updater::Error) -> PublicError {
     use tauri_plugin_updater::Error;
     match error {
-        Error::Reqwest(_) | Error::Network(_) | Error::Io(_) => offline(),
+        // `latest.json` arrived but is not JSON: the release is at fault,
+        // not the network.
+        Error::Reqwest(error) => reqwest_failure(error.is_decode()),
+        Error::Network(_) | Error::Io(_) => offline(),
         // The plugin's answer to any non-2xx reply (a GitHub outage, rate
         // limiting, a release without `latest.json` yet).
         Error::ReleaseNotFound => release_unavailable(),
@@ -529,6 +650,16 @@ fn check_error(error: tauri_plugin_updater::Error) -> PublicError {
         | Error::TargetNotFound(_)
         | Error::TargetsNotFound(_) => release_invalid(),
         _ => check_failed(),
+    }
+}
+
+/// A failed request for `latest.json`: a body that could not be decoded is
+/// `update.release_invalid`, anything else a network failure.
+fn reqwest_failure(decode: bool) -> PublicError {
+    if decode {
+        release_invalid()
+    } else {
+        offline()
     }
 }
 
@@ -693,7 +824,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::jet::errors::safe_code;
+    use crate::jet::{errors::safe_code, local_service::Phase};
 
     struct FakeSource {
         answers: Mutex<Vec<Checked>>,
@@ -781,10 +912,21 @@ mod tests {
         (initial.state, seen)
     }
 
-    fn service(channel: Option<ServiceChannel>) -> watch::Sender<LocalServiceView> {
+    /// A settled service view: running under `channel`, or nothing
+    /// installed when `channel` is `None`.
+    fn settled(channel: Option<ServiceChannel>) -> LocalServiceView {
         let mut view = LocalServiceView::checking(None);
         view.channel = channel;
-        watch::channel(view).0
+        view.phase = if channel.is_some() {
+            Phase::Running
+        } else {
+            Phase::NotInstalled
+        };
+        view
+    }
+
+    fn service(channel: Option<ServiceChannel>) -> watch::Sender<LocalServiceView> {
+        watch::channel(settled(channel)).0
     }
 
     fn state(
@@ -794,7 +936,7 @@ mod tests {
     ) -> AppUpdateState {
         AppUpdateState::new(
             source,
-            true,
+            Install::Updatable,
             service.subscribe(),
             Box::new(move || {
                 restarts.fetch_add(1, Ordering::SeqCst);
@@ -804,34 +946,179 @@ mod tests {
 
     #[test]
     fn updates_are_disabled_for_the_right_reason() {
-        let homebrew = Some(ServiceChannel::Homebrew);
-        let gui = Some(ServiceChannel::Gui);
+        let homebrew = settled(Some(ServiceChannel::Homebrew));
+        let gui = settled(Some(ServiceChannel::Gui));
+        let nothing = settled(None);
+        let (updatable, unsupported) = (Install::Updatable, Install::Unsupported);
         let cases = [
-            (false, true, gui, Some(DisabledReason::DevelopmentBuild)),
             (
                 false,
-                false,
-                homebrew,
+                updatable,
+                &gui,
                 Some(DisabledReason::DevelopmentBuild),
             ),
-            (true, false, gui, Some(DisabledReason::UnsupportedInstall)),
-            (true, true, homebrew, Some(DisabledReason::Homebrew)),
-            (true, true, gui, None),
-            (true, true, Some(ServiceChannel::Development), None),
-            (true, true, None, None),
+            (
+                false,
+                unsupported,
+                &homebrew,
+                Some(DisabledReason::DevelopmentBuild),
+            ),
+            (
+                true,
+                unsupported,
+                &gui,
+                Some(DisabledReason::UnsupportedInstall),
+            ),
+            (
+                true,
+                Install::Homebrew,
+                &gui,
+                Some(DisabledReason::Homebrew),
+            ),
+            (true, updatable, &homebrew, Some(DisabledReason::Homebrew)),
+            (true, updatable, &gui, None),
+            (
+                true,
+                updatable,
+                &settled(Some(ServiceChannel::Development)),
+                None,
+            ),
+            (true, updatable, &nothing, None),
         ];
-        for (configured, installable, channel, expected) in cases {
+        for (configured, install, service, expected) in cases {
             assert_eq!(
-                disabled_reason(configured, installable, channel),
+                disabled_reason(configured, install, service),
                 expected,
-                "{configured} {installable} {channel:?}"
+                "{configured} {install:?} {service:?}"
             );
         }
-        assert!(installable(Some(BundleType::Deb)));
-        assert!(installable(Some(BundleType::Rpm)));
-        assert!(installable(Some(BundleType::AppImage)));
-        assert!(!installable(None));
-        assert!(!installable(Some(BundleType::Dmg)));
+    }
+
+    /// Finding 3: while no settled view names the channel, Homebrew may be
+    /// managing this Jet, so updates stay off: before the first pass
+    /// settles, while it starts `brew services`, and for a daemon whose
+    /// owner metadata is unknown. A working view keeps the channel a
+    /// settled one found.
+    #[test]
+    fn an_unknown_service_channel_keeps_updates_off() {
+        let unknown = Some(DisabledReason::ServiceUnknown);
+        let launch = LocalServiceView::checking(Some("0.2.0".into()));
+        assert_eq!(disabled_reason(true, Install::Updatable, &launch), unknown);
+        let starting_brew = launch.working(Phase::Starting);
+        assert_eq!(
+            disabled_reason(true, Install::Updatable, &starting_brew),
+            unknown
+        );
+        let mut held_unknown = settled(None);
+        held_unknown.phase = Phase::Running;
+        assert_eq!(
+            disabled_reason(true, Install::Updatable, &held_unknown),
+            unknown
+        );
+        let mut failed = settled(None);
+        failed.phase = Phase::Failed;
+        assert_eq!(disabled_reason(true, Install::Updatable, &failed), unknown);
+        let repairing = settled(Some(ServiceChannel::Gui)).working(Phase::Checking);
+        assert_eq!(disabled_reason(true, Install::Updatable, &repairing), None);
+    }
+
+    /// Finding 3: which binaries the updater may replace. An AppImage needs
+    /// `$APPIMAGE` (an extracted `squashfs-root` has none), and the cask's
+    /// AppImage is Homebrew's.
+    #[test]
+    fn install_kinds() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        let prefix = directory.path().join("linuxbrew");
+        fs::create_dir_all(home.join("Applications")).unwrap();
+        fs::create_dir_all(prefix.join("Caskroom/jet-app/0.2.0")).unwrap();
+        let cask_image = home.join(CASK_APPIMAGE);
+        fs::write(&cask_image, b"elf").unwrap();
+        let downloaded = home.join("Downloads/Jet_0.2.0_amd64.AppImage");
+        fs::create_dir_all(downloaded.parent().unwrap()).unwrap();
+        fs::write(&downloaded, b"elf").unwrap();
+        let in_caskroom = prefix.join("Caskroom/jet-app/0.2.0/Jet.AppImage");
+        fs::write(&in_caskroom, b"elf").unwrap();
+        let prefixes = [prefix.clone()];
+        let kind =
+            |bundle, appimage: Option<&Path>| install_kind(bundle, appimage, &prefixes, &home);
+
+        assert_eq!(kind(Some(BundleType::Deb), None), Install::Updatable);
+        assert_eq!(kind(Some(BundleType::Rpm), None), Install::Updatable);
+        assert_eq!(kind(None, None), Install::Unsupported);
+        assert_eq!(kind(Some(BundleType::Dmg), None), Install::Unsupported);
+        assert_eq!(kind(Some(BundleType::AppImage), None), Install::Unsupported);
+        assert_eq!(
+            kind(Some(BundleType::AppImage), Some(&downloaded)),
+            Install::Updatable
+        );
+        assert_eq!(
+            kind(Some(BundleType::AppImage), Some(&cask_image)),
+            Install::Homebrew
+        );
+        assert_eq!(
+            kind(Some(BundleType::AppImage), Some(&in_caskroom)),
+            Install::Homebrew
+        );
+        // The same path without the cask installed is the user's own copy.
+        fs::remove_dir_all(prefix.join("Caskroom")).unwrap();
+        assert_eq!(
+            kind(Some(BundleType::AppImage), Some(&cask_image)),
+            Install::Updatable
+        );
+    }
+
+    /// Finding 5: Tauri's restart launches `$APPIMAGE` when it is set, so a
+    /// deb or rpm binary that inherited it clears it at launch.
+    #[test]
+    fn only_an_appimage_keeps_the_appimage_variables() {
+        assert!(!inherited_appimage_variables(Some(BundleType::AppImage)));
+        assert!(inherited_appimage_variables(Some(BundleType::Deb)));
+        assert!(inherited_appimage_variables(Some(BundleType::Rpm)));
+        assert!(inherited_appimage_variables(None));
+    }
+
+    /// Finding 6: the preference is read again after the delay, so turning
+    /// it off during the first 10 s stops the automatic check.
+    #[tokio::test]
+    async fn the_automatic_check_rereads_the_preference_after_its_delay() {
+        let service = service(Some(ServiceChannel::Gui));
+        let source = FakeSource::new(vec![Ok(None)]);
+        let updates = state(
+            Some(source.clone()),
+            &service,
+            Arc::new(AtomicUsize::new(0)),
+        );
+        let wanted = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let turned_off = wanted.clone();
+        automatic_check(&updates, || wanted.load(Ordering::SeqCst), async move {
+            turned_off.store(false, Ordering::SeqCst)
+        })
+        .await;
+        assert_eq!(source.checks.load(Ordering::SeqCst), 0);
+
+        automatic_check(&updates, || true, async {}).await;
+        assert_eq!(source.checks.load(Ordering::SeqCst), 1);
+    }
+
+    /// Finding 12: the revision goes up with every change of the update
+    /// state or of the service view, so a late reply is recognisably old.
+    #[tokio::test]
+    async fn the_view_revision_only_goes_up() {
+        let service = service(Some(ServiceChannel::Gui));
+        let update = FakeUpdate::new("0.3.0", vec![Ok(())]);
+        let source = FakeSource::new(vec![Ok(Some(update))]);
+        let updates = state(Some(source), &service, Arc::new(AtomicUsize::new(0)));
+        let first = updates.view().revision;
+        let checked = updates.check().await.revision;
+        assert!(checked > first);
+        service.send_modify(|view| view.revision += 1);
+        let after_service = updates.view().revision;
+        assert!(after_service > checked);
+        let installed = updates.install().await.unwrap().revision;
+        assert!(installed > after_service);
+        let json = serde_json::to_value(updates.view()).unwrap();
+        assert_eq!(json["revision"], installed);
     }
 
     /// The seam `lib.rs` uses: only a usable `plugins.updater` registers the
@@ -1106,6 +1393,10 @@ mod tests {
             (not_found.code.as_str(), not_found.retryable),
             ("update.release_unavailable", true)
         );
+        // Finding 7: a `latest.json` that is not JSON is the release's
+        // fault, not the network's.
+        assert_eq!(reqwest_failure(true).code, "update.release_invalid");
+        assert_eq!(reqwest_failure(false).code, "update.offline");
         let unreadable = check_error(tauri_plugin_updater::Error::Semver(
             semver::Version::parse("x").unwrap_err(),
         ));

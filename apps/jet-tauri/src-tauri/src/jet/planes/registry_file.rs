@@ -214,7 +214,7 @@ impl RegistryFile {
     pub(crate) fn load(&mut self) -> (Stored, Option<&'static str>) {
         let path = self.path();
         let read = (|| -> io::Result<Option<Vec<u8>>> {
-            let file = match fs::File::open(&path) {
+            let file = match crate::jet::local_store::open_regular(&path) {
                 Ok(file) => file,
                 Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
                 Err(error) => return Err(error),
@@ -231,8 +231,16 @@ impl RegistryFile {
                 None => self.reset(),
             },
             Ok(Some(_)) => self.reset(),
-            // A directory in its place can be set aside without losing data.
-            Err(error) if error.kind() == ErrorKind::IsADirectory => self.reset(),
+            // A directory, a FIFO or a device in its place can be set aside
+            // without losing data (a FIFO would have blocked launch).
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    ErrorKind::IsADirectory | ErrorKind::InvalidData
+                ) =>
+            {
+                self.reset()
+            }
             Err(_) => self.keep(REGISTRY_UNREADABLE),
         }
     }
@@ -411,6 +419,35 @@ mod tests {
 
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
         assert_eq!(RegistryFile::new(directory.path()).load(), (stored, None));
+    }
+
+    /// Finding 8: a FIFO in `planes.json`'s place blocked launch in the
+    /// read. It is set aside like a directory, and the registry starts
+    /// empty and writable.
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_in_place_of_the_registry_is_set_aside() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(FILE);
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        let (done, finished) = std::sync::mpsc::channel();
+        let at = directory.path().to_owned();
+        std::thread::spawn(move || {
+            let mut file = RegistryFile::new(&at);
+            let loaded = file.load();
+            let _ = done.send((loaded, file.read_only()));
+        });
+        let (loaded, read_only) = finished
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("loading must not block on a FIFO");
+        assert_eq!(loaded, (Stored::default(), Some(REGISTRY_RESET)));
+        assert!(!read_only);
+        assert!(!path.exists());
+        assert!(directory.path().join(INVALID).exists());
     }
 
     #[test]

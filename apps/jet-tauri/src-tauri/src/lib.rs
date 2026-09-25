@@ -8,6 +8,8 @@ use tauri::{Manager, RunEvent, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before Tauri reads them, and before any thread starts.
+    jet::updates::clear_inherited_appimage_variables();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -29,6 +31,7 @@ pub fn run() {
                 app.handle(),
                 updates_configured,
                 service.subscribe(),
+                &home_directory,
             ));
             app.manage(service);
             app.manage(bridge);

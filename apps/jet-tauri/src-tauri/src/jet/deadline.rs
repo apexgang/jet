@@ -34,10 +34,30 @@
 //! connection it happened on then fails every later request at once
 //! (`Connection::bounded`), local or remote, so a flow of many reads waits
 //! out one deadline rather than one per read.
+//!
+//! **Queued requests.** `jetd` serves one connection's requests one at a
+//! time, in arrival order, and a remote Plane's requests (Queries, Commands
+//! and the event feed) share one ssh session. A request's deadline therefore
+//! starts when it reaches the head of its connection's `RequestQueue`, not
+//! when it is sent: a feed page queued behind a healthy 60 s Craft discovery
+//! waits for it instead of expiring at 30 s and dropping the session under
+//! the discovery. Only the head can expire, and when it does the peer is hung:
+//! the queue is marked hung and every request behind it expires at once, so
+//! the connection (and, remote, its ssh session) is dropped once. A hung peer
+//! is detected within the head request's own deadline.
 
-use std::{fmt, future::Future, io, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    collections::VecDeque,
+    fmt,
+    future::Future,
+    io,
+    pin::Pin,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use jet_client::ClientError;
+use tokio::sync::watch;
 
 /// A local connect and handshake, a status read, or one event-feed page.
 pub(crate) const LIVENESS_DEADLINE: Duration = Duration::from_secs(30);
@@ -128,6 +148,161 @@ impl Deadlines {
             }
         }
     }
+
+    /// `request` on a connection whose requests `queue` orders: its deadline
+    /// starts when it reaches the head of the queue (now, when nothing is
+    /// ahead of it). The request is sent at once either way. It expires at
+    /// once when the queue is already hung, and an expiry at the head marks
+    /// the queue hung.
+    pub(crate) fn bound_in<T>(
+        &self,
+        queue: &Arc<RequestQueue>,
+        wait: Wait,
+        request: impl Future<Output = Result<T, ClientError>>,
+    ) -> impl Future<Output = Result<T, Box<ClientError>>> {
+        let ticket = queue.enter();
+        let limit = wait.limit();
+        // At the head already: the deadline starts now, not at first poll.
+        let started = ticket.at_head_now().then(|| self.timer.sleep(limit));
+        let timer = Arc::clone(&self.timer);
+        async move {
+            let deadline = async {
+                let sleep = match started {
+                    Some(sleep) => Some(sleep),
+                    None if ticket.reach_head().await => Some(timer.sleep(limit)),
+                    None => None,
+                };
+                if let Some(sleep) = sleep {
+                    sleep.await;
+                    ticket.queue.hang();
+                }
+            };
+            let result = tokio::select! {
+                biased;
+                result = request => result.map_err(Box::new),
+                () = deadline => Err(Box::new(expired(wait))),
+            };
+            drop(ticket);
+            result
+        }
+    }
+}
+
+/// The order a Plane serves one connection's requests in: `jetd` answers
+/// them one at a time, in arrival order. Each request holds a ticket while
+/// it waits; the oldest ticket is the request the Plane is working on.
+pub(crate) struct RequestQueue {
+    tickets: Mutex<Tickets>,
+    /// The head ticket, or `Hung` once a head outlived its deadline.
+    head: watch::Sender<Head>,
+}
+
+impl fmt::Debug for RequestQueue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("RequestQueue { .. }")
+    }
+}
+
+#[derive(Default)]
+struct Tickets {
+    next: u64,
+    waiting: VecDeque<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Head {
+    #[default]
+    Empty,
+    Ticket(u64),
+    Hung,
+}
+
+impl RequestQueue {
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            tickets: Mutex::new(Tickets::default()),
+            head: watch::Sender::new(Head::Empty),
+        })
+    }
+
+    /// Whether a request here outlived its deadline: the peer is hung.
+    pub(crate) fn is_hung(&self) -> bool {
+        *self.head.borrow() == Head::Hung
+    }
+
+    fn enter(self: &Arc<Self>) -> Ticket {
+        let id = match self.tickets.lock() {
+            Ok(mut tickets) => {
+                let id = tickets.next;
+                tickets.next += 1;
+                tickets.waiting.push_back(id);
+                self.publish(&tickets);
+                id
+            }
+            // A poisoned queue orders nothing: the request is its own head.
+            Err(_) => u64::MAX,
+        };
+        Ticket {
+            queue: Arc::clone(self),
+            id,
+        }
+    }
+
+    fn leave(&self, id: u64) {
+        if let Ok(mut tickets) = self.tickets.lock() {
+            tickets.waiting.retain(|waiting| *waiting != id);
+            self.publish(&tickets);
+        }
+    }
+
+    fn publish(&self, tickets: &Tickets) {
+        let head = tickets
+            .waiting
+            .front()
+            .map_or(Head::Empty, |id| Head::Ticket(*id));
+        self.head.send_if_modified(|current| {
+            if *current == Head::Hung || *current == head {
+                return false;
+            }
+            *current = head;
+            true
+        });
+    }
+
+    fn hang(&self) {
+        self.head.send_replace(Head::Hung);
+    }
+}
+
+/// One request's place in its connection's queue, released when dropped.
+struct Ticket {
+    queue: Arc<RequestQueue>,
+    id: u64,
+}
+
+impl Ticket {
+    fn at_head_now(&self) -> bool {
+        self.id == u64::MAX || *self.queue.head.borrow() == Head::Ticket(self.id)
+    }
+
+    /// Waits until this request is the head (true) or the queue is hung
+    /// (false).
+    async fn reach_head(&self) -> bool {
+        let mut head = self.queue.head.subscribe();
+        let id = self.id;
+        let reached = head
+            .wait_for(|head| *head == Head::Ticket(id) || *head == Head::Hung)
+            .await
+            .map(|head| *head != Head::Hung);
+        // An error: the queue is gone with its connection.
+        reached.unwrap_or(false)
+    }
+}
+
+impl Drop for Ticket {
+    fn drop(&mut self) {
+        self.queue.leave(self.id);
+    }
 }
 
 /// The marker inside an expired wait's `io::Error`.
@@ -208,7 +383,10 @@ pub(crate) mod tests {
 
     use jet_client::ClientError;
 
-    use super::{expired_wait, manual::ManualTimer, Deadlines, Wait, COMMAND_DEADLINE};
+    use super::{
+        expired_wait, manual::ManualTimer, Deadlines, RequestQueue, Wait, COMMAND_DEADLINE,
+        LIVENESS_DEADLINE, QUERY_DEADLINE,
+    };
 
     /// Polls `future` once: whether it is still waiting.
     pub(crate) async fn still_pending<F: Future + Unpin>(future: &mut F) -> bool {
@@ -277,5 +455,85 @@ pub(crate) mod tests {
             matches!(&*error, ClientError::Io(io) if io.kind() == std::io::ErrorKind::TimedOut)
         );
         assert_eq!(expired_wait(&ClientError::Closed), None);
+    }
+
+    fn never() -> (
+        tokio::sync::oneshot::Sender<u8>,
+        impl Future<Output = Result<u8, ClientError>>,
+    ) {
+        let (answer, answered) = tokio::sync::oneshot::channel::<u8>();
+        (answer, async {
+            answered.await.map_err(|_| ClientError::Closed)
+        })
+    }
+
+    /// `jetd` serves a connection's requests one at a time: a liveness read
+    /// queued behind a slow but healthy Query is not on its deadline until
+    /// the Query is answered, then gets its full 30 s.
+    #[tokio::test]
+    async fn a_queued_request_starts_its_deadline_at_the_head() {
+        let timer = Arc::new(ManualTimer::default());
+        let deadlines = Deadlines::on(timer.clone());
+        let queue = RequestQueue::new();
+        let (answer_query, query) = never();
+        let (answer_page, page) = never();
+        let query = deadlines.bound_in(&queue, Wait::Query, query);
+        let page = deadlines.bound_in(&queue, Wait::Liveness, page);
+        tokio::pin!(query, page);
+        assert!(still_pending(&mut query).await);
+        assert!(still_pending(&mut page).await);
+
+        timer.advance(2 * LIVENESS_DEADLINE);
+        assert!(
+            still_pending(&mut page).await,
+            "a read queued behind a healthy Query does not expire"
+        );
+        answer_query.send(1).unwrap();
+        assert_eq!(query.await.unwrap(), 1);
+
+        // The page is the head now: its deadline starts here.
+        assert!(still_pending(&mut page).await);
+        timer.advance(LIVENESS_DEADLINE - Duration::from_millis(1));
+        assert!(still_pending(&mut page).await);
+        answer_page.send(2).unwrap();
+        assert_eq!(page.await.unwrap(), 2);
+        assert!(!queue.is_hung());
+    }
+
+    /// D6 still holds: when the request at the head outlives its deadline
+    /// the peer is hung, and everything queued behind it expires with it
+    /// instead of waiting a deadline of its own. Later requests expire at
+    /// once.
+    #[tokio::test]
+    async fn a_hung_head_expires_every_request_behind_it() {
+        let timer = Arc::new(ManualTimer::default());
+        let deadlines = Deadlines::on(timer.clone());
+        let queue = RequestQueue::new();
+        let (_query_kept, query) = never();
+        let (_page_kept, page) = never();
+        let (_command_kept, command) = never();
+        let query = deadlines.bound_in(&queue, Wait::Query, query);
+        let page = deadlines.bound_in(&queue, Wait::Liveness, page);
+        let command = deadlines.bound_in(&queue, Wait::Command, command);
+        tokio::pin!(query, page, command);
+        assert!(still_pending(&mut query).await);
+        assert!(still_pending(&mut page).await);
+        assert!(still_pending(&mut command).await);
+
+        timer.advance(QUERY_DEADLINE);
+        assert_eq!(expired_wait(&query.await.unwrap_err()), Some(Wait::Query));
+        assert_eq!(expired_wait(&page.await.unwrap_err()), Some(Wait::Liveness));
+        assert_eq!(
+            expired_wait(&command.await.unwrap_err()),
+            Some(Wait::Command)
+        );
+        assert!(queue.is_hung());
+
+        let (_late_kept, late) = never();
+        let mut late = Box::pin(deadlines.bound_in(&queue, Wait::Query, late));
+        assert!(
+            !still_pending(&mut late).await,
+            "a hung queue waits no more"
+        );
     }
 }

@@ -68,7 +68,9 @@ export function serviceErrorText(error: PublicError | null): string {
     case "service.channel_owned":
       return "Another installation of Jet manages the service on this computer, so this app left it alone.";
     case "service.drain_timeout":
-      return "The running Jet service didn't stop in time, so nothing was changed. Try again when no task is finishing.";
+      // `jetd core` asked the daemon to stop before it gave up, so the
+      // service may have restarted; only the version is known to be kept.
+      return "The running Jet service didn't stop in time, so it keeps its current version. Try again when no task is finishing.";
     case "service.start_timeout":
       return "The Jet service was started but didn't answer in time.";
     case "service.systemd_unavailable":
@@ -77,6 +79,8 @@ export function serviceErrorText(error: PublicError | null): string {
       return "Homebrew couldn't start the Jet service. Try brew services start apexgang/tap/jet in a terminal.";
     case "service.payload_invalid":
       return "The Jet service included with this app is damaged. Reinstall Jet.";
+    case "service.tar_missing":
+      return "Jet needs the tar program to set up its service. Install tar, then try Repair.";
     case "service.busy":
       return "Another Jet window is already working on the service. Try again in a moment.";
     default:
@@ -142,6 +146,12 @@ export function actionText(view: LocalServiceView): string | null {
   }
 }
 
+/** What a refused rollback left as it was. */
+export function rollbackRefusedNote(error: PublicError): string {
+  // A drain that timed out may have stopped and restarted the service.
+  return error.code === "service.drain_timeout" ? "The version wasn't changed." : "Nothing was changed.";
+}
+
 /** The rollback review's consequences, in order. */
 export function rollbackLines(current: string, previous: string): string[] {
   return [
@@ -159,6 +169,8 @@ export function updateDisabledText(reason: AppUpdateDisabledReason): string {
       return "This is a development build, so it doesn't update itself.";
     case "unsupported_install":
       return "This copy of Jet can't update itself. Install it from a .deb, .rpm or AppImage release to get updates.";
+    case "service_unknown":
+      return "Jet is still checking who manages it on this computer. Updates are available once that is known.";
   }
 }
 
@@ -168,7 +180,11 @@ export function downloadPercent(downloaded: number, total: number | null): numbe
   return Math.min(100, Math.floor((downloaded / total) * 100));
 }
 
-/** The App updates block's status line. */
+/**
+ * The App updates block's status line, spoken by its live region. It changes
+ * with the state, never with download progress, so a screen reader hears
+ * each step once.
+ */
 export function updateStatusText(update: AppUpdate): string {
   const state = update.state;
   switch (state.kind) {
@@ -180,10 +196,9 @@ export function updateStatusText(update: AppUpdate): string {
       return "Checking for updates…";
     case "available":
       return `Jet ${state.version} is available. You have ${update.currentVersion}.`;
-    case "downloading": {
-      const percent = downloadPercent(state.downloaded, state.total);
-      return percent === null ? `Downloading Jet ${state.version}…` : `Downloading Jet ${state.version}: ${percent}%`;
-    }
+    // The live region speaks this once; the progress bar shows how far.
+    case "downloading":
+      return `Downloading Jet ${state.version}…`;
     case "ready":
       return `Jet ${state.version} is installed. Restart Jet to use it.`;
     case "failed":

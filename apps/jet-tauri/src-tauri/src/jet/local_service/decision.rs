@@ -243,9 +243,25 @@ pub(crate) struct LocalServiceView {
     pub(crate) can_rollback: bool,
     pub(crate) last_action: Option<Action>,
     pub(crate) error: Option<PublicError>,
+    /// Goes up with every view the service publishes, so a window drops an
+    /// older reply (a Repair's) that lands after a newer pushed view.
+    pub(crate) revision: u64,
 }
 
 impl LocalServiceView {
+    /// The channel that runs the local service, once a settled view knows
+    /// it: `Some(None)` when nothing is installed, `None` while it is not
+    /// known (before the first pass settles, or when the owner's metadata
+    /// could not be read). A view that is still working keeps the channel
+    /// of the settled view before it.
+    pub(crate) fn known_channel(&self) -> Option<Option<Channel>> {
+        match (self.channel, self.phase) {
+            (Some(channel), _) => Some(Some(channel)),
+            (None, Phase::NotInstalled) => Some(None),
+            (None, _) => None,
+        }
+    }
+
     /// Before the first observation.
     pub(crate) fn checking(bundled_version: Option<String>) -> Self {
         Self {
@@ -260,6 +276,7 @@ impl LocalServiceView {
             can_rollback: false,
             last_action: None,
             error: None,
+            revision: 0,
         }
     }
 
@@ -330,6 +347,7 @@ pub(crate) fn settle(facts: &Facts, outcome: &Outcome) -> LocalServiceView {
         // Kept while running too: an update that failed leaves the old
         // daemon serving, and the user still learns why.
         error: outcome.error.clone(),
+        revision: 0,
     }
 }
 
