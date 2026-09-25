@@ -421,8 +421,9 @@ class ReleaseAssets(unittest.TestCase):
         payload = dist / f'jet-core-{self.VERSION}-{label}.tar.gz'
         self.assertIn(f'url "file:///tmp/jet-assets/{payload.name}"', formula)
         self.assertIn(hashlib.sha256(payload.read_bytes()).hexdigest(), formula)
-        # The macOS and Linux ARM payloads were not built here.
-        self.assertEqual(formula.count(release_assets.UNBUILT), 2)
+        # The macOS payload (named once per Mac architecture) and the Linux
+        # ARM payload were not built here.
+        self.assertEqual(formula.count(release_assets.UNBUILT), 3)
         self.assertIn(f'url "file:///tmp/jet-assets/jet-core-{self.VERSION}-universal-apple-darwin.tar.gz"', formula)
         appimage = desktop / f'Jet_{self.VERSION}_amd64.AppImage'
         self.assertIn(f'x86_64_linux: "{hashlib.sha256(appimage.read_bytes()).hexdigest()}"', cask)
@@ -467,8 +468,9 @@ class HomebrewTemplates(unittest.TestCase):
         self.assertNotRegex(formula, '@[A-Z_0-9]+@')
         self.assertEqual(re.findall(self.SWIFT_VERSION_LINE, formula), ['0.2.0'])
         self.assertIn('  license "Apache-2.0"\n  depends_on :macos\n', formula)
-        self.assertIn('  on_macos do\n    url "https://github.com/apexgang/jet/releases/download/swift-v1.0.42/'
-                      'jet-core-0.2.0-universal-apple-darwin.tar.gz"\n    sha256 "' + 'b' * 64 + '"\n  end\n\n'
+        mac = ('      url "https://github.com/apexgang/jet/releases/download/swift-v1.0.42/'
+               'jet-core-0.2.0-universal-apple-darwin.tar.gz"\n      sha256 "' + 'b' * 64 + '"\n    end\n')
+        self.assertIn('  on_macos do\n    on_arm do\n' + mac + '    on_intel do\n' + mac + '  end\n\n'
                       '  def install\n', formula)
         self.assertNotIn('linux-gnu', formula)
         self.assertIn('ConditionFileIsExecutable=#{opt_bin}/jetd', formula)

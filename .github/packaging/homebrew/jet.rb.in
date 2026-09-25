@@ -8,9 +8,17 @@ class Jet < Formula
   version "@VERSION@"
   license "Apache-2.0"
 
+  # One universal archive serves both Mac architectures; Homebrew's style
+  # check allows url and sha256 only inside on_arm/on_intel here.
   on_macos do
-    url "@URL@/jet-core-@VERSION@-universal-apple-darwin.tar.gz"
-    sha256 "@MACOS_SHA256@"
+    on_arm do
+      url "@URL@/jet-core-@VERSION@-universal-apple-darwin.tar.gz"
+      sha256 "@MACOS_SHA256@"
+    end
+    on_intel do
+      url "@URL@/jet-core-@VERSION@-universal-apple-darwin.tar.gz"
+      sha256 "@MACOS_SHA256@"
+    end
   end
 
   on_linux do
