@@ -142,7 +142,10 @@ async function journey(
   return { report, app: fake, host, saved, logs };
 }
 
-describe("the desktop release journey against fakes", () => {
+// Each case drives the whole journey against fakes; several run a few
+// journeys in one test. On a loaded CI runner that exceeds Vitest's 5 s
+// default even though the fakes use a virtual clock.
+describe("the desktop release journey against fakes", { timeout: 60_000 }, () => {
   it("passes a fresh install end to end and records every measurement", async () => {
     const { report, app, host, saved } = await journey();
     expect(report.failure).toBeNull();
