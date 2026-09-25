@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-plane-setup",
-  "description": "Plane status, pairing, tasks, and preview-gated local setup operations for the main window. Settings mutations live in the settings-window capability.",
+  "description": "Plane status, pairing, tasks, and preview-gated local setup operations for the main window, plus the local Jet service's state and its repair (the native decision table installs or starts it; no path or command crosses). Settings mutations live in the settings-window capability.",
   "windows": [
     "main"
   ],
@@ -26,6 +26,9 @@
     "allow-complete-remote-pairing",
     "allow-cancel-remote-pairing",
     "allow-forget-remote-plane",
+    "allow-load-local-service",
+    "allow-watch-local-service",
+    "allow-repair-local-service",
     "allow-load-setup",
     "allow-preview-project",
     "allow-register-project",

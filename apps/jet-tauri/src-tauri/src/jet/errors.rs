@@ -5,6 +5,8 @@ use jet_protocol::{
 };
 use serde::Serialize;
 
+use super::deadline::{expired_wait, Wait};
+
 /// Stable, bounded failure information that is safe to render in the webview.
 /// Native error strings and protocol payloads stay in the Rust process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -145,6 +147,9 @@ impl PublicError {
                     false,
                 )
             },
+            ClientError::Io(_) if expired_wait(error) == Some(Wait::Command) => {
+                Self::command_outcome_unknown()
+            }
             ClientError::Io(_)
             | ClientError::Frame(FrameError::Io(_) | FrameError::Closed)
             | ClientError::Closed => Self::offline(),
@@ -250,6 +255,18 @@ impl PublicError {
             "protocol.invalid_response",
             "The Plane returned an invalid response.",
             false,
+        )
+    }
+
+    /// A Command whose answer did not arrive before its deadline
+    /// (`deadline.rs`). It may have been applied, so the shell keeps its
+    /// command ID and a retry resends the same request (ADR-0093).
+    pub(crate) fn command_outcome_unknown() -> Self {
+        Self::new(
+            "outcome_unknown",
+            "command.outcome_unknown",
+            "The Plane didn't answer in time, so Jet can't tell whether this was done. Try again to resend the same request.",
+            true,
         )
     }
 
@@ -512,6 +529,82 @@ mod tests {
         assert_eq!((failed.category, failed.retryable), ("internal", true));
         // `internal()` keeps its own code.
         assert_eq!(PublicError::internal().code, "client.state_unavailable");
+    }
+
+    /// A Revision conflict crosses as its safe state only: the current
+    /// revision as a decimal string and the identifiers the webview needs to
+    /// replace its stale copy, never the daemon's text.
+    #[test]
+    fn a_revision_conflict_crosses_with_its_safe_state() {
+        use jet_protocol::{
+            ConflictState, Conversation, RetentionPolicy, RevisionConflict, Run, RunLifecycle,
+        };
+        use uuid::Uuid;
+
+        let conflict = |safe_state| {
+            PublicError::from_client(&ClientError::Remote(WireError {
+                category: ErrorCategory::Conflict,
+                code: "run.revision_conflict".into(),
+                retryable: false,
+                message: "daemon text never crosses".into(),
+                revision_conflict: Some(RevisionConflict {
+                    current_revision: 18_446_744_073_709_551_615,
+                    safe_state,
+                }),
+                restart: None,
+                recovery_actions: Vec::new(),
+            }))
+        };
+        let run = conflict(ConflictState::Run {
+            run: Run {
+                run_id: Uuid::from_u128(0x70),
+                conversation_id: Uuid::from_u128(0x71),
+                revision: 7,
+                lifecycle: RunLifecycle::Stopping,
+                name: None,
+                created_at_unix_ms: 1,
+                ended_at_unix_ms: None,
+            },
+        });
+        assert_eq!(
+            (run.category, run.code.as_str()),
+            ("conflict", "run.revision_conflict")
+        );
+        let json = serde_json::to_value(&run).unwrap();
+        assert_eq!(
+            json["revisionConflict"],
+            serde_json::json!({
+                "currentRevision": "18446744073709551615",
+                "safeState": {
+                    "type": "run",
+                    "runId": "00000000-0000-0000-0000-000000000070",
+                    "conversationId": "00000000-0000-0000-0000-000000000071",
+                    "revision": "7",
+                    "lifecycle": "stopping",
+                },
+            })
+        );
+        assert!(!json.to_string().contains("daemon text"));
+
+        let conversation = conflict(ConflictState::Conversation {
+            conversation: Conversation {
+                conversation_id: Uuid::from_u128(0x71),
+                revision: None,
+                retention: RetentionPolicy::Retain,
+                working_tree: None,
+                origin: None,
+                name: None,
+                created_at_unix_ms: 1,
+            },
+        });
+        assert_eq!(
+            serde_json::to_value(&conversation).unwrap()["revisionConflict"]["safeState"],
+            serde_json::json!({
+                "type": "conversation",
+                "conversationId": "00000000-0000-0000-0000-000000000071",
+                "revision": null,
+            })
+        );
     }
 
     #[test]

@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -15,22 +14,32 @@ use jet_protocol::{
     WorkingTree, WorkingTreeRequest, FENCED_READS_MINOR, SEARCH_MINOR,
 };
 use serde::Serialize;
-use tauri::State;
 use uuid::Uuid;
 
-use super::{errors::PublicError, planes::PlaneId, JetBridge};
+use super::{
+    command_ids::PendingCommands, errors::PublicError, local_store, planes::PlaneId, JetBridge,
+};
 
 const SELECTION_FILE: &str = "last-conversation";
 const MAX_SELECTION_BYTES: usize = 80;
 const MAX_PROMPT_BYTES: usize = 65_536;
 const MAX_SEARCH_BYTES: usize = 256;
-const MAX_PENDING_COMMANDS: usize = 256;
 
+/// The Command IDs of composer sends, kept only while one's outcome is
+/// uncertain. Each is tied to the webview's `attempt`: one Send of the
+/// composer, which the webview keeps only while the user retries that Send
+/// unchanged. A retry therefore gets the same ID and the Plane's original
+/// answer, while any later Send is a new request, even with the same text
+/// in the same Project or Conversation: sent under a kept ID it would only
+/// replay the old answer (D2).
 #[derive(Default)]
 pub(crate) struct ConversationCommands {
-    create: Mutex<HashMap<Uuid, Uuid>>,
-    start: Mutex<HashMap<StartKey, Uuid>>,
-    submit: Mutex<HashMap<SubmitKey, Uuid>>,
+    /// Per Project: a local create's body is only its Project (the
+    /// retention policy, base and seed are fixed), so an uncertain create
+    /// retried by the same Send returns the task it may have made.
+    create: PendingCommands<Uuid, Uuid>,
+    start: PendingCommands<SendTarget, StartRequest>,
+    submit: PendingCommands<SendTarget, SubmitRequest>,
 }
 
 pub(crate) struct ConversationState {
@@ -39,28 +48,72 @@ pub(crate) struct ConversationState {
     commands: ConversationCommands,
 }
 
-// Command-ID keys include the Plane: the same Conversation UUID on two Planes
-// (ADR-0070 transfer) is two different request bodies.
-#[derive(Clone, Hash, PartialEq, Eq)]
-struct StartKey {
+// Command-ID targets include the Plane: the same Conversation UUID on two
+// Planes (ADR-0070 transfer) is two different request bodies.
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct SendTarget {
     plane: PlaneId,
     conversation_id: Uuid,
-    craft: String,
-    prompt: String,
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
-struct SubmitKey {
-    plane: PlaneId,
-    conversation_id: Uuid,
+#[derive(PartialEq)]
+struct StartRequest {
+    craft: String,
     prompt: String,
+    attempt: Uuid,
+}
+
+#[derive(PartialEq)]
+struct SubmitRequest {
+    prompt: String,
+    attempt: Uuid,
+}
+
+impl ConversationCommands {
+    /// Refuses a composer Send whose `attempt` is still kept for another
+    /// kind of request or another target: an uncertain Run start retried as
+    /// a Turn (or the reverse) would send the prompt twice (finding 2). The
+    /// webview resends a kept attempt exactly as it was first sent.
+    fn check_attempt(
+        &self,
+        kind: SendKind,
+        target: SendTarget,
+        attempt: Uuid,
+    ) -> Result<(), PublicError> {
+        let started_elsewhere = self.start.holds(|kept, request| {
+            request.attempt == attempt && (kind != SendKind::Start || *kept != target)
+        })?;
+        let submitted_elsewhere = self.submit.holds(|kept, request| {
+            request.attempt == attempt && (kind != SendKind::Submit || *kept != target)
+        })?;
+        if started_elsewhere || submitted_elsewhere {
+            return Err(attempt_conflict());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SendKind {
+    Start,
+    Submit,
+}
+
+fn attempt_conflict() -> PublicError {
+    PublicError::conflict(
+        "conversation.attempt_conflict",
+        "This message is still being confirmed as a different request. Edit the draft to send it as a new one.",
+    )
 }
 
 impl ConversationState {
     pub(crate) fn new(app_data_directory: &Path) -> Self {
         let selection_path = app_data_directory.join(SELECTION_FILE);
-        let selection = fs::read_to_string(&selection_path)
+        // Bounded: an oversized or unreadable file restores nothing.
+        let selection = local_store::read_bounded(&selection_path, MAX_SELECTION_BYTES as u64)
             .ok()
+            .flatten()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
             .and_then(|value| parse_selection(&value));
         Self {
             selection_path,
@@ -209,29 +262,29 @@ pub(crate) struct TurnResultView {
 }
 
 pub(crate) async fn load_conversations(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     plane_id: Option<String>,
     next_page: Option<String>,
 ) -> Result<ConversationPageView, PublicError> {
     let next_page = next_page
         .map(|cursor| parse_id(&cursor, "conversation.page_invalid").map(PageCursor))
         .transpose()?;
-    let (binding, client) = bridge.plane(plane_id.as_deref())?;
+    let (binding, plane_client) = bridge.plane(plane_id.as_deref())?;
     let plane = binding.plane;
     async {
-        let client = client
+        let client = plane_client
             .connect()
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         let page = match next_page {
             Some(cursor) => {
-                let page = client.next_conversations(cursor).await;
+                let page = client.query(client.next_conversations(cursor)).await;
                 if page.is_ok() {
                     bridge.planes.observe_success(plane, FENCED_READS_MINOR);
                 }
                 page
             }
-            None => client.conversations().await,
+            None => client.query(client.conversations()).await,
         }
         .map_err(|error| PublicError::from_client(&error))?;
         Ok(page_view(plane, page))
@@ -241,19 +294,20 @@ pub(crate) async fn load_conversations(
 }
 
 pub(crate) async fn search_conversations(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     plane_id: Option<String>,
     text: String,
 ) -> Result<SearchResultView, PublicError> {
     validate_search(&text)?;
-    let (binding, client) = bridge.plane(plane_id.as_deref())?;
+    let (binding, plane_client) = bridge.plane(plane_id.as_deref())?;
     let plane = binding.plane;
     async {
-        let result = client
+        let client = plane_client
             .connect()
             .await
-            .map_err(|error| PublicError::from_client(&error))?
-            .search(&text)
+            .map_err(|error| PublicError::from_client(&error))?;
+        let result = client
+            .query(client.search(&text))
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         bridge.planes.observe_success(plane, SEARCH_MINOR);
@@ -264,19 +318,20 @@ pub(crate) async fn search_conversations(
 }
 
 pub(crate) async fn load_conversation(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     conversation_id: String,
     plane_id: Option<String>,
 ) -> Result<ConversationDetailView, PublicError> {
     let id = parse_id(&conversation_id, "conversation.identifier_invalid")?;
-    let (binding, client) = bridge.plane(plane_id.as_deref())?;
+    let (binding, plane_client) = bridge.plane(plane_id.as_deref())?;
     let plane = binding.plane;
     async {
-        let snapshot = client
+        let client = plane_client
             .connect()
             .await
-            .map_err(|error| PublicError::from_client(&error))?
-            .conversation(id)
+            .map_err(|error| PublicError::from_client(&error))?;
+        let snapshot = client
+            .query(client.conversation(id))
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         if snapshot.conversation.conversation_id != id {
@@ -290,20 +345,21 @@ pub(crate) async fn load_conversation(
 }
 
 pub(crate) async fn create_conversation(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     project_id: String,
+    attempt: String,
 ) -> Result<ConversationRowView, PublicError> {
     let project_id = parse_id(&project_id, "project.identifier_invalid")?;
-    let command_id = command_id(&bridge.conversations.commands.create, project_id)?;
+    let attempt = parse_id(&attempt, "conversation.attempt_invalid")?;
     // New tasks stay on this computer in Wave 3.1: the "Runs on" chooser for
     // remote Planes is deferred client work.
-    let client = bridge
-        .local()
+    let local = bridge.local();
+    let client = local
         .connect()
         .await
         .map_err(|error| PublicError::from_client(&error))?;
     let projects = client
-        .projects()
+        .query(client.projects())
         .await
         .map_err(|error| PublicError::from_client(&error))?;
     if !projects
@@ -318,8 +374,10 @@ pub(crate) async fn create_conversation(
     }
     // ASVS 2.2.2 and 8.3.1: the native boundary resolves a typed Project
     // and sends only the fixed managed-Workspace variant.
-    let conversation = client
-        .create_conversation_in(
+    let commands = &bridge.conversations.commands.create;
+    let command_id = commands.id(project_id, attempt)?;
+    let outcome = client
+        .command(client.create_conversation_in(
             command_id,
             RetentionPolicy::Retain,
             WorkingTreeRequest::Workspace {
@@ -327,10 +385,12 @@ pub(crate) async fn create_conversation(
                 base: BaseSelection::Head,
                 seed: SeedSelection::None,
             },
-        )
-        .await
-        .map_err(|error| PublicError::from_client(&error))?;
-    remove_command(&bridge.conversations.commands.create, &project_id)?;
+        ))
+        .await;
+    // A refused create is receipted: keeping its ID would replay the
+    // refusal for every later "New task" in this Project (D2).
+    commands.settle(&project_id, command_id, &outcome)?;
+    let conversation = outcome.map_err(|error| PublicError::from_client(&error))?;
     bridge
         .conversations
         .remember(conversation.conversation_id, PlaneId::Local)?;
@@ -338,30 +398,33 @@ pub(crate) async fn create_conversation(
 }
 
 pub(crate) async fn start_run(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     conversation_id: String,
     craft: String,
     prompt: String,
+    attempt: String,
     plane_id: Option<String>,
 ) -> Result<StartResultView, PublicError> {
     let conversation_id = parse_id(&conversation_id, "conversation.identifier_invalid")?;
+    let attempt = parse_id(&attempt, "conversation.attempt_invalid")?;
     validate_prompt(&prompt)?;
     validate_token(&craft, "craft.identifier_invalid")?;
-    let (binding, client) = bridge.plane(plane_id.as_deref())?;
+    let (binding, plane_client) = bridge.plane(plane_id.as_deref())?;
     async {
-        let key = StartKey {
+        let target = SendTarget {
             plane: binding.plane,
             conversation_id,
-            craft: craft.clone(),
-            prompt: prompt.clone(),
         };
-        let command_id = command_id(&bridge.conversations.commands.start, key.clone())?;
-        let client = client
+        bridge
+            .conversations
+            .commands
+            .check_attempt(SendKind::Start, target, attempt)?;
+        let client = plane_client
             .connect()
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         let capabilities = client
-            .capabilities(CapabilityObservation::Fresh)
+            .query(client.capabilities(CapabilityObservation::Fresh))
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         if !capabilities
@@ -374,11 +437,18 @@ pub(crate) async fn start_run(
                 "Choose a Craft that is installed on this Plane.",
             ));
         }
-        let run = client
-            .start_run(command_id, conversation_id, &craft, &prompt)
-            .await
-            .map_err(|error| PublicError::from_client(&error))?;
-        remove_command(&bridge.conversations.commands.start, &key)?;
+        let request = StartRequest {
+            craft: craft.clone(),
+            prompt: prompt.clone(),
+            attempt,
+        };
+        let commands = &bridge.conversations.commands.start;
+        let command_id = commands.id(target, request)?;
+        let outcome = client
+            .command(client.start_run(command_id, conversation_id, &craft, &prompt))
+            .await;
+        commands.settle(&target, command_id, &outcome)?;
+        let run = outcome.map_err(|error| PublicError::from_client(&error))?;
         Ok(StartResultView {
             run: run_view(&run),
             prompt: bounded_text(&prompt, MAX_PROMPT_BYTES, "Task submitted"),
@@ -389,29 +459,44 @@ pub(crate) async fn start_run(
 }
 
 pub(crate) async fn submit_turn(
-    bridge: State<'_, JetBridge>,
+    bridge: &JetBridge,
     conversation_id: String,
     prompt: String,
+    attempt: String,
     plane_id: Option<String>,
 ) -> Result<TurnResultView, PublicError> {
     let conversation_id = parse_id(&conversation_id, "conversation.identifier_invalid")?;
+    let attempt = parse_id(&attempt, "conversation.attempt_invalid")?;
     validate_prompt(&prompt)?;
-    let (binding, client) = bridge.plane(plane_id.as_deref())?;
+    let (binding, plane_client) = bridge.plane(plane_id.as_deref())?;
     async {
-        let key = SubmitKey {
+        let target = SendTarget {
             plane: binding.plane,
             conversation_id,
-            prompt: prompt.clone(),
         };
-        let command_id = command_id(&bridge.conversations.commands.submit, key.clone())?;
-        let turn = client
+        bridge
+            .conversations
+            .commands
+            .check_attempt(SendKind::Submit, target, attempt)?;
+        let client = plane_client
             .connect()
             .await
-            .map_err(|error| PublicError::from_client(&error))?
-            .submit_turn(command_id, conversation_id, TurnSource::User, &prompt)
-            .await
             .map_err(|error| PublicError::from_client(&error))?;
-        remove_command(&bridge.conversations.commands.submit, &key)?;
+        let commands = &bridge.conversations.commands.submit;
+        let command_id = commands.id(
+            target,
+            SubmitRequest {
+                prompt: prompt.clone(),
+                attempt,
+            },
+        )?;
+        let outcome = client
+            .command(client.submit_turn(command_id, conversation_id, TurnSource::User, &prompt))
+            .await;
+        // `turn.queue_full` is receipted: with its ID kept, the same prompt
+        // would replay "queue full" after the queue drained (D2).
+        commands.settle(&target, command_id, &outcome)?;
+        let turn = outcome.map_err(|error| PublicError::from_client(&error))?;
         Ok(turn_view(turn, prompt))
     }
     .await
@@ -589,34 +674,6 @@ fn parse_id(value: &str, code: &'static str) -> Result<Uuid, PublicError> {
     Uuid::parse_str(value).map_err(|_| PublicError::invalid_input(code, "That item is not valid."))
 }
 
-fn command_id<K>(commands: &Mutex<HashMap<K, Uuid>>, key: K) -> Result<Uuid, PublicError>
-where
-    K: std::hash::Hash + Eq,
-{
-    let mut commands = commands.lock().map_err(|_| PublicError::internal())?;
-    if let Some(command_id) = commands.get(&key) {
-        return Ok(*command_id);
-    }
-    if commands.len() >= MAX_PENDING_COMMANDS {
-        return Err(PublicError::invalid_input(
-            "client.too_many_pending_commands",
-            "Finish or retry an earlier task before starting another one.",
-        ));
-    }
-    Ok(*commands.entry(key).or_insert_with(Uuid::new_v4))
-}
-
-fn remove_command<K>(commands: &Mutex<HashMap<K, Uuid>>, key: &K) -> Result<(), PublicError>
-where
-    K: std::hash::Hash + Eq,
-{
-    commands
-        .lock()
-        .map_err(|_| PublicError::internal())?
-        .remove(key);
-    Ok(())
-}
-
 fn bounded_text(value: &str, maximum_bytes: usize, fallback: &str) -> String {
     if value.is_empty() || value.len() > maximum_bytes || value.chars().any(char::is_control) {
         fallback.into()
@@ -627,17 +684,299 @@ fn bounded_text(value: &str, maximum_bytes: usize, fallback: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Mutex};
-
     use uuid::Uuid;
 
-    use jet_protocol::RetentionPolicy;
+    use jet_protocol::{
+        Actor, ClientMessage, CommandRequest, CommandResponse, Conversation, ErrorCategory,
+        Project, ProjectList, QueryRequest, QueryResponse, RetentionPolicy, Turn, TurnSource,
+        TurnState,
+    };
 
     use super::{
-        command_id, parse_selection, retention_name, validate_prompt, validate_search,
-        validate_token, ConversationState, StartKey,
+        create_conversation, parse_selection, retention_name, submit_turn, validate_prompt,
+        validate_search, validate_token, ConversationCommands, ConversationState, SendKind,
+        SendTarget, StartRequest, SubmitRequest,
     };
-    use crate::jet::planes::PlaneId;
+    use crate::jet::{
+        command_ids::PendingCommands,
+        fake_plane::{
+            answer, command_id as sent_id, complete, exchange, local_plane, next, refuse,
+            remote_plane, wire, FakePlane,
+        },
+        planes::PlaneId,
+    };
+
+    const TASK: Uuid = Uuid::from_u128(0xc0);
+    const PROJECT: Uuid = Uuid::from_u128(0xc1);
+    /// One Send of the composer, and a later one.
+    const SEND: Uuid = Uuid::from_u128(0xa1);
+    const LATER_SEND: Uuid = Uuid::from_u128(0xa2);
+
+    /// Finding 2: a Send whose outcome is uncertain keeps its attempt bound
+    /// to the kind and target it was first sent as. Retried as the other
+    /// kind (a Run start as a Turn after the Run appeared, or the reverse)
+    /// or on another task, it would carry a new Command ID and deliver the
+    /// prompt twice, so it is refused; the exact retry still passes.
+    #[test]
+    fn a_kept_attempt_is_bound_to_its_kind_and_target() {
+        let commands = ConversationCommands::default();
+        let task = SendTarget {
+            plane: PlaneId::Local,
+            conversation_id: TASK,
+        };
+        let other_task = SendTarget {
+            plane: PlaneId::Local,
+            conversation_id: Uuid::from_u128(0xc9),
+        };
+        commands
+            .start
+            .id(
+                task,
+                StartRequest {
+                    craft: "claude".into(),
+                    prompt: "Ship it".into(),
+                    attempt: SEND,
+                },
+            )
+            .unwrap();
+        let refused = |kind, target| {
+            commands
+                .check_attempt(kind, target, SEND)
+                .err()
+                .map(|error| error.code)
+        };
+        assert_eq!(
+            refused(SendKind::Submit, task).as_deref(),
+            Some("conversation.attempt_conflict")
+        );
+        assert_eq!(
+            refused(SendKind::Start, other_task).as_deref(),
+            Some("conversation.attempt_conflict")
+        );
+        assert_eq!(refused(SendKind::Start, task), None);
+        assert!(commands
+            .check_attempt(SendKind::Submit, task, LATER_SEND)
+            .is_ok());
+
+        let commands = ConversationCommands::default();
+        commands
+            .submit
+            .id(
+                task,
+                SubmitRequest {
+                    prompt: "Ship it".into(),
+                    attempt: SEND,
+                },
+            )
+            .unwrap();
+        assert!(commands.check_attempt(SendKind::Start, task, SEND).is_err());
+        assert!(commands.check_attempt(SendKind::Submit, task, SEND).is_ok());
+    }
+
+    /// Serves one `submit_turn` and answers its Command with `reply`, or
+    /// admits the Turn. Returns the Command ID the shell sent.
+    async fn serve_submit(fake: &FakePlane, reply: Option<(ErrorCategory, &'static str)>) -> Uuid {
+        let (mut reader, mut writer) = fake.accept().await;
+        let (stream, message) = next(&mut reader).await;
+        assert!(matches!(
+            &message,
+            ClientMessage::Command {
+                command: CommandRequest::SubmitTurn { conversation_id, prompt, .. },
+                ..
+            } if *conversation_id == TASK && prompt == "Ship it"
+        ));
+        match reply {
+            Some((category, code)) => {
+                refuse(&mut writer, stream, &message, wire(category, code)).await;
+            }
+            None => {
+                let turn = Turn {
+                    turn_id: Uuid::from_u128(0xc2),
+                    sequence: 2,
+                    client_id: Uuid::from_u128(7),
+                    source: TurnSource::User,
+                    state: TurnState::Queued,
+                    run_id: None,
+                };
+                complete(
+                    &mut writer,
+                    stream,
+                    &message,
+                    CommandResponse::TurnAdmitted { turn },
+                )
+                .await;
+            }
+        }
+        sent_id(&message)
+    }
+
+    async fn submit(
+        fake: &FakePlane,
+        reply: Option<(ErrorCategory, &'static str)>,
+    ) -> (Result<(), String>, Option<Uuid>) {
+        submit_as(fake, SEND, reply).await
+    }
+
+    /// `submit` as the composer Send `attempt`.
+    async fn submit_as(
+        fake: &FakePlane,
+        attempt: Uuid,
+        reply: Option<(ErrorCategory, &'static str)>,
+    ) -> (Result<(), String>, Option<Uuid>) {
+        let (outcome, id) = exchange(
+            submit_turn(
+                fake.bridge(),
+                TASK.to_string(),
+                "Ship it".into(),
+                attempt.to_string(),
+                Some(fake.plane_id.clone()),
+            ),
+            serve_submit(fake, reply),
+        )
+        .await;
+        (outcome.map(|_| ()).map_err(|error| error.code), id)
+    }
+
+    /// D2: `turn.queue_full` is receipted. Once the queue drains, the same
+    /// prompt is a new request instead of a replay of "queue full"; an
+    /// outcome-unknown answer keeps the ID for an exact retry.
+    #[tokio::test]
+    async fn a_refused_turn_releases_its_id_and_an_unknown_one_keeps_it() {
+        let fake = remote_plane();
+        let (outcome, full) =
+            submit(&fake, Some((ErrorCategory::Conflict, "turn.queue_full"))).await;
+        assert_eq!(outcome, Err("turn.queue_full".into()));
+
+        let (outcome, unknown) = submit(
+            &fake,
+            Some((ErrorCategory::OutcomeUnknown, "command.outcome_unknown")),
+        )
+        .await;
+        assert!(unknown.is_some());
+        assert_ne!(unknown, full, "the refusal is not replayed");
+        assert_eq!(outcome, Err("command.outcome_unknown".into()));
+
+        let (outcome, retried) = submit(&fake, None).await;
+        assert_eq!(retried, unknown, "an unknown outcome is retried exactly");
+        assert_eq!(outcome, Ok(()));
+        assert!(fake.bridge().conversations.commands.submit.is_empty());
+    }
+
+    /// D2: an uncertain Turn that the Plane admitted keeps its ID for the
+    /// retry of that Send only. A later Send of the same text is new work:
+    /// under the kept ID the Plane would replay the old admission and the
+    /// new message would never be queued.
+    #[tokio::test]
+    async fn a_later_send_of_the_same_prompt_is_not_a_replay() {
+        let fake = remote_plane();
+        let unknown = Some((ErrorCategory::OutcomeUnknown, "command.outcome_unknown"));
+        let (_, first) = submit_as(&fake, SEND, unknown).await;
+        let (_, retried) = submit_as(&fake, SEND, unknown).await;
+        assert_eq!(retried, first, "the same Send retries exactly");
+
+        let (outcome, later) = submit_as(&fake, LATER_SEND, None).await;
+        assert_eq!(outcome, Ok(()));
+        assert!(later.is_some());
+        assert_ne!(later, first, "a later Send never replays the kept ID");
+        assert!(fake.bridge().conversations.commands.submit.is_empty());
+    }
+
+    /// D2: a refused create does not block "New task" in its Project.
+    #[tokio::test]
+    async fn a_refused_create_does_not_block_new_tasks_in_the_project() {
+        let fake = local_plane();
+        let serve = |refusal: Option<&'static str>| {
+            let fake = &fake;
+            async move {
+                let (mut reader, mut writer) = fake.accept().await;
+                let (stream, message) = next(&mut reader).await;
+                assert!(matches!(
+                    message,
+                    ClientMessage::Query {
+                        query: QueryRequest::Projects,
+                        ..
+                    }
+                ));
+                let projects = ProjectList {
+                    cursor: 1,
+                    projects: vec![Project {
+                        project_id: PROJECT,
+                        root: "/work/jet".into(),
+                        registered_by: Actor::InteractiveClient {
+                            client_id: Uuid::from_u128(7),
+                        },
+                        registered_at_unix_ms: 1,
+                    }],
+                };
+                answer(
+                    &mut writer,
+                    stream,
+                    &message,
+                    QueryResponse::Projects(projects),
+                )
+                .await;
+                let (stream, message) = next(&mut reader).await;
+                assert!(matches!(
+                    message,
+                    ClientMessage::Command {
+                        command: CommandRequest::CreateConversation { .. },
+                        ..
+                    }
+                ));
+                match refusal {
+                    Some(code) => {
+                        let category = if code == "command.outcome_unknown" {
+                            ErrorCategory::OutcomeUnknown
+                        } else {
+                            ErrorCategory::Unavailable
+                        };
+                        refuse(&mut writer, stream, &message, wire(category, code)).await;
+                    }
+                    None => {
+                        let conversation = Conversation {
+                            conversation_id: TASK,
+                            revision: Some(1),
+                            retention: RetentionPolicy::Retain,
+                            working_tree: None,
+                            origin: None,
+                            name: None,
+                            created_at_unix_ms: 1,
+                        };
+                        complete(
+                            &mut writer,
+                            stream,
+                            &message,
+                            CommandResponse::ConversationCreated(conversation),
+                        )
+                        .await;
+                    }
+                }
+                sent_id(&message)
+            }
+        };
+        let create = |attempt: Uuid| {
+            create_conversation(fake.bridge(), PROJECT.to_string(), attempt.to_string())
+        };
+        let (refused, first) = exchange(create(SEND), serve(Some("storage.disk_pressure"))).await;
+        assert_eq!(refused.unwrap_err().code, "storage.disk_pressure");
+        let (created, second) = exchange(create(SEND), serve(None)).await;
+        assert_eq!(created.unwrap().id, TASK.to_string());
+        assert!(second.is_some());
+        assert_ne!(second, first, "the refused create is not replayed");
+
+        // D2: an uncertain create is retried by its own Send only. "New
+        // task" sent again later creates a task instead of reopening the
+        // one the uncertain create may have made.
+        let (unknown, third) = exchange(create(SEND), serve(Some("command.outcome_unknown"))).await;
+        assert_eq!(unknown.unwrap_err().code, "command.outcome_unknown");
+        let (_, retried) = exchange(create(SEND), serve(Some("command.outcome_unknown"))).await;
+        assert_eq!(retried, third, "the same Send retries exactly");
+        let (created, later) = exchange(create(LATER_SEND), serve(None)).await;
+        assert!(created.is_ok());
+        assert!(later.is_some());
+        assert_ne!(later, third, "a later Send never replays the kept ID");
+        assert!(fake.bridge().conversations.commands.create.is_empty());
+    }
 
     #[test]
     fn selection_persists_its_plane_atomically_and_accepts_the_old_form() {
@@ -690,17 +1029,25 @@ mod tests {
 
     #[test]
     fn command_ids_for_the_same_conversation_differ_across_planes() {
-        let commands = Mutex::new(HashMap::new());
-        let key = |plane| StartKey {
+        let commands = PendingCommands::default();
+        let target = |plane| SendTarget {
             plane,
             conversation_id: Uuid::from_u128(4),
+        };
+        let request = || StartRequest {
             craft: "codex".into(),
             prompt: "Ship it".into(),
+            attempt: SEND,
         };
-        let local = command_id(&commands, key(PlaneId::Local)).unwrap();
-        let remote = command_id(&commands, key(PlaneId::Remote(Uuid::from_u128(9)))).unwrap();
+        let local = commands.id(target(PlaneId::Local), request()).unwrap();
+        let remote = commands
+            .id(target(PlaneId::Remote(Uuid::from_u128(9))), request())
+            .unwrap();
         assert_ne!(local, remote);
-        assert_eq!(command_id(&commands, key(PlaneId::Local)).unwrap(), local);
+        assert_eq!(
+            commands.id(target(PlaneId::Local), request()).unwrap(),
+            local
+        );
     }
 
     #[test]

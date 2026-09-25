@@ -19,7 +19,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use jet_client::Client;
 use jet_protocol::{
     AuditActor, AuditEntry, AuditOutcome, AuditRisk, SecurityAudit, SecurityState,
     SECURITY_AUDIT_MINOR,
@@ -31,6 +30,7 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use super::{
+    client::Connection,
     errors::{safe_code, PublicError},
     planes::{PlaneBinding, PlaneId},
     settings::plane_client,
@@ -221,9 +221,9 @@ fn parse_after(after: Option<String>) -> Result<u64, PublicError> {
 
 /// One page, checked: at most [`PAGE_LIMIT`] records, strictly after
 /// `after`, strictly ascending and never past the page's cursor.
-async fn read_page(connection: &Client, after: u64) -> Result<SecurityAudit, PublicError> {
+async fn read_page(connection: &Connection, after: u64) -> Result<SecurityAudit, PublicError> {
     let page = connection
-        .security_audit_after(after)
+        .query(connection.security_audit_after(after))
         .await
         .map_err(|error| PublicError::from_client(&error))?;
     check_page(after, &page)?;
@@ -381,7 +381,7 @@ pub(crate) async fn export_security_audit(
         .await
         .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
     connection
-        .status()
+        .query(connection.status())
         .await
         .map_err(|error| bridge.settle(&binding, PublicError::from_client(&error)))?;
     drop(connection);
@@ -444,7 +444,7 @@ pub(super) async fn export_to(
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         let status = connection
-            .status()
+            .query(connection.status())
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         bridge.planes.observe_status(binding.plane, &status);
@@ -501,7 +501,7 @@ struct Header<'a> {
 /// Streams every page after the header, one wire `AuditEntry` per line.
 /// Returns the record count and the audit position read through.
 async fn write_export(
-    connection: &Client,
+    connection: &Connection,
     target: &Path,
     header: &Header<'_>,
 ) -> Result<(u64, u64), PublicError> {

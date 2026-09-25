@@ -106,7 +106,13 @@
   <AuditViewer system={session.system} planeLabel={session.planeLabel} {onopen} />
 </section>
 
-<VersionsSection system={session.system} planeLabel={session.planeLabel} {onopen} />
+<VersionsSection
+  system={session.system}
+  service={session.service}
+  updates={session.updates}
+  planeLabel={session.planeLabel}
+  {onopen}
+/>
 
 <style>
   .setting-rows {

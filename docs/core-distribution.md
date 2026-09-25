@@ -44,9 +44,70 @@ Ape Bonker installation token scoped to that repository. Prereleases leave
 the stable formula unchanged. See [CI and releases](../.github/workflows/README.md)
 for credentials and retry instructions.
 
-`brew install apexgang/tap/jet` installs the compiled payload without Rust.
-`brew services start apexgang/tap/jet` runs `jetd serve --channel homebrew`.
-The service definitions preserve helpers across daemon restarts.
+`brew install apexgang/tap/jet` installs the compiled payload on macOS and
+Linux without Rust. Always name the formula in full: homebrew/core has an
+unrelated `jet`. `brew services start apexgang/tap/jet` runs
+`jetd serve --channel homebrew`.
+The service definitions preserve helpers across daemon restarts. The systemd
+unit starts only while the formula's `jetd` exists, so a unit left behind by
+an uninstall cannot restart in a loop.
+
+The tap is shared with the Swift app's release, which publishes the macOS app
+as the `apexgang/tap/jet` cask (`Casks/jet.rb`) that depends on this formula.
+Both releases render `Formula/jet.rb` from
+`.github/packaging/homebrew/jet.rb.in`. The Swift release writes a macOS-only
+formula when the tap has none or an older core version. The tagged core
+release replaces it with the macOS and Linux formula at the same or a newer
+version, never touches `Casks/jet.rb`, and neither release downgrades the
+formula. Because the formula and the cask share a name, `brew install` and
+`brew uninstall` warn that they treat `apexgang/tap/jet` as a formula. The
+macOS app installs with `brew install --cask apexgang/tap/jet`.
+
+The Swift release builds with the core version on `main` and runs for every
+change under `apps/jet/` that reaches `main`. A run after the commit that
+bumps the version in `packages/Cargo.toml` therefore replaces the macOS and
+Linux formula with a macOS-only one at the new version. Until that version's
+tag updates the tap, `brew install apexgang/tap/jet apexgang/tap/jet-app` and
+`brew upgrade` fail on Linux with "This formula requires macOS." To avoid
+that window, push the `v*` tag at the version-bump commit and let its release
+finish before an `apps/jet/` change merges. If the release or its tap job
+fails, the window stays open until a rerun succeeds, and no release publishes
+while the `jetd` size gate below fails. A patch release for an older version
+cannot close the window, because the tap job skips both files while the tap's
+formula is newer. Before the first core release the tap has only the Swift
+release's formula, so Linux has nothing to install.
+
+## The Linux desktop app
+
+Each release also bundles the Tauri desktop app for both Linux labels as a
+deb, an rpm, and an AppImage. Every bundle carries the label's unmodified
+`jet-core-<version>-<label>.tar.gz` archive, never loose executables: the
+AppImage build rewrites every ELF file under `usr/lib`, which would break
+the digests `jetd core stage` checks. On first launch the app extracts the
+archive, stages and activates it under `~/.jet/core`, and installs the
+systemd user unit or the autostart entry described in
+[Versions under the Jet home](#versions-under-the-jet-home), so these
+installs run the `gui` channel. The bundles are signed for the Tauri updater, and `latest.json`
+on the latest release lists them. GitHub's latest release is always the
+highest stable core version: a patch for an older version publishes without
+taking it, so the updater always offers the newest version.
+
+The Linux-only `apexgang/tap/jet-app` cask installs the AppImage and depends
+on `apexgang/tap/jet`, so the Homebrew channel owns the daemon, `brew services`
+runs it, and the app's updater stays off. The app finds that formula's
+`<prefix>/opt/jet/bin/jetd`; homebrew/core's `jet` links the same `opt/jet`
+but has no `jetd`, so it is never taken for Jet. The cask needs Homebrew 6.0
+or later.
+Homebrew trusts only the tap items named on the command line, so install
+both together:
+
+```sh
+brew install apexgang/tap/jet apexgang/tap/jet-app
+```
+
+or run `brew trust apexgang/tap` first. See
+[CI and releases](../.github/workflows/README.md#releases) for how the
+bundles, the cask, and the updater manifest are built and published.
 
 ## The release envelope
 

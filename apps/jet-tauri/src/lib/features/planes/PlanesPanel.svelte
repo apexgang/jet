@@ -55,9 +55,13 @@
     </button>
   </header>
 
-  {#if planes.notice}
+  {#if planes.notices.length > 0}
     <div class="notice planes-notice" role="status">
-      <p>{planes.notice}</p>
+      <div>
+        {#each planes.notices as notice (notice)}
+          <p>{notice}</p>
+        {/each}
+      </div>
       <button class="text-button" onclick={() => (planes.noticeDismissed = true)}>Dismiss</button>
     </div>
   {/if}
@@ -152,6 +156,10 @@
 
   .planes-notice p {
     margin: 0;
+  }
+
+  .planes-notice p + p {
+    margin-top: 4px;
   }
 
   .planes-layout {

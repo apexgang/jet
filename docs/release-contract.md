@@ -46,10 +46,11 @@ one the matrix publishes.
 | Budget | Gate | Baseline |
 | --- | --- | --- |
 | Store, startup, reconnect, ingestion (ADR-0022) | `just budget-test` on a reference host, alone: `jet-daemon/tests/budgets.rs` seeds 10,000 Conversations and one million journal Events and writes `target/budgets/<os>-<arch>.json`; `just budget-check` fails a measurement over its limit in `budgets.toml` or more than 15% worse than the accepted one, beyond any `tolerance` the limit names for scheduling jitter. Reconnect paging is measured at the store seam, in the store's bounded pages, without protocol framing | `budget-baseline.json`, per operating system and architecture, through `just budget-accept --justification` |
-| Binary size (ADR-0054) | `just release-check --target <label>` after `just release-package`; the `Release core executables` workflow on every `v*` tag | `release-baseline.json`, drift over 5% fails |
+| Binary size (ADR-0054) | `just release-check --target <label>` after `just release-package`; the `Release core executables and the Linux desktop app` workflow on every `v*` tag | `release-baseline.json`, drift over 5% fails |
 | Idle resources (ADR-0055) | `just resource-test` on a reference host, alone: 35 MiB daemon RSS, 15 MiB per idle Craft, 8 MiB per helper, 0.2% combined CPU over five minutes, zero idle storage growth | Recorded in [resource-budgets.md](resource-budgets.md) |
 | Disk pressure (ADR-0079) | `jet-core` unit tests in `disk_pressure.rs`, `artifact/mod.rs`, and `checkpoint/mod.rs`: pressure rejects new Runs without poisoning retries or reads, the disposable budget reserves and releases uploads, and the current diff stays readable when pressure prevents Artifact ingestion | Behavioral, no measurement |
 | Stress | `just resource-test` first runs the 64 MiB spool backpressure and replay stress and the bounded Craft recovery checks; the ordinary suite runs the smoke-scale budget runner so it cannot rot | Behavioral, no measurement |
+| Desktop launch, idle and reconnect (Linux) | `.github/workflows/desktop-e2e.yml` on the installed release `.deb`; see [Desktop (Linux)](#desktop-linux) | Informational; proposed ceilings in [resource-budgets.md](resource-budgets.md#desktop-linux) |
 
 The ordinary suite runs the budget runner at a smoke scale of 100
 Conversations and 2,000 Events, asserting only that every gate produces a
@@ -87,6 +88,57 @@ destructive maintenance it precedes run behind the ready line
 (ADR-0097); and semantic Events have an index of their own. macOS has not
 been measured yet; run the same recipe on the macOS reference host and
 accept its label.
+
+## Desktop (Linux)
+
+The Linux desktop app ships around the core payload (Wave 4), so a release
+also runs the desktop journey (`apps/jet-tauri/tests/e2e/`,
+`.github/workflows/desktop-e2e.yml`) on the bundles it is about to publish.
+On a fresh `ubuntu-24.04` runner it installs the x86_64 `.deb` with
+`apt-get`, enables the runner's systemd user session, and drives the real
+app through tauri-driver and WebKitWebDriver under Xvfb. It asserts through
+the DOM, by role and accessible name, and on the machine:
+
+- the first launch provisions the service from the bundled payload: Setup
+  reaches a connected local Plane on the bundled core and says it set the
+  service up; `~/.jet/core/current` exists; `jetd.service` is enabled and
+  active; and `jetd core status` reports the daemon on the `gui` channel at
+  the release version;
+- Settings › Versions, in its own window, shows "Managed by this app" and
+  the release version, with App updates on in a signed build and off in an
+  unsigned one;
+- after `systemctl --user kill jetd.service` the daemon restarts and the UI
+  reconnects on its own;
+- after a quit and a relaunch, the same connected state returns without
+  provisioning again, with the same `current` and the same daemon process.
+
+A failed check blocks `publish` in the release workflow. `packaging.yml`
+runs the same journey on the unsigned bundle for pull requests that touch
+packaging, the journey, the timing marks it reads, the app's provisioning
+code, or the app's dependency and toolchain files, and on demand. Each run's
+`desktop-e2e.json` artifact holds the launch, provisioning, idle CPU and
+memory, and reconnect measurements. They inform and never gate.
+[resource-budgets.md](resource-budgets.md#desktop-linux) says how each value
+is taken and lists the proposed ceilings.
+
+The journey needs a display, WebKitWebDriver and a disposable home, so it
+runs only in CI. `just e2e-dry-run`, part of the app's `just check`, runs it
+against fakes on every app change. Unit tests cover its WebDriver client and
+its /proc parsing. The in-page reader's tests run against the real Svelte
+components.
+
+Not covered yet:
+
+- The journey has not run on GitHub Actions yet, so there is no desktop
+  measurement. Dispatch `packaging.yml` before the first `v*` tag so its
+  first real run does not gate `publish`.
+- It drives only the x86_64 `.deb`. The aarch64 bundles, the rpm, and the
+  AppImage are built and verified by `just release-verify` but are not
+  launched.
+- The first launch may finish provisioning before the page's watcher
+  registers. Its `installing` phase is therefore recorded, not required.
+  The required evidence is Setup's "set up on this computer" notice together
+  with the resulting layout and unit.
 
 ## What still fails the contract
 

@@ -63,6 +63,8 @@ import {
 import { openSettings, type SettingsTarget } from "$lib/jet/settings-window";
 import { PlaneCatalog } from "$lib/features/planes/catalog.svelte";
 import { PlaneHealth } from "$lib/features/system/health.svelte";
+import { LocalServiceSession } from "$lib/features/system/local-service.svelte";
+import { isProvisioning, type LocalServiceView } from "$lib/jet/local-service";
 import { TrashSession } from "$lib/features/trash/session.svelte";
 import type { PlaneNotice } from "$lib/features/system/model";
 import { needsPairing } from "$lib/features/planes/model";
@@ -86,6 +88,7 @@ import {
   type ShellIntent,
   type ShortcutContext,
 } from "./shortcuts";
+import { LOCAL_PLANE_CONNECTED, mark } from "./timing";
 import {
   fixtureForState,
   type DesktopFixtureScenario,
@@ -151,6 +154,29 @@ function focusTarget(value: unknown): FocusTarget | null {
   return value as FocusTarget;
 }
 
+/**
+ * A random (version 4) UUID naming one composer Send. `getRandomValues`
+ * works in every webview context, unlike `randomUUID`.
+ */
+function newSendAttempt(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * The request a composer Send was first sent as. A retry of an uncertain
+ * Send resends exactly this, whatever the task shows now: an uncertain Run
+ * start retried as a Turn (or the reverse) would send the prompt twice.
+ */
+type KeptSend =
+  | { kind: "start"; conversationId: string; planeId: string; craft: string }
+  | { kind: "submit"; conversationId: string; planeId: string };
+
+type SendAttempt = { id: string; send: KeptSend | null };
+
 /** How long Ctrl+W and Ctrl+Q wait for a pending layout save before closing. */
 export const FLUSH_BEFORE_CLOSE_MS = 500;
 
@@ -168,6 +194,11 @@ export class DesktopSession implements FeedHandler {
     knownTitle: (planeId, conversationId) => this.catalog.find(planeId, conversationId)?.title ?? null,
     observe: (planeId, error) => this.observeOutcome(planeId, error),
   });
+  /**
+   * The local Jet service (Wave 4 §A): Setup shows its provisioning and
+   * repair, and re-reads the local Plane when the service is up again.
+   */
+  readonly service = new LocalServiceSession((view, previous) => this.serviceChanged(view, previous));
   scenario = $state<DesktopFixtureScenario>(fixtureForState("active"));
   sidebarSelection = $state<SidebarDestination>("conversation");
   /** Written only through `applySidebar`. */
@@ -178,7 +209,16 @@ export class DesktopSession implements FeedHandler {
   sidebarWidth = $state<number>(SIDEBAR_WIDTH.ideal);
   workPanelWidth = $state<number>(WORK_PANEL_WIDTH.ideal);
   selectedWorkPanel = $state<WorkPanelTab>("run");
-  draft = $state("");
+  #draft = $state("");
+  /**
+   * The composer Send in progress (D2). The shell ties its Command IDs to
+   * it, so it is kept only while the user may retry that Send unchanged: a
+   * retry is then answered with what the Plane already did. A successful
+   * Send or any edit of the draft clears it, so a later Send is new work
+   * even with the same text. Once sent, it is bound to the request it was
+   * sent as (`KeptSend`); a Send to another task is new work.
+   */
+  private sendAttempt: SendAttempt | null = null;
   actionNotice = $state<string | null>(null);
   /** The saved window layout; nothing is saved while it is loading. */
   presentation = $state<PresentationLoad>({ kind: "loading" });
@@ -281,6 +321,18 @@ export class DesktopSession implements FeedHandler {
   private presentationSaveFailing = false;
   private presentationSaveRequest = 0;
   private setupRequest = 0;
+  /**
+   * The startup generation whose Setup read failed, until a read succeeds:
+   * once the local service is up, that read is repeated with the startup's
+   * incomplete-setup redirect.
+   */
+  private startupSetupFailed: number | null = null;
+  /**
+   * Planes whose feed dropped (`reconnecting`, `failed`) and has not come
+   * back. A feed that dials again says `connected` with a fresh status read,
+   * then `resumed`. Either one ends the drop, so its reads run once.
+   */
+  private readonly droppedFeeds = new Set<PlaneId>();
   private restoreRequest = 0;
   private workRequest = 0;
   private workFileRequest = 0;
@@ -288,6 +340,15 @@ export class DesktopSession implements FeedHandler {
   private patchDecoder: TextDecoder | null = null;
   private terminalDecoders = new Map<string, TerminalTranscriptDecoder>();
   private lastTerminalSize: { terminalId: string; rows: number; columns: number } | null = null;
+
+  get draft(): string {
+    return this.#draft;
+  }
+
+  set draft(value: string) {
+    if (value !== this.#draft) this.sendAttempt = null;
+    this.#draft = value;
+  }
 
   get canSubmitDraft(): boolean {
     return (
@@ -528,11 +589,51 @@ export class DesktopSession implements FeedHandler {
       this.loadPresentation(),
       this.loadReopenLastTask(),
       this.planes.refresh(),
+      this.service.start(),
     ]);
     this.reopenLastTask = reopenLastTask;
     this.applyStartupPresentation(presentation, reopenLastTask, generation);
     await this.refreshSetup(true, generation);
+    if (this.setup.kind === "failed") {
+      this.startupSetupFailed = generation;
+      this.showServiceProblem();
+    }
     await this.connectPlanes(reopenLastTask);
+  }
+
+  /**
+   * The local service changed. Up again (installed, started, updated or
+   * restarted): Setup re-reads the local Plane. Settled without running
+   * after a failed startup: Setup opens, where Repair is.
+   */
+  private serviceChanged(view: LocalServiceView, previous: LocalServiceView | null): void {
+    // The first view arrives before startup reads Setup itself.
+    if (previous === null) return;
+    if (view.phase === "running") {
+      if (previous.phase !== "running" || previous.runningVersion !== view.runningVersion) {
+        const startup = this.startupSetupFailed;
+        void this.refreshSetup(startup !== null, startup);
+      }
+      return;
+    }
+    if (!isProvisioning(view.phase)) this.showServiceProblem();
+  }
+
+  /** Opens Setup for a startup whose Setup read failed, unless the user moved on. */
+  private showServiceProblem(): void {
+    const view = this.service.view;
+    if (
+      view === null ||
+      view.phase === "running" ||
+      isProvisioning(view.phase) ||
+      this.setup.kind !== "failed" ||
+      this.startupSetupFailed === null ||
+      this.startupSetupFailed !== this.presentationGeneration
+    ) {
+      return;
+    }
+    this.sidebarSelection = "project";
+    this.applyPanel({ kind: "auto-close" });
   }
 
   /** The saved layout, or the defaults when the native read fails. */
@@ -703,6 +804,7 @@ export class DesktopSession implements FeedHandler {
   disconnect(): void {
     this.planes.closeAll();
     this.catalog.dispose();
+    this.service.dispose();
   }
 
   /**
@@ -791,6 +893,7 @@ export class DesktopSession implements FeedHandler {
 
   /** FeedHandler: a Plane was forgotten here; its tasks leave Recent. */
   planeForgotten(planeId: PlaneId): void {
+    this.droppedFeeds.delete(planeId);
     this.catalog.sync();
     this.trash.forget(planeId);
     if (this.selectedPlaneId !== planeId) return;
@@ -804,10 +907,17 @@ export class DesktopSession implements FeedHandler {
 
   /** FeedHandler: a Plane's feed opened. */
   opened(planeId: PlaneId, snapshot: ConnectionSnapshot): void {
-    this.applyConnection(planeId, snapshot);
+    const restarted = this.applyConnection(planeId, snapshot);
     if (planeId !== LOCAL_PLANE) return;
     this.connection = snapshot.state === "online" ? snapshot : null;
     this.connectionState = snapshot.state;
+    if (snapshot.state === "online") mark(LOCAL_PLANE_CONNECTED);
+    // The local Plane answers now although startup's Setup read failed, or
+    // a reopened feed found the service started again.
+    if (snapshot.state === "online" && (restarted || this.setup.kind === "failed")) {
+      const startup = this.startupSetupFailed;
+      void this.refreshSetup(startup !== null, startup);
+    }
   }
 
   /** FeedHandler: a Plane's feed could not be opened. */
@@ -830,6 +940,7 @@ export class DesktopSession implements FeedHandler {
       const snapshot = await loadSetup();
       if (request !== this.setupRequest) return;
       this.setup = { kind: "ready", snapshot };
+      this.startupSetupFailed = null;
       this.failure = null;
       const projectsAvailable = !snapshot.issues.some((issue) => issue.section === "projects");
       const accountsAvailable = !snapshot.issues.some((issue) => issue.section === "accounts");
@@ -1162,6 +1273,7 @@ export class DesktopSession implements FeedHandler {
     }
     this.conversationBusy = true;
     this.actionNotice = null;
+    let attempt = (this.sendAttempt ??= { id: newSendAttempt(), send: null });
     try {
       // New task always creates a task, whatever is still selected (D17).
       const creating = this.sidebarSelection === "new-task" || !this.selectedConversationId;
@@ -1174,7 +1286,7 @@ export class DesktopSession implements FeedHandler {
         if (this.selectedConversationId) this.clearSelectedConversation();
         // New tasks run on this computer in Wave 3.1.
         this.selectedPlaneId = LOCAL_PLANE;
-        const conversation = await createConversation(this.selectedProjectId);
+        const conversation = await createConversation(this.selectedProjectId, attempt.id);
         this.catalog.upsert(conversation);
         conversationId = conversation.id;
         this.selectedConversationId = conversation.id;
@@ -1184,13 +1296,26 @@ export class DesktopSession implements FeedHandler {
       }
 
       const planeId = this.selectedPlaneId;
-      if (this.hasLiveRun) {
-        await submitTurn(conversationId, prompt, planeId);
+      let kept = attempt.send;
+      if (kept && (kept.conversationId !== conversationId || kept.planeId !== planeId)) {
+        // The same draft sent to another task is new work.
+        attempt = this.sendAttempt = { id: newSendAttempt(), send: null };
+        kept = null;
+      }
+      const send: KeptSend =
+        kept ??
+        (this.hasLiveRun
+          ? { kind: "submit", conversationId, planeId }
+          : { kind: "start", conversationId, planeId, craft });
+      attempt.send = send;
+      if (send.kind === "submit") {
+        await submitTurn(send.conversationId, prompt, attempt.id, send.planeId);
       } else {
-        await startRun(conversationId, craft, prompt, planeId);
+        await startRun(send.conversationId, send.craft, prompt, attempt.id, send.planeId);
       }
       this.health.succeeded(planeId);
       this.draft = "";
+      this.sendAttempt = null;
       this.actionNotice = "Sent to the Plane.";
       await this.loadSelectedConversation(false);
     } catch (error: unknown) {
@@ -2045,27 +2170,48 @@ export class DesktopSession implements FeedHandler {
     const local = planeId === LOCAL_PLANE;
     const selectedPlane = planeId === this.selectedPlaneId;
     switch (update.type) {
-      case "connected":
-        this.applyConnection(planeId, update.connection);
+      case "connected": {
+        // A fresh status read, and `resumed` follows: the feed's first read
+        // failed and the Plane answered later, or the feed dialed again
+        // after a drop, perhaps to a restarted jetd (`client.rs`
+        // `stream_updates`). A new daemon start reads everything shown for
+        // the Plane again; otherwise only what the drop left offline or
+        // cached is read again. Either runs once. Recent is walked again on
+        // that `resumed`, once the connection pages; a first page that fails
+        // leaves it unavailable until the next one.
+        const restarted = this.applyConnection(planeId, update.connection);
+        this.droppedFeeds.delete(planeId);
+        // The registry already holds this read: core version and health.
         void this.planes.refresh();
-        this.catalog.reconnected(planeId);
-        this.trash.reconnected(planeId);
-        if (selectedPlane && this.selectedConversationId) {
-          void this.trash.loadBanner(planeId, this.selectedConversationId);
-        }
-        if (selectedPlane && this.selectedConversationId && this.conversationFreshness !== "live") {
-          void this.loadSelectedConversation(false);
-        }
+        if (!restarted) this.readPlaneAgain(planeId);
         if (!local) break;
+        // The local Plane came back (wave 4 §A): Setup re-reads it rather
+        // than keep showing it unavailable, or the service it had before.
+        const reconnected = this.localPlaneOnline();
         this.connection = update.connection;
-        this.connectionState = "online";
-        this.failure = null;
+        mark(LOCAL_PLANE_CONNECTED);
+        if (reconnected || restarted || this.setup.kind === "failed") {
+          const startup = this.startupSetupFailed;
+          void this.refreshSetup(startup !== null, startup);
+        }
         break;
+      }
       case "resumed":
+        // The feed streams: it just opened, or it dialed again after a drop
+        // and said `connected` first, which ended the drop. A `resumed` that
+        // ends a drop by itself still brings the Plane back, with its health
+        // as last read.
         void this.catalog.load(planeId);
+        if (this.droppedFeeds.delete(planeId)) {
+          void this.planes.refresh();
+          this.readPlaneAgain(planeId);
+        }
         if (!local) break;
-        this.connectionState = "online";
-        this.failure = null;
+        if (this.localPlaneOnline()) {
+          mark(LOCAL_PLANE_CONNECTED);
+          const startup = this.startupSetupFailed;
+          void this.refreshSetup(startup !== null, startup);
+        }
         break;
       case "event":
         if (local) {
@@ -2082,6 +2228,7 @@ export class DesktopSession implements FeedHandler {
         this.receiveTrashEvent(planeId, update.kind, update.conversation_id);
         break;
       case "reconnecting":
+        this.droppedFeeds.add(planeId);
         this.health.offline(planeId);
         this.trash.offline(planeId);
         void this.planes.refresh();
@@ -2100,6 +2247,7 @@ export class DesktopSession implements FeedHandler {
           void this.recoverSnapshot(planeId);
           break;
         }
+        this.droppedFeeds.add(planeId);
         this.health.offline(planeId);
         this.trash.offline(planeId);
         void this.planes.refresh();
@@ -2113,22 +2261,43 @@ export class DesktopSession implements FeedHandler {
     }
   }
 
-  /**
-   * A fresh status read of one Plane (a feed opened or reconnected). The
-   * health summary is applied from here only; `resumed` carries none. When
-   * the daemon started again its store may be older than what is shown.
-   */
-  private applyConnection(planeId: PlaneId, connection: ConnectionSnapshot): void {
-    if (this.health.applyConnection(planeId, connection)) this.planeRestarted(planeId);
+  /** A Plane's feed is back: what its drop left offline or cached is read again. */
+  private readPlaneAgain(planeId: PlaneId): void {
+    this.trash.reconnected(planeId);
+    if (planeId !== this.selectedPlaneId || !this.selectedConversationId) return;
+    void this.trash.loadBanner(planeId, this.selectedConversationId);
+    if (this.conversationFreshness !== "live") void this.loadSelectedConversation(false);
+  }
+
+  /** This computer's feed is online; true when it was shown down until now. */
+  private localPlaneOnline(): boolean {
+    const reconnected = this.connectionState === "reconnecting" || this.connectionState === "failed";
+    this.connectionState = "online";
+    this.failure = null;
+    return reconnected;
   }
 
   /**
-   * The Plane's daemon started again (a restart, or a restored snapshot):
-   * state can move backwards, so what is shown for it is read again, and
-   * Wave 3.3 views drop their per-Plane caches.
+   * A fresh status read of one Plane (a feed opened, or reconnected after a
+   * drop). The health summary is applied from here only; `resumed` carries
+   * none. True when the daemon started again since the last read: its store
+   * may be older than what is shown, and `planeRestarted` has run.
+   */
+  private applyConnection(planeId: PlaneId, connection: ConnectionSnapshot): boolean {
+    const restarted = this.health.applyConnection(planeId, connection);
+    if (restarted) this.planeRestarted(planeId);
+    return restarted;
+  }
+
+  /**
+   * The Plane's daemon started again (a restart, a new core version, or a
+   * restored snapshot): state can move backwards, so what is shown for it
+   * is read again, Wave 3.3 views drop their per-Plane caches, and the
+   * Plane detail shows the versions and capabilities the new start reports.
    */
   private planeRestarted(planeId: PlaneId): void {
     this.trash.reset(planeId);
+    this.planes.planeRestarted(planeId);
     if (planeId === this.selectedPlaneId && this.selectedConversationId) {
       void this.loadSelectedConversation(false);
     }

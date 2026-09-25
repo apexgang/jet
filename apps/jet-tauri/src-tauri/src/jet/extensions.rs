@@ -799,11 +799,12 @@ pub(crate) async fn load_extension_catalog_for(
     validate_craft_id(craft_id)?;
     let (binding, client) = plane_client(bridge, plane_id)?;
     async {
-        let catalog = client
+        let connection = client
             .connect()
             .await
-            .map_err(|e| PublicError::from_client(&e))?
-            .extension_catalog(craft_id.to_owned())
+            .map_err(|e| PublicError::from_client(&e))?;
+        let catalog = connection
+            .query(connection.extension_catalog(craft_id.to_owned()))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         // The answer must be about the Craft that was asked.
@@ -838,11 +839,12 @@ pub(crate) async fn inspect_extension_for(
         // The inspection goes only to the Plane that issued the token.
         let client = bridge.bound(&binding)?;
         // ASVS 4.3.2: the identifier comes from the native grant, never the webview.
-        let catalog = client
+        let connection = client
             .connect()
             .await
-            .map_err(|e| PublicError::from_client(&e))?
-            .inspect_extension(entry.craft_id.clone(), entry.extension_id.clone())
+            .map_err(|e| PublicError::from_client(&e))?;
+        let catalog = connection
+            .query(connection.inspect_extension(entry.craft_id.clone(), entry.extension_id.clone()))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         if catalog.craft_id != entry.craft_id {
@@ -933,11 +935,12 @@ pub(crate) async fn load_extension_change_for(
     let binding = record.plane;
     async {
         let client = bridge.bound(&binding)?;
-        let change = client
+        let connection = client
             .connect()
             .await
-            .map_err(|e| PublicError::from_client(&e))?
-            .extension_change(change_id)
+            .map_err(|e| PublicError::from_client(&e))?;
+        let change = connection
+            .query(connection.extension_change(change_id))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         if change.change_id != change_id

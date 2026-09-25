@@ -53,3 +53,12 @@ just bundle
 
 CI runs `just check` and `just audit` for every change to this app. `just audit`
 needs `cargo-deny` and network access.
+
+The release journey in `tests/e2e/` installs the built `.deb` on a fresh CI
+runner and drives the real app through WebDriver. It checks provisioning,
+Settings › Versions, a daemon restart and a relaunch, and records launch, idle
+and reconnect measurements. The app it launches provisions the real `~/.jet`
+and systemd user unit, so the journey runs only in CI
+(`.github/workflows/desktop-e2e.yml`). `just check` includes
+`just e2e-dry-run`, which runs the journey against fakes and never touches your
+home.

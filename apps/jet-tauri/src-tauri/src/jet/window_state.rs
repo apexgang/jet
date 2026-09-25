@@ -228,6 +228,12 @@ impl WindowGeometryState {
         }
     }
 
+    /// The geometry read at launch, if it was usable.
+    #[cfg(test)]
+    pub(crate) fn saved(&self) -> Option<SavedGeometry> {
+        self.saved.clone()
+    }
+
     fn update(&self, change: impl FnOnce(&mut Option<SavedGeometry>)) {
         if let Ok(mut current) = self.current.lock() {
             change(&mut current);

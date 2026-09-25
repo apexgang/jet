@@ -100,11 +100,12 @@ pub(crate) async fn load_deliveries(
     let id = parse_id(&conversation_id)?;
     let (binding, client) = bridge.plane(plane_id.as_deref())?;
     async {
-        let deliveries = client
+        let connection = client
             .connect()
             .await
-            .map_err(|e| PublicError::from_client(&e))?
-            .git_deliveries(id)
+            .map_err(|e| PublicError::from_client(&e))?;
+        let deliveries = connection
+            .query(connection.git_deliveries(id))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         bridge
@@ -136,11 +137,11 @@ pub(crate) async fn prepare_delivery(
             .map_err(|e| PublicError::from_client(&e))?;
         // The typed read checks protocol support before admitting any mutation.
         client
-            .git_deliveries(id)
+            .query(client.git_deliveries(id))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         let snapshot = client
-            .conversation(id)
+            .query(client.conversation(id))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         let working_tree = match snapshot
@@ -165,12 +166,12 @@ pub(crate) async fn prepare_delivery(
                 ));
             }
             let diff = client
-                .change_diff(
+                .query(client.change_diff(
                     checkpoint.run_id,
                     DiffScope::Turn {
                         turn: checkpoint.turn,
                     },
-                )
+                ))
                 .await
                 .map_err(|e| PublicError::from_client(&e))?;
             (Some(diff.total_files), Some(diff.after.content_complete))
@@ -358,11 +359,12 @@ async fn execute_reviewed(
         } else {
             None
         };
-    let result = client
+    let connection = client
         .connect()
         .await
-        .map_err(|e| PublicError::from_client(&e))?
-        .execute_command(id, command)
+        .map_err(|e| PublicError::from_client(&e))?;
+    let result = connection
+        .command(connection.execute_command(id, command))
         .await;
     if let Ok(ref response) = result {
         let matches = match (expected_acknowledgement, response) {
@@ -390,7 +392,7 @@ async fn execute_reviewed(
             let public = bridge.settle(&binding, PublicError::from_client(&error));
             // A definite daemon rejection ends admission. Transport/decoding
             // errors remain uncertain and must reuse this exact request.
-            if matches!(error, jet_client::ClientError::Remote(_))
+            if matches!(*error, jet_client::ClientError::Remote(_))
                 && public.category != "outcome_unknown"
             {
                 let receipt = DeliveryReceipt::Refused { error: public };
@@ -418,7 +420,7 @@ pub(crate) async fn prepare_delivery_acknowledgement(
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         let rows = client
-            .git_deliveries(conversation_id)
+            .query(client.git_deliveries(conversation_id))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         if !rows.iter().any(|d| {

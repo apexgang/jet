@@ -1,5 +1,5 @@
 # This workflow is managed by gh actions-lock.
-name: Release core executables
+name: Release core executables and the Linux desktop app
 
 on:
   push:
@@ -17,16 +17,24 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: Require a version tag matching the workspace
+      - name: Require a version tag matching the workspace and the desktop app
         env:
           HAS_APP_KEY: ${{ secrets.APE_BONKER_PRIVATE_KEY != '' }}
+          HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD != '' }}
         run: |
           test "$GITHUB_REF_TYPE" = tag
           python3 .github/scripts/release_assets.py --tag "$GITHUB_REF_NAME"
           if [[ "$GITHUB_REF_NAME" != *-* && "$HAS_APP_KEY" != true ]]; then
             echo 'Configure APE_BONKER_PRIVATE_KEY before releasing.' >&2
+            exit 1
+          fi
+          # Every release, prereleases included, signs its desktop bundles and
+          # publishes their signatures in the updater manifest.
+          if [[ "$HAS_UPDATER_KEY" != true ]]; then
+            echo 'Configure TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD before releasing.' >&2
             exit 1
           fi
 
@@ -106,18 +114,61 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-  publish:
+  # Bundles the Linux desktop app around the unmodified core payloads above,
+  # signed for the updater.
+  desktop-linux:
     needs: package
+    uses: ./.github/workflows/desktop-linux.yml
+    with:
+      sign: true
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+  # Installs this release's formula and cask from a local tap before anything
+  # is published.
+  homebrew-check:
+    needs: [package, desktop-linux]
+    uses: ./.github/workflows/homebrew-check.yml
+
+  # Drives the signed x86_64 .deb through the desktop journey before anything
+  # is published. Its measurements are informational; its checks gate.
+  desktop-e2e:
+    needs: desktop-linux
+    uses: ./.github/workflows/desktop-e2e.yml
+    with:
+      signed: true
+      labels: '["x86_64-unknown-linux-gnu"]'
+
+  publish:
+    needs: [package, desktop-linux, homebrew-check, desktop-e2e]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7.0.1
+      # A published release keeps its assets, so a rerun after the artifacts
+      # expire downloads nothing and only checks GitHub's Latest.
+      - name: Check whether the release is published
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/publish-release.sh --check
       - uses: actions/download-artifact@v8.0.1
+        if: ${{ steps.release.outputs.published != 'true' }}
         with:
           pattern: jet-core-*
           merge-multiple: true
           path: packages/target/dist
+      # publish-release.sh reads the bundles from here, apart from the core's
+      # exact archive set.
+      - uses: actions/download-artifact@v8.0.1
+        if: ${{ steps.release.outputs.published != 'true' }}
+        with:
+          pattern: jet-desktop-linux-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/jet-desktop
       - name: Publish complete release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -127,6 +178,7 @@ jobs:
     needs: publish
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     concurrency:
       group: homebrew-tap-jet
       cancel-in-progress: false
@@ -148,7 +200,12 @@ jobs:
           ref: main
           path: homebrew-tap
           token: ${{ steps.app.outputs.token }}
-      - name: Update the binary formula
+      # Brings Formula/jet.rb and Casks/jet-app.rb to the highest published
+      # stable release, which need not be this tag: this group keeps one
+      # pending job and cancels the older one. The Swift app's release
+      # writes Casks/jet.rb, and Formula/jet.rb for a newer core, under its own
+      # concurrency group; the script rebases onto its commits before pushing.
+      - name: Update the core formula and the Linux desktop cask
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/update-homebrew.sh

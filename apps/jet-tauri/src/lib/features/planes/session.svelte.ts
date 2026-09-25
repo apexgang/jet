@@ -19,7 +19,7 @@ import {
 } from "$lib/jet/planes";
 
 import { PlaneEnrollment } from "./enrollment.svelte";
-import { aggregateStatus, planeAttentionCount } from "./model";
+import { aggregateStatus, launchNotices, planeAttentionCount } from "./model";
 import { OwnerPairing } from "./pairing.svelte";
 
 /** Deep-link targets inside the Planes destination. */
@@ -186,10 +186,9 @@ export class PlanesSession {
     return this.plane(this.selectedPlaneId);
   }
 
-  get notice(): string | null {
-    return this.snapshot?.notice === "registry_reset" && !this.noticeDismissed
-      ? "Saved Planes couldn't be read and were reset. Add them again."
-      : null;
+  /** What launch did to the saved Planes and this computer's identity. */
+  get notices(): string[] {
+    return this.snapshot && !this.noticeDismissed ? launchNotices(this.snapshot) : [];
   }
 
   /** Reads the native registry snapshot. It never connects to a Plane. */
@@ -255,6 +254,14 @@ export class PlanesSession {
     await this.refresh();
   }
 
+  /**
+   * The Plane's daemon started again: a detail shown for it names the old
+   * start's versions and capabilities, so it is read again.
+   */
+  planeRestarted(planeId: PlaneId): void {
+    if (planeId === this.selectedPlaneId && this.detail?.planeId === planeId) void this.loadDetail();
+  }
+
   hasFeed(planeId: PlaneId): boolean {
     return this.feeds.has(planeId);
   }
@@ -274,10 +281,18 @@ export class PlanesSession {
     const generation = ++this.feedGeneration;
     this.feeds.set(planeId, { generation, feedId: null });
     const current = () => this.feeds.get(planeId)?.generation === generation;
+    // The feed task runs before this call answers, so a drop and a redial's
+    // status can arrive first. Its snapshot is then older than what they
+    // said (perhaps an earlier daemon start) and is not applied over them.
+    let superseded = false;
     try {
       const snapshot = await openPlaneFeed(
         (update) => {
-          if (current()) this.handler.receive(planeId, update);
+          if (!current()) return;
+          if (update.type === "connected" || update.type === "reconnecting" || update.type === "failed") {
+            superseded = true;
+          }
+          this.handler.receive(planeId, update);
         },
         after,
         planeId,
@@ -288,7 +303,7 @@ export class PlanesSession {
         return;
       }
       this.feeds.set(planeId, { generation, feedId: snapshot.feedId });
-      this.handler.opened(planeId, snapshot);
+      if (!superseded) this.handler.opened(planeId, snapshot);
     } catch (error: unknown) {
       if (current()) this.handler.openFailed(planeId, publicError(error));
     }
