@@ -146,7 +146,7 @@ jobs:
           done
           cat "$RUNNER_TEMP/jetd-status.json"
           exit 1
-      # The case ConditionFileIsExecutable exists for: the daemon is still
+      # The case RestartPreventExitStatus=203 exists for: the daemon is still
       # running when the cask and formula go, and its unit stays behind.
       - name: Uninstall while running and require no restart loop
         run: |
@@ -165,18 +165,24 @@ jobs:
           test -f "$HOME/.config/systemd/user/$unit"
           test ! -e "$HOME/Applications/Jet.AppImage"
           # The orphaned daemon exits as it does after a drain. Restart=always
-          # tries again after RestartSec, and the condition skips that start.
+          # tries once more after RestartSec; that exec fails with status 203,
+          # which RestartPreventExitStatus turns into a stop. (systemd does
+          # not re-check conditions on a Restart= restart.)
           systemctl --user kill "$unit"
           state() { systemctl --user show "$unit" -p "$1" --value; }
+          stopped() { [[ $(state ActiveState) =~ ^(inactive|failed)$ ]]; }
           for _ in $(seq 30); do
-            [[ $(state ActiveState) == inactive && $(state ConditionResult) == no ]] && break
+            stopped && break
             sleep 1
           done
           systemctl --user status "$unit" --no-pager || true
-          [[ $(state ActiveState) == inactive && $(state ConditionResult) == no ]]
+          stopped
           restarts=$(state NRestarts)
           sleep 10
-          [[ $(state ActiveState) == inactive && $(state NRestarts) == "$restarts" ]]
+          stopped && [[ $(state NRestarts) == "$restarts" ]]
+          # The next login's start is skipped by the condition instead.
+          systemctl --user start "$unit"
+          [[ $(state ConditionResult) == no ]] && stopped
           if pgrep -u "$(id -u)" -x jetd; then
             echo 'jetd is still running after its formula was removed.' >&2
             exit 1
