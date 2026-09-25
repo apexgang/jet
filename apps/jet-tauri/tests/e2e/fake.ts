@@ -12,7 +12,7 @@ import { dirname } from "node:path";
 
 import type { Clock } from "./clock";
 import { servicePaths, UNIT, type Host, type RunResult } from "./host";
-import type { ControlQuery, MainView, Mark, SettingsView } from "./page";
+import { PAGE_SCRIPT, type ControlQuery, type MainView, type Mark, type SettingsView } from "./page";
 import { ELEMENT_KEY } from "./webdriver";
 
 /** A 1×1 PNG, the fake screenshot. */
@@ -360,11 +360,10 @@ const error = (status: number, code: string, message: string): Reply => ({ statu
 
 /**
  * Serves the WebDriver commands the journey sends, answering from `app`.
- * Scripts must be the journey's page script: it has to compile, as it would
- * in the webview, and its first argument picks the answer.
+ * The only script it takes is the journey's page script, compared as text
+ * and never run; its first argument picks the answer.
  */
 export function fakeDriver(app: FakeApp, onControl: (path: string, body: unknown) => void = () => undefined): Server {
-  const compiled = new Set<string>();
   const sessions = new Set<string>();
   const route = (method: string, path: string, body: Record<string, unknown>): Reply => {
     if (method === "GET" && path === "/status") return { status: 200, value: { ready: true, message: "fake driver" } };
@@ -401,16 +400,7 @@ export function fakeDriver(app: FakeApp, onControl: (path: string, body: unknown
     if (command === "GET /url") return { status: 200, value: app.title() === "Jet" ? "tauri://localhost/" : "tauri://localhost/settings" };
     if (command === "GET /screenshot") return { status: 200, value: FAKE_PNG };
     if (command === "POST /execute/sync") {
-      const script = String(body.script ?? "");
-      if (!compiled.has(script)) {
-        try {
-          new Function(script);
-        } catch (cause) {
-          return error(500, "javascript error", `the page script does not compile: ${(cause as Error).message}`);
-        }
-        if (!script.includes("jetPage")) return error(500, "javascript error", "not the journey's page script");
-        compiled.add(script);
-      }
+      if (body.script !== PAGE_SCRIPT) return error(500, "javascript error", "not the journey's page script");
       const [pageCommand, argument] = (body.args as unknown[]) ?? [];
       switch (pageCommand) {
         case "main":
