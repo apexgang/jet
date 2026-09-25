@@ -1,4 +1,5 @@
-# This workflow is managed by gh actions-lock.
+# Actions are pinned to full commit SHAs (repository policy); the comment
+# names the release tag each SHA was verified against.
 name: Release core executables and the Linux desktop app
 
 on:
@@ -19,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Require a version tag matching the workspace and the desktop app
         env:
           HAS_APP_KEY: ${{ secrets.APE_BONKER_PRIVATE_KEY != '' }}
@@ -62,12 +63,12 @@ jobs:
       TARGETS: ${{ matrix.targets }}
       LABEL: ${{ matrix.label }}
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: extractions/setup-just@v4.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
       - name: Set up Rust
         working-directory: .
         run: bash .github/scripts/setup-rust.sh release
-      - uses: actions/cache/restore@v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache
         with:
           path: |
@@ -95,7 +96,7 @@ jobs:
         if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
         working-directory: .
         run: python3 .github/scripts/cache_sources.py save
-      - uses: actions/cache/save@v6.1.0
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' }}
         with:
           path: |
@@ -105,7 +106,7 @@ jobs:
             !packages/target/dist
             .github/.cache
           key: ${{ steps.cache.outputs.cache-primary-key }}
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
           name: jet-core-${{ matrix.label }}
@@ -147,7 +148,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # A published release keeps its assets, so a rerun after the artifacts
       # expire downloads nothing and only checks GitHub's Latest.
       - name: Check whether the release is published
@@ -155,7 +156,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/publish-release.sh --check
-      - uses: actions/download-artifact@v8.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         if: ${{ steps.release.outputs.published != 'true' }}
         with:
           pattern: jet-core-*
@@ -163,7 +164,7 @@ jobs:
           path: packages/target/dist
       # publish-release.sh reads the bundles from here, apart from the core's
       # exact archive set.
-      - uses: actions/download-artifact@v8.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         if: ${{ steps.release.outputs.published != 'true' }}
         with:
           pattern: jet-desktop-linux-*
@@ -183,10 +184,10 @@ jobs:
       group: homebrew-tap-jet
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # ASVS 13.3.1/13.3.2: keep the key in Actions secrets and mint only
       # contents:write for the tap. The action revokes the token after the job.
-      - uses: actions/create-github-app-token@v3.2.0
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app
         with:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID || 'Iv23liPckhcRTwkS6Yxe' }}
@@ -194,7 +195,7 @@ jobs:
           owner: apexgang
           repositories: homebrew-tap
           permission-contents: write
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: apexgang/homebrew-tap
           ref: main
