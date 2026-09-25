@@ -286,9 +286,9 @@ update check in a task spawned from `.setup()`, which never waits for it.
 - `CARGO_ENCODED_RUSTFLAGS` adds `--remap-path-prefix` for the repository
   (`/jet`), `CARGO_HOME` (`/cargo`) and the target directory (`/target`), so
   panic locations in the app binary no longer name the build user.
-- The template logo is gone. `src-tauri/icons/source/jet.svg` is an original
-  mark, a forward-leaning J with two speed lines, white on `#29B6F6`, and
-  `bun run tauri icon` regenerated the existing file names from it.
+- The template logo is gone. The icons are the approved Wing J flat app icon
+  (`docs/brand/jet-app-icon.png`), regenerated into the existing file names with
+  `bun run tauri icon ../../docs/brand/jet-app-icon.png`.
 - `just release-verify [--payload <archive>] [--release]
   [--require-signatures]` reads ar, tar, cpio and rpm itself and opens the
   AppImage with `--appimage-extract`. It checks the expected bundle names,
