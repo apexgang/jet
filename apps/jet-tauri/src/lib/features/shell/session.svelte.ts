@@ -317,8 +317,8 @@ export class DesktopSession implements FeedHandler {
   private startupSetupFailed: number | null = null;
   /**
    * Planes whose feed dropped (`reconnecting`, `failed`) and has not come
-   * back. A feed that dials again says `resumed`, not `connected`, so either
-   * one ends the drop.
+   * back. A feed that dials again says `connected` with a fresh status read,
+   * then `resumed`. Either one ends the drop, so its reads run once.
    */
   private readonly droppedFeeds = new Set<PlaneId>();
   private restoreRequest = 0;
@@ -895,13 +895,14 @@ export class DesktopSession implements FeedHandler {
 
   /** FeedHandler: a Plane's feed opened. */
   opened(planeId: PlaneId, snapshot: ConnectionSnapshot): void {
-    this.applyConnection(planeId, snapshot);
+    const restarted = this.applyConnection(planeId, snapshot);
     if (planeId !== LOCAL_PLANE) return;
     this.connection = snapshot.state === "online" ? snapshot : null;
     this.connectionState = snapshot.state;
     if (snapshot.state === "online") mark(LOCAL_PLANE_CONNECTED);
-    // The local Plane answers now although startup's Setup read failed.
-    if (snapshot.state === "online" && this.setup.kind === "failed") {
+    // The local Plane answers now although startup's Setup read failed, or
+    // a reopened feed found the service started again.
+    if (snapshot.state === "online" && (restarted || this.setup.kind === "failed")) {
       const startup = this.startupSetupFailed;
       void this.refreshSetup(startup !== null, startup);
     }
@@ -2145,30 +2146,37 @@ export class DesktopSession implements FeedHandler {
     const local = planeId === LOCAL_PLANE;
     const selectedPlane = planeId === this.selectedPlaneId;
     switch (update.type) {
-      case "connected":
-        this.applyConnection(planeId, update.connection);
+      case "connected": {
+        // A fresh status read, and `resumed` follows: the feed's first read
+        // failed and the Plane answered later, or the feed dialed again
+        // after a drop, perhaps to a restarted jetd (`client.rs`
+        // `stream_updates`). A new daemon start reads everything shown for
+        // the Plane again; otherwise only what the drop left offline or
+        // cached is read again. Either runs once. Recent is walked again on
+        // that `resumed`, once the connection pages; a first page that fails
+        // leaves it unavailable until the next one.
+        const restarted = this.applyConnection(planeId, update.connection);
         this.droppedFeeds.delete(planeId);
+        // The registry already holds this read: core version and health.
         void this.planes.refresh();
-        this.catalog.reconnected(planeId);
-        this.readPlaneAgain(planeId);
+        if (!restarted) this.readPlaneAgain(planeId);
         if (!local) break;
-        {
-          // The local Plane came back (wave 4 §A): Setup re-reads it rather
-          // than keep showing it unavailable.
-          const reconnected = this.localPlaneOnline();
-          this.connection = update.connection;
-          mark(LOCAL_PLANE_CONNECTED);
-          if (reconnected || this.setup.kind === "failed") {
-            const startup = this.startupSetupFailed;
-            void this.refreshSetup(startup !== null, startup);
-          }
+        // The local Plane came back (wave 4 §A): Setup re-reads it rather
+        // than keep showing it unavailable, or the service it had before.
+        const reconnected = this.localPlaneOnline();
+        this.connection = update.connection;
+        mark(LOCAL_PLANE_CONNECTED);
+        if (reconnected || restarted || this.setup.kind === "failed") {
+          const startup = this.startupSetupFailed;
+          void this.refreshSetup(startup !== null, startup);
         }
         break;
+      }
       case "resumed":
-        // The feed streams: it just opened, or it dialed again after a drop,
-        // which is how it outlives a restarted jetd (`client.rs`
-        // `stream_updates`). Natively the Plane is online again; no status
-        // was read, so its health stays as last read.
+        // The feed streams: it just opened, or it dialed again after a drop
+        // and said `connected` first, which ended the drop. A `resumed` that
+        // ends a drop by itself still brings the Plane back, with its health
+        // as last read.
         void this.catalog.load(planeId);
         if (this.droppedFeeds.delete(planeId)) {
           void this.planes.refresh();
@@ -2246,21 +2254,26 @@ export class DesktopSession implements FeedHandler {
   }
 
   /**
-   * A fresh status read of one Plane (a feed opened or reconnected). The
-   * health summary is applied from here only; `resumed` carries none. When
-   * the daemon started again its store may be older than what is shown.
+   * A fresh status read of one Plane (a feed opened, or reconnected after a
+   * drop). The health summary is applied from here only; `resumed` carries
+   * none. True when the daemon started again since the last read: its store
+   * may be older than what is shown, and `planeRestarted` has run.
    */
-  private applyConnection(planeId: PlaneId, connection: ConnectionSnapshot): void {
-    if (this.health.applyConnection(planeId, connection)) this.planeRestarted(planeId);
+  private applyConnection(planeId: PlaneId, connection: ConnectionSnapshot): boolean {
+    const restarted = this.health.applyConnection(planeId, connection);
+    if (restarted) this.planeRestarted(planeId);
+    return restarted;
   }
 
   /**
-   * The Plane's daemon started again (a restart, or a restored snapshot):
-   * state can move backwards, so what is shown for it is read again, and
-   * Wave 3.3 views drop their per-Plane caches.
+   * The Plane's daemon started again (a restart, a new core version, or a
+   * restored snapshot): state can move backwards, so what is shown for it
+   * is read again, Wave 3.3 views drop their per-Plane caches, and the
+   * Plane detail shows the versions and capabilities the new start reports.
    */
   private planeRestarted(planeId: PlaneId): void {
     this.trash.reset(planeId);
+    this.planes.planeRestarted(planeId);
     if (planeId === this.selectedPlaneId && this.selectedConversationId) {
       void this.loadSelectedConversation(false);
     }

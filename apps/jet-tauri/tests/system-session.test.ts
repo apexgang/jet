@@ -339,6 +339,33 @@ describe("Settings session wiring", () => {
     expect(session.system.recentCodes).toContain("client.state_unavailable");
     session.dispose();
   });
+
+  it("shows a restarted Jet service in Versions once the watcher resumes", async () => {
+    const fake = new Fake();
+    fake.install();
+    let service = { coreVersion: "0.2.0", daemonStarts: "3" };
+    fake.answers.set("load_system_health", (args) => {
+      const read = health(args.planeId as string, service.daemonStarts);
+      return { ...read, service: { ...read.service, coreVersion: service.coreVersion } };
+    });
+    const session = new SettingsSession();
+    const restarted = vi.spyOn(session.autodelete, "planeRestarted");
+    session.system.select("local");
+    await session.system.ensureLoaded();
+
+    // A core activation drains jetd: this window's watcher drops, then its
+    // redial resumes against the new start (`settings.rs` keeps the redial's
+    // status read native; the resumed reloads every section).
+    await session.receive({ type: "reconnecting", error: failure("transport.offline", "offline", true) });
+    service = { coreVersion: "0.3.0", daemonStarts: "4" };
+    await session.receive({ type: "resumed", after: "10" });
+    await settle();
+    const shown = session.system.health.kind === "ready" ? session.system.health : null;
+    expect(shown?.data.service).toMatchObject({ coreVersion: "0.3.0", daemonStarts: "4" });
+    expect(shown?.freshness).toBe("live");
+    expect(restarted).toHaveBeenCalledTimes(1);
+    session.dispose();
+  });
 });
 
 const TOKEN = "5a1f0000-0000-4000-8000-000000000001";

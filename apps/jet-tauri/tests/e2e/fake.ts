@@ -180,8 +180,9 @@ export class FakeApp {
     if (!(this.options.failure && launch.fresh) && !this.options.neverConnect) {
       add("local-plane-connected", launch.fresh ? t.runningMs - 50 : t.warmConnectedMs);
       // After a daemon restart the real feed says `reconnecting`, then
-      // `resumed`; the app marks and reads the Plane registry again on
-      // `resumed`. The shell tests drive that sequence
+      // `connected` with the new daemon's status, then `resumed`; the app
+      // marks once and reads the Plane registry again on `connected`. The
+      // shell tests drive that sequence
       // (shell-timing.test.ts, e2e-page.component.test.ts); this fake only
       // shows its outcome.
       for (const outage of this.outages) {

@@ -1467,6 +1467,10 @@ pub(crate) enum SettingsChange {
 /// Projects one native update for the Settings window, or drops it.
 fn settings_change(update: NativeUpdate, plane: PlaneId) -> Option<SettingsChange> {
     match update {
+        // The status a redial reads is the main window's to apply. The
+        // `resumed` that follows it makes this window read every section
+        // again, Versions included, which shows a restarted service.
+        NativeUpdate::Connected { .. } => None,
         NativeUpdate::Resumed { after } => Some(SettingsChange::Resumed {
             after: after.to_string(),
         }),

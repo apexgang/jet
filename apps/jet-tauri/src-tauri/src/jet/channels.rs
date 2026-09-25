@@ -12,7 +12,7 @@ use uuid::Uuid;
 use super::{
     client::{ApprovalProjection, EventSummary, NativeUpdate, PlaneClient},
     errors::PublicError,
-    notifications::NotificationState,
+    notifications::{NotificationSignal, NotificationState},
     planes::{ConnectionView, HealthView, PlaneHealth, PlaneId, PlaneRegistry},
     JetBridge,
 };
@@ -169,6 +169,47 @@ impl FeedContext {
         self.feeds.finished(self.plane, self.feed);
     }
 
+    /// The shell state this feed keeps current.
+    fn shell(&self) -> FeedShell<'_> {
+        FeedShell {
+            plane: self.plane,
+            feed: self.feed,
+            planes: &self.planes,
+            notifications: &self.notifications,
+        }
+    }
+
+    async fn stream(&self, cursor: u64, on_update: &Channel<PlaneUpdate>) {
+        let label = self.planes.notification_label(self.plane);
+        stream_feed(
+            &self.client,
+            &self.shell(),
+            cursor,
+            |sequence, signal| {
+                self.notifications.observe(
+                    &self.app,
+                    self.plane,
+                    label.as_deref(),
+                    sequence,
+                    signal,
+                );
+            },
+            |update| on_update.send(update).is_ok(),
+        )
+        .await;
+    }
+}
+
+/// What one feed changes in the shell's own Plane state. It holds no app
+/// handle, so tests drive it through `stream_feed` with a fake Plane.
+struct FeedShell<'a> {
+    plane: PlaneId,
+    feed: Uuid,
+    planes: &'a PlaneRegistry,
+    notifications: &'a NotificationState,
+}
+
+impl FeedShell<'_> {
     /// A successful status read: seed Plane knowledge and fence notifications
     /// so connecting never replays the Plane's history.
     fn connected(&self, status: &PlaneStatus) {
@@ -179,46 +220,67 @@ impl FeedContext {
             .fence(self.plane, status.cursor.unwrap_or_default());
     }
 
-    async fn stream(&self, cursor: u64, on_update: &Channel<PlaneUpdate>) {
-        let label = self.planes.notification_label(self.plane);
-        self.client
-            .stream_updates(cursor, |update| {
-                match &update {
-                    NativeUpdate::Event(event) => self.notifications.observe(
-                        &self.app,
-                        self.plane,
-                        label.as_deref(),
-                        event.sequence,
-                        event.notification,
-                    ),
-                    NativeUpdate::Resumed { .. } => self
-                        .planes
-                        .set_connection(self.plane, ConnectionView::Online),
-                    NativeUpdate::Reconnecting { error } => self.planes.set_connection(
-                        self.plane,
-                        ConnectionView::Reconnecting {
-                            error: error.clone(),
-                        },
-                    ),
-                    NativeUpdate::Failed { error } => self.planes.set_connection(
-                        self.plane,
-                        ConnectionView::Failed {
-                            error: error.clone(),
-                        },
-                    ),
-                }
-                on_update.send(named(update.into(), self.plane)).is_ok()
-            })
-            .await;
+    /// Applies one native update to the Plane registry, then projects it for
+    /// the webview. The registry changes first, so a registry read the
+    /// webview makes on this update (a new core version) already sees it.
+    fn apply(&self, update: NativeUpdate) -> PlaneUpdate {
+        match &update {
+            NativeUpdate::Connected { status } => self.connected(status),
+            NativeUpdate::Event(_) => {}
+            NativeUpdate::Resumed { .. } => self
+                .planes
+                .set_connection(self.plane, ConnectionView::Online),
+            NativeUpdate::Reconnecting { error } => self.planes.set_connection(
+                self.plane,
+                ConnectionView::Reconnecting {
+                    error: error.clone(),
+                },
+            ),
+            NativeUpdate::Failed { error } => self.planes.set_connection(
+                self.plane,
+                ConnectionView::Failed {
+                    error: error.clone(),
+                },
+            ),
+        }
+        named(
+            PlaneUpdate::from_native(update, self.feed, self.plane),
+            self.plane,
+        )
     }
+}
+
+/// Streams one feed from `cursor`: every native update changes the shell's
+/// Plane state, an Event may raise a desktop notification (`notify`), and
+/// the webview receives the projection (`send`, false once it is gone).
+async fn stream_feed(
+    client: &PlaneClient,
+    shell: &FeedShell<'_>,
+    cursor: u64,
+    mut notify: impl FnMut(u64, Option<NotificationSignal>),
+    mut send: impl FnMut(PlaneUpdate) -> bool,
+) {
+    client
+        .stream_updates(cursor, |update| {
+            if let NativeUpdate::Event(event) = &update {
+                notify(event.sequence, event.notification);
+            }
+            send(shell.apply(update))
+        })
+        .await;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum PlaneUpdate {
+    /// A fresh status read. The feed's first read failed and the Plane
+    /// answered later, or the feed dialed again after a drop, possibly to a
+    /// restarted `jetd` with a new daemon start and core version. `resumed`
+    /// follows once the first page of the connection arrives.
     Connected {
         connection: ConnectionSnapshot,
     },
+    /// The first page of a connection arrived: Events after `after` follow.
     Resumed {
         after: String,
     },
@@ -281,9 +343,13 @@ impl From<ApprovalProjection> for ApprovalView {
     }
 }
 
-impl From<NativeUpdate> for PlaneUpdate {
-    fn from(update: NativeUpdate) -> Self {
+impl PlaneUpdate {
+    /// The webview's form of one native update of feed `feed` on `plane`.
+    fn from_native(update: NativeUpdate, feed: Uuid, plane: PlaneId) -> Self {
         match update {
+            NativeUpdate::Connected { status } => Self::Connected {
+                connection: ConnectionSnapshot::from_status(feed, plane, *status),
+            },
             NativeUpdate::Resumed { after } => Self::Resumed {
                 after: after.to_string(),
             },
@@ -332,8 +398,10 @@ fn named(update: PlaneUpdate, plane: PlaneId) -> PlaneUpdate {
 }
 
 /// Opens one Plane's read-only feed: a fenced status snapshot plus ordered,
-/// redacted updates that resume after the native cursor. It replaces that
-/// Plane's previous feed, if any.
+/// redacted updates that resume after the native cursor. After a drop the
+/// feed sends `connected` with a fresh status snapshot, then `resumed`, and
+/// goes on after the last Event it delivered. It replaces that Plane's
+/// previous feed, if any.
 pub(crate) async fn open_plane_feed(
     app: tauri::AppHandle,
     bridge: State<'_, JetBridge>,
@@ -371,7 +439,7 @@ pub(crate) async fn open_plane_feed(
     match context.client.status().await {
         Ok(status) => {
             let cursor = requested_cursor.unwrap_or_else(|| status.cursor.unwrap_or_default());
-            context.connected(&status);
+            context.shell().connected(&status);
             let snapshot = ConnectionSnapshot::from_status(context.feed, plane, status);
             let registration = context.registration();
             spawn_feed(registration, async move {
@@ -430,7 +498,7 @@ async fn reconnect(
         match context.client.status().await {
             Ok(status) => {
                 let cursor = requested_cursor.unwrap_or_else(|| status.cursor.unwrap_or_default());
-                context.connected(&status);
+                context.shell().connected(&status);
                 let connection =
                     ConnectionSnapshot::from_status(context.feed, context.plane, status);
                 if on_update
@@ -536,14 +604,20 @@ mod tests {
     use uuid::Uuid;
 
     use jet_protocol::{
-        AuditBreach, DeletionLedgerStatus, RecoveryReason, RecoveryState, RecoveryStatus,
-        SecurityState,
+        AuditBreach, DeletionLedgerStatus, PlaneStatus, RecoveryReason, RecoveryState,
+        RecoveryStatus, SecurityState,
     };
 
     use super::{
-        bounded_text, named, parse_resume_cursor, ConnectionSnapshot, FeedRegistry, PlaneUpdate,
+        bounded_text, named, parse_resume_cursor, stream_feed, ConnectionSnapshot, FeedRegistry,
+        FeedShell, PlaneUpdate,
     };
-    use crate::jet::{client::unit_tests::status, errors::PublicError, planes::PlaneId};
+    use crate::jet::{
+        client::unit_tests::{answer_events, answer_status, assert_events_after, event, status},
+        errors::PublicError,
+        fake_plane::{local_plane, next},
+        planes::PlaneId,
+    };
 
     fn pending_task() -> tokio::task::JoinHandle<()> {
         tokio::spawn(async { tokio::time::sleep(Duration::from_secs(3600)).await })
@@ -723,6 +797,131 @@ mod tests {
                 assert_eq!(json["daemonStarts"], "3");
             }
         }
+    }
+
+    /// `jetd` restarts under an open feed (a crash, `systemctl --user kill`,
+    /// or a core activation that drained it). The feed dials again and sends
+    /// `connected` with the new daemon start and core version before
+    /// `resumed`; the Plane registry the webview reads on that update
+    /// already has them, and no longer holds the protocol minor the old
+    /// core negotiated. No Event is lost or delivered twice.
+    #[tokio::test]
+    async fn a_feed_reports_a_restarted_jetd_before_it_resumes() {
+        let fake = local_plane();
+        let bridge = fake.bridge();
+        let feed = Uuid::from_u128(50);
+        let shell = FeedShell {
+            plane: PlaneId::Local,
+            feed,
+            planes: &bridge.planes,
+            notifications: &bridge.notifications,
+        };
+        // Both cores report recovery, so a status read proves minor 37 and
+        // cannot contradict a higher minor the old core negotiated.
+        let serving = || {
+            Some(RecoveryStatus {
+                state: RecoveryState::Serving,
+                reason: None,
+                snapshots: Vec::new(),
+                deletion_ledger: None,
+            })
+        };
+        // What `open_plane_feed` read before the feed streamed.
+        shell.connected(&PlaneStatus {
+            recovery: serving(),
+            ..status(10)
+        });
+        let restarted = PlaneStatus {
+            daemon_starts: 4,
+            core_version: "0.3.0".into(),
+            recovery: serving(),
+            ..status(12)
+        };
+        let registry =
+            || serde_json::to_value(bridge.planes.view(PlaneId::Local).unwrap()).unwrap();
+        assert_eq!(registry()["coreVersion"], "0.2.0");
+        // The old core named its minor in a refusal.
+        let _ = bridge.planes.settle(
+            PlaneId::Local,
+            PublicError::from_client(&jet_client::ClientError::FeatureUnavailable {
+                required_minor: 41,
+                negotiated_minor: 40,
+            }),
+        );
+        assert_eq!(registry()["protocol"]["exact"], 40);
+
+        let mut sent = Vec::new();
+        let mut notified = Vec::new();
+        let ((), served) = tokio::join!(
+            stream_feed(
+                bridge.local(),
+                &shell,
+                10,
+                |sequence, _| notified.push(sequence),
+                |update| {
+                    let json = serde_json::to_value(&update).unwrap();
+                    if json["type"] == "connected" {
+                        let plane = registry();
+                        assert_eq!(plane["coreVersion"], "0.3.0");
+                        assert_eq!(plane["connection"]["state"], "online");
+                        assert!(plane["protocol"]["exact"].is_null());
+                    }
+                    let last = json["type"] == "event" && json["sequence"] == "12";
+                    sent.push(json);
+                    !last
+                },
+            ),
+            async {
+                let (mut reader, mut writer) = fake.accept().await;
+                answer_events(&mut reader, &mut writer, 10, 11, vec![event(11)]).await;
+                let (_, poll) = next(&mut reader).await;
+                assert_events_after(&poll, 11);
+                // The old daemon is gone; the restarted one answers next.
+                drop((reader, writer));
+                let (mut reader, mut writer) = fake.accept().await;
+                answer_status(&mut reader, &mut writer, restarted).await;
+                answer_events(&mut reader, &mut writer, 11, 12, vec![event(12)]).await;
+                (reader, writer)
+            }
+        );
+        drop(served);
+
+        let kinds: Vec<_> = sent
+            .iter()
+            .map(|update| update["type"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                "resumed",
+                "event",
+                "reconnecting",
+                "connected",
+                "resumed",
+                "event"
+            ]
+        );
+        assert_eq!(sent[0]["after"], "10");
+        assert_eq!(sent[1]["sequence"], "11");
+        assert_eq!(sent[2]["error"]["planeId"], "local");
+        assert_eq!(
+            sent[3]["connection"],
+            serde_json::json!({
+                "state": "online",
+                "feedId": feed.to_string(),
+                "planeId": "local",
+                "planeIdentity": Uuid::from_u128(1).to_string(),
+                "health": { "security": "unknown", "store": "serving", "ledger": "unsupported" },
+                "coreVersion": "0.3.0",
+                "daemonStarts": "4",
+                "startedAtUnixMs": "1700000000000",
+                "cursor": "12",
+            })
+        );
+        // Paging goes on after the last Event delivered, not at the fence.
+        assert_eq!(sent[4]["after"], "11");
+        assert_eq!(sent[5]["sequence"], "12");
+        assert_eq!(notified, [11, 12]);
     }
 
     #[test]

@@ -301,17 +301,47 @@ pub(crate) struct PlaneDetailView {
 pub(crate) struct Observed {
     identity: Option<Uuid>,
     core_version: Option<String>,
+    /// The daemon run the last status read came from.
+    run: Option<DaemonRun>,
     knowledge: ProtocolKnowledge,
     health: PlaneHealth,
     connection: ConnectionView,
 }
 
+/// One run of a Plane's daemon, as its status reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DaemonRun {
+    plane: Uuid,
+    starts: u64,
+    started_at_unix_ms: i64,
+}
+
 impl Observed {
     /// Seeds identity, health, core version and protocol knowledge from a
     /// status read.
+    ///
+    /// Protocol knowledge holds only what this daemon run's connections
+    /// proved. Another run may be another core (an activated update, a
+    /// rollback) that negotiates another minor, so a status from a new run
+    /// or core version drops what the old one proved before it is applied.
     pub(crate) fn apply_status(&mut self, status: &PlaneStatus) {
+        let run = DaemonRun {
+            plane: status.plane_id,
+            starts: status.daemon_starts,
+            started_at_unix_ms: status.started_at_unix_ms,
+        };
+        let core_version = bounded_text(&status.core_version, 48, "Unknown");
+        let another_run = self.run.is_some_and(|last| last != run)
+            || self
+                .core_version
+                .as_ref()
+                .is_some_and(|last| *last != core_version);
+        if another_run {
+            self.knowledge = ProtocolKnowledge::default();
+        }
+        self.run = Some(run);
         self.identity = Some(status.plane_id);
-        self.core_version = Some(bounded_text(&status.core_version, 48, "Unknown"));
+        self.core_version = Some(core_version);
         self.knowledge.observe_status(status);
         self.health = PlaneHealth::from_status(status);
     }
@@ -1509,6 +1539,66 @@ mod tests {
             .find(|feature| feature["feature"] == "search")
             .unwrap();
         assert_eq!(search["support"], "unsupported");
+    }
+
+    /// What one daemon run proved about the negotiated minor is dropped when
+    /// a status comes from another run or core (an activated update, a
+    /// rollback). A later read of the same run keeps it.
+    #[test]
+    fn protocol_knowledge_belongs_to_the_daemon_run_that_proved_it() {
+        let registry = PlaneRegistry::new(client("/local.sock"));
+        let protocol = |registry: &PlaneRegistry| {
+            serde_json::to_value(registry.protocol(PlaneId::Local)).unwrap()
+        };
+        let first = status(1);
+        registry.observe_status(PlaneId::Local, &first);
+        let _ = registry.settle(
+            PlaneId::Local,
+            PublicError::from_client(&jet_client::ClientError::FeatureUnavailable {
+                required_minor: 41,
+                negotiated_minor: 40,
+            }),
+        );
+        registry.observe_success(PlaneId::Local, 40);
+        registry.observe_status(PlaneId::Local, &first);
+        assert_eq!(
+            protocol(&registry),
+            serde_json::json!({ "exact": 40, "atLeast": 40, "atMost": 40 })
+        );
+
+        // The service manager started a new core.
+        let updated = PlaneStatus {
+            daemon_starts: 2,
+            started_at_unix_ms: 2,
+            core_version: "0.3.0".into(),
+            ..first.clone()
+        };
+        registry.observe_status(PlaneId::Local, &updated);
+        let recovery = jet_protocol::STORE_RECOVERY_MINOR;
+        assert_eq!(
+            protocol(&registry),
+            serde_json::json!({ "exact": null, "atLeast": recovery, "atMost": null })
+        );
+
+        // The new core proved a higher lower bound. A status that names
+        // another core drops it, even with the same start fields.
+        registry.observe_success(PlaneId::Local, 43);
+        let rolled_back = PlaneStatus {
+            core_version: "0.2.0".into(),
+            ..updated.clone()
+        };
+        registry.observe_status(PlaneId::Local, &rolled_back);
+        assert_eq!(protocol(&registry)["atLeast"], recovery);
+
+        // Another start of the same core negotiates again too.
+        registry.observe_success(PlaneId::Local, 43);
+        let restarted = PlaneStatus {
+            daemon_starts: 3,
+            started_at_unix_ms: 3,
+            ..rolled_back
+        };
+        registry.observe_status(PlaneId::Local, &restarted);
+        assert_eq!(protocol(&registry)["atLeast"], recovery);
     }
 
     #[test]

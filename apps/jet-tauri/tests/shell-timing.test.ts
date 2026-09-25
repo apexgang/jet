@@ -160,20 +160,24 @@ describe("release journey timing marks", () => {
     await settle();
     expect(marks(LOCAL_PLANE_CONNECTED)).toBe(1);
 
-    // jetd restarted: the open feed dials again and says resumed, never
-    // connected (`client.rs` `stream_updates`).
+    // jetd restarted: the open feed reports reconnecting, dials again,
+    // reads the new daemon's status and says connected, then resumed
+    // (`client.rs` `stream_updates`). The pair marks once.
     feed!.onmessage({ type: "reconnecting", error: OFFLINE });
     feed!.onmessage({ type: "reconnecting", error: OFFLINE });
     await settle();
     expect(marks(LOCAL_PLANE_CONNECTED)).toBe(1);
+    feed!.onmessage({ type: "connected", connection: { ...CONNECTION, coreVersion: "0.3.0", daemonStarts: "2" } });
+    await settle();
+    expect(marks(LOCAL_PLANE_CONNECTED)).toBe(2);
     feed!.onmessage({ type: "resumed", after: "40" });
     await settle();
     expect(marks(LOCAL_PLANE_CONNECTED)).toBe(2);
     expect(session.connectionState).toBe("online");
 
-    // A feed whose first status read failed comes back with connected.
+    // A drop that ends in resumed alone still marks, once.
     feed!.onmessage({ type: "reconnecting", error: OFFLINE });
-    feed!.onmessage({ type: "connected", connection: CONNECTION });
+    feed!.onmessage({ type: "resumed", after: "40" });
     feed!.onmessage({ type: "resumed", after: "40" });
     await settle();
     expect(marks(LOCAL_PLANE_CONNECTED)).toBe(3);

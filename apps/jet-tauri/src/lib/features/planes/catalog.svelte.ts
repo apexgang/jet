@@ -263,7 +263,7 @@ export class PlaneCatalog {
         this.fail(planeId, failure, previous);
         // Without a first page there is no fence yet. Open the feed anyway so
         // its native reconnect loop reports when the Plane is back; the
-        // section is re-walked on that `connected` update.
+        // section is re-walked on the `resumed` update it then sends.
         if (pages === 0) void this.planes.ensureFeed(planeId, null);
         return;
       }
@@ -279,13 +279,6 @@ export class PlaneCatalog {
     const section = this.sections[planeId];
     if (!section || section.chain === "paging") return;
     this.fail(planeId, error, sectionData(section.state));
-  }
-
-  /** A Plane's feed (re)connected: rebuild it if it was not current. */
-  reconnected(planeId: PlaneId): void {
-    const section = this.sections[planeId];
-    if (!section || section.chain === "paging") return;
-    if (section.state.kind !== "ready") void this.load(planeId);
   }
 
   /**

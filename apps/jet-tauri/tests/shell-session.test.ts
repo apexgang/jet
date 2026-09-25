@@ -14,6 +14,7 @@ import type { Plane, PlanesSnapshot } from "../src/lib/jet/planes";
 import { DEFAULT_PRESENTATION, type ShellPresentation, type ShellPresentationView } from "../src/lib/jet/presentation";
 import { DesktopSession, FLUSH_BEFORE_CLOSE_MS, type ShortcutEvent } from "../src/lib/features/shell/session.svelte";
 import { ENABLED_SHORTCUTS } from "../src/lib/features/shell/shortcuts";
+import { LOCAL_PLANE_CONNECTED } from "../src/lib/features/shell/timing";
 import { withActiveRun } from "./support/session";
 
 afterEach(() => {
@@ -114,6 +115,9 @@ function harness(options: Options = {}) {
     : Promise.resolve();
   const saveFails = [...(options.saveFails ?? [])];
   const startFails = [...(options.startFails ?? [])];
+  // What the native registry and Setup report for this computer's core.
+  let local = LOCAL;
+  let setup = options.setup ?? SETUP;
   vi.stubGlobal("window", { crypto: globalThis.crypto });
   mockIPC(async (command, args) => {
     const { onUpdate, ...plain } = (args ?? {}) as Record<string, unknown>;
@@ -135,12 +139,12 @@ function harness(options: Options = {}) {
       case "close_plane_feed":
         return null;
       case "list_planes":
-        return planes(options.restored ?? null);
+        return { ...planes(options.restored ?? null), planes: [local] };
       case "load_desktop_preferences":
         if (options.reopenLastTask === "fails") throw failure("internal", "preferences.read_failed");
         return { reopenLastTask: options.reopenLastTask ?? true };
       case "load_setup":
-        return options.setup ?? SETUP;
+        return setup;
       case "load_shell_presentation": {
         await presentationHeld;
         if (options.presentation === "fails") throw failure("internal", "client.state_unavailable");
@@ -191,7 +195,17 @@ function harness(options: Options = {}) {
         return null;
     }
   });
-  return { calls, feeds, release: () => release(), releasePresentation: () => releasePresentation() };
+  return {
+    calls,
+    feeds,
+    release: () => release(),
+    releasePresentation: () => releasePresentation(),
+    /** The local core started again with `coreVersion`, as its next reads report. */
+    restartCore: (coreVersion: string, daemonStarts: string) => {
+      local = { ...LOCAL, coreVersion };
+      setup = { ...setup, plane: { ...setup.plane, coreVersion, daemonStarts } };
+    },
+  };
 }
 
 async function flush() {
@@ -352,7 +366,7 @@ describe("D17: a Plane event never selects a task behind New task", () => {
 });
 
 describe("a Plane feed that dials again after a drop", () => {
-  it("reads the selected task again: the feed says resumed, not connected", async () => {
+  it("reads the selected task again when a drop ends in resumed alone", async () => {
     const { calls, feeds } = harness();
     const session = new DesktopSession();
     session.connect();
@@ -372,6 +386,83 @@ describe("a Plane feed that dials again after a drop", () => {
     expect(reads()).toBe(opened + 1);
     expect(session.conversationFreshness).toBe("live");
     expect(session.connectionState).toBe("online");
+  });
+
+  const offline = { ...failure("offline", "transport.offline"), retryable: true };
+  /** A redial's status read, as `channels.rs` sends it before `resumed`. */
+  const redialed = (daemonStarts: string, coreVersion: string): PlaneUpdate => ({
+    type: "connected",
+    connection: {
+      state: "online",
+      feedId: "feed-1",
+      planeId: "local",
+      planeIdentity: null,
+      health: { security: "trusted", store: "serving", ledger: "verified" },
+      coreVersion,
+      daemonStarts,
+      startedAtUnixMs: "2",
+      cursor: "40",
+    },
+  });
+  const marks = () => performance.getEntriesByName(LOCAL_PLANE_CONNECTED, "mark").length;
+
+  it("runs restart handling once when it reaches a restarted jetd, and shows the new core", async () => {
+    performance.clearMarks();
+    const { calls, feeds, restartCore } = harness();
+    const session = new DesktopSession();
+    const restarts = vi.spyOn(session as unknown as { planeRestarted(planeId: string): void }, "planeRestarted");
+    const trashResets = vi.spyOn(session.trash, "reset");
+    session.connect();
+    await settle(session);
+    feeds[0]?.onmessage({ type: "resumed", after: "40" });
+    session.planes.select("local");
+    await settle(session);
+    expect(session.selection).toEqual({ planeId: "local", conversationId: "l2" });
+    const count = (command: string) => calls.filter((call) => call.command === command).length;
+    const before = {
+      conversation: count("load_conversation"),
+      recent: count("load_conversations"),
+      setup: count("load_setup"),
+      detail: count("load_plane_detail"),
+      marks: marks(),
+    };
+
+    feeds[0]?.onmessage({ type: "reconnecting", error: offline });
+    await settle(session);
+    expect(session.conversationFreshness).toBe("cached");
+    restartCore("0.3.0", "2");
+    feeds[0]?.onmessage(redialed("2", "0.3.0"));
+    feeds[0]?.onmessage({ type: "resumed", after: "40" });
+    await settle(session);
+
+    expect(restarts).toHaveBeenCalledTimes(1);
+    expect(restarts).toHaveBeenCalledWith("local");
+    expect(trashResets).toHaveBeenCalledTimes(1);
+    // Each read runs once, though `connected` and `resumed` both end the drop.
+    expect(count("load_conversation")).toBe(before.conversation + 1);
+    expect(count("load_conversations")).toBe(before.recent + 1);
+    expect(count("load_setup")).toBe(before.setup + 1);
+    expect(count("load_plane_detail")).toBe(before.detail + 1);
+    expect(marks()).toBe(before.marks + 1);
+    expect(session.connectionState).toBe("online");
+    expect(session.conversationFreshness).toBe("live");
+    expect(session.planes.plane("local")?.coreVersion).toBe("0.3.0");
+    expect(session.setupSnapshot?.plane.coreVersion).toBe("0.3.0");
+
+    // The next drop reaches the same start: nothing restarts, and only what
+    // the drop left cached is read again.
+    feeds[0]?.onmessage({ type: "reconnecting", error: offline });
+    await settle(session);
+    feeds[0]?.onmessage(redialed("2", "0.3.0"));
+    feeds[0]?.onmessage({ type: "resumed", after: "40" });
+    await settle(session);
+    expect(restarts).toHaveBeenCalledTimes(1);
+    expect(trashResets).toHaveBeenCalledTimes(1);
+    expect(count("load_conversation")).toBe(before.conversation + 2);
+    expect(count("load_conversations")).toBe(before.recent + 2);
+    expect(count("load_plane_detail")).toBe(before.detail + 1);
+    expect(marks()).toBe(before.marks + 2);
+    session.disconnect();
   });
 });
 
