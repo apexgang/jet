@@ -455,6 +455,7 @@ class HomebrewTemplates(unittest.TestCase):
         self.assertNotRegex(formula, r'depends_on :(linux|macos)')
         self.assertIn('name macos: "com.apexgang.jet.homebrew", linux: "jet-homebrew"', formula)
         self.assertIn('ConditionFileIsExecutable=#{opt_bin}/jetd', formula)
+        self.assertIn('RestartPreventExitStatus=203', formula)
         self.assertIn('brew services start apexgang/tap/jet\n', formula)
         # The Swift app's release parses it, so it stays although `brew audit`
         # calls it redundant; homebrew-check.yml skips only that audit.
@@ -474,6 +475,7 @@ class HomebrewTemplates(unittest.TestCase):
                       '  def install\n', formula)
         self.assertNotIn('linux-gnu', formula)
         self.assertIn('ConditionFileIsExecutable=#{opt_bin}/jetd', formula)
+        self.assertIn('RestartPreventExitStatus=203', formula)
         self.assertIn('brew services start apexgang/tap/jet\n', formula)
         with tempfile.TemporaryDirectory() as directory:
             (Path(directory) / 'jet.rb').write_text(formula)
