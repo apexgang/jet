@@ -13,7 +13,7 @@
 //! different change for that rule is refused until the first resolves.
 use std::{collections::HashMap, sync::Mutex};
 
-use jet_client::{Client, ClientError};
+use jet_client::ClientError;
 use jet_protocol::{
     AutodeleteCandidate, AutodeleteRule, AutodeleteRuleState, AutodeleteRules, AutodeleteScope,
     SettingKey, SettingValue, UtilityOutcome, UtilityPurpose, AUTODELETE_MINOR,
@@ -24,6 +24,7 @@ use uuid::Uuid;
 
 use super::{definite, plane_label, plane_setting, protection_view, ProtectionView};
 use crate::jet::{
+    client::Connection,
     errors::{safe_code, PublicError},
     planes::{PlaneBinding, PlaneId},
     JetBridge,
@@ -804,7 +805,7 @@ pub(in crate::jet) async fn load_rules_for(
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         let listed = connection
-            .autodelete_rules()
+            .query(connection.autodelete_rules())
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         check_rules(&listed)?;
@@ -856,7 +857,7 @@ fn check_rules(listed: &AutodeleteRules) -> Result<(), PublicError> {
 
 /// The drafting disclosure, on the same connection. A failed read is
 /// `None`; the account binding's value is reduced to whether one is set.
-async fn drafting(connection: &Client) -> DraftingView {
+async fn drafting(connection: &Connection) -> DraftingView {
     let enabled = match plane_setting(connection, SettingKey::UtilityAutodeleteCompilation).await {
         Some(SettingValue::Flag(enabled)) => Some(enabled),
         _ => None,
@@ -878,7 +879,7 @@ async fn drafting(connection: &Client) -> DraftingView {
 async fn attributions(
     bridge: &JetBridge,
     binding: PlaneBinding,
-    connection: &Client,
+    connection: &Connection,
     listed: &AutodeleteRules,
 ) -> Result<HashMap<Uuid, JobAttribution>, PublicError> {
     let state = &bridge.retention.rules;
@@ -902,7 +903,7 @@ async fn attributions(
             continue;
         }
         lookups += 1;
-        let Ok(answer) = connection.utility(job).await else {
+        let Ok(answer) = connection.query(connection.utility(job)).await else {
             continue;
         };
         if answer.job_id != job || answer.purpose != UtilityPurpose::Autodelete {
@@ -1009,33 +1010,32 @@ pub(in crate::jet) async fn change_rule_for(
 
 /// Sends one change under its Command ID. `None` means the rule is deleted.
 async fn send(
-    connection: &Client,
+    connection: &Connection,
     entry: &PendingRule,
 ) -> Result<Option<AutodeleteRule>, Box<ClientError>> {
     let (command, rule) = (entry.command_id, entry.rule_id);
-    let result = match &entry.body {
+    match &entry.body {
         RuleBody::Compile { prompt } => connection
-            .compile_autodelete_rule(command, rule, prompt.clone())
+            .command(connection.compile_autodelete_rule(command, rule, prompt.clone()))
             .await
             .map(Some),
         RuleBody::SetDays { days } => connection
-            .set_autodelete_rule_inactive_days(command, rule, *days)
+            .command(connection.set_autodelete_rule_inactive_days(command, rule, *days))
             .await
             .map(Some),
         RuleBody::Approve { days } => connection
-            .approve_autodelete_rule(command, rule, *days)
+            .command(connection.approve_autodelete_rule(command, rule, *days))
             .await
             .map(Some),
         RuleBody::Everywhere => connection
-            .authorize_autodelete_everywhere(command, rule)
+            .command(connection.authorize_autodelete_everywhere(command, rule))
             .await
             .map(Some),
         RuleBody::Delete => connection
-            .delete_autodelete_rule(command, rule)
+            .command(connection.delete_autodelete_rule(command, rule))
             .await
             .map(|()| None),
-    };
-    result.map_err(Box::new)
+    }
 }
 
 #[cfg(test)]

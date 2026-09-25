@@ -40,8 +40,21 @@ clippy:
 test:
 	cargo test --locked --manifest-path "{{manifest}}"
 
-# Run the app-local contract, frontend, lint, and test checks.
-check: contracts frontend-check frontend-test frontend-build fmt clippy test
+# Fail unless tauri.conf.json, src-tauri/Cargo.toml (and its Cargo.lock entry)
+# and package.json carry the core workspace version (ADR-0053).
+version-check:
+	bun scripts/release/main.ts version-check
+
+# Run the desktop release journey (tests/e2e/) against fakes: the WebDriver
+# client, the page script, /proc sampling of real processes, a fake systemd
+# and the report, everything but the app itself. It never touches the real
+# Jet home. The journey proper needs a fresh runner and runs in CI only
+# (.github/workflows/desktop-e2e.yml). Linux only: it reads /proc.
+e2e-dry-run:
+	@if [ "$(uname -s)" != Linux ]; then echo "e2e-dry-run: skipped, it reads /proc"; else bun tests/e2e/main.ts --dry-run --quiet > /dev/null; fi
+
+# Run the app-local version, contract, frontend, lint, test and journey dry-run checks.
+check: version-check contracts frontend-check frontend-test frontend-build fmt clippy test e2e-dry-run
 
 # Fail on any known npm or RustSec advisory, apart from the reviewed exceptions in
 # docs/dependency-advisories.md (the npm one below, the Rust ones in
@@ -59,6 +72,107 @@ adaptation-audit *args:
 # Build a debug app bundle on macOS or AppImage on Linux.
 bundle:
 	bun run tauri build --debug --bundles "{{bundle_kind}}"
+
+# Build this machine's release deb, rpm and AppImage around a core payload
+# archive (`jet-core-<version>-<target>.tar.gz` from `just release-package` in
+# packages/), then verify them. Nothing here signs (ASVS 13.3.2): the npm and
+# crate build scripts and the linuxdeploy tools the Tauri bundler downloads
+# from mutable URLs all run in this build, so the recipe first removes the
+# updater key (TAURI_SIGNING_PRIVATE_KEY, its password and path) from its
+# environment, and Tauri's own updater artifacts, which would need the key,
+# stay off. JET_RELEASE_SIGN picks the build: `true` (or `1`) is a release
+# build that keeps `plugins.updater`, so the app carries the updater endpoint
+# and public key, for `just release-sign` to sign next; `false`, `0` or unset
+# is a pull-request or test build without `plugins.updater`, which never
+# checks github.com for updates. The rustc flags remap build paths out of the
+# app binary.
+release-bundle payload:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}${TAURI_SIGNING_PRIVATE_KEY_PATH:-}" ]]; then
+		echo 'release-bundle keeps the updater key out of the build; sign afterwards with `just release-sign`.' >&2
+	fi
+	unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD TAURI_SIGNING_PRIVATE_KEY_PATH
+	payload="$(cd {{quote(invocation_directory())}} && realpath -e -- {{quote(payload)}})"
+	mode="$(bun scripts/release/main.ts bundle-mode)"
+	just --justfile "{{justfile()}}" version-check
+	bun scripts/release/main.ts check-payload "$payload"
+	mkdir -p src-tauri/resources
+	cp -f -- "$payload" src-tauri/resources/jet-core.tar.gz
+	bun scripts/release/main.ts clean-bundles
+	if [ "$mode" = release ]; then
+		overlay='{"bundle":{"createUpdaterArtifacts":false}}'
+		verify=(--release)
+	else
+		overlay='{"bundle":{"createUpdaterArtifacts":false},"plugins":{"updater":null}}'
+		verify=()
+	fi
+	CARGO_ENCODED_RUSTFLAGS="$(bun scripts/release/main.ts rustflags)"
+	export CARGO_ENCODED_RUSTFLAGS
+	# linuxdeploy's bundled strip predates `.relr.dyn` and fails on current
+	# distribution libraries; they ship stripped, and the release profile
+	# already strips the app, so skip it.
+	NO_STRIP=1 bun run tauri build --config src-tauri/tauri.release.conf.json --config "$overlay" --bundles deb,rpm,appimage
+	just --justfile "{{justfile()}}" release-verify --payload "$payload" "${verify[@]}"
+
+# Sign the release bundles for the updater. A release build
+# (`JET_RELEASE_SIGN=true just release-bundle`) makes a deb, an rpm and an
+# AppImage for this machine's architecture; this writes a `<bundle>.sig` next
+# to each, as `tauri build` would, whose trusted comment names the file and
+# binds the app version the updater's `requireSignedVersion` checks. It signs
+# this machine's build output, or the bundles in `dir` (relative to where you
+# run `just`), which must hold those three and nothing else: CI signs on a
+# fresh runner that never ran the build (ASVS 13.3.2). Needs
+# TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD; they move
+# into unexported shell variables at once, so only the Tauri CLI's signer
+# sees them. Check the result with `just release-verify --require-signatures`
+# or `just release-check-signatures <dir>`.
+release-sign dir="":
+	#!/usr/bin/env bash
+	set -euo pipefail
+	key="${TAURI_SIGNING_PRIVATE_KEY:-}"
+	password="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+	unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD TAURI_SIGNING_PRIVATE_KEY_PATH
+	if [[ -z "$key" || -z "$password" ]]; then
+		echo 'release-sign needs TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD.' >&2
+		exit 2
+	fi
+	input=()
+	if [[ -n {{quote(dir)}} ]]; then
+		input=(--in "$(cd {{quote(invocation_directory())}} && realpath -e -- {{quote(dir)}})")
+	fi
+	version="$(bun scripts/release/main.ts app-version)"
+	listing="$(bun scripts/release/main.ts bundles "${input[@]}")"
+	mapfile -t bundles <<<"$listing"
+	for bundle in "${bundles[@]}"; do
+		rm -f -- "$bundle.sig"
+		# The signer reads the key from its environment, never its arguments,
+		# and never prompts.
+		TAURI_SIGNING_PRIVATE_KEY="$key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$password" \
+			bun run tauri signer sign --app-version "$version" "$bundle" </dev/null
+		test -s "$bundle.sig"
+	done
+	echo "Signed ${#bundles[@]} bundles for $version."
+
+# Check only the updater signatures of the deb, rpm and AppImage in `dir`:
+# each must verify against `plugins.updater.pubkey` and name its file and the
+# app version. Opens no bundle and needs no build, so the signing job can run
+# it; `release-verify` checks the contents.
+[no-cd]
+release-check-signatures dir:
+	bun {{quote(justfile_directory() / "scripts/release/main.ts")}} check-signatures {{quote(dir)}}
+
+# Check the release bundles: expected names, the payload byte-identical in the
+# deb, rpm and AppImage, no build paths in the app binary and the updater
+# endpoint only in a release build, no source maps or fixtures, clean webview
+# assets, and updater signatures that verify when present. Prints sizes and
+# SHA-256s. Flags: `--payload <archive>` (default: the copy `release-bundle`
+# made; relative to where you run `just`), `--release` (a release build, not
+# yet signed) and `--require-signatures` (signed by `release-sign`).
+[no-cd]
+[positional-arguments]
+release-verify *args:
+	bun {{quote(justfile_directory() / "scripts/release/main.ts")}} verify "$@"
 
 # Launch the desktop app in development mode.
 dev:

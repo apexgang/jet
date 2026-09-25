@@ -37,6 +37,7 @@ use self::{
 use super::{
     client::PlaneClient,
     errors::PublicError,
+    identity::IdentityNotice,
     keystore::{session_ended, Credential, IdentityKeys},
     JetBridge,
 };
@@ -253,6 +254,8 @@ struct IdentityView {
     client_id: String,
     key: &'static str,
     fingerprint: Option<String>,
+    /// What happened to an unreadable stored identity at launch (D5).
+    notice: Option<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -298,17 +301,47 @@ pub(crate) struct PlaneDetailView {
 pub(crate) struct Observed {
     identity: Option<Uuid>,
     core_version: Option<String>,
+    /// The daemon run the last status read came from.
+    run: Option<DaemonRun>,
     knowledge: ProtocolKnowledge,
     health: PlaneHealth,
     connection: ConnectionView,
 }
 
+/// One run of a Plane's daemon, as its status reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DaemonRun {
+    plane: Uuid,
+    starts: u64,
+    started_at_unix_ms: i64,
+}
+
 impl Observed {
     /// Seeds identity, health, core version and protocol knowledge from a
     /// status read.
+    ///
+    /// Protocol knowledge holds only what this daemon run's connections
+    /// proved. Another run may be another core (an activated update, a
+    /// rollback) that negotiates another minor, so a status from a new run
+    /// or core version drops what the old one proved before it is applied.
     pub(crate) fn apply_status(&mut self, status: &PlaneStatus) {
+        let run = DaemonRun {
+            plane: status.plane_id,
+            starts: status.daemon_starts,
+            started_at_unix_ms: status.started_at_unix_ms,
+        };
+        let core_version = bounded_text(&status.core_version, 48, "Unknown");
+        let another_run = self.run.is_some_and(|last| last != run)
+            || self
+                .core_version
+                .as_ref()
+                .is_some_and(|last| *last != core_version);
+        if another_run {
+            self.knowledge = ProtocolKnowledge::default();
+        }
+        self.run = Some(run);
         self.identity = Some(status.plane_id);
-        self.core_version = Some(bounded_text(&status.core_version, 48, "Unknown"));
+        self.core_version = Some(core_version);
         self.knowledge.observe_status(status);
         self.health = PlaneHealth::from_status(status);
     }
@@ -371,6 +404,7 @@ pub(crate) struct PlaneRegistry {
     /// while local jetd is offline.
     local_identity: Mutex<Option<Uuid>>,
     notice: Option<&'static str>,
+    identity_notice: Option<IdentityNotice>,
     spawner: Arc<dyn SshSpawner>,
     keys: Arc<IdentityKeys>,
     /// Serializes registry changes with their file writes.
@@ -401,8 +435,8 @@ impl PlaneRegistry {
         spawner: Arc<dyn SshSpawner>,
         keys: Arc<IdentityKeys>,
     ) -> Self {
-        let file = directory.map(RegistryFile::new);
-        let (stored, notice) = file.as_ref().map(RegistryFile::load).unwrap_or_default();
+        let mut file = directory.map(RegistryFile::new);
+        let (stored, notice) = file.as_mut().map(RegistryFile::load).unwrap_or_default();
         let entry = Arc::new(PlaneEntry {
             id: PlaneId::Local,
             label: LOCAL_LABEL.into(),
@@ -416,6 +450,7 @@ impl PlaneRegistry {
             file,
             local_identity: Mutex::new(stored.local_identity),
             notice,
+            identity_notice: None,
             spawner,
             keys,
             changes: Mutex::new(()),
@@ -448,6 +483,13 @@ impl PlaneRegistry {
             registry.mark_local_duplicates(identity);
         }
         registry
+    }
+
+    /// Records what happened to this computer's stored client identity, for
+    /// the Planes notice.
+    pub(crate) fn with_identity_notice(mut self, notice: Option<IdentityNotice>) -> Self {
+        self.identity_notice = notice;
+        self
     }
 
     #[cfg(test)]
@@ -493,6 +535,8 @@ impl PlaneRegistry {
                 spawner: Arc::clone(&self.spawner),
                 keys: Arc::clone(&self.keys),
                 observed: Arc::clone(&observed),
+                // Every Plane of this registry shares the local clock.
+                deadlines: self.local.deadlines().clone(),
             },
             session,
         ));
@@ -809,6 +853,17 @@ impl PlaneRegistry {
             .or_else(|| self.local_identity.lock().ok().and_then(|value| *value))
     }
 
+    /// Refuses a change to the saved Planes while they are kept read-only
+    /// (D8). Add Plane checks this before any ssh or pairing step: the new
+    /// Plane could never be saved, and a finished pairing would be left
+    /// orphaned on the remote Plane.
+    pub(crate) fn check_writable(&self) -> Result<(), PublicError> {
+        if self.file.as_ref().is_some_and(RegistryFile::read_only) {
+            return Err(registry_read_only());
+        }
+        Ok(())
+    }
+
     pub(crate) fn check_capacity(&self) -> Result<(), PublicError> {
         if self.remote_count() >= MAXIMUM_REMOTE_PLANES {
             return Err(PublicError::invalid_input(
@@ -878,7 +933,7 @@ impl PlaneRegistry {
                 .write()
                 .map_err(|_| PublicError::internal())?
                 .retain(|entry| entry.id != id);
-            return Err(registry_unsaved());
+            return Err(self.unsaved());
         }
         Ok(id)
     }
@@ -908,7 +963,7 @@ impl PlaneRegistry {
         };
         if saved.is_err() {
             meta.connector.set_credential(previous);
-            return Err(registry_unsaved());
+            return Err(self.unsaved());
         }
         meta.connector.reset().await;
         meta.connector.shutdown().await;
@@ -935,7 +990,7 @@ impl PlaneRegistry {
                 if let Ok(mut entries) = self.entries.write() {
                     entries.push(Arc::clone(&removed));
                 }
-                return Err(registry_unsaved());
+                return Err(self.unsaved());
             }
             removed
         };
@@ -943,6 +998,15 @@ impl PlaneRegistry {
             meta.connector.close();
         }
         Ok(())
+    }
+
+    /// Why a change to the saved Planes was not saved.
+    fn unsaved(&self) -> PublicError {
+        if self.file.as_ref().is_some_and(RegistryFile::read_only) {
+            registry_read_only()
+        } else {
+            registry_unsaved()
+        }
     }
 
     /// Writes `planes.json` from the current entries. Callers hold `changes`.
@@ -1021,6 +1085,7 @@ impl PlaneRegistry {
                 client_id: self.local.client_id().to_string(),
                 key: key.key,
                 fingerprint: key.fingerprint,
+                notice: self.identity_notice.map(IdentityNotice::code),
             },
             restored_selection: restored_selection
                 .filter(|(_, plane)| self.contains(*plane))
@@ -1091,6 +1156,16 @@ fn registry_unsaved() -> PublicError {
     PublicError::internal()
 }
 
+/// The saved Planes could not be read this launch, so changing them would
+/// overwrite what a newer Jet or a later launch can read (D8).
+fn registry_read_only() -> PublicError {
+    PublicError::local_unavailable(
+        "plane.registry_read_only",
+        "Jet can't change saved Planes until it can read them.",
+        false,
+    )
+}
+
 pub(crate) fn unknown_plane() -> PublicError {
     PublicError::invalid_input(
         "plane.unknown",
@@ -1126,7 +1201,7 @@ pub(crate) async fn load_plane_detail(
     let mut capabilities = None;
     match client.connect().await {
         Ok(connection) => {
-            match connection.status().await {
+            match connection.query(connection.status()).await {
                 Ok(status) => bridge.planes.observe_status(plane, &status),
                 Err(error) => issues.push(IssueView {
                     section: "status",
@@ -1136,7 +1211,7 @@ pub(crate) async fn load_plane_detail(
                 }),
             }
             match connection
-                .capabilities(CapabilityObservation::LastObserved)
+                .query(connection.capabilities(CapabilityObservation::LastObserved))
                 .await
             {
                 Ok(snapshot) => {
@@ -1300,6 +1375,45 @@ mod tests {
         }
     }
 
+    /// D8: while `planes.json` is kept read-only (written by a newer Jet),
+    /// adding a Plane is refused with a stable code and the file is left
+    /// exactly as it was.
+    #[test]
+    fn a_read_only_registry_refuses_changes_and_keeps_the_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let newer = r#"{"version":2,"localIdentity":null,"planes":[]}"#;
+        std::fs::write(directory.path().join("planes.json"), newer).unwrap();
+        let registry = PlaneRegistry::open(
+            client("/local.sock"),
+            Some(directory.path()),
+            std::sync::Arc::new(super::spawner::fake::FakeSpawner::default()),
+            std::sync::Arc::new(crate::jet::keystore::IdentityKeys::new(
+                std::sync::Arc::new(crate::jet::keystore::SessionKeyStore::default()),
+            )),
+        );
+        let error = registry
+            .add_remote(
+                super::NewRemote {
+                    id: Uuid::from_u128(2),
+                    destination: "alice@build-box".into(),
+                    endpoint: jet_client::SshEndpoint::new("alice@build-box").unwrap(),
+                    plane_identity: Uuid::from_u128(20),
+                    credential: crate::jet::keystore::Credential::Durable,
+                    session: None,
+                },
+                1,
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "plane.registry_read_only");
+        assert!(!registry.contains(PlaneId::Remote(Uuid::from_u128(2))));
+        // Learning the local identity would write the file: it does not.
+        registry.observe_status(PlaneId::Local, &status(9));
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("planes.json")).unwrap(),
+            newer
+        );
+    }
+
     #[test]
     fn plane_handles_are_canonical_and_opaque() {
         assert_eq!(PlaneId::parse("local").unwrap(), PlaneId::Local);
@@ -1425,6 +1539,66 @@ mod tests {
             .find(|feature| feature["feature"] == "search")
             .unwrap();
         assert_eq!(search["support"], "unsupported");
+    }
+
+    /// What one daemon run proved about the negotiated minor is dropped when
+    /// a status comes from another run or core (an activated update, a
+    /// rollback). A later read of the same run keeps it.
+    #[test]
+    fn protocol_knowledge_belongs_to_the_daemon_run_that_proved_it() {
+        let registry = PlaneRegistry::new(client("/local.sock"));
+        let protocol = |registry: &PlaneRegistry| {
+            serde_json::to_value(registry.protocol(PlaneId::Local)).unwrap()
+        };
+        let first = status(1);
+        registry.observe_status(PlaneId::Local, &first);
+        let _ = registry.settle(
+            PlaneId::Local,
+            PublicError::from_client(&jet_client::ClientError::FeatureUnavailable {
+                required_minor: 41,
+                negotiated_minor: 40,
+            }),
+        );
+        registry.observe_success(PlaneId::Local, 40);
+        registry.observe_status(PlaneId::Local, &first);
+        assert_eq!(
+            protocol(&registry),
+            serde_json::json!({ "exact": 40, "atLeast": 40, "atMost": 40 })
+        );
+
+        // The service manager started a new core.
+        let updated = PlaneStatus {
+            daemon_starts: 2,
+            started_at_unix_ms: 2,
+            core_version: "0.3.0".into(),
+            ..first.clone()
+        };
+        registry.observe_status(PlaneId::Local, &updated);
+        let recovery = jet_protocol::STORE_RECOVERY_MINOR;
+        assert_eq!(
+            protocol(&registry),
+            serde_json::json!({ "exact": null, "atLeast": recovery, "atMost": null })
+        );
+
+        // The new core proved a higher lower bound. A status that names
+        // another core drops it, even with the same start fields.
+        registry.observe_success(PlaneId::Local, 43);
+        let rolled_back = PlaneStatus {
+            core_version: "0.2.0".into(),
+            ..updated.clone()
+        };
+        registry.observe_status(PlaneId::Local, &rolled_back);
+        assert_eq!(protocol(&registry)["atLeast"], recovery);
+
+        // Another start of the same core negotiates again too.
+        registry.observe_success(PlaneId::Local, 43);
+        let restarted = PlaneStatus {
+            daemon_starts: 3,
+            started_at_unix_ms: 3,
+            ..rolled_back
+        };
+        registry.observe_status(PlaneId::Local, &restarted);
+        assert_eq!(protocol(&registry)["atLeast"], recovery);
     }
 
     #[test]

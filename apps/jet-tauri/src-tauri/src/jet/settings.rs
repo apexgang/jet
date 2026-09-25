@@ -16,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use jet_client::{Client, ClientError};
+use jet_client::ClientError;
 use jet_protocol::{
     AutoContinuePolicy, AutoContinueTarget, CapabilityObservation, CraftDisableMode,
     CraftInstallationConfirmation, CredentialSource, ExtensionConfirmation, PlaneStatus,
@@ -31,7 +31,7 @@ use uuid::Uuid;
 use super::{
     agents::{self, AutoContinuePolicyView, CraftPreviewView},
     channels::parse_resume_cursor,
-    client::{NativeUpdate, PlaneClient},
+    client::{Connection, NativeUpdate, PlaneClient},
     errors::PublicError,
     extensions::ExtensionReviewView,
     planes,
@@ -889,14 +889,13 @@ fn same_view(left: &ResolvedSetting, right: &ResolvedSetting) -> bool {
 /// Reads one key at one scope on an open connection. Also gates the key's
 /// minor through `jet-client`.
 async fn read_one(
-    client: &Client,
+    client: &Connection,
     key: SettingKey,
     scope: SettingScope,
 ) -> Result<ResolvedSetting, Box<ClientError>> {
     let snapshot = client
-        .settings(scope, SettingSelection::Key { key })
-        .await
-        .map_err(Box::new)?;
+        .query(client.settings(scope, SettingSelection::Key { key }))
+        .await?;
     let mut matching = snapshot
         .settings
         .into_iter()
@@ -940,12 +939,12 @@ async fn load_settings_for(
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         let status = client
-            .status()
+            .query(client.status())
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         bridge.planes.observe_status(binding.plane, &status);
         let snapshot = client
-            .settings(scope, SettingSelection::All)
+            .query(client.settings(scope, SettingSelection::All))
             .await
             .map_err(|e| PublicError::from_client(&e))?;
         if snapshot.scope != scope || snapshot.settings.len() > MAX_SNAPSHOT_SETTINGS {
@@ -1176,16 +1175,15 @@ async fn send_reviewed(
 /// and the body is the exact stored request on every attempt. `Ok(None)`
 /// is an answer that does not match the request.
 async fn send_action(
-    connection: &Client,
+    connection: &Connection,
     id: Uuid,
     action: &SettingsAction,
 ) -> Result<Option<AppliedDetail>, Box<ClientError>> {
     Ok(match action {
         SettingsAction::Set { key, scope, value } => {
             let stored = connection
-                .set_setting(id, *key, *scope, value.clone())
-                .await
-                .map_err(Box::new)?;
+                .command(connection.set_setting(id, *key, *scope, value.clone()))
+                .await?;
             (std::mem::discriminant(value) == std::mem::discriminant(&stored)).then(|| {
                 AppliedDetail::Setting {
                     key: key_spelling(*key),
@@ -1195,9 +1193,8 @@ async fn send_action(
         }
         SettingsAction::Clear { key, scope } => {
             connection
-                .clear_setting(id, *key, *scope)
-                .await
-                .map_err(Box::new)?;
+                .command(connection.clear_setting(id, *key, *scope))
+                .await?;
             Some(AppliedDetail::Setting {
                 key: key_spelling(*key),
                 value: None,
@@ -1206,45 +1203,46 @@ async fn send_action(
         SettingsAction::Bind { provider, label } => {
             // ASVS 13.3.1: Harness-native only; no credential crosses.
             let bound = connection
-                .bind_account(id, provider, label, None, CredentialSource::HarnessNative)
-                .await
-                .map_err(Box::new)?;
+                .command(connection.bind_account(
+                    id,
+                    provider,
+                    label,
+                    None,
+                    CredentialSource::HarnessNative,
+                ))
+                .await?;
             (bound.provider == *provider).then(|| AppliedDetail::AccountBound {
                 binding_id: bound.binding_id.to_string(),
             })
         }
         SettingsAction::AutoContinue { binding_id, policy } => {
             connection
-                .set_auto_continue(
+                .command(connection.set_auto_continue(
                     id,
                     AutoContinueTarget::AccountBinding(*binding_id),
                     policy.clone(),
-                )
-                .await
-                .map_err(Box::new)?;
+                ))
+                .await?;
             Some(AppliedDetail::AutoContinue)
         }
         SettingsAction::Unbind { binding_id } => {
             let reference = connection
-                .unbind_account(id, *binding_id)
-                .await
-                .map_err(Box::new)?;
+                .command(connection.unbind_account(id, *binding_id))
+                .await?;
             Some(AppliedDetail::AccountUnbound {
                 cleanup: agents::cleanup_after_unbind(&reference),
             })
         }
         SettingsAction::DisableCraft { craft_id, mode } => {
             connection
-                .disable_craft(id, craft_id.clone(), *mode)
-                .await
-                .map_err(Box::new)?;
+                .command(connection.disable_craft(id, craft_id.clone(), *mode))
+                .await?;
             Some(AppliedDetail::CraftDisabled)
         }
         SettingsAction::InstallCraft { confirmation } => {
             let queued = connection
-                .install_craft(id, confirmation.clone())
-                .await
-                .map_err(Box::new)?;
+                .command(connection.install_craft(id, confirmation.clone()))
+                .await?;
             // The queued Artifact must be the one the user reviewed.
             (queued.artifact_sha256 == confirmation.artifact_sha256).then(|| {
                 AppliedDetail::CraftInstallQueued {
@@ -1255,9 +1253,8 @@ async fn send_action(
         }
         SettingsAction::ChangeExtension { confirmation } => {
             let change_id = connection
-                .change_extension(id, confirmation.clone())
-                .await
-                .map_err(Box::new)?;
+                .command(connection.change_extension(id, confirmation.clone()))
+                .await?;
             Some(AppliedDetail::ExtensionChangeQueued {
                 change_id: change_id.to_string(),
             })
@@ -1340,13 +1337,13 @@ async fn load_work_context_for(
         .await
         .map_err(|e| settle(PublicError::from_client(&e)))?;
     let status = client
-        .status()
+        .query(client.status())
         .await
         .map_err(|e| settle(PublicError::from_client(&e)))?;
     bridge.planes.observe_status(binding.plane, &status);
     let mut issues = Vec::new();
 
-    let (projects, projects_cursor) = match client.projects().await {
+    let (projects, projects_cursor) = match client.query(client.projects()).await {
         Ok(list) => (
             list.projects
                 .iter()
@@ -1369,7 +1366,7 @@ async fn load_work_context_for(
     };
 
     let bindings = match client
-        .account_bindings(CapabilityObservation::LastObserved)
+        .query(client.account_bindings(CapabilityObservation::LastObserved))
         .await
     {
         Ok(list) => list
@@ -1391,7 +1388,7 @@ async fn load_work_context_for(
         }
     };
 
-    let autodelete = match client.autodelete_rules().await {
+    let autodelete = match client.query(client.autodelete_rules()).await {
         Ok(rules) => Some(AutodeleteSummaryView {
             count: u32::try_from(rules.rules.len()).unwrap_or(u32::MAX),
         }),
@@ -1470,6 +1467,10 @@ pub(crate) enum SettingsChange {
 /// Projects one native update for the Settings window, or drops it.
 fn settings_change(update: NativeUpdate, plane: PlaneId) -> Option<SettingsChange> {
     match update {
+        // The status a redial reads is the main window's to apply. The
+        // `resumed` that follows it makes this window read every section
+        // again, Versions included, which shows a restarted service.
+        NativeUpdate::Connected { .. } => None,
         NativeUpdate::Resumed { after } => Some(SettingsChange::Resumed {
             after: after.to_string(),
         }),

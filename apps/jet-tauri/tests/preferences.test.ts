@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 
 import { publicError } from "../src/lib/jet/errors";
-import { loadDesktopPreferences, setDesktopPreferences, type DesktopPreferences } from "../src/lib/jet/preferences";
+import {
+  loadDesktopPreferences,
+  setDesktopPreferences,
+  type DesktopPreferences,
+  type DesktopPreferencesChange,
+} from "../src/lib/jet/preferences";
 
 afterEach(() => {
   if (typeof window !== "undefined") clearMocks();
@@ -10,23 +15,33 @@ afterEach(() => {
 });
 
 describe("desktop preferences adapter", () => {
-  it("round-trips reopenLastTask", async () => {
-    let stored: DesktopPreferences = { reopenLastTask: true };
+  it("sends only the changed preference and resolves with all of them", async () => {
+    let stored: DesktopPreferences = { reopenLastTask: true, checkForUpdates: true };
     const calls: Array<{ command: string; args: unknown }> = [];
     vi.stubGlobal("window", {});
     mockIPC((command, args) => {
       calls.push({ command, args });
       if (command === "load_desktop_preferences") return stored;
       if (command === "set_desktop_preferences") {
-        stored = (args as { preferences: DesktopPreferences }).preferences;
+        // The shell keeps a preference the change leaves out.
+        stored = { ...stored, ...(args as { preferences: DesktopPreferencesChange }).preferences };
         return stored;
       }
       throw new Error(`Unexpected ${command}`);
     });
-    expect(await loadDesktopPreferences()).toEqual({ reopenLastTask: true });
-    expect(await setDesktopPreferences({ reopenLastTask: false })).toEqual({ reopenLastTask: false });
-    expect(await loadDesktopPreferences()).toEqual({ reopenLastTask: false });
-    expect(calls[1]).toEqual({ command: "set_desktop_preferences", args: { preferences: { reopenLastTask: false } } });
+    expect(await loadDesktopPreferences()).toEqual({ reopenLastTask: true, checkForUpdates: true });
+    expect(await setDesktopPreferences({ checkForUpdates: false })).toEqual({
+      reopenLastTask: true,
+      checkForUpdates: false,
+    });
+    expect(await setDesktopPreferences({ reopenLastTask: false })).toEqual({
+      reopenLastTask: false,
+      checkForUpdates: false,
+    });
+    expect(calls.slice(1)).toEqual([
+      { command: "set_desktop_preferences", args: { preferences: { checkForUpdates: false } } },
+      { command: "set_desktop_preferences", args: { preferences: { reopenLastTask: false } } },
+    ]);
   });
 
   it("surfaces a refusal as a PublicError", async () => {

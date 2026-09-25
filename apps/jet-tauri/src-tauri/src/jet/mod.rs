@@ -1,12 +1,18 @@
 pub(crate) mod agents;
+#[cfg(test)]
+mod app_data_tests;
 pub(crate) mod audit;
 mod channels;
 mod client;
+mod command_ids;
 mod conversations;
+mod deadline;
 pub(crate) mod delivery;
 pub(crate) mod enrollment;
 mod errors;
 pub(crate) mod extensions;
+#[cfg(test)]
+mod fake_plane;
 mod identity;
 mod keystore;
 pub(crate) mod ledger;
@@ -14,6 +20,7 @@ pub(crate) mod ledger;
 mod live_e2e;
 #[cfg(test)]
 mod live_system;
+pub(crate) mod local_service;
 pub(crate) mod local_store;
 pub(crate) mod notifications;
 pub(crate) mod pairing;
@@ -27,6 +34,7 @@ pub(crate) mod settings;
 pub(crate) mod settings_window;
 mod setup;
 pub(crate) mod system;
+pub(crate) mod updates;
 pub(crate) mod window_mode;
 pub(crate) mod window_state;
 mod work_panel;
@@ -66,11 +74,32 @@ pub(crate) struct JetBridge {
 }
 
 impl JetBridge {
+    /// Never fails on a damaged app data directory (D5): the identity is
+    /// recovered or replaced with a notice, so the window always opens.
     pub(crate) fn for_local_plane(
         home_directory: &Path,
         app_data_directory: &Path,
     ) -> io::Result<Self> {
-        let client_id = identity::load_or_create(app_data_directory)?;
+        Ok(Self::open(
+            home_directory,
+            app_data_directory,
+            keystore::platform_store(),
+            Arc::new(planes::spawner::SystemSsh),
+        ))
+    }
+
+    /// Everything the bridge loads from the app data directory, with the
+    /// key store and ssh it will use.
+    fn open(
+        home_directory: &Path,
+        app_data_directory: &Path,
+        store: Arc<dyn keystore::KeyStore>,
+        spawner: Arc<dyn planes::spawner::SshSpawner>,
+    ) -> Self {
+        let identity = identity::load_or_create(app_data_directory, || {
+            keystore::recover_client_id(store.as_ref())
+        });
+        let client_id = identity.client_id;
         let socket = home_directory.join(".jet/runtime/jetd.sock");
         let local = PlaneClient::new(
             socket,
@@ -85,10 +114,11 @@ impl JetBridge {
         let planes = PlaneRegistry::open(
             local,
             Some(app_data_directory),
-            Arc::new(planes::spawner::SystemSsh),
-            Arc::new(keystore::IdentityKeys::new(keystore::platform_store())),
-        );
-        Ok(Self::with_planes(planes, app_data_directory))
+            spawner,
+            Arc::new(keystore::IdentityKeys::new(store)),
+        )
+        .with_identity_notice(identity.notice);
+        Self::with_planes(planes, app_data_directory)
     }
 
     fn with_planes(planes: PlaneRegistry, app_data_directory: &Path) -> Self {
@@ -197,7 +227,7 @@ pub(crate) fn close_plane_feed(
 pub(crate) async fn load_setup(
     bridge: State<'_, JetBridge>,
 ) -> Result<setup::SetupSnapshot, PublicError> {
-    setup::load_setup(bridge).await
+    setup::load_setup(&bridge).await
 }
 
 #[tauri::command]
@@ -205,7 +235,7 @@ pub(crate) async fn preview_project(
     bridge: State<'_, JetBridge>,
     path: String,
 ) -> Result<setup::ProjectPreviewView, PublicError> {
-    setup::preview_project(bridge, path).await
+    setup::preview_project(&bridge, path).await
 }
 
 #[tauri::command]
@@ -213,7 +243,7 @@ pub(crate) async fn register_project(
     bridge: State<'_, JetBridge>,
     preview_id: String,
 ) -> Result<setup::MutationResult, PublicError> {
-    setup::register_project(bridge, preview_id).await
+    setup::register_project(&bridge, preview_id).await
 }
 
 #[tauri::command]
@@ -221,7 +251,7 @@ pub(crate) async fn preview_project_removal(
     bridge: State<'_, JetBridge>,
     project_id: String,
 ) -> Result<setup::ProjectRemovalPreviewView, PublicError> {
-    setup::preview_project_removal(bridge, project_id).await
+    setup::preview_project_removal(&bridge, project_id).await
 }
 
 #[tauri::command]
@@ -231,7 +261,7 @@ pub(crate) async fn remove_project(
     typed_name: String,
     permanent: bool,
 ) -> Result<setup::MutationResult, PublicError> {
-    setup::remove_project(bridge, preview_id, typed_name, permanent).await
+    setup::remove_project(&bridge, preview_id, typed_name, permanent).await
 }
 
 #[tauri::command]
@@ -239,7 +269,7 @@ pub(crate) async fn bind_harness_account(
     bridge: State<'_, JetBridge>,
     provider: String,
 ) -> Result<setup::MutationResult, PublicError> {
-    setup::bind_harness_account(bridge, provider).await
+    setup::bind_harness_account(&bridge, provider).await
 }
 
 #[tauri::command]
@@ -248,7 +278,7 @@ pub(crate) async fn load_conversations(
     plane_id: Option<String>,
     next_page: Option<String>,
 ) -> Result<conversations::ConversationPageView, PublicError> {
-    conversations::load_conversations(bridge, plane_id, next_page).await
+    conversations::load_conversations(&bridge, plane_id, next_page).await
 }
 
 #[tauri::command]
@@ -257,7 +287,7 @@ pub(crate) async fn search_conversations(
     plane_id: Option<String>,
     text: String,
 ) -> Result<conversations::SearchResultView, PublicError> {
-    conversations::search_conversations(bridge, plane_id, text).await
+    conversations::search_conversations(&bridge, plane_id, text).await
 }
 
 #[tauri::command]
@@ -266,15 +296,16 @@ pub(crate) async fn load_conversation(
     conversation_id: String,
     plane_id: Option<String>,
 ) -> Result<conversations::ConversationDetailView, PublicError> {
-    conversations::load_conversation(bridge, conversation_id, plane_id).await
+    conversations::load_conversation(&bridge, conversation_id, plane_id).await
 }
 
 #[tauri::command]
 pub(crate) async fn create_conversation(
     bridge: State<'_, JetBridge>,
     project_id: String,
+    attempt: String,
 ) -> Result<conversations::ConversationRowView, PublicError> {
-    conversations::create_conversation(bridge, project_id).await
+    conversations::create_conversation(&bridge, project_id, attempt).await
 }
 
 #[tauri::command]
@@ -283,9 +314,10 @@ pub(crate) async fn start_run(
     conversation_id: String,
     craft: String,
     prompt: String,
+    attempt: String,
     plane_id: Option<String>,
 ) -> Result<conversations::StartResultView, PublicError> {
-    conversations::start_run(bridge, conversation_id, craft, prompt, plane_id).await
+    conversations::start_run(&bridge, conversation_id, craft, prompt, attempt, plane_id).await
 }
 
 #[tauri::command]
@@ -293,9 +325,10 @@ pub(crate) async fn submit_turn(
     bridge: State<'_, JetBridge>,
     conversation_id: String,
     prompt: String,
+    attempt: String,
     plane_id: Option<String>,
 ) -> Result<conversations::TurnResultView, PublicError> {
-    conversations::submit_turn(bridge, conversation_id, prompt, plane_id).await
+    conversations::submit_turn(&bridge, conversation_id, prompt, attempt, plane_id).await
 }
 
 #[tauri::command]
@@ -305,7 +338,7 @@ pub(crate) async fn load_run_supervision(
     run_id: Option<String>,
     plane_id: Option<String>,
 ) -> Result<run_control::RunSupervisionView, PublicError> {
-    run_control::load_run_supervision(bridge, conversation_id, run_id, plane_id).await
+    run_control::load_run_supervision(&bridge, conversation_id, run_id, plane_id).await
 }
 
 #[tauri::command]
@@ -315,7 +348,7 @@ pub(crate) async fn withdraw_turn(
     turn_id: String,
     plane_id: Option<String>,
 ) -> Result<run_control::TurnView, PublicError> {
-    run_control::withdraw_turn(bridge, conversation_id, turn_id, plane_id).await
+    run_control::withdraw_turn(&bridge, conversation_id, turn_id, plane_id).await
 }
 
 #[tauri::command]
@@ -324,7 +357,7 @@ pub(crate) async fn interrupt_turn(
     run_id: String,
     plane_id: Option<String>,
 ) -> Result<run_control::CommandAcceptedView, PublicError> {
-    run_control::interrupt_turn(bridge, run_id, plane_id).await
+    run_control::interrupt_turn(&bridge, run_id, plane_id).await
 }
 
 #[tauri::command]
@@ -333,7 +366,7 @@ pub(crate) async fn stop_run(
     run_id: String,
     plane_id: Option<String>,
 ) -> Result<run_control::CommandAcceptedView, PublicError> {
-    run_control::stop_run(bridge, run_id, plane_id).await
+    run_control::stop_run(&bridge, run_id, plane_id).await
 }
 
 #[tauri::command]
@@ -343,7 +376,7 @@ pub(crate) async fn authorize_approval_retry(
     review_id: String,
     plane_id: Option<String>,
 ) -> Result<run_control::ApprovalRetryView, PublicError> {
-    run_control::authorize_approval_retry(bridge, run_id, review_id, plane_id).await
+    run_control::authorize_approval_retry(&bridge, run_id, review_id, plane_id).await
 }
 
 // The IPC argument list is the webview contract; the body forwards it as one
@@ -361,7 +394,7 @@ pub(crate) async fn load_work_panel(
     plane_id: Option<String>,
 ) -> Result<work_panel::WorkPanelSnapshot, PublicError> {
     work_panel::load_work_panel(
-        bridge,
+        &bridge,
         work_panel::WorkPanelRequest {
             conversation_id,
             run_id,
@@ -380,7 +413,7 @@ pub(crate) async fn load_more_changes(
     bridge: State<'_, JetBridge>,
     page_id: String,
 ) -> Result<work_panel::ChangePageView, PublicError> {
-    work_panel::load_more_changes(bridge, page_id).await
+    work_panel::load_more_changes(&bridge, page_id).await
 }
 
 #[tauri::command]
@@ -388,7 +421,7 @@ pub(crate) async fn load_patch_chunk(
     bridge: State<'_, JetBridge>,
     artifact_read_id: String,
 ) -> Result<work_panel::ArtifactChunkView, PublicError> {
-    work_panel::load_patch_chunk(bridge, artifact_read_id).await
+    work_panel::load_patch_chunk(&bridge, artifact_read_id).await
 }
 
 #[tauri::command]
@@ -396,7 +429,7 @@ pub(crate) async fn load_work_file(
     bridge: State<'_, JetBridge>,
     file_id: String,
 ) -> Result<work_panel::EditableFileView, PublicError> {
-    work_panel::load_work_file(bridge, file_id).await
+    work_panel::load_work_file(&bridge, file_id).await
 }
 
 #[tauri::command]
@@ -405,7 +438,7 @@ pub(crate) async fn save_work_file(
     file_id: String,
     content: String,
 ) -> Result<work_panel::FileSavedView, PublicError> {
-    work_panel::save_work_file(bridge, file_id, content).await
+    work_panel::save_work_file(&bridge, file_id, content).await
 }
 
 #[tauri::command]
@@ -415,7 +448,7 @@ pub(crate) async fn submit_file_review(
     line: u32,
     comment: String,
 ) -> Result<work_panel::ReviewSubmittedView, PublicError> {
-    work_panel::submit_file_review(bridge, file_id, line, comment).await
+    work_panel::submit_file_review(&bridge, file_id, line, comment).await
 }
 
 #[tauri::command]
@@ -426,7 +459,7 @@ pub(crate) async fn open_workspace_terminal(
     columns: u16,
     plane_id: Option<String>,
 ) -> Result<work_panel::TerminalView, PublicError> {
-    work_panel::open_workspace_terminal(bridge, conversation_id, rows, columns, plane_id).await
+    work_panel::open_workspace_terminal(&bridge, conversation_id, rows, columns, plane_id).await
 }
 
 #[tauri::command]
@@ -434,7 +467,7 @@ pub(crate) async fn close_workspace_terminal(
     bridge: State<'_, JetBridge>,
     terminal_id: String,
 ) -> Result<work_panel::TerminalView, PublicError> {
-    work_panel::close_workspace_terminal(bridge, terminal_id).await
+    work_panel::close_workspace_terminal(&bridge, terminal_id).await
 }
 
 #[tauri::command]
@@ -443,7 +476,7 @@ pub(crate) async fn attach_workspace_terminal(
     terminal_id: String,
     on_update: Channel<work_panel::TerminalUpdate>,
 ) -> Result<(), PublicError> {
-    work_panel::attach_workspace_terminal(bridge, terminal_id, on_update).await
+    work_panel::attach_workspace_terminal(&bridge, terminal_id, on_update).await
 }
 
 #[tauri::command]
@@ -452,7 +485,7 @@ pub(crate) async fn send_terminal_input(
     terminal_id: String,
     input: String,
 ) -> Result<(), PublicError> {
-    work_panel::send_terminal_input(bridge, terminal_id, input).await
+    work_panel::send_terminal_input(&bridge, terminal_id, input).await
 }
 
 #[tauri::command]
@@ -462,7 +495,7 @@ pub(crate) async fn resize_workspace_terminal(
     rows: u16,
     columns: u16,
 ) -> Result<(), PublicError> {
-    work_panel::resize_workspace_terminal(bridge, terminal_id, rows, columns).await
+    work_panel::resize_workspace_terminal(&bridge, terminal_id, rows, columns).await
 }
 
 #[tauri::command]
@@ -470,7 +503,7 @@ pub(crate) fn detach_workspace_terminal(
     bridge: State<'_, JetBridge>,
     terminal_id: String,
 ) -> Result<(), PublicError> {
-    work_panel::detach_workspace_terminal(bridge, terminal_id)
+    work_panel::detach_workspace_terminal(&bridge, terminal_id)
 }
 
 #[cfg(test)]
@@ -515,7 +548,10 @@ mod manifest_tests {
     /// `resolve_conversation_names` reads task titles only (wave 3.3 §5).
     /// `load_shell_presentation` reads layout only (for the Window layout
     /// line), and `quit_jet` is Ctrl+Q in both windows (wave 3.4 §5).
-    const SHARED: [&str; 7] = [
+    /// The local service view and its repair back Setup and Settings ›
+    /// Versions (Wave 4 §A): a repair re-runs the native decision table,
+    /// which never downgrades and never touches another channel's core.
+    const SHARED: [&str; 10] = [
         "load_desktop_preferences",
         "load_shell_presentation",
         "quit_jet",
@@ -523,10 +559,13 @@ mod manifest_tests {
         "load_plane_detail",
         "collect_disposable_storage",
         "resolve_conversation_names",
+        "load_local_service",
+        "watch_local_service",
+        "repair_local_service",
     ];
 
     /// Commands only the Settings window may call.
-    const SETTINGS_ONLY: [&str; 31] = [
+    const SETTINGS_ONLY: [&str; 38] = [
         "watch_settings_navigation",
         "remember_settings_pane",
         "close_settings",
@@ -558,6 +597,13 @@ mod manifest_tests {
         "execute_recovery_action",
         "load_security_audit",
         "export_security_audit",
+        "prepare_local_service_rollback",
+        "execute_local_service_rollback",
+        "load_app_update",
+        "watch_app_update",
+        "check_app_update",
+        "install_app_update",
+        "restart_after_update",
     ];
 
     /// Wave 3.3 commands granted to the main window only.

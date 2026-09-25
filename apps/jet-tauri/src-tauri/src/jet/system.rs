@@ -11,7 +11,6 @@
 //! Recovery snapshot restore and the Recovery purge live in [`recovery`].
 use std::{collections::HashSet, sync::Mutex};
 
-use jet_client::Client;
 use jet_protocol::{
     AuditBreach, CapabilityObservation, CapabilitySnapshot, CredentialStoreKind,
     CredentialStoreStatus, DegradedCondition, DeletionLedgerStatus, ExternalTool, PlaneStatus,
@@ -23,6 +22,7 @@ use serde::Serialize;
 use tauri::State;
 
 use super::{
+    client::Connection,
     errors::PublicError,
     planes::{knowledge::ProtocolView, PlaneId},
     settings::plane_client,
@@ -238,7 +238,7 @@ pub(super) async fn load_health(
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         let status = connection
-            .status()
+            .query(connection.status())
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         bridge.planes.observe_status(plane, &status);
@@ -258,7 +258,7 @@ pub(super) async fn load_health(
         } else {
             CapabilityObservation::LastObserved
         };
-        let capabilities = match connection.capabilities(observation).await {
+        let capabilities = match connection.query(connection.capabilities(observation)).await {
             Ok(snapshot) => {
                 bridge
                     .planes
@@ -327,9 +327,12 @@ fn issue(
 
 /// One Plane-scope count Setting. A Plane whose minor does not name the key
 /// answers without it, which is `None`, not an error.
-async fn count_setting(connection: &Client, key: SettingKey) -> Result<Option<u32>, PublicError> {
+async fn count_setting(
+    connection: &Connection,
+    key: SettingKey,
+) -> Result<Option<u32>, PublicError> {
     let snapshot = connection
-        .settings(SettingScope::Plane, SettingSelection::Key { key })
+        .query(connection.settings(SettingScope::Plane, SettingSelection::Key { key }))
         .await
         .map_err(|error| PublicError::from_client(&error))?;
     Ok(snapshot
@@ -607,11 +610,12 @@ pub(super) async fn collect(
     )
     .map_err(|error| error.with_plane(binding.plane.to_string()))?;
     async {
-        let removed = client
+        let connection = client
             .connect()
             .await
-            .map_err(|error| PublicError::from_client(&error))?
-            .collect_artifacts()
+            .map_err(|error| PublicError::from_client(&error))?;
+        let removed = connection
+            .command(connection.collect_artifacts())
             .await
             .map_err(|error| PublicError::from_client(&error))?;
         bridge

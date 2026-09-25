@@ -144,7 +144,7 @@
       {#if pane === "general"}
         <GeneralPane />
       {:else if pane === "connections"}
-        <ConnectionsPane />
+        <ConnectionsPane service={session.service} />
       {:else if pane === "agents" || pane === "work" || pane === "safety"}
         <div class="plane-context">
           <PlanePicker

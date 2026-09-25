@@ -330,6 +330,37 @@ describe("DesktopSession with Jet Trash", () => {
     expect(session.trash.sections[REMOTE]?.kind).toBe("offline");
   });
 
+  it("reads a dropped Plane's Jet Trash again when its feed resumes", async () => {
+    const loads: string[] = [];
+    const session = desktop((command, args) => {
+      if (command !== "load_trash") return null;
+      loads.push(String(args.planeId));
+      return view(String(args.planeId), []);
+    });
+    session.trash.sections = {
+      local: { kind: "empty", view: view("local", []), freshness: "live", loadedAt: NOW },
+      [REMOTE]: { kind: "empty", view: view(REMOTE, []), freshness: "live", loadedAt: NOW },
+    };
+    // A feed that opens says resumed: nothing to read again.
+    session.receive(REMOTE, { type: "resumed", after: "4" });
+    await settle();
+    expect(loads).toEqual([]);
+
+    // A drop that ends in resumed alone (no connected first) still reads
+    // the dropped Plane again.
+    session.receive(REMOTE, { type: "reconnecting", error: failure("transport.offline", "offline", { planeId: REMOTE }) });
+    expect(session.trash.sections[REMOTE]?.kind).toBe("offline");
+    session.receive(REMOTE, { type: "resumed", after: "4" });
+    await settle();
+    expect(loads).toEqual([REMOTE]);
+    expect(session.trash.sections[REMOTE]?.kind).toBe("empty");
+    expect(session.trash.sections.local).toMatchObject({ kind: "empty", freshness: "live" });
+
+    session.receive(REMOTE, { type: "resumed", after: "4" });
+    await settle();
+    expect(loads).toEqual([REMOTE]);
+  });
+
   it("opens Jet Trash from the sidebar and hides it when leaving", () => {
     const session = desktop((command) => (command === "load_trash" ? view("local", []) : null));
     session.select("trash");

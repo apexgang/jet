@@ -383,6 +383,7 @@ async fn start(
             client_id,
             credential,
             None,
+            bridge.planes.local().deadlines(),
         )
         .await
         {
@@ -434,6 +435,7 @@ pub(crate) async fn add(
     now: Instant,
 ) -> Result<AddPlaneResult, PublicError> {
     let (destination, endpoint) = validate_destination(destination)?;
+    bridge.planes.check_writable()?;
     bridge.planes.check_destination(&destination, None)?;
     bridge.planes.check_capacity()?;
     start(
@@ -685,6 +687,7 @@ async fn finish(bridge: &JetBridge, ticket: &Ticket) -> Result<PlaneView, Public
                 bridge.planes.local().client_id(),
                 ticket.credential,
                 Some(ticket.transcript.plane_identity()),
+                bridge.planes.local().deadlines(),
             )
             .await?;
             bridge.planes.add_remote(
@@ -1142,6 +1145,36 @@ pub(crate) mod tests {
         assert_eq!(error.code, "plane.already_registered");
         assert_eq!(error.plane_id.as_deref(), Some(existing.as_str()));
         assert_eq!(setup.bridge.planes.remote_count(), 1);
+    }
+
+    /// D8: while the saved Planes are kept read-only (written by a newer
+    /// Jet), Add Plane is refused before ssh starts: finishing the pairing
+    /// would leave it orphaned on the remote Plane, because this computer
+    /// could never save the new Plane.
+    #[tokio::test]
+    async fn a_read_only_registry_refuses_add_plane_before_ssh() {
+        let directory = tempfile::tempdir().unwrap();
+        let newer = r#"{"version":2,"localIdentity":null,"planes":[]}"#;
+        std::fs::write(directory.path().join("planes.json"), newer).unwrap();
+        let spawner = Arc::new(FakeSpawner::default());
+        let keys = Arc::new(IdentityKeys::new(Arc::new(CountingStore::new(
+            Fail::Nothing,
+        ))));
+        // With a key already made, Add Plane would log in over ssh at once.
+        keys.ensure_public(CLIENT, Credential::Durable)
+            .await
+            .unwrap();
+        let bridge = JetBridge::for_test(directory.path(), CLIENT, spawner.clone(), keys);
+
+        let error = add(&bridge, "alice@build-box", None, Instant::now())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "plane.registry_read_only");
+        assert_eq!(spawner.spawns(), 0, "no ssh, no pairing ceremony");
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("planes.json")).unwrap(),
+            newer
+        );
     }
 
     #[tokio::test]

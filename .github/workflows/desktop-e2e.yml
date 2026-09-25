@@ -1,0 +1,125 @@
+# This workflow is managed by gh actions-lock.
+# The Linux desktop journey on the release artifacts (Wave 4 spec F). On a
+# fresh runner it installs the `.deb` the calling workflow bundled, lets the
+# real app provision its Jet service from the bundled payload in a real
+# systemd user session, and drives the app through tauri-driver and
+# WebKitWebDriver under Xvfb (apps/jet-tauri/tests/e2e/). Only functional
+# checks fail the job. The launch, idle CPU and memory, and reconnect
+# measurements are informational: they land in a JSON artifact with the
+# screenshots, and docs/resource-budgets.md compares them with proposed
+# ceilings.
+name: Desktop end-to-end
+
+on:
+  workflow_call:
+    inputs:
+      signed:
+        description: The bundles are signed and carry the updater configuration.
+        type: boolean
+        required: true
+      labels:
+        description: JSON array of the Linux labels whose bundles to drive.
+        type: string
+        default: '["x86_64-unknown-linux-gnu"]'
+
+permissions:
+  contents: read
+
+# Naming bash adds pipefail to every step.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  journey:
+    name: Journey (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        label: ${{ fromJSON(inputs.labels) }}
+    # The images the bundles were built on, so the runtime libraries match.
+    runs-on: ${{ matrix.label == 'aarch64-unknown-linux-gnu' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    env:
+      LABEL: ${{ matrix.label }}
+      # Built from its own lockfile by `cargo install --locked`.
+      TAURI_DRIVER_VERSION: 2.0.6
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: jet-desktop-linux-${{ matrix.label }}
+          path: ${{ runner.temp }}/jet-desktop
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.4.2
+      # The journey uses only bun and node: modules, so it needs no install.
+      # The dry run fails fast when the script itself is broken.
+      - name: Dry-run the journey against fakes
+        working-directory: apps/jet-tauri
+        run: bun tests/e2e/main.ts --dry-run > "$RUNNER_TEMP/jet-e2e-dry-run.json"
+      - name: Install WebKitWebDriver, Xvfb and tauri-driver
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y webkit2gtk-driver xvfb xauth
+          command -v WebKitWebDriver
+          # Outside the checkout, so neither toolchain file picks the Rust version.
+          cd "$RUNNER_TEMP"
+          cargo install tauri-driver --version "$TAURI_DRIVER_VERSION" --locked --root "$RUNNER_TEMP/tauri-driver"
+      - name: Install the desktop bundle
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("packages/Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          case "$LABEL" in
+            x86_64-*) arch=amd64 ;;
+            aarch64-*) arch=arm64 ;;
+            *) echo "Unknown label $LABEL" >&2; exit 1 ;;
+          esac
+          deb="$RUNNER_TEMP/jet-desktop/Jet_${version}_${arch}.deb"
+          dpkg-deb --field "$deb" Package Version Depends Recommends
+          sudo apt-get install -y "$deb"
+          echo "JET_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Enable a systemd user session for the runner
+        run: |
+          sudo loginctl enable-linger "$USER"
+          runtime="/run/user/$(id -u)"
+          echo "XDG_RUNTIME_DIR=$runtime" >> "$GITHUB_ENV"
+          for _ in $(seq 30); do
+            if XDG_RUNTIME_DIR=$runtime systemctl --user show-environment >/dev/null 2>&1; then
+              if [[ -S "$runtime/bus" ]]; then
+                echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime/bus" >> "$GITHUB_ENV"
+              fi
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'The systemd user manager did not start.' >&2
+          exit 1
+      # The app and its WebKit processes inherit this environment through
+      # tauri-driver and WebKitWebDriver.
+      - name: Run the journey
+        working-directory: apps/jet-tauri
+        timeout-minutes: 15
+        env:
+          SIGNED: ${{ inputs.signed }}
+          # Xvfb has no GPU: no DMA-BUF renderer, and Mesa's software GL.
+          WEBKIT_DISABLE_DMABUF_RENDERER: 1
+          LIBGL_ALWAYS_SOFTWARE: 1
+        run: |
+          args=(--driver "$RUNNER_TEMP/tauri-driver/bin/tauri-driver" --out "$RUNNER_TEMP/jet-e2e" --version "$JET_VERSION")
+          if [[ "$SIGNED" == true ]]; then args+=(--signed); fi
+          xvfb-run --auto-servernum --server-args='-screen 0 1440x900x24' bun tests/e2e/main.ts "${args[@]}"
+      - name: Show the service journal, the app log and the Jet home
+        if: ${{ failure() }}
+        run: |
+          sudo journalctl --no-pager --output=short-precise _SYSTEMD_USER_UNIT=jetd.service | tail -n 300 || true
+          systemctl --user status jetd.service --no-pager --full || true
+          tail -n 300 "$RUNNER_TEMP/jet-e2e/tauri-driver.log" || true
+          ls -la "$HOME/.jet" "$HOME/.jet/core" "$HOME/.config/systemd/user" "$HOME/.local/share/me.heeka.jet-tauri" || true
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
+      - uses: actions/upload-artifact@v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: jet-desktop-e2e-${{ matrix.label }}
+          path: ${{ runner.temp }}/jet-e2e
+          if-no-files-found: warn
+          retention-days: 14

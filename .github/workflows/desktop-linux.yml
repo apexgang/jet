@@ -1,0 +1,152 @@
+# This workflow is managed by gh actions-lock.
+# Bundle the Linux desktop app (deb, rpm, AppImage) around the release payload
+# the calling workflow uploaded as `jet-core-<label>`. The payload travels
+# inside each bundle as the unmodified archive, never as loose executables,
+# because the AppImage build rewrites every ELF file under usr/lib and would
+# break the manifest digests `jetd core stage` checks. The `bundle` job builds
+# and checks the bundles without any secret; for a release, the `sign` job
+# signs them for the updater on a fresh runner, and `release_assets.py`
+# verifies the names and signatures again before anything is published.
+name: Desktop Linux bundles
+
+on:
+  workflow_call:
+    inputs:
+      sign:
+        description: Sign the bundles for the updater; needs both secrets.
+        type: boolean
+        required: true
+      labels:
+        description: JSON array of the Linux labels to bundle.
+        type: string
+        default: '["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]'
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    name: Bundle (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        label: ${{ fromJSON(inputs.labels) }}
+    # The same images as the core payload legs, so the bundles share its glibc floor.
+    runs-on: ${{ matrix.label == 'aarch64-unknown-linux-gnu' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/jet-tauri
+    env:
+      LABEL: ${{ matrix.label }}
+      # Core builds already fill the repository's Actions cache, so this job
+      # builds from scratch and skips state it could not reuse.
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: jet-core-${{ matrix.label }}
+          path: ${{ runner.temp }}/jet-core
+      - name: Install the WebKitGTK build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev file
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.4.2
+      - uses: extractions/setup-just@v4.0.0
+      - name: Set up Rust
+        run: |
+          toolchain=$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
+          rustup toolchain install "$toolchain" --profile minimal
+      - name: Install the locked frontend dependencies
+        run: just install
+      - name: Name the payload
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("../../packages/Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          echo "PAYLOAD=$RUNNER_TEMP/jet-core/jet-core-$version-$LABEL.tar.gz" >> "$GITHUB_ENV"
+      # ASVS 13.3.2: this job runs the frontend dependencies, crate build
+      # scripts, and the linuxdeploy tools the Tauri bundler downloads from
+      # mutable URLs, so it gets no secret. Any step here could change what a
+      # later step of this job runs (GITHUB_ENV, GITHUB_PATH, the checkout, a
+      # process left running), so the key goes to the `sign` job instead. A
+      # release builds with JET_RELEASE_SIGN, which keeps the updater endpoint
+      # and public key in the app.
+      - name: Build and check the bundles
+        env:
+          JET_RELEASE_SIGN: ${{ inputs.sign }}
+        run: just release-bundle "$PAYLOAD"
+      - name: Collect the bundles
+        run: |
+          out="$RUNNER_TEMP/jet-desktop"
+          mkdir -p "$out"
+          bundle=src-tauri/target/release/bundle
+          cp "$bundle"/deb/*.deb "$bundle"/rpm/*.rpm "$bundle"/appimage/*.AppImage "$out"/
+          ls -l "$out"
+      # A release build still needs its signatures; a test build is final.
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ${{ inputs.sign && 'unsigned-' || '' }}jet-desktop-linux-${{ matrix.label }}
+          path: ${{ runner.temp }}/jet-desktop/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  # Signs the release bundles on a fresh runner that builds nothing: it checks
+  # out the same commit, installs the locked frontend packages without running
+  # any of their scripts, and runs only the Tauri CLI's signer with the key.
+  sign:
+    name: Sign (${{ matrix.label }})
+    if: inputs.sign
+    needs: bundle
+    strategy:
+      fail-fast: false
+      matrix:
+        label: ${{ fromJSON(inputs.labels) }}
+    # `just release-sign` expects this machine's architecture's bundle names.
+    runs-on: ${{ matrix.label == 'aarch64-unknown-linux-gnu' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/jet-tauri
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: unsigned-jet-desktop-linux-${{ matrix.label }}
+          path: ${{ runner.temp }}/jet-desktop
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.4.2
+      - uses: extractions/setup-just@v4.0.0
+      - name: Install the signer without running package scripts
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Require the updater signing key
+        env:
+          HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD != '' }}
+        run: |
+          if [[ "$HAS_UPDATER_KEY" != true ]]; then
+            echo 'Signed bundles need TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD.' >&2
+            exit 1
+          fi
+      - name: Sign the bundles for the updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: just release-sign "$RUNNER_TEMP/jet-desktop"
+      - name: Check the signatures
+        run: just release-check-signatures "$RUNNER_TEMP/jet-desktop"
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: jet-desktop-linux-${{ matrix.label }}
+          path: ${{ runner.temp }}/jet-desktop/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

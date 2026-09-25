@@ -213,8 +213,11 @@ ledger-corrupt, Security-degraded, or recently refused work for low disk
 space. Priority follows that order, and one notice is shown at a time. The
 notice adds one item to Needs attention, and choosing Needs attention focuses
 it. The feed's `connected` snapshot carries a compact health summary (store,
-ledger, security). `resumed` changes nothing. Refusals seen on requests
-(`recovery.read_only`, `recovery.deletion_ledger_corrupt`,
+ledger, security). The feed sends it again each time it dials again after a
+drop, before any Event of the new connection, so a restarted daemon's summary,
+start count and core version replace the old ones. `resumed` changes nothing.
+Refusals seen on requests (`recovery.read_only`,
+`recovery.deletion_ledger_corrupt`,
 `security.audit_degraded`, `storage.disk_pressure`) are recorded against the
 Plane that refused them. A disk-pressure refusal on one Plane never shows on
 another Plane's task. It reads "Low disk space on {Plane} stopped new work at
@@ -226,8 +229,11 @@ to Safety › Recovery and Safety › Audit for the other conditions.
 - *Versions and capabilities* shows the Jet service version, starts and start
   time, app version, "Supports protocol 1.43", the negotiated minor when
   known, platform, external tools with versions, Crafts, the credential store
-  and degraded conditions. Each item that has a fix links to its 3.2 section.
-  "Check again" asks the Plane for a fresh capability observation.
+  and degraded conditions. The negotiated minor is known only from the
+  daemon run that proved it: a status read from a new start or core version
+  drops it until that run proves it again. Each item that has a fix links to
+  its 3.2 section. "Check again" asks the Plane for a fresh capability
+  observation.
 - *Storage health* sits inside 3.2's Storage section. It shows the temporary
   file budget, the last low-disk refusal seen in this window, and "Free
   disposable space". That runs one bounded Artifact collection per Plane at a

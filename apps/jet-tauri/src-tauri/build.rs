@@ -98,6 +98,16 @@ fn main() {
             "toggle_main_window_fullscreen",
             "close_main_window",
             "quit_jet",
+            "load_local_service",
+            "watch_local_service",
+            "repair_local_service",
+            "prepare_local_service_rollback",
+            "execute_local_service_rollback",
+            "load_app_update",
+            "watch_app_update",
+            "check_app_update",
+            "install_app_update",
+            "restart_after_update",
         ]),
     ))
     .expect("failed to build the Tauri command manifest");

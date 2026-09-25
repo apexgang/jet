@@ -1502,6 +1502,12 @@ fn watcher_failures_name_their_plane() {
             .unwrap(),
         json!({"type": "resumed", "after": "5"})
     );
+    // A redial's status read stays native: the `resumed` after it reloads
+    // this window's sections.
+    let redialed = NativeUpdate::Connected {
+        status: Box::new(status(5)),
+    };
+    assert!(settings_change(redialed, plane).is_none());
 }
 
 /// Lets the runtime process an abort; no wall-clock sleep.
@@ -1590,5 +1596,106 @@ async fn the_watcher_forwards_only_staleness_events_from_the_journal() {
     assert_eq!(received[1]["sequence"], "22");
     assert_eq!(received[1]["settingKey"], "energy.constrained");
     assert!(!serde_json::to_string(&received).unwrap().contains("secret"));
+    fake.setup.bridge.settings_window_closed();
+}
+
+/// The watcher outlives a restarted `jetd` as a main-window feed does: after
+/// the drop it dials again and reads status on the new connection first.
+/// That status stays native. The window hears `reconnecting`, then
+/// `resumed` after the last change it was sent, which reloads its sections
+/// (Versions included), then the new run's changes.
+#[tokio::test]
+async fn the_watcher_redials_a_restarted_plane_and_resumes_after_its_last_change() {
+    let fake = fake_plane();
+    let received = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = received.clone();
+    watch_settings_changes_for(
+        &fake.setup.bridge,
+        &fake.plane_id,
+        "20".into(),
+        move |change| {
+            sink.lock()
+                .unwrap()
+                .push(serde_json::to_value(change).unwrap());
+            true
+        },
+    )
+    .unwrap();
+    let setting = |sequence: u64| Event {
+        sequence,
+        event_id: Uuid::from_u128(u128::from(sequence)),
+        ..event(
+            "setting.changed",
+            json!({"key": "energy.constrained", "scope": {"type": "plane"}, "value": {"type": "flag", "value": true}}),
+        )
+    };
+    let page = |cursor, events| QueryResponse::Events(jet_protocol::EventPage { cursor, events });
+    let events_after = |message: &ClientMessage| match message {
+        ClientMessage::Query {
+            query: QueryRequest::Events { after },
+            ..
+        } => *after,
+        other => panic!("expected an Events page, got {other:?}"),
+    };
+
+    // The first connection pages one change, then `jetd` goes away mid-poll.
+    let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+    let (stream, message) = next_message(&mut reader).await;
+    assert_eq!(events_after(&message), 20);
+    answer(&mut writer, stream, &message, page(21, vec![setting(21)])).await;
+    let (_, poll) = next_message(&mut reader).await;
+    assert_eq!(events_after(&poll), 21);
+    drop((reader, writer));
+
+    // The redial reads status first and reaches a restarted daemon.
+    let (mut reader, mut writer) = accept(&fake.listener, CLIENT).await;
+    let (stream, message) = next_message(&mut reader).await;
+    assert!(
+        matches!(
+            message,
+            ClientMessage::Query {
+                query: QueryRequest::Status,
+                ..
+            }
+        ),
+        "expected a status read, got {message:?}"
+    );
+    let restarted = PlaneStatus {
+        daemon_starts: 4,
+        core_version: "0.3.0".into(),
+        ..status(22)
+    };
+    answer(
+        &mut writer,
+        stream,
+        &message,
+        QueryResponse::Status(restarted),
+    )
+    .await;
+    // Paging goes on after the last change sent, not at the status fence.
+    let (stream, message) = next_message(&mut reader).await;
+    assert_eq!(events_after(&message), 21);
+    answer(&mut writer, stream, &message, page(22, vec![setting(22)])).await;
+    // The next poll proves the page was handled.
+    let (_, poll) = next_message(&mut reader).await;
+    assert_eq!(events_after(&poll), 22);
+
+    let received = received.lock().unwrap().clone();
+    let types: Vec<_> = received
+        .iter()
+        .map(|change| change["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        types,
+        ["resumed", "change", "reconnecting", "resumed", "change"],
+        "{received:?}"
+    );
+    assert_eq!(received[1]["sequence"], "21");
+    assert_eq!(received[2]["error"]["planeId"], fake.plane_id);
+    assert_eq!(received[2]["error"]["retryable"], true);
+    assert_eq!(received[3], json!({"type": "resumed", "after": "21"}));
+    assert_eq!(received[4]["sequence"], "22");
+    // Nothing of the status read crosses to this window.
+    assert!(!serde_json::to_string(&received).unwrap().contains("0.3.0"));
     fake.setup.bridge.settings_window_closed();
 }

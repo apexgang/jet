@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
 
   import { planeStatus } from "$lib/features/planes/model";
+  import type { LocalServiceSession } from "$lib/features/system/local-service.svelte";
   import { publicError } from "$lib/jet/errors";
+  import type { LocalServicePhase } from "$lib/jet/local-service";
   import {
     LOCAL_PLANE,
     listPlanes,
@@ -15,6 +17,8 @@
   import SectionState from "./SectionState.svelte";
   import { sectionData, sectionStateFor, type SectionState as State } from "./model";
 
+  let { service }: { service: LocalServiceSession } = $props();
+
   const LOCAL_LABEL = "This computer";
 
   let local = $state<State<PlaneDetail>>({ kind: "loading", last: null });
@@ -22,6 +26,31 @@
   let mounted = false;
   let localRequest = 0;
   let planesRequest = 0;
+  /**
+   * The phase and running version of the last service view this pane saw
+   * (the version is null while no daemon runs); null until it saw one.
+   */
+  let lastService: { phase: LocalServicePhase; running: string | null } | null = null;
+
+  // The local service started, stopped, or now runs another core version
+  // (an install, an update it activated, a rollback), or a provisioning
+  // pass ended with it running, which may have restarted the same core (an
+  // activation that failed after draining it): read the local Plane again,
+  // so an open window never keeps showing a service that is gone or a
+  // daemon run it replaced. The first view seen only records what runs; the
+  // pane read the Plane when it mounted.
+  $effect(() => {
+    const view = service.view;
+    if (view === null) return;
+    const seen = { phase: view.phase, running: view.runningVersion };
+    untrack(() => {
+      const last = lastService;
+      lastService = seen;
+      if (last === null) return;
+      const nowRunning = seen.phase === "running" && last.phase !== "running";
+      if (nowRunning || seen.running !== last.running) reload();
+    });
+  });
 
   /** Status and capabilities of the local Jet service. Read-only. */
   async function loadLocal() {
@@ -105,6 +134,7 @@
   onMount(() => {
     mounted = true;
     reload();
+    void service.start();
     // The registry and the local service change outside this window.
     const onFocus = () => reload();
     window.addEventListener("focus", onFocus);

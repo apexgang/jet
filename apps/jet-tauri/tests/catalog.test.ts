@@ -63,7 +63,7 @@ function plane(planeId: string, kind: "local" | "remote", label: string): Plane 
 function snapshot(planes: Plane[], restoredSelection: PlanesSnapshot["restoredSelection"] = null): PlanesSnapshot {
   return {
     planes,
-    identity: { clientId: "00000000-0000-4000-8000-00000000000c", key: "unknown", fingerprint: null },
+    identity: { clientId: "00000000-0000-4000-8000-00000000000c", key: "unknown", fingerprint: null, notice: null },
     restoredSelection,
     notice: null,
     maximumRemotePlanes: 16,
@@ -354,7 +354,7 @@ describe("PlaneCatalog Recent", () => {
     expect(catalog.rows.map((item) => item.planeId)).toEqual(["local"]);
   });
 
-  it("marks a Plane stale on a feed failure and reloads it on reconnect", async () => {
+  it("marks a Plane stale on a feed failure and reloads it when the feed resumes", async () => {
     const local = chain("local", 1);
     const { calls } = ipc((_command, args) => local(args.nextPage as string | null));
     const { catalog } = catalogFor([LOCAL_PLANE]);
@@ -365,8 +365,8 @@ describe("PlaneCatalog Recent", () => {
     expect(catalog.statusRows[0]).toMatchObject({ kind: "stale", action: "retry" });
 
     calls.length = 0;
-    catalog.reconnected("local");
-    await catalog.settled("local");
+    // The shell's `resumed` handler.
+    await catalog.load("local");
     expect(calls.map((call) => call.command).filter((command) => command !== "list_planes")).toEqual([
       "load_conversations",
     ]);
