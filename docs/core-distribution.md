@@ -38,9 +38,8 @@ relocations into `DT_RELR` (`packages/.cargo/config.toml`), so it
 refuses to load on glibc older than 2.36; built on Ubuntu 24.04 the
 executables already need glibc 2.39.
 
-`just release-package --target <triple>` builds `jetd` with the
-`release` profile and the helper and Crafts with `release-small`
-(ADR-0059), splits and strips symbols, writes the manifest by running the
+`just release-package --target <triple>` builds all four executables
+with the `release-small` profile (ADR-0059), splits and strips symbols, writes the manifest by running the
 freshly built `jetd core describe`, and archives payload and symbols.
 Two Apple targets given together are merged with `lipo` into one
 universal payload. `.github/workflows/release.yml` runs it for the three
@@ -80,27 +79,26 @@ The service definitions preserve helpers across daemon restarts.
   a release profile in `Cargo.toml` no longer says what ADR-0059
   requires.
 
-Measured on Linux x86_64 at this change. Every size in this section is
-for Linux x86_64 only; the aarch64 Linux build and the two macOS slices
-have not been measured with these changes.
+Measured on Linux x86_64 at this change and accepted in
+`release-baseline.json`:
 
 | Executable | Profile | Stripped size | Budget |
 | --- | --- | --- | --- |
-| `jetd` | `release` (opt-level `s`, thin LTO) | 13.31 MiB | 12 MiB |
-| `jetfueld` | `release-small` (opt-level `z`, fat LTO) | 0.97 MiB | 3 MiB |
-| `jet-craft-claude` | `release-small` | 1.66 MiB | 6 MiB |
-| `jet-craft-codex` | `release-small` | 1.70 MiB | 6 MiB |
+| `jetd` | `release-small` (opt-level `z`, fat LTO) | 12,342,792 bytes (11.77 MiB) | 12 MiB |
+| `jetfueld` | `release-small` | 1,019,248 bytes (0.97 MiB) | 3 MiB |
+| `jet-craft-claude` | `release-small` | 1,745,624 bytes (1.66 MiB) | 6 MiB |
+| `jet-craft-codex` | `release-small` | 1,781,616 bytes (1.70 MiB) | 6 MiB |
 
-`jetd` is still over its budget, so `just release-check` and the
-release workflow fail on it until the daemon is smaller; the workflow
-still uploads the failed payload for inspection. Issue #215 brought it
-down from 18.31 MiB (19,203,248 bytes at 0fde750, as #215 records) to
-13.31 MiB without touching either profile. The 17.08 MiB this table
-showed before was measured for #57; `jetd` grew after it. The changes:
+The payload totals 16.11 MiB against 30 MiB. `jetd` has 240,120 bytes
+(1.9%) of room on this slice. Issue #215 brought it
+down from 18.31 MiB (19,203,248 bytes at 0fde750, as #215 records).
+The changes:
 
-- TLS runs on rustls with the ring provider instead of aws-lc
-  (`jet-core/src/https.rs`), keeping the platform verifier. `jetd`
-  installs the provider at startup, before its runtime runs any work.
+- `jetd` builds with `release-small` instead of `release` (opt-level
+  `s`, thin LTO); ADR-0059 records the change in its 2026-09-25
+  amendment. The workspace's development profile, under which the
+  ADR-0022 and ADR-0055 budgets are measured, is already opt-level `z`
+  with fat LTO.
 - Schedules resolve zones with jiff and its bundled tz database instead
   of chrono-tz. The zone data moves from tzdb 2025b (chrono-tz 0.10.4)
   to 2026c (jiff-tzdb 0.1.8). Under 2026c Morocco stays at +00 from
@@ -120,45 +118,31 @@ showed before was measured for #57; `jetd` grew after it. The changes:
   classification in the daemon and the No-Visa client are compiled once
   instead of once per caller or per reply kind.
 
-On Linux x86_64 what remains is the profile. The same `jetd`, built
-alone with each profile and stripped:
+TLS stays on rustls with reqwest's aws-lc-rs provider, so every HTTPS
+connection `jetd` makes, including the GitHub API calls that carry the
+user's token, keeps the hybrid post-quantum X25519MLKEM768 key
+exchange. rustls is at 0.23.45, which fixes RUSTSEC-2026-0285. The ring
+provider would save 668,968 bytes on Linux x86_64 but offers only
+X25519, P-256, and P-384.
 
-| `jetd` profile | Stripped size | Against 12 MiB |
-| --- | --- | --- |
-| `release` (opt-level `s`, thin LTO) | 13,953,288 bytes | 1,370,376 over |
-| `release` with fat LTO | 12,536,552 bytes | 46,360 under |
-| opt-level `z`, fat LTO, as `release-small` | 11,670,216 bytes | 912,696 under |
+CI measured the stripped `jetd` on every slice with these changes under
+both profiles, with rustls on the ring provider #215 tried at the time:
 
-Identical code folding (`-Wl,--icf=all` with rust-lld) removes about
-230 KiB more under thin LTO and about 110 KiB under fat LTO. That is
-not enough on its own. `just release-accept` never records a size over
-budget, so the baseline file holds no `jetd` size and the drift rule
-cannot anchor above the limit.
+| Slice | `release` (opt-level `s`, thin LTO) | `release-small` (opt-level `z`, fat LTO) |
+| --- | ---: | ---: |
+| Linux x86_64 | 13.32 MiB | 11,673,824 bytes (11.13 MiB) |
+| Linux aarch64 | 12.39 MiB | 9,653,504 bytes (9.21 MiB) |
+| macOS x86_64 | 13.36 MiB | 9,987,376 bytes (9.52 MiB) |
+| macOS arm64 | 12.24 MiB | 7,640,832 bytes (7.29 MiB) |
 
-**Pending decision.** Two trade-offs in this change wait on the
-maintainer, and no ADR records either yet:
-
-- *The `jetd` profile (ADR-0059).* The table above is Linux x86_64
-  only, and fat LTO clears the budget there by 0.37%. `just
-  release-check` measures every slice, and the macOS slices gain
-  neither `DT_RELR` nor the `.eh_frame_hdr` removal. A rough projection
-  from the published swift-v1.0.4 payload, not a measurement, puts the
-  macOS x86_64 `jetd` near 12.26 MiB with fat LTO, still over, and near
-  11.41 MiB with opt-level `z` and fat LTO. Until the decision lands,
-  `.github/workflows/release-size.yml` measures all three labels under
-  `release`, `release` with fat LTO, and opt-level `z` with fat LTO on
-  every pull request that touches the core. Changing the profile also
-  changes the `[profiles.release]` check in
-  `.github/packaging/release.toml` and needs the performance budgets
-  re-run.
-- *Post-quantum key exchange.* reqwest's aws-lc-rs provider offered the
-  hybrid X25519MLKEM768 group on every HTTPS connection `jetd` made.
-  ring offers only X25519, P-256, and P-384, so those connections,
-  including the GitHub API calls that carry the user's token, lose
-  protection against traffic recorded now and decrypted later by a
-  quantum computer. Restoring it without aws-lc means adding a hybrid
-  group built on a pure-Rust ML-KEM crate, whose size cost has not been
-  measured.
+Every slice was over 12 MiB under `release` and under it with
+`release-small`. With aws-lc kept, only Linux x86_64 has been measured
+here; the other slices had at least 2.4 MiB of room, and
+`.github/workflows/release-size.yml` measures all three labels with the
+configured profiles on every pull request that touches the core and
+fails when a slice is over budget. Identical code folding
+(`-Wl,--icf=all` with rust-lld) would remove about 110 KiB more under
+fat LTO and is not applied.
 
 ## Versions under the Jet home
 

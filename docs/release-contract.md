@@ -90,12 +90,6 @@ accept its label.
 
 ## What still fails the contract
 
-- `jetd` measures 13.31 MiB stripped on Linux x86_64 against its 12 MiB
-  budget, so `just release-check` fails. Every `jetd` figure so far is
-  Linux x86_64 only: fat LTO brings that build to 11.96 MiB, but
-  ADR-0059 gives `jetd` thin LTO, and the aarch64 Linux and macOS
-  slices have not been measured. The profile is a pending decision
-  ([core-distribution.md](core-distribution.md)).
 - The Codex Craft leaves three capabilities the Harness exposes unused:
   native resume, Model selection, and a No-Visa tool bridge. ADR-0104 makes
   them release blockers, marked as Craft gaps in the matrix (#154).

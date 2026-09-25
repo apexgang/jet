@@ -97,15 +97,9 @@ impl From<Channel> for InstallationChannel {
 	}
 }
 
-fn main() -> ExitCode {
-	// Before the runtime exists, so no task can build an HTTPS client first:
-	// reqwest has no TLS provider of its own and panics without one.
-	jet_core::install_tls_provider();
-	dispatch(Cli::parse())
-}
-
 #[tokio::main]
-async fn dispatch(Cli { subcommand }: Cli) -> ExitCode {
+async fn main() -> ExitCode {
+	let Cli { subcommand } = Cli::parse();
 	match subcommand {
 		Subcommand::CraftSupervisor {
 			executable,

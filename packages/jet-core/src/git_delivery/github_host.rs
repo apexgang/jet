@@ -1,6 +1,6 @@
 //! The external GitHub and platform-credential boundary, independent of Git policy.
 use crate::{CoreError, RunFuture, git_delivery::state::refused};
-use reqwest::Method;
+use reqwest::{Client, Method};
 use serde_json::json;
 use std::time::Duration;
 use tokio::process::Command;
@@ -67,7 +67,7 @@ impl GitHubHost for SystemGitHub {
 	) -> RunFuture<'a, Result<Vec<u8>, CoreError>> {
 		Box::pin(async move {
 			let token = credential().await?;
-			let client = crate::https::client_builder()
+			let client = Client::builder()
 				.timeout(Duration::from_secs(20))
 				.redirect(reqwest::redirect::Policy::none())
 				.retry(reqwest::retry::never())

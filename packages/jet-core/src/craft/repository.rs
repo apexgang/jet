@@ -174,7 +174,7 @@ async fn get(url: reqwest::Url, limit: usize) -> Result<Vec<u8>, CoreError> {
 }
 
 fn github_client() -> Result<reqwest::Client, CoreError> {
-	crate::https::client_builder()
+	reqwest::Client::builder()
 		.https_only(true)
 		.connect_timeout(Duration::from_secs(10))
 		.timeout(Duration::from_secs(30))

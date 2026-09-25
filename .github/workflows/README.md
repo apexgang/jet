@@ -92,16 +92,15 @@ workflow against a version tag, never a branch. Older releases cannot downgrade
 the formula after a newer stable release is published.
 
 Failed size gates retain build artifacts for seven days but prevent publication.
-The historical `jetd` size overage is documented in
+Sizes and the profile each executable builds with are recorded in
 [Core distribution](../../docs/core-distribution.md); this workflow does not relax
-that budget. GUI signing and notarization remain separate distribution steps.
+any budget. GUI signing and notarization remain separate distribution steps.
 
 `release-size.yml` runs the same package and gate steps for the three labels on
 pull requests that change `packages/`, the packaging files, `release.py`, or
 `setup-rust.sh`, and lists every executable's stripped size per architecture
-slice in the job summary. Until the ADR-0059 profile decision lands it also
-builds `jetd` with fat LTO and with opt-level `z` and fat LTO; those legs report
-sizes without failing the run.
+slice in the job summary. It builds the profiles release.toml configures and
+fails when a slice is over its budget.
 
 ## Swift app releases
 

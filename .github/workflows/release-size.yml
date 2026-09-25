@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   measure:
-    name: ${{ matrix.platform.label }} (${{ matrix.profile }})
+    name: ${{ matrix.platform.label }}
     strategy:
       fail-fast: false
       matrix:
@@ -39,17 +39,6 @@ jobs:
           - runner: macos-15
             targets: aarch64-apple-darwin x86_64-apple-darwin
             label: universal-apple-darwin
-        # temporary: remove once ADR-0059 decision lands. `release` builds
-        # the profiles as configured; the others override the `release`
-        # profile `jetd` uses through Cargo's environment configuration.
-        profile: [release, s-fat, z-fat]
-        include:
-          - profile: release
-            overrides: ""
-          - profile: s-fat
-            overrides: CARGO_PROFILE_RELEASE_LTO=fat
-          - profile: z-fat
-            overrides: CARGO_PROFILE_RELEASE_OPT_LEVEL=z CARGO_PROFILE_RELEASE_LTO=fat
     runs-on: ${{ matrix.platform.runner }}
     # Fat LTO links `jetd` as one module, twice for the universal payload.
     timeout-minutes: 90
@@ -60,18 +49,12 @@ jobs:
     env:
       TARGETS: ${{ matrix.platform.targets }}
       LABEL: ${{ matrix.platform.label }}
-      PROFILE: ${{ matrix.profile }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: extractions/setup-just@v4.0.0
       - name: Set up Rust
         working-directory: .
         run: bash .github/scripts/setup-rust.sh release
-      - name: Select the measured profile
-        env:
-          OVERRIDES: ${{ matrix.overrides }}
-        run: |
-          for setting in $OVERRIDES; do echo "$setting" >> "$GITHUB_ENV"; done
       - uses: actions/cache/restore@v6.1.0
         id: cache
         with:
@@ -81,8 +64,8 @@ jobs:
             packages/target
             !packages/target/dist
             .github/.cache
-          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-release-size-${{ matrix.profile }}-${{ matrix.platform.label }}-${{ hashFiles('packages/rust-toolchain.toml', 'packages/.cargo/config.toml', '.github/ci/cargo.toml') }}-${{ hashFiles('packages/**', 'docs/conformance-matrix.md') }}
-          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-release-size-${{ matrix.profile }}-${{ matrix.platform.label }}-${{ hashFiles('packages/rust-toolchain.toml', 'packages/.cargo/config.toml', '.github/ci/cargo.toml') }}-
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-release-size-${{ matrix.platform.label }}-${{ hashFiles('packages/rust-toolchain.toml', 'packages/.cargo/config.toml', '.github/ci/cargo.toml') }}-${{ hashFiles('packages/**', 'docs/conformance-matrix.md') }}
+          restore-keys: rust-v1-${{ runner.os }}-${{ runner.arch }}-release-size-${{ matrix.platform.label }}-${{ hashFiles('packages/rust-toolchain.toml', 'packages/.cargo/config.toml', '.github/ci/cargo.toml') }}-
       - name: Restore unchanged source timestamps
         working-directory: .
         run: python3 .github/scripts/cache_sources.py restore
@@ -95,8 +78,6 @@ jobs:
           for target in $TARGETS; do args+=(--target "$target"); done
           just release-package "${args[@]}"
       - name: Gate sizes, dependency seams, and profiles
-        # The configured profile is the release gate; the others only measure.
-        continue-on-error: ${{ matrix.profile != 'release' }}
         run: just release-check --target "$LABEL" | tee "$RUNNER_TEMP/release-check.json"
       - name: Summarize stripped sizes per slice
         if: ${{ !cancelled() }}
@@ -114,7 +95,7 @@ jobs:
               report = json.loads(text)
           except ValueError:
               report = None
-          lines = [f"### `{os.environ['LABEL']}`, `{os.environ['PROFILE']}` profile", ""]
+          lines = [f"### `{os.environ['LABEL']}`", ""]
           if not report:
               lines.append("`just release-check` printed no report; see its step log.")
           else:

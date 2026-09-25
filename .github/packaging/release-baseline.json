@@ -2,16 +2,19 @@
   "x86_64-unknown-linux-gnu": {
     "executables": {
       "jet-craft-claude": {
-        "x86_64": 1792936
+        "x86_64": 1745624
       },
       "jet-craft-codex": {
-        "x86_64": 1712008
+        "x86_64": 1781616
+      },
+      "jetd": {
+        "x86_64": 12342792
       },
       "jetfueld": {
-        "x86_64": 1073840
+        "x86_64": 1019248
       }
     },
-    "justification": "Initial measurement at 0.2.0",
+    "justification": "#215 shrinks jetd under its 12 MiB budget: jetd builds with release-small (opt-level z, fat LTO) per ADR-0059 as amended 2026-09-25, with dependency and linker size levers; rustls keeps the aws-lc-rs provider for X25519MLKEM768",
     "version": "0.2.0"
   }
 }

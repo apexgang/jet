@@ -48,20 +48,10 @@ libfuzzer-sys = "0.4"
 # call sites out instead (ADR-0059); `jet-daemon` names these only for that.
 log = { version = "0.4", features = ["release_max_level_off"] }
 pretty_assertions = "1"
-# rustls with the ring provider rather than reqwest's aws-lc-rs default, which
-# links the aws-lc C library into `jetd` (ADR-0054); the platform verifier
-# stays. ring offers no post-quantum key exchange (X25519MLKEM768), a
-# trade-off still pending in docs/core-distribution.md. `jetd` installs the
-# provider at startup through `jet-core`'s `https` module.
-reqwest = { version = "0.13.4", default-features = false, features = [
-	"rustls-no-provider",
-] }
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
 filedescriptor = "0.8.3"
 portable-pty = "0.9.0"
 rustix = { version = "1", features = ["fs", "process"] }
-# 0.23.45 fixes RUSTSEC-2026-0285: TLS 1.3 handshake messages were accepted
-# across encryption-level boundaries.
-rustls = { version = "0.23.45", default-features = false, features = ["ring"] }
 security-framework = "3"
 serde = { version = "1", features = ["derive"] }
 schemars = { version = "1.2", features = ["raw_value", "uuid1"] }
@@ -119,8 +109,10 @@ lto = true
 codegen-units = 1
 panic = "abort"
 
-# Release profiles by role (ADR-0059). `jetd` balances speed and size with
-# thin LTO; `jetfueld` and the bundled Crafts take the size-first profile.
+# Release profiles (ADR-0059, amended 2026-09-25). Every shipped executable,
+# `jetd` included, builds with the size-first `release-small`: under
+# `release` no `jetd` slice fits its 12 MiB budget (ADR-0054). `release`
+# stays as the base `release-small` inherits and for `just build-release`.
 # Both keep line tables and leave symbols in place so `just release-package`
 # can split them into separate crash-symbol artifacts before stripping.
 [profile.release]
