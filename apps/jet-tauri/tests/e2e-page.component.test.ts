@@ -208,9 +208,9 @@ describe("the journey's page script in the main window", () => {
     const session = new DesktopSession();
     render(AppShell, { session });
     await settle();
-    const setupButton = page<HTMLElement | null>("button", { scope: SIDEBAR, names: ["Add a Project", "Manage Projects"] });
+    const setupButton = page<HTMLElement | null>("button", { scope: SIDEBAR, names: ["Projects"] });
     expect(setupButton?.tagName).toBe("BUTTON");
-    expect(setupButton?.textContent?.trim()).toBe("Add a Project");
+    expect(setupButton?.textContent?.trim()).toBe("Projects");
     const settings = page<HTMLElement | null>("button", { scope: SIDEBAR, names: ["Settings"] });
     expect(settings?.textContent).toContain("Settings");
     expect(page("button", { scope: SIDEBAR, names: ["No such button"] })).toBeNull();
@@ -227,8 +227,8 @@ describe("the journey's page script in the main window", () => {
     session.setup = { kind: "ready", snapshot: setup([{ id: "p1", name: "Jet", root: "/w" }]) };
     render(AppShell, { session });
     await settle();
-    const button = page<HTMLElement | null>("button", { scope: SIDEBAR, names: ["Add a Project", "Manage Projects"] });
-    expect(button?.textContent?.trim()).toBe("Manage Projects");
+    const button = page<HTMLElement | null>("button", { scope: SIDEBAR, names: ["Projects"] });
+    expect(button?.textContent?.trim()).toBe("Projects");
   });
 
   it("follows Setup from provisioning to the connected local Plane", async () => {
@@ -262,7 +262,7 @@ describe("the journey's page script in the main window", () => {
     expect(view.provisioning).toBeNull();
     expect(view.failure).toBeNull();
     expect(view.localPlane).toEqual({
-      text: expect.stringContaining("Core 0.2.0"),
+      text: expect.stringContaining("core 0.2.0"),
       coreVersion: "0.2.0",
       status: "Connected",
       notice: "The Jet service 0.2.0 is set up on this computer.",

@@ -22,6 +22,9 @@ struct JetCommands: Commands {
         }
 
         CommandMenu("Conversation") {
+            Button("Rename task…") { session.isRenamePresented = true }
+                .disabled(session.selectedConversation?.revision == nil || !session.planeIsConnected)
+            Divider()
             Button("Send") {
                 Task { await session.submitDraft() }
             }
@@ -36,13 +39,6 @@ struct JetCommands: Commands {
                 session.requestRunControl(.stopRun)
             }
                 .disabled(!session.canStopRun || session.supervisionOperation != nil)
-            Divider()
-            Button("Rename") {}
-                .disabled(true)
-            Button("Fork") {}
-                .disabled(true)
-            Button("Archive") {}
-                .disabled(true)
             Divider()
             Button("Review Retention…") {
                 session.requestSettings(.work)

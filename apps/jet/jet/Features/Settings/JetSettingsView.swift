@@ -12,7 +12,7 @@ enum JetSettingsPane: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .general: "General"
-        case .agents: "Agents"
+        case .agents: "Harnesses"
         case .work: "Work"
         case .connections: "Connections"
         case .safety: "Safety & System"
@@ -63,27 +63,33 @@ struct JetSettingsView: View {
     }
 
     var body: some View {
-        TabView(selection: paneBinding) {
-            GeneralSettingsPane(session: session, restoresLastTask: $restoresLastTask)
-                .tabItem { Label(JetSettingsPane.general.title, systemImage: JetSettingsPane.general.symbol) }
-                .tag(JetSettingsPane.general)
-
-            AgentsSettingsPane(session: session, model: model)
-                .tabItem { Label(JetSettingsPane.agents.title, systemImage: JetSettingsPane.agents.symbol) }
-                .tag(JetSettingsPane.agents)
-
-            WorkSettingsPane(session: session, model: model, recovery: recoveryModel)
-                .tabItem { Label(JetSettingsPane.work.title, systemImage: JetSettingsPane.work.symbol) }
-                .tag(JetSettingsPane.work)
-
-            PlaneManagementView(session: session)
-                .tabItem { Label(JetSettingsPane.connections.title, systemImage: JetSettingsPane.connections.symbol) }
-                .tag(JetSettingsPane.connections)
-
-            SafetySettingsPane(session: session, model: model, recovery: recoveryModel)
-                .tabItem { Label(JetSettingsPane.safety.title, systemImage: JetSettingsPane.safety.symbol) }
-                .tag(JetSettingsPane.safety)
+        NavigationSplitView {
+            List(JetSettingsPane.allCases, selection: Binding<JetSettingsPane?>(
+                get: { paneBinding.wrappedValue },
+                set: { if let value = $0 { paneBinding.wrappedValue = value } }
+            )) { pane in
+                Label(pane.title, systemImage: pane.symbol).tag(pane)
+                    .padding(.vertical, 3)
+            }
+            .listStyle(.sidebar)
+            .navigationTitle("Settings")
+            .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
+        } detail: {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(paneBinding.wrappedValue.title)
+                    .font(.title2.weight(.semibold))
+                    .padding(.horizontal, 24).padding(.vertical, 20)
+                Divider()
+                switch paneBinding.wrappedValue {
+                case .general: GeneralSettingsPane(session: session, restoresLastTask: $restoresLastTask)
+                case .agents: AgentsSettingsPane(session: session, model: model)
+                case .work: WorkSettingsPane(session: session, model: model, recovery: recoveryModel)
+                case .connections: PlaneManagementView(session: session)
+                case .safety: SafetySettingsPane(session: session, model: model, recovery: recoveryModel)
+                }
+            }
         }
+        .tint(JetDesign.accent)
         .frame(minWidth: 760, idealWidth: 820, minHeight: 600, idealHeight: 680)
         .task(id: loadID) {
             await model.load(
@@ -148,10 +154,10 @@ private struct GeneralSettingsPane: View {
 
             Section("Appearance") {
                 LabeledContent("Theme", value: "Use system setting")
-                LabeledContent("Accent", value: "Jet Blue")
+                LabeledContent("Accent", value: "Copper")
             }
 
-            Section("Notification routing") {
+            Section("Notifications") {
                 Toggle("Approval requests", isOn: $approvalNotifications)
                     .accessibilityIdentifier("notifications-approvals")
                 Toggle("Completed tasks", isOn: $completionNotifications)

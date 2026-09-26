@@ -16,6 +16,7 @@ mod codes;
 mod core_cli;
 mod decision;
 mod homebrew;
+#[cfg(any(target_os = "linux", test))]
 pub(crate) mod launcher;
 mod manager;
 mod payload;
@@ -120,7 +121,7 @@ impl ServiceSettings {
                 .unwrap_or_else(|_| user_home.join(".config")),
             scratch: resolver
                 .app_cache_dir()
-                .unwrap_or_else(|_| user_home.join(".cache").join(launcher::APP_ID)),
+                .unwrap_or_else(|_| user_home.join(".cache").join("me.heeka.jet-tauri")),
             lock_file: app_data_directory.join(LOCK_FILE),
             bundled,
             homebrew_prefixes: homebrew::prefixes(std::env::var_os("HOMEBREW_PREFIX"), user_home),
@@ -976,6 +977,10 @@ pub(crate) fn launch(app: &AppHandle) {
     });
 }
 
+#[cfg(not(target_os = "linux"))]
+async fn refresh_launcher(_app: &AppHandle) {}
+
+#[cfg(target_os = "linux")]
 async fn refresh_launcher(app: &AppHandle) {
     use tauri::utils::{config::BundleType, platform::bundle_type};
     // The bundler marks the binary; `$APPIMAGE` alone is not proof.

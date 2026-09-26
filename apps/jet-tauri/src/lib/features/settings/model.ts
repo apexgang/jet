@@ -3,7 +3,7 @@ import { LOCAL_PLANE } from "$lib/jet/planes";
 import type { ResolvedSetting, SettingKeyId, SettingSource, SettingValue, SettingsReview } from "$lib/jet/settings";
 import type { SettingsPane, SettingsSection, SettingsTarget } from "$lib/jet/settings-window";
 
-/** Pane and section titles, in design-language order (docs/design-language.md 216-222). */
+/** Settings navigation shared by the native window and its deep links. */
 export const PANES: ReadonlyArray<{
   id: SettingsPane;
   title: string;
@@ -21,7 +21,7 @@ export const PANES: ReadonlyArray<{
   },
   {
     id: "agents",
-    title: "Agents",
+    title: "Harnesses",
     sections: [
       { id: "harnesses", title: "Harnesses" },
       { id: "extensions", title: "Extensions" },
@@ -718,14 +718,6 @@ export function refusalText(error: PublicError): string {
  * dependency `jet_client_schedules`). The destination says so; it never
  * shows a fake list.
  */
-export const schedulesAvailability = {
-  kind: "dependency",
-  dependency: "jet_client_schedules",
-  summary: "Scheduled tasks can't be shown in this version of Jet for Linux yet.",
-  detail:
-    "Your Jet service supports daily schedules, but this app can't read or change them yet. Existing schedules keep running on their Plane.",
-} as const;
-
 /** Every Plane pane ends with this disclosure. */
 export const LAST_WRITER_WINS =
   "Jet applies the most recent change. If another device changes the same setting at the same time, the later change wins.";

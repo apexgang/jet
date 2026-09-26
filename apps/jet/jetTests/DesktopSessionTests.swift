@@ -11,7 +11,7 @@ struct DesktopSessionTests {
         await session.loadFoundationFixture()
         #expect(session.scenario?.state == .active)
         #expect(session.sidebarSelection == .conversation)
-        #expect(session.isWorkPanelPresented)
+        #expect(!session.isWorkPanelPresented)
 
         session.beginNewTask()
         #expect(session.scenario?.state == .active)

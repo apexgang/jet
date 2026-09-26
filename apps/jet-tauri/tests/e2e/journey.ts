@@ -208,7 +208,7 @@ class JourneyFailure extends Error {
 }
 
 const SIDEBAR = { role: "complementary", name: "Jet navigation" } as const;
-const SETUP_BUTTONS = ["Add a Project", "Manage Projects"];
+const SETUP_BUTTONS = ["Projects"];
 /**
  * App updates controls that AppUpdatesBlock shows only while the updater is
  * on: its check, install and restart buttons and the automatic-check toggle.
@@ -450,7 +450,7 @@ class Journey {
         // Not restored: open it as a user would.
       }
     }
-    await this.click({ scope: SIDEBAR, names: SETUP_BUTTONS }, "the sidebar's Setup button (Add a Project)");
+    await this.click({ scope: SIDEBAR, names: SETUP_BUTTONS }, "the sidebar's Projects button");
   }
 
   /**

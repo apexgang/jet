@@ -1,3 +1,4 @@
+import { SchedulesSession } from "$lib/features/schedules/session.svelte";
 import { publicError } from "$lib/jet/errors";
 import { DeliverySession } from "$lib/features/delivery/session.svelte";
 import {
@@ -6,6 +7,7 @@ import {
   attachWorkspaceTerminal,
   closeWorkspaceTerminal,
   createConversation,
+  renameConversation,
   detachWorkspaceTerminal,
   interruptTurn,
   loadConversation,
@@ -181,6 +183,7 @@ type SendAttempt = { id: string; send: KeptSend | null };
 export const FLUSH_BEFORE_CLOSE_MS = 500;
 
 export class DesktopSession implements FeedHandler {
+  readonly schedules = new SchedulesSession();
   /** Per-Plane health conditions; the notice shows only the selected task's Plane. */
   health = new PlaneHealth();
   delivery = new DeliverySession((planeId, error) => this.observeOutcome(planeId, error));
@@ -254,6 +257,7 @@ export class DesktopSession implements FeedHandler {
   failure = $state<PublicError | null>(null);
   setup = $state<SetupViewState>({ kind: "loading" });
   selectedProjectId = $state<string | null>(null);
+  chosenCraftId = $state<string | null>(null);
   projectPath = $state("");
   projectPreview = $state<ProjectPreview | null>(null);
   removalPreview = $state<ProjectRemovalPreview | null>(null);
@@ -526,15 +530,31 @@ export class DesktopSession implements FeedHandler {
   }
 
   get selectedHarnessName(): string {
-    return (
-      this.setupSnapshot?.accounts[0]?.label ??
-      this.setupSnapshot?.capabilities.authProviders[0]?.harness ??
-      "Choose an Agent"
-    );
+    const craft = this.setupSnapshot?.capabilities.crafts.find((item) => item.id === this.selectedCraftId);
+    const harness = craft?.harnesses[0];
+    return harness === "codex" ? "Codex" : harness === "claude-code" ? "Claude Code" : harness ?? "Choose a Harness";
   }
 
   get selectedCraftId(): string | null {
-    return this.setupSnapshot?.capabilities.crafts[0]?.id ?? null;
+    // A removed choice requires a new choice; never silently switch Harnesses.
+    return this.chosenCraftId ?? this.setupSnapshot?.capabilities.crafts[0]?.id ?? null;
+  }
+
+  get canStartTask(): boolean {
+    return this.selectedPlaneOnline && this.selectedProject !== null &&
+      !!this.setupSnapshot?.capabilities.crafts.some((craft) => craft.id === this.selectedCraftId);
+  }
+
+  chooseCraft(id: string): void {
+    // ASVS 2.2.1: present only observed choices; native admission revalidates them.
+    if (this.conversationBusy || !this.setupSnapshot?.capabilities.crafts.some((craft) => craft.id === id)) return;
+    this.chosenCraftId = id;
+  }
+
+  useProjectForNewTask(id: string): void {
+    if (!this.setupSnapshot?.projects.some((project) => project.id === id)) return;
+    this.select("new-task");
+    this.selectedProjectId = id;
   }
 
   get selectedConversation(): ConversationRow | null {
@@ -1259,6 +1279,30 @@ export class DesktopSession implements FeedHandler {
     }
   }
 
+  async renameTask(name: string, attempt: string, revision: string): Promise<boolean> {
+    const selected = this.conversationDetail?.conversation;
+    if (!selected?.revision || !this.selectedPlaneOnline || this.conversationBusy) return false;
+    this.conversationBusy = true;
+    this.actionNotice = null;
+    try {
+      const updated = await renameConversation(selected.id, revision, name, attempt, selected.planeId);
+      this.catalog.upsert(updated);
+      if (this.isSelected(updated.planeId, updated.id) && this.conversationDetail) {
+        this.conversationDetail = { ...this.conversationDetail, conversation: updated };
+      }
+      return true;
+    } catch (error: unknown) {
+      const failure = publicError(error);
+      if (failure.category === "conflict") {
+        await this.loadSelectedConversation(false);
+        this.actionNotice = "This task changed. Use its latest version before saving. Your new name was kept.";
+      } else {
+        this.actionNotice = failure.message;
+      }
+      return false;
+    } finally { this.conversationBusy = false; }
+  }
+
   async submitDraft(): Promise<void> {
     if (!this.canSubmitDraft || this.conversationBusy) return;
     if (!this.selectedPlaneOnline) {
@@ -1314,9 +1358,9 @@ export class DesktopSession implements FeedHandler {
         await startRun(send.conversationId, send.craft, prompt, attempt.id, send.planeId);
       }
       this.health.succeeded(planeId);
-      this.draft = "";
+      if (this.draft === prompt && this.isSelected(planeId, conversationId)) this.draft = "";
       this.sendAttempt = null;
-      this.actionNotice = "Sent to the Plane.";
+      this.actionNotice = this.hasLiveRun ? "Message sent. Jet will pick it up in order." : "Task started.";
       await this.loadSelectedConversation(false);
     } catch (error: unknown) {
       const failure = publicError(error);

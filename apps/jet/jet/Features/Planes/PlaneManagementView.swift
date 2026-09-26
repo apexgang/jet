@@ -8,9 +8,9 @@ struct PlaneManagementView: View {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Planes")
+                        Text("Your computers")
                             .font(.title2.weight(.semibold))
-                        Text("Each Plane keeps its own state, cursor, capabilities, and connection health.")
+                        Text("Work here or connect another computer. Each computer is a Plane with its own tasks.")
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -27,7 +27,9 @@ struct PlaneManagementView: View {
                 if !session.remoteProfiles.isEmpty {
                     Divider()
                 }
-                AddRemotePlaneCard(session: session)
+                DisclosureGroup("Connect another computer") {
+                    AddRemotePlaneCard(session: session).padding(.top, 12)
+                }
 
                 if let notice = session.remotePairingNotice {
                     Text(notice)
@@ -65,7 +67,8 @@ private struct PlaneCard: View {
     let plane: JetPlanePresentation
 
     var body: some View {
-        GroupBox {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider().padding(.bottom, 20)
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: plane.isLocal ? "macbook" : "desktopcomputer")
@@ -87,6 +90,7 @@ private struct PlaneCard: View {
                         .foregroundStyle(connectionColor)
                 }
 
+                DisclosureGroup("Connection details") {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 7) {
                     GridRow {
                         Text("Plane identity").foregroundStyle(.secondary)
@@ -110,7 +114,8 @@ private struct PlaneCard: View {
                         }
                     }
                 }
-                .font(.caption)
+                .font(.caption).padding(.top, 8)
+                }
 
                 if let failure = plane.failure {
                     Label {
@@ -126,8 +131,8 @@ private struct PlaneCard: View {
                     .accessibilityElement(children: .combine)
                 }
 
-                capabilitySection
-                pairingSection
+                DisclosureGroup("Capabilities") { capabilitySection }
+                DisclosureGroup("Pairing and access") { pairingSection }
 
                 if !plane.isLocal {
                     Divider()

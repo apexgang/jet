@@ -325,7 +325,7 @@ export class FakeApp {
     const inMain = launch.window === MAIN;
     for (const name of query.names) {
       if (inMain && query.scope?.name === "Jet navigation") {
-        if (name === "Add a Project" || name === "Manage Projects" || name === "Settings") return `button:${name}`;
+        if (name === "Projects" || name === "Settings") return `button:${name}`;
       }
       if (!inMain && query.scope?.name === "Settings" && name === "Safety and system") return `button:${name}`;
     }
@@ -336,8 +336,7 @@ export class FakeApp {
     const launch = this.current;
     this.clicks.push(element);
     switch (element) {
-      case "button:Add a Project":
-      case "button:Manage Projects":
+      case "button:Projects":
         launch.setupOpen = true;
         return true;
       case "button:Settings":

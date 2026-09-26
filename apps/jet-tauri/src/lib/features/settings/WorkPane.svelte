@@ -2,7 +2,6 @@
   import { untrack } from "svelte";
 
   import AutodeleteRules from "$lib/features/autodelete/AutodeleteRules.svelte";
-  import SchedulesDestination from "$lib/features/schedules/SchedulesDestination.svelte";
   import type { SettingsSnapshot, WorkContext } from "$lib/jet/settings";
   import type { SettingsSection } from "$lib/jet/settings-window";
   import ConsentRow from "./ConsentRow.svelte";
@@ -145,7 +144,7 @@
 
 <section class="settings-section" aria-labelledby="section-schedules">
   <h2 id="section-schedules" tabindex="-1">Schedules</h2>
-  <SchedulesDestination changed={session.schedulesChanged} />
+  <p>Open Schedules in the main window to choose a task and manage its daily instructions.</p>
 </section>
 
 <section class="settings-section" aria-labelledby="section-retention">

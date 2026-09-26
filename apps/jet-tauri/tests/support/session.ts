@@ -3,6 +3,8 @@ import type { DesktopSession } from "../../src/lib/features/shell/session.svelte
 
 /** Puts an active Run with an active Turn on the session: both run controls are available. */
 export function withActiveRun(session: DesktopSession): void {
+  session.selectedConversationId ??= "l1";
+  session.sidebarSelection = "conversation";
   const turn: RunSupervision["turns"][number] = {
     id: "turn-1",
     sequence: "1",

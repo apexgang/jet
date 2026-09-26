@@ -217,7 +217,7 @@ describe("the desktop release journey against fakes", () => {
       "09-warm-shell-interactive.png",
     ]);
     expect([...saved.keys()]).toEqual(report.screenshots);
-    expect(app.clicks).toEqual(["button:Add a Project", "button:Settings", "button:Safety and system"]);
+    expect(app.clicks).toEqual(["button:Projects", "button:Settings", "button:Safety and system"]);
     expect(host.calls).toContainEqual(["systemctl", "--user", "kill", "jetd.service"]);
     // It never signals anything itself when the app exits with its session.
     expect(host.kills).toEqual([]);

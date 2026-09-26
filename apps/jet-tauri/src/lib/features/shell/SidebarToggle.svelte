@@ -15,5 +15,5 @@
   title={`${action} (${shortcutLabel("toggle-sidebar", platform)})`}
   onclick={() => session.toggleSidebar()}
 >
-  Sidebar
+  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="2" /><path d="M7 3v14" /></svg>
 </button>

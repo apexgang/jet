@@ -10,7 +10,7 @@
  * class names. The names come from the components:
  *
  * - main window: the `Jet navigation` complementary landmark (Sidebar), its
- *   Plane status live region, the `Set up this workspace` region
+ *   Plane status live region, the `Set up Jet` region
  *   (SetupPanel) with its provisioning status, failure alert and the
  *   `Local Plane` region, and the `Task message` composer;
  * - Settings window: the `Settings` navigation (SettingsApp), the `Versions
@@ -197,7 +197,7 @@ export function jetPage(command: PageCommand, argument?: unknown): unknown {
   };
 
   const readSetup = (): SetupView | null => {
-    const setup = first(byRole(document, "region", "Set up this workspace"));
+    const setup = first(byRole(document, "region", "Set up Jet"));
     if (!setup) return null;
     let provisioning: string | null = null;
     for (const status of byRole(setup, "status")) {
@@ -208,16 +208,16 @@ export function jetPage(command: PageCommand, argument?: unknown): unknown {
       }
     }
     const alert = first(byRole(setup, "alert").filter((element) => element.closest("dialog") === null));
-    const plane = first(byRole(setup, "region", "Local Plane"));
+    const plane = first(byRole(setup, "region", "Jet service on this computer"));
     let localPlane: SetupView["localPlane"] = null;
     if (plane) {
       const text = textOf(plane);
-      const version = /\bCore (\S+)/.exec(text);
-      const notice = first(byRole(plane, "status"));
+      const version = /\bcore (\S+)/.exec(text);
+      const notice = first(byRole(plane, "status").filter((element) => element.getAttribute("aria-label") !== "Connection status"));
       localPlane = {
         text,
         coreVersion: version ? version[1] : null,
-        status: text.endsWith("Needs attention") ? "Needs attention" : text.endsWith("Connected") ? "Connected" : null,
+        status: textOf(first(byRole(plane, "status", "Connection status"))) || null,
         notice: notice ? textOf(notice) : null,
       };
     }

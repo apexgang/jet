@@ -3,6 +3,9 @@ import UniformTypeIdentifiers
 
 struct ProjectSetupView: View {
     @Bindable var session: DesktopSession
+    #if os(macOS)
+    @Environment(\.openSettings) private var openSettings
+    #endif
 
     var body: some View {
         ScrollView {
@@ -12,11 +15,11 @@ struct ProjectSetupView: View {
 
                 switch session.setupState {
                 case .idle, .loading:
-                    ProgressView("Connecting to the local Plane")
+                    ProgressView("Connecting to Jet on this computer…")
                         .frame(maxWidth: .infinity, minHeight: 280)
                 case let .failed(error):
                     ContentUnavailableView {
-                        Label("Local Plane unavailable", systemImage: "network.slash")
+                        Label("Jet could not connect", systemImage: "network.slash")
                     } description: {
                         VStack(spacing: 6) {
                             Text(error.message)
@@ -59,12 +62,19 @@ struct ProjectSetupView: View {
         }
     }
 
+    private func showSettings(_ pane: JetSettingsPane) {
+        session.requestSettings(pane)
+        #if os(macOS)
+        openSettings()
+        #endif
+    }
+
     private var header: some View {
         HStack(alignment: .center, spacing: 20) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("Set up this workspace")
+                Text("Set up Jet")
                     .font(.title2.weight(.semibold))
-                Text("Connect the local Plane, choose a Project, and use a Harness login already available here.")
+                Text("Choose a Project and a coding assistant. You can change both later.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -79,187 +89,112 @@ struct ProjectSetupView: View {
 
     @ViewBuilder
     private func setupContent(_ snapshot: JetSetupSnapshot) -> some View {
-        let capabilitiesIssue = snapshot.issue(for: .capabilities)
-        let needsAttention = capabilitiesIssue != nil || !snapshot.capabilities.degraded.isEmpty
-
-        SetupRow(
-            symbol: "circle.fill",
-            symbolColor: session.planeIsConnected ? (needsAttention ? .orange : .green) : .orange,
-            title: "Local Plane"
-        ) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(snapshot.capabilities.platform) · Core \(snapshot.capabilities.coreVersion)")
-                if !snapshot.capabilities.degraded.isEmpty {
-                    Text(snapshot.capabilities.degraded.joined(separator: " · "))
-                        .foregroundStyle(.orange)
-                }
-                if let capabilitiesIssue {
-                    SetupIssueView(session: session, issue: capabilitiesIssue)
-                }
-            }
-        } trailing: {
-            let label = session.planeIsConnected
-                ? (needsAttention ? "Needs attention" : "Connected")
-                : session.planeConnectionLabel
-            Text(label)
-                .foregroundStyle(session.planeIsConnected && !needsAttention ? Color.green : Color.orange)
-        }
-
-        Divider()
-
-        SetupRow(symbol: "folder", symbolColor: .accentColor, title: "Projects") {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Jet registers the Git working tree only after you review its resolved path.")
-                    .foregroundStyle(.secondary)
-
+        VStack(alignment: .leading, spacing: 32) {
+            SetupStep(number: "01", title: "Give your work a home", detail: "Choose a Git project. Jet makes a separate working copy for each task.") {
                 if let issue = snapshot.issue(for: .projects) {
                     SetupIssueView(session: session, issue: issue)
-                } else if snapshot.projects.projects.isEmpty {
-                    Text("No Projects yet. Add the root folder of a Git working tree.")
-                        .foregroundStyle(.secondary)
                 } else {
-                    VStack(spacing: 2) {
-                        ForEach(snapshot.projects.projects) { project in
-                            HStack(spacing: 12) {
-                                Button {
-                                    session.selectProject(project.id)
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(project.name)
-                                            .foregroundStyle(.primary)
-                                        Text(project.root)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
+                    ForEach(snapshot.projects.projects) { project in
+                        HStack(spacing: 12) {
+                            Button {
+                                session.selectedProjectID = project.id
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: session.selectedProjectID == project.id ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(session.selectedProjectID == project.id ? Color.accentColor : Color.secondary)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(project.name).fontWeight(.medium)
+                                        Text(project.root).font(.caption).foregroundStyle(.secondary)
+                                            .lineLimit(1).truncationMode(.middle)
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
-
-                                if session.selectedProjectID == project.id {
-                                    Text("Selected")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Button("Remove", role: .destructive) {
-                                    Task { await session.prepareProjectRemoval(project.id) }
-                                }
-                                .buttonStyle(.borderless)
-                                .disabled(session.setupOperation != nil)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(
-                                session.selectedProjectID == project.id
-                                    ? Color.accentColor.opacity(0.09)
-                                    : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 9)
-                            )
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(session.selectedProjectID == project.id ? .isSelected : [])
+                            Button("Remove…", role: .destructive) {
+                                Task { await session.prepareProjectRemoval(project.id) }
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(session.setupOperation != nil)
                         }
+                        .padding(.vertical, 8)
+                        Divider()
                     }
                 }
-
-                Button {
+                Button("Choose Folder…", systemImage: "folder.badge.plus") {
                     session.isProjectImporterPresented = true
-                } label: {
-                    Label("Add Project…", systemImage: "plus")
                 }
                 .disabled(session.setupOperation != nil)
-
                 if let preview = session.projectPreview {
                     ProjectPreviewView(session: session, preview: preview)
                 }
             }
-        } trailing: {
-            Text(
-                snapshot.issue(for: .projects) == nil
-                    ? "\(snapshot.projects.projects.count) registered"
-                    : "Unavailable"
-            )
-                .foregroundStyle(.secondary)
-        }
 
-        Divider()
-
-        SetupRow(symbol: "person.crop.circle", symbolColor: .secondary, title: "Harness access") {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Jet records a non-secret binding. Sign-in stays with the Harness when work starts.")
-                    .foregroundStyle(.secondary)
-
-                if let issue = snapshot.issue(for: .accounts) {
+            SetupStep(number: "02", title: "Choose who to work with", detail: "Jet uses the assistant installed on this computer and its existing login.") {
+                if let issue = snapshot.issue(for: .capabilities) {
                     SetupIssueView(session: session, issue: issue)
+                } else if snapshot.capabilities.crafts.isEmpty {
+                    Text("Install a supported Harness to start a task.").foregroundStyle(.secondary)
                 } else {
-                    ForEach(snapshot.accounts.bindings) { binding in
-                        LabeledContent(binding.label) {
-                            Text(binding.stateLabel)
-                                .foregroundStyle(.secondary)
+                    Picker("Harness", selection: Binding(
+                        get: { session.selectedCraftID ?? "" },
+                        set: { session.chooseCraft($0) }
+                    )) {
+                        ForEach(snapshot.capabilities.crafts, id: \.id) { craft in
+                            Text(DesktopSession.harnessLabel(craft.harnesses.first ?? craft.id)).tag(craft.id)
                         }
                     }
+                    .pickerStyle(.menu)
+                    .fixedSize()
                 }
-
-                if snapshot.issue(for: .capabilities) != nil {
-                    Text("Harness choices will return when Plane capabilities are available.")
-                        .foregroundStyle(.secondary)
-                } else if snapshot.capabilities.authProviders.isEmpty {
-                    Text("Install a supported Craft before connecting a Harness.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    HStack(spacing: 8) {
-                        ForEach(snapshot.capabilities.authProviders) { provider in
-                            Button("Use \(provider.harness) login") {
+                if let issue = snapshot.issue(for: .accounts) {
+                    SetupIssueView(session: session, issue: issue)
+                }
+                HStack {
+                    ForEach(snapshot.capabilities.authProviders) { provider in
+                        if !snapshot.accounts.bindings.contains(where: { $0.provider == provider.provider }) {
+                            Button("Use \(DesktopSession.harnessLabel(provider.harness)) login") {
                                 Task { await session.connectHarness(provider) }
                             }
                             .disabled(session.setupOperation != nil)
                         }
                     }
+                    Button("Manage Harnesses…") { showSettings(.agents) }
                 }
             }
-        } trailing: {
-            Text(snapshot.capabilities.credentialStore.label)
-                .foregroundStyle(
-                    snapshot.capabilities.credentialStore == .available
-                        ? Color.secondary
-                        : Color.orange
-                )
-        }
 
-        Divider()
-
-        SetupRow(symbol: "desktopcomputer", symbolColor: .secondary, title: "Remote Plane") {
-            if let issue = snapshot.issue(for: .pairing) {
-                SetupIssueView(session: session, issue: issue)
-            } else if snapshot.pairing.pairedClients > 0 {
-                Text("\(snapshot.pairing.pairedClients) paired client\(snapshot.pairing.pairedClients == 1 ? "" : "s")")
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Pair another computer later from Connections.")
-                    .foregroundStyle(.secondary)
+            Divider()
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(session.canStartTask ? "Ready when you are" : "Finish setup to start your first task")
+                        .font(.headline)
+                    if session.canStartTask { Text("Describe what you need. You can review every change.").foregroundStyle(.secondary) }
+                }
+                Spacer()
+                Button("New task", action: session.beginNewTask)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!session.canStartTask)
             }
-        } trailing: {
-            if snapshot.issue(for: .pairing) != nil {
-                Text("Unavailable")
-                    .foregroundStyle(.secondary)
-            } else if session.remotePairingSkipped {
-                Text("Skipped")
-                    .foregroundStyle(.secondary)
-            } else {
-                Button("Skip for now", action: session.skipRemotePairing)
-                    .buttonStyle(.borderless)
+            DisclosureGroup("Other computers and connection details") {
+                VStack(alignment: .leading, spacing: 12) {
+                    LabeledContent("This computer", value: session.planeConnectionLabel)
+                    LabeledContent("Service", value: "\(snapshot.capabilities.platform) · \(snapshot.capabilities.coreVersion)")
+                    if let issue = snapshot.issue(for: .capabilities) { SetupIssueView(session: session, issue: issue) }
+                    ForEach(snapshot.capabilities.degraded, id: \.self) { reason in Text(reason).foregroundStyle(.orange) }
+                    if let issue = snapshot.issue(for: .pairing) { SetupIssueView(session: session, issue: issue) }
+                    Button("Manage connections…") { showSettings(.connections) }
+                }.padding(.top, 12)
+            }
+            .foregroundStyle(.secondary)
+            if let notice = session.setupNotice {
+                Text(notice).font(.callout).foregroundStyle(.secondary).accessibilityLabel(notice)
             }
         }
-
-        if let notice = session.setupNotice {
-            Text(notice)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 14)
-                .padding(.leading, 38)
-                .accessibilityLabel(notice)
-        }
+        .padding(.vertical, 28)
     }
+
 }
 
 private struct SetupIssueView: View {
@@ -282,34 +217,24 @@ private struct SetupIssueView: View {
     }
 }
 
-private struct SetupRow<Content: View, Trailing: View>: View {
-    let symbol: String
-    let symbolColor: Color
+private struct SetupStep<Content: View>: View {
+    let number: String
     let title: String
+    let detail: String
     @ViewBuilder let content: Content
-    @ViewBuilder let trailing: Trailing
-
     var body: some View {
-        Grid(alignment: .topLeading, horizontalSpacing: 14, verticalSpacing: 6) {
-            GridRow {
-                Image(systemName: symbol)
-                    .foregroundStyle(symbolColor)
-                    .frame(width: 24)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .font(.headline)
-                trailing
-                    .font(.caption)
-                    .gridColumnAlignment(.trailing)
-            }
-            GridRow {
-                Color.clear.frame(width: 24, height: 0)
+        HStack(alignment: .top, spacing: 18) {
+            Text(number).font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
+                .frame(width: 24).padding(.top, 4).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title).font(.title3.weight(.semibold))
+                    Text(detail).foregroundStyle(.secondary)
+                }
                 content
-                    .font(.subheadline)
-                Color.clear.frame(width: 0, height: 0)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 18)
     }
 }
 
@@ -340,7 +265,7 @@ private struct ProjectPreviewView: View {
             }
         }
         .padding(12)
-        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: JetDesign.controlRadius))
     }
 
     private var detail: String {
@@ -400,7 +325,7 @@ private struct ProjectRemovalSheet: View {
                     }
                 }
                 .padding(12)
-                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: JetDesign.controlRadius))
             }
 
             HStack {

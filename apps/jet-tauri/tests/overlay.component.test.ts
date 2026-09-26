@@ -24,6 +24,8 @@ afterEach(() => {
 });
 
 function renderShell(session = new DesktopSession()) {
+  // Inspector tests use an open task. New-task setup deliberately has no inspector toggle.
+  session.selectedConversationId ??= "l1";
   const result = render(AppShell, { session });
   const onKey = (event: KeyboardEvent) =>
     session.handleShortcut(event, {
@@ -216,6 +218,7 @@ describe("compact work panel overlay", () => {
   it("never remounts the work panel: the same element before hide, after show, and in the overlay", async () => {
     viewport(1280);
     const { session } = renderShell();
+    session.toggleWorkPanel("toggle");
     await settle();
     const root = panel();
     expect(root.getAttribute("role")).toBe("complementary");
@@ -250,6 +253,7 @@ describe("regular layout", () => {
   it("shows both column resizers and sets widths through CSSOM", async () => {
     viewport(1280);
     const { session } = renderShell();
+    session.toggleWorkPanel("toggle");
     await settle();
     const shell = document.querySelector<HTMLElement>(".app-shell")!;
     expect(shell.getAttribute("data-layout")).toBe("regular");
@@ -275,6 +279,7 @@ describe("regular layout", () => {
   it("hiding the work panel column that has focus moves focus to the Work panel button", async () => {
     viewport(1280);
     const { session } = renderShell();
+    session.toggleWorkPanel("toggle");
     await settle();
     expect(session.panel.presentation).toEqual({ kind: "column" });
     const tab = document.querySelector<HTMLElement>("#work-tab-run")!;
@@ -309,6 +314,7 @@ describe("regular layout", () => {
   it("an arrow on a narrowed work panel keeps the requested width", async () => {
     viewport(1101);
     const { session } = renderShell();
+    session.toggleWorkPanel("toggle");
     session.setColumnWidth("sidebar", 300);
     session.setColumnWidth("work-panel", 440);
     await settle();

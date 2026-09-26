@@ -47,8 +47,8 @@
   <header class="setup-header">
     <SidebarToggle {session} />
     <div>
-      <h1 id="planes-title" tabindex="-1">Planes</h1>
-      <p>Planes run your tasks. This computer is always listed; remote Planes you pair with appear here too.</p>
+      <h1 id="planes-title" tabindex="-1">Your computers</h1>
+      <p>Work here or connect another computer. Each computer is a Plane with its own tasks.</p>
     </div>
     <button class="secondary-button" onclick={() => { void session.refreshPlanes(); void planes.loadDetail(); void planes.pairing.load(); }}>
       Refresh
@@ -164,7 +164,7 @@
 
   .planes-layout {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: 190px minmax(0, 1fr);
     align-items: start;
     gap: 24px;
     padding: 0 32px 32px;
@@ -189,9 +189,9 @@
     gap: 4px 8px;
     width: 100%;
     padding: 10px 12px;
-    border: 1px solid var(--border-soft);
-    border-radius: 8px;
-    background: var(--raised);
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
     color: var(--text);
     text-align: left;
   }
@@ -201,7 +201,7 @@
   }
 
   .planes-list li button.active {
-    border-color: var(--accent);
+    box-shadow: inset 2px 0 var(--accent-text);
     background: var(--selected);
   }
 
@@ -231,7 +231,7 @@
   .plane-tag {
     padding: 1px 6px;
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: 3px;
     color: var(--muted);
     font-size: 10px;
   }

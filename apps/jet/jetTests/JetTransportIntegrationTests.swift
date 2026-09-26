@@ -4,6 +4,23 @@ import Testing
 @testable import jet
 
 struct JetTransportIntegrationTests {
+    @Test("Task rename carries the observed revision exactly through the wire")
+    func renameTaskWire() async throws {
+        let server = HermeticJetd()
+        let client = JetClient(
+            configuration: JetClientConfiguration(clientID: UUID(), reconnectDelays: [.zero]),
+            schema: try JetWireSchema.bundled(),
+            makeTransport: { HermeticJetdTransport(server: server) }
+        )
+        try await client.connect()
+        defer { Task { await client.disconnect() } }
+        let id = UUID()
+        let updated = try await client.renameConversation(id: id, revision: 9_007_199_254_740_993, name: "A better task name", commandID: UUID())
+        #expect(updated.id == id)
+        #expect(updated.title == "A better task name")
+        #expect(await server.renameRevision == "9007199254740993")
+    }
+
     @Test("Recovery and retention use the negotiated, schema-checked wire forms")
     func recoveryAndRetentionWire() async throws {
         let server = HermeticJetd()
@@ -425,6 +442,7 @@ private actor HermeticJetd {
         case hold
     }
 
+    private(set) var renameRevision: String?
     private(set) var connectionCount = 0
     private var commandBodies: [Data] = []
     private(set) var gitCommandTypes: [String] = []
@@ -702,6 +720,16 @@ private actor HermeticJetd {
             let command = request["command"] as! [String: Any]
             let commandType = command["type"] as! String
             switch commandType {
+            case "set_conversation_name":
+                renameRevision = command["expected_revision"] as? String
+                return .reply(try replyFrame(streamID: frame.streamID, object: [
+                    "kind": "command_result", "id": NSNumber(value: requestID),
+                    "result": [
+                        "type": "conversation_named", "conversation_id": command["conversation_id"]!,
+                        "revision": "9007199254740994", "retention": "retain", "created_at_unix_ms": 1,
+                        "name": ["value": command["name"]!, "source": "manual"],
+                    ],
+                ]))
             case "clear_setting":
                 commandBodies.append(try JSONSerialization.data(
                     withJSONObject: command,

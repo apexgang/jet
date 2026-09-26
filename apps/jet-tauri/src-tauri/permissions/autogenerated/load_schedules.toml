@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-load-schedules"
+description = "Enables the load_schedules command without any pre-configured scope."
+commands.allow = ["load_schedules"]
+
+[[permission]]
+identifier = "deny-load-schedules"
+description = "Denies the load_schedules command without any pre-configured scope."
+commands.deny = ["load_schedules"]

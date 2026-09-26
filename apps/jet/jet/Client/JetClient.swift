@@ -258,6 +258,21 @@ actor JetClient {
         return try decodeSearch(data, requestID: requestID)
     }
 
+    func renameConversation(id: UUID, revision: UInt64, name: String, commandID: UUID) async throws -> JetConversationSummary {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.utf8.count <= 256, !name.contains("\0") else {
+            throw JetClientFailure.presentation(.invalidInput(code: "conversation.name_invalid", message: "Use a name between 1 and 256 UTF-8 bytes."))
+        }
+        try await requireProtocolMinor(20, feature: "Task names")
+        let (data, requestID) = try await sendCommand([
+            "type": "set_conversation_name",
+            "conversation_id": id.uuidString.lowercased(),
+            "expected_revision": String(revision),
+            "name": name,
+        ], commandID: commandID)
+        let (_, result, _) = try responseResult(data, requestID: requestID, kind: "command_result", type: "conversation_named")
+        return try decodeConversationSummary(result)
+    }
+
     func createConversation(
         projectID: UUID,
         commandID: UUID = UUID()

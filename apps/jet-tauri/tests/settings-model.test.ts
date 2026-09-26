@@ -80,7 +80,7 @@ describe("settings targets", () => {
       versions: "safety",
     });
     expect(sections).toHaveLength(23);
-    expect(PANES.map((pane) => pane.title)).toEqual(["General", "Agents", "Work", "Connections", "Safety and system"]);
+    expect(PANES.map((pane) => pane.title)).toEqual(["General", "Harnesses", "Work", "Connections", "Safety and system"]);
   });
 
   it("shows only panes with a landed section", () => {

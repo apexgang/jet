@@ -23,7 +23,7 @@ struct DesktopShellView: View {
 
     @SceneStorage("jet.shell.selection") private var storedSelection = SidebarDestination.conversation.rawValue
     @SceneStorage("jet.shell.work-panel") private var storedWorkPanel = WorkPanelTab.run.rawValue
-    @SceneStorage("jet.shell.work-panel-presented") private var storedPanelPresented = true
+    @SceneStorage("jet.shell.work-panel-presented") private var storedPanelPresented = false
     @AppStorage("jet.settings.restore-last-task") private var restoresLastTask = true
     @AppStorage("jet.last-conversation") private var storedConversationID = ""
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -79,7 +79,7 @@ struct DesktopShellView: View {
             .accessibilityIdentifier("compact-work-panel")
         }
 #endif
-        .tint(Color(red: 41 / 255, green: 182 / 255, blue: 246 / 255))
+        .tint(JetDesign.accent)
         .toolbar {
 #if os(macOS)
             ToolbarItem(placement: .primaryAction) {
@@ -166,211 +166,109 @@ struct DesktopShellView: View {
 
 private struct SidebarView: View {
     @Bindable var session: DesktopSession
+    @FocusState private var searchFocused: Bool
 #if os(macOS)
     @Environment(\.openSettings) private var openSettings
 #endif
 
     var body: some View {
-        Group {
-#if os(macOS)
-            List(selection: $session.sidebarSelection) {
-                sidebarSections
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                JetMark(size: 24)
+                Text("Jet").font(.title3.weight(.semibold))
+                Spacer()
+                Text("Workspace").font(.caption2).foregroundStyle(.secondary)
             }
-#else
-            List {
-                sidebarSections
-            }
-#endif
-        }
-        .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            PlaneStatusFooter(session: session)
-        }
-        .navigationTitle("Jet")
-        .searchable(text: $session.searchText, prompt: "Search tasks")
-        .onSubmit(of: .search) {
-            session.selectSearch()
-            Task { await session.searchConversations() }
-        }
-        .onChange(of: session.sidebarSelection) { _, _ in
-            session.applySidebarSelection()
-        }
-    }
-
-    @ViewBuilder
-    private var sidebarSections: some View {
-            Section {
+            .padding(.horizontal, 20).padding(.vertical, 16)
+            VStack(spacing: 8) {
                 Button(action: session.beginNewTask) {
-                    Label("New task", systemImage: "square.and.pencil")
+                    HStack { Text("New task"); Spacer(); Text("⌘N").foregroundStyle(.secondary).font(.caption) }
+                        .padding(.vertical, 4)
                 }
-                .buttonStyle(.plain)
-
-                Button(action: session.selectSearch) {
-                    Label("Search", systemImage: "magnifyingglass")
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                Button {
+                    session.selectSearch()
+                    searchFocused = true
+                } label: {
+                    HStack { Label("Find a task", systemImage: "magnifyingglass"); Spacer(); Text("⌘K").font(.caption) }
                 }
-                .buttonStyle(.plain)
-
-                HStack {
-                    Label("Needs attention", systemImage: "bell")
-                    Spacer()
-                    if session.attentionCount > 0 {
-                        Text(session.attentionCount, format: .number)
-                            .font(.caption2.monospacedDigit())
+                .buttonStyle(.plain).foregroundStyle(.secondary).padding(8)
+                if session.sidebarSelection == .search {
+                    TextField("Search your work", text: $session.searchText)
+                        .textFieldStyle(.roundedBorder).focused($searchFocused)
+                        .onSubmit { Task { await session.searchConversations() } }
+                }
+            }
+            .padding(.horizontal, 12)
+            List {
+                if session.attentionCount > 0 {
+                    Button {
+                        session.sidebarSelection = .needsAttention
+                        session.applySidebarSelection()
+                    } label: {
+                        HStack { Text("Needs attention"); Spacer(); Text(session.attentionCount, format: .number) }
                             .foregroundStyle(.orange)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.orange.opacity(0.12), in: Capsule())
-                            .accessibilityLabel("\(session.attentionCount) items")
                     }
                 }
-                .tag(SidebarDestination.needsAttention)
-            }
-
-            Section("Projects") {
-                ForEach(session.allProjects) { item in
-                        Button {
-                            session.selectProject(item.project.id, on: item.planeRegistryID)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Label(item.project.name, systemImage: "folder")
+                if session.sidebarSelection == .search, let result = session.searchResult {
+                    Section("Search results") {
+                        ForEach(result.hits) { hit in
+                            Button { session.selectSearchHit(hit) } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(hit.hit.excerpt).lineLimit(3)
+                                    Text(hit.planeName).font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }.buttonStyle(.plain)
+                        }
+                        if result.hits.isEmpty { Text("No matching tasks").foregroundStyle(.secondary) }
+                    }
+                }
+                Section("Your tasks") {
+                    ForEach(session.conversations) { conversation in
+                        Button { session.selectConversation(conversation.id) } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(conversation.title).lineLimit(2)
                                 if session.planes.count > 1 {
-                                    Text(item.planeName)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .padding(.leading, 24)
+                                    Text(session.conversationPlaneName(conversation.id)).font(.caption2).foregroundStyle(.secondary)
                                 }
                             }
+                            .padding(.vertical, 5).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .listRowBackground(session.selectedConversationID == conversation.id ? JetDesign.accent.opacity(0.12) : Color.clear)
+                        .accessibilityValue(session.selectedConversationID == conversation.id ? "Selected" : "")
+                    }
+                    if session.conversations.isEmpty {
+                        Text("Your work will be saved here.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if session.hasMoreConversations {
+                        Button("Show earlier tasks") { Task { await session.loadMoreConversations() } }
+                            .disabled(session.conversationOperation != nil)
+                    }
                 }
-
-                Button(action: session.requestAddProject) {
-                    Label(
-                        session.setupSnapshot?.projects.projects.isEmpty == false
-                            ? "Add Project…"
-                            : "Add a Project",
-                        systemImage: "plus"
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Label("Manage Projects", systemImage: "folder.badge.gearshape")
-                    .tag(SidebarDestination.project)
             }
-
-            Section("Recent") {
-                ForEach(session.conversations) { conversation in
-                    Button {
-                        session.selectConversation(conversation.id)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Label(conversation.title, systemImage: "bubble.left.and.bubble.right")
-                                .lineLimit(2)
-                            if session.planes.count > 1 {
-                                Text(session.conversationPlaneName(conversation.id))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.leading, 24)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .listRowBackground(
-                        session.selectedConversationID == conversation.id
-                            ? Color.accentColor.opacity(0.16)
-                            : Color.clear
-                    )
-                    .accessibilityValue(
-                        session.selectedConversationID == conversation.id ? "Selected" : ""
-                    )
+            .listStyle(.sidebar)
+            VStack(spacing: 12) {
+                HStack(spacing: 16) {
+                    Button("Projects", action: session.showProjects)
 #if os(macOS)
-                    .contextMenu {
-                        Button("Review Retention…") {
-                            session.selectConversation(conversation.id)
-                            session.requestSettings(.work)
-                            openSettings()
-                        }
-                    }
+                    Button("Schedules") { session.requestSettings(.work); openSettings() }
+                    Button("Settings") { openSettings() }
 #endif
-                }
-
-                if session.conversations.isEmpty, session.conversationFreshness != .loading {
-                    Text(
-                        session.conversationFreshness == .live
-                            ? "No tasks yet"
-                            : "Tasks unavailable"
-                    )
-                        .foregroundStyle(.secondary)
-                }
-
-                if session.hasMoreConversations {
-                    Button {
-                        Task { await session.loadMoreConversations() }
-                    } label: {
-                        Label("Show more", systemImage: "ellipsis")
-                    }
-                    .disabled(session.conversationOperation != nil)
-                }
-            }
-
-            if session.sidebarSelection == .search, let result = session.searchResult {
-                Section("Search results") {
-                    ForEach(result.hits) { hit in
-                        Button {
-                            session.selectSearchHit(hit)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(hit.hit.excerpt)
-                                    .lineLimit(2)
-                                Text("\(hit.planeName) · \(hit.hit.field.rawValue.capitalized)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    if result.hits.isEmpty {
-                        Text("No matching tasks")
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(
-                        result.failures.keys.sorted(by: { $0.uuidString < $1.uuidString }),
-                        id: \.self
-                    ) { planeID in
-                        if let failure = result.failures[planeID] {
-                            Text("\(session.planes.first(where: { $0.id == planeID })?.name ?? "Plane") unavailable: \(failure.code)")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                }
-            }
-
-            Section {
-#if os(macOS)
+                }.buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
                 Button {
-                    session.requestSettings(.work)
-                    openSettings()
-                } label: {
-                    Label("Schedules", systemImage: "calendar")
-                }
-                .buttonStyle(.plain)
-#else
-                Label("Schedules", systemImage: "calendar")
-                    .tag(SidebarDestination.schedules)
-#endif
-                Label("Planes", systemImage: "desktopcomputer")
-                    .tag(SidebarDestination.planes)
-#if os(macOS)
-                Button {
-                    openSettings()
-                } label: {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .buttonStyle(.plain)
-#endif
+                    session.sidebarSelection = .planes
+                    session.applySidebarSelection()
+                } label: { PlaneStatusFooter(session: session) }
+                .buttonStyle(.plain).help("Planes are computers running Jet")
             }
+            .padding(.top, 12)
+        }
+        .navigationTitle("Jet")
+        .onChange(of: session.sidebarSelection) { _, value in
+            if value == .search { searchFocused = true }
+        }
     }
 }
 
@@ -420,6 +318,7 @@ private struct ConversationView: View {
     var body: some View {
         if session.usesLivePlane {
             LiveConversationView(session: session, composerFocused: $composerFocused)
+                .sheet(isPresented: $session.isRenamePresented) { RenameTaskSheet(session: session) }
                 .onChange(of: session.composerFocusRequest) { _, _ in
                     composerFocused = true
                 }
@@ -463,33 +362,40 @@ private struct LiveConversationView: View {
     let composerFocused: FocusState<Bool>.Binding
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 5) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 14) {
-                        Text(session.selectedConversationTitle)
-                            .font(.headline)
-                            .fixedSize(horizontal: true, vertical: false)
+        Group {
+            if session.selectedConversationID == nil {
+                NewTaskView(session: session, composerFocused: composerFocused)
+            } else {
+                VStack(spacing: 0) {
+                    HStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(session.selectedConversationTitle).font(.headline).lineLimit(1)
+                            Text("\(session.selectedProjectName) · \(session.selectedPlaneName)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         Spacer(minLength: 12)
                         LiveStatusLabel(session: session)
+                        Button("Changes") { session.selectedWorkPanel = .changes; session.isWorkPanelPresented = true }
+                            .disabled(session.selectedRun == nil)
+                        Menu {
+                        Button("Rename task…") { session.isRenamePresented = true }
+                            .disabled(session.selectedConversation?.revision == nil || !session.planeIsConnected)
+                        Divider()
+                            Button("Open Terminal") { session.selectedWorkPanel = .terminal; session.isWorkPanelPresented = true }
+                            Divider()
+                            Button("Interrupt Turn…") { session.requestRunControl(.interruptTurn) }.disabled(!session.canInterruptTurn)
+                            Button("Stop Run…", role: .destructive) { session.requestRunControl(.stopRun) }.disabled(!session.canStopRun)
+                        } label: { Image(systemName: "ellipsis") }
+                        .menuIndicator(.hidden)
+                        .help("Task actions")
                     }
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(session.selectedConversationTitle)
-                            .font(.headline)
-                        LiveStatusLabel(session: session)
-                    }
+                    .padding(.horizontal, 24).padding(.vertical, 16)
+                    Divider()
+                    LiveTimelineView(session: session)
+                    WorkspaceComposer(session: session, composerFocused: composerFocused)
+                        .padding(.horizontal, 28).padding(.top, 16).padding(.bottom, 20)
                 }
-                Text("\(session.selectedProjectName) · Runs on \(session.selectedPlaneName)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 13)
-
-            Divider()
-            LiveTimelineView(session: session)
-            Divider()
-            LiveComposerView(session: session, composerFocused: composerFocused)
         }
         .navigationTitle(session.selectedConversationTitle)
     }
@@ -503,12 +409,7 @@ private struct LiveStatusLabel: View {
         Label(label, systemImage: symbol)
             .font(.caption.weight(.medium))
             .foregroundStyle(contrast == .increased ? Color.primary : color)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(color.opacity(0.10), in: Capsule())
-            .overlay {
-                Capsule().stroke(contrast == .increased ? Color.primary : .clear, lineWidth: 1)
-            }
+
             .accessibilityLabel("Task status: \(label)")
     }
 
@@ -555,7 +456,7 @@ private struct LiveStatusLabel: View {
         if session.runExecution?.needsAttention == true { return .orange }
         return switch session.selectedRun?.lifecycle {
         case .starting, .active, .stopping:
-            Color(red: 41 / 255, green: 182 / 255, blue: 246 / 255)
+            JetDesign.accent
         case .completed: .green
         case .failed, .canceled, .lost: .orange
         case .created, nil: .secondary
@@ -582,7 +483,7 @@ private struct LiveTimelineView: View {
                         }
                     }
                     .padding(12)
-                    .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: JetDesign.controlRadius))
                     .accessibilityElement(children: .combine)
                 }
 
@@ -591,14 +492,14 @@ private struct LiveTimelineView: View {
                         Label(
                             session.selectedConversationID == nil
                                 ? "What should Jet do?"
-                                : "Live activity starts here",
+                                : "Waiting for the first update",
                             systemImage: "text.bubble"
                         )
                     } description: {
                         Text(
                             session.selectedConversationID == nil
                                 ? "Describe the outcome. Jet will create an isolated Workspace in the selected Project."
-                                : "The current Run state is restored above. New ordered activity will appear here."
+                                : "Your messages and results will appear here as work progresses."
                         )
                     }
                     .frame(maxWidth: .infinity, minHeight: 260)
@@ -624,13 +525,10 @@ private struct LiveTimelineEntryView: View {
     var body: some View {
         switch entry.kind {
         case .user:
-            HStack {
-                Spacer(minLength: 52)
-                Text(entry.text)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 9)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 13))
+            VStack(alignment: .leading, spacing: 10) {
+                Text("You").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                MessageText(text: entry.text).font(.body).textSelection(.enabled).lineSpacing(5)
+                Divider().padding(.top, 14)
             }
         case .activity:
             Label(entry.text, systemImage: "bolt.horizontal.circle")
@@ -641,15 +539,13 @@ private struct LiveTimelineEntryView: View {
             if let approval = entry.approval {
                 ApprovalCardView(approval: approval, session: session)
             }
-        case .result:
-            Label(entry.text, systemImage: "checkmark.circle")
-                .font(.subheadline)
-                .foregroundStyle(.green)
-        case .agent:
-            Text(entry.text)
-                .textSelection(.enabled)
-                .font(.body)
-                .lineSpacing(3)
+        case .result, .agent:
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Jet").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                // Render native Markdown as text. OpenURL remains a platform action.
+                MessageText(text: entry.text).textSelection(.enabled).font(.body).lineSpacing(5)
+            }
+
         }
     }
 }
@@ -713,9 +609,9 @@ private struct ApprovalCardView: View {
             }
         }
         .padding(16)
-        .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+        .background(.background, in: RoundedRectangle(cornerRadius: 4))
         .overlay {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 4)
                 .stroke(.orange.opacity(0.35), lineWidth: 1)
         }
         .accessibilityElement(children: .contain)
@@ -739,7 +635,7 @@ private struct ApprovalCardView: View {
             .buttonStyle(.borderedProminent)
             .disabled(session.supervisionOperation != nil)
         } else if approval.state == .requested || approval.state == .unavailable {
-            Text("Approve and Reject need the planned approval-decision protocol command.")
+            Text("This version of Jet cannot answer this request. Interrupt the Turn or stop the Run to continue safely.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -756,117 +652,6 @@ private struct ApprovalCardView: View {
             }
             .disabled(!session.canStopRun || session.supervisionOperation != nil)
         }
-    }
-}
-
-private struct LiveComposerView: View {
-    @Bindable var session: DesktopSession
-    let composerFocused: FocusState<Bool>.Binding
-
-    var body: some View {
-        VStack(spacing: 8) {
-            if let actionNotice = session.actionNotice {
-                Text(actionNotice)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 760, alignment: .leading)
-                    .accessibilityLabel(actionNotice)
-            }
-
-            if session.queueIsFull {
-                Label(
-                    "The Turn queue is full. Withdraw a queued Turn or wait for one to finish.",
-                    systemImage: "exclamationmark.triangle"
-                )
-                .font(.caption)
-                .foregroundStyle(.orange)
-                .frame(maxWidth: 760, alignment: .leading)
-            }
-
-            HStack(alignment: .bottom, spacing: 10) {
-                TextField(
-                    "Describe what you want Jet to do",
-                    text: $session.draft,
-                    axis: .vertical
-                )
-                .textFieldStyle(.plain)
-                .lineLimit(2 ... 6)
-                .focused(composerFocused)
-                .accessibilityLabel("Task message")
-
-                Button("Send") {
-                    Task { await session.submitDraft() }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    !session.canSubmitDraft
-                        || session.conversationOperation != nil
-                        || !session.planeIsConnected
-                )
-                .keyboardShortcut(.return, modifiers: [.command])
-            }
-            .padding(12)
-            .background(.background, in: RoundedRectangle(cornerRadius: 14))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(.separator, lineWidth: 1)
-            }
-
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    ContextValue(label: "Project", value: session.selectedProjectName)
-                    ContextValue(label: "Agent", value: session.selectedHarnessName)
-                    runsOnContext
-                    Spacer(minLength: 0)
-                    messageSize
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    ContextValue(label: "Project", value: session.selectedProjectName)
-                    ContextValue(label: "Agent", value: session.selectedHarnessName)
-                    runsOnContext
-                    messageSize
-                }
-            }
-            .frame(maxWidth: 760)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 24)
-        .padding(.top, 12)
-        .padding(.bottom, 16)
-        .modifier(LegibleBarBackground())
-    }
-
-    @ViewBuilder
-    private var runsOnContext: some View {
-        if session.selectedConversationID == nil, session.planes.count > 1 {
-            Menu {
-                ForEach(session.planes) { plane in
-                    Button {
-                        session.chooseNewTaskPlane(plane.id)
-                    } label: {
-                        if plane.id == session.newTaskPlaneRegistryID {
-                            Label(plane.name, systemImage: "checkmark")
-                        } else {
-                            Text(plane.name)
-                        }
-                    }
-                }
-            } label: {
-                ContextValue(label: "Runs on", value: session.selectedPlaneName)
-            }
-            .menuStyle(.borderlessButton)
-        } else {
-            ContextValue(label: "Runs on", value: session.selectedPlaneName)
-        }
-    }
-
-    private var messageSize: some View {
-        Text("\(session.draftBytes.formatted()) / \(JetTurnQueue.maximumPromptBytes.formatted()) bytes")
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(
-                session.draftBytes > JetTurnQueue.maximumPromptBytes ? .red : .secondary
-            )
-            .accessibilityLabel("Message size")
     }
 }
 
@@ -907,12 +692,7 @@ private struct StatusLabel: View {
         Label(label, systemImage: symbol)
             .font(.caption.weight(.medium))
             .foregroundStyle(contrast == .increased ? Color.primary : color)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(color.opacity(0.10), in: Capsule())
-            .overlay {
-                Capsule().stroke(contrast == .increased ? Color.primary : .clear, lineWidth: 1)
-            }
+
             .accessibilityLabel("Task status: \(label)")
     }
 
@@ -960,7 +740,7 @@ private struct StatusLabel: View {
         case .waitingForApproval, .waitingForAuth, .waitingForUser, .waitingForQuota, .reconnecting:
             .orange
         case .working:
-            Color(red: 41 / 255, green: 182 / 255, blue: 246 / 255)
+            JetDesign.accent
         case nil:
             scenario.run?.lifecycle == .completed ? .green : .secondary
         }
@@ -1017,7 +797,7 @@ private struct NoticeView: View {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: JetDesign.controlRadius))
         .accessibilityElement(children: .combine)
     }
 
@@ -1031,7 +811,7 @@ private struct NoticeView: View {
 
     private var color: Color {
         switch notice.tone {
-        case .informational: Color(red: 41 / 255, green: 182 / 255, blue: 246 / 255)
+        case .informational: JetDesign.accent
         case .warning: .orange
         case .critical: .red
         }
@@ -1112,9 +892,9 @@ private struct ComposerView: View {
                     .keyboardShortcut(.return, modifiers: [.command])
             }
             .padding(12)
-            .background(.background, in: RoundedRectangle(cornerRadius: 14))
+            .background(.background, in: RoundedRectangle(cornerRadius: JetDesign.fieldRadius))
             .overlay {
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: JetDesign.fieldRadius)
                     .stroke(.separator, lineWidth: 1)
             }
 
@@ -1162,6 +942,12 @@ private struct WorkPanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack {
+                Text("Work details").font(.headline)
+                Spacer()
+                Button("Close") { session.isWorkPanelPresented = false }
+                    .buttonStyle(.borderless).font(.caption)
+            }.padding(.horizontal, 16).padding(.top, 16)
             Picker("Work panel", selection: $session.selectedWorkPanel) {
                 ForEach(WorkPanelTab.allCases, id: \.self) { tab in
                     Text(tab.title).tag(tab)

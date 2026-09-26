@@ -817,6 +817,8 @@ describe("work panel presentation (layout model)", () => {
     const session = new DesktopSession();
     for (const destination of closing) {
       session.select("conversation");
+      expect(session.panel.presentation).toEqual({ kind: "hidden" });
+      session.toggleWorkPanel("toggle");
       expect(session.panel.presentation).toEqual({ kind: "column" });
       session.select(destination);
       expect(session.panel).toEqual({ mode: "regular", columnPreference: false, presentation: { kind: "hidden" } });
@@ -838,9 +840,9 @@ describe("work panel presentation (layout model)", () => {
       expect(session.workPanelPresented).toBe(false);
     }
     // Compact destinations leave the regular-window preference alone.
-    expect(session.panel.columnPreference).toBe(true);
+    expect(session.panel.columnPreference).toBe(false);
     session.setLayoutMode("regular");
-    expect(session.panel.presentation).toEqual({ kind: "column" });
+    expect(session.panel.presentation).toEqual({ kind: "hidden" });
   });
 
   it("Needs attention opens the overlay on the Run tab in a compact window", () => {
@@ -861,6 +863,7 @@ describe("work panel presentation (layout model)", () => {
   it("the setup redirect and choosing a Project close the panel", async () => {
     harness({ setup: { ...SETUP, projects: [] } });
     const session = new DesktopSession();
+    session.toggleWorkPanel("toggle");
     expect(session.workPanelPresented).toBe(true);
     await session.refreshSetup(true);
     expect(session.sidebarSelection).toBe("project");
@@ -876,12 +879,12 @@ describe("work panel presentation (layout model)", () => {
     expect(session.panel).toEqual({ mode: "regular", columnPreference: false, presentation: { kind: "hidden" } });
   });
 
-  it("opening a task shows the column, but not the overlay", async () => {
+  it("opening a task keeps the reading area focused in either window size", async () => {
     harness();
     const session = new DesktopSession();
     session.select("new-task");
     await session.openConversation("l1", true, "local");
-    expect(session.panel.presentation).toEqual({ kind: "column" });
+    expect(session.panel.presentation).toEqual({ kind: "hidden" });
 
     session.select("new-task");
     session.setLayoutMode("compact");
@@ -932,7 +935,7 @@ describe("work panel presentation (layout model)", () => {
     session.handleShortcut(escape.event, linux);
     expect(escape.prevented.value).toBe(true);
     expect(session.workPanelOverlay).toBe(false);
-    expect(session.panel.columnPreference).toBe(true);
+    expect(session.panel.columnPreference).toBe(false);
     expect(session.takeFocusRequest("work-panel-return")).toBe(true);
     expect(session.returnWorkPanelFocus()).toBe(true);
     expect(composer.focus).toHaveBeenCalledTimes(1);
@@ -1166,7 +1169,6 @@ describe("window layout: persistence", () => {
     session.select("attention");
     await session.persistPresentation();
     expect(saves(calls)).toEqual([
-      { ...DEFAULT_PRESENTATION, destination: "conversation", workPanelPresented: false },
       { ...DEFAULT_PRESENTATION, destination: "conversation", workPanelPresented: true },
     ]);
 
@@ -1174,7 +1176,7 @@ describe("window layout: persistence", () => {
     session.setColumnWidth("work-panel", 999);
     await session.persistPresentation();
     await session.persistPresentation();
-    expect(saves(calls).slice(2)).toEqual([
+    expect(saves(calls).slice(1)).toEqual([
       { ...DEFAULT_PRESENTATION, destination: "planes", workPanelPresented: false, workPanelWidth: 440 },
     ]);
 
@@ -1185,8 +1187,8 @@ describe("window layout: persistence", () => {
     session.toggleWorkPanel("toggle");
     expect(session.workPanelOverlay).toBe(true);
     await session.persistPresentation();
-    expect(saves(calls).slice(3)).toEqual([
-      { ...DEFAULT_PRESENTATION, destination: "conversation", workPanelPresented: true, workPanelWidth: 440 },
+    expect(saves(calls).slice(2)).toEqual([
+      { ...DEFAULT_PRESENTATION, destination: "conversation", workPanelPresented: false, workPanelWidth: 440 },
     ]);
   });
 

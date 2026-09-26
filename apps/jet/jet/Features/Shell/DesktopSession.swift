@@ -233,8 +233,10 @@ final class DesktopSession {
     var contentState: ContentState = .loading
     var sidebarSelection: SidebarDestination = .conversation
     var selectedWorkPanel: WorkPanelTab = .run
-    var isWorkPanelPresented = true
+    var isWorkPanelPresented = false
+    var chosenCraftID: String?
     var draft = ""
+    var isRenamePresented = false
     var composerFocusRequest = 0
     var actionNotice: String?
     var actionError: JetPresentationError?
@@ -498,16 +500,38 @@ final class DesktopSession {
     }
 
     var selectedHarnessName: String {
-        if let label = selectedSetupSnapshot?.accounts.bindings.first?.label
-            ?? selectedSetupSnapshot?.capabilities.authProviders.first?.harness
-        {
-            return label
-        }
-        return usesLivePlane ? "Choose an Agent" : scenario?.capabilities.harnesses.first?.capitalized ?? "Choose"
+        guard let craft = selectedSetupSnapshot?.capabilities.crafts.first(where: { $0.id == selectedCraftID })
+        else { return "Choose a Harness" }
+        return Self.harnessLabel(craft.harnesses.first ?? craft.id)
     }
 
     var selectedCraftID: String? {
-        selectedSetupSnapshot?.capabilities.crafts.first?.id
+        chosenCraftID ?? selectedSetupSnapshot?.capabilities.crafts.first?.id
+    }
+
+    static func harnessLabel(_ name: String) -> String {
+        switch name {
+        case "codex": "Codex"
+        case "claude-code": "Claude Code"
+        default: name
+        }
+    }
+
+    var canStartTask: Bool {
+        planeIsConnected && selectedProject != nil
+            && selectedSetupSnapshot?.capabilities.crafts.contains(where: { $0.id == selectedCraftID }) == true
+    }
+
+    func chooseCraft(_ id: String) {
+        guard conversationOperation == nil,
+              selectedSetupSnapshot?.capabilities.crafts.contains(where: { $0.id == id }) == true
+        else { return }
+        chosenCraftID = id
+    }
+
+    func useProjectForNewTask(_ id: UUID, on planeID: UUID) {
+        selectProject(id, on: planeID)
+        beginNewTask()
     }
 
     var selectedConversation: JetConversationSummary? {
@@ -988,7 +1012,6 @@ final class DesktopSession {
         }
         selectedConversationID = conversationID
         sidebarSelection = .conversation
-        isWorkPanelPresented = true
         actionNotice = nil
         Task { await loadSelectedConversation() }
     }
@@ -2396,11 +2419,34 @@ final class DesktopSession {
             showScenario(.ready)
             isWorkPanelPresented = false
         case .conversation:
-            isWorkPanelPresented = true
+            break
         case .schedules:
             actionNotice = "Schedules are managed in Work Settings on macOS."
         case .planes:
             isWorkPanelPresented = false
+        }
+    }
+
+    func renameTask(_ name: String, revision: UInt64, commandID: UUID) async -> Bool {
+        guard let conversation = selectedConversation,
+              planeIsConnected, conversationOperation == nil else { return false }
+        conversationOperation = "rename"
+        defer { conversationOperation = nil }
+        do {
+            let client = try await activeClient()
+            let updated = try await client.renameConversation(id: conversation.id, revision: revision, name: name, commandID: commandID)
+            mergeConversation(updated)
+            await loadSelectedConversation()
+            return true
+        } catch {
+            let failure = presentationError(error)
+            if failure.category == .conflict {
+                await loadSelectedConversation()
+                actionNotice = "This task changed. Use its latest version before saving. Your new name was kept."
+            } else {
+                actionNotice = failure.message
+            }
+            return false
         }
     }
 
@@ -2441,7 +2487,6 @@ final class DesktopSession {
                 conversationID = conversation.id
                 self.selectedConversationID = conversation.id
                 sidebarSelection = .conversation
-                isWorkPanelPresented = true
                 conversationSnapshot = try await activeClient().conversation(conversation.id)
             }
 
@@ -2475,8 +2520,8 @@ final class DesktopSession {
                 )
                 pendingStart = nil
             }
-            draft = ""
-            actionNotice = "Sent to the Plane."
+            if draft == prompt && selectedConversationID == conversationID { draft = "" }
+            actionNotice = "Message sent. Jet will pick it up in order."
             await loadSelectedConversation()
         } catch {
             let failure = presentationError(error)
