@@ -26,7 +26,7 @@ struct InlineNotice: View {
             if let action = notice.action {
                 Button(action.title) { perform(action) }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .controlSize(.regular)
             }
         }
         .font(.system(size: textSize))

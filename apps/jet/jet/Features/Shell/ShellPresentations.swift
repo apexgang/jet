@@ -84,9 +84,13 @@ struct ShellPresentations: ViewModifier {
     }
 
     /// The buttons clear the state themselves, so dismissal never races with the
-    /// confirmation; the setter has nothing left to do.
+    /// confirmation. Any other dismissal (a closing window, Escape) cancels.
     private var runControlPresented: Binding<Bool> {
-        Binding(get: { Self.isRunControlPresented(session) }, set: { _ in })
+        Binding(get: { Self.isRunControlPresented(session) }, set: { presented in
+            if !presented, session.supervisionOperation == nil, session.runControlConfirmation != nil {
+                session.cancelRunControl()
+            }
+        })
     }
 
     /// Hidden while the confirmed request is in flight.
@@ -113,8 +117,13 @@ struct ShellPresentations: ViewModifier {
         Text("Save changes to \(session.pendingNavigation?.fileName ?? "")?")
     }
 
+    /// Dismissing the alert without a button keeps the edits, like Cancel.
     private var pendingNavigationPresented: Binding<Bool> {
-        Binding(get: { session.pendingNavigation != nil }, set: { _ in })
+        Binding(get: { session.pendingNavigation != nil }, set: { presented in
+            if !presented, session.pendingNavigation != nil {
+                session.pendingNavigation = nil
+            }
+        })
     }
 
     /// Resolves synchronously up to the first suspension, so the held navigation is

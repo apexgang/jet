@@ -153,6 +153,9 @@ struct TaskStatusPresentationTests {
         #expect(TaskStatus.waitingForReply.rowGlyph(isUnread: false) == .none)
         #expect(TaskStatus.finished.rowGlyph(isUnread: true) == .unreadDot)
         #expect(TaskStatus.stopped.rowGlyph(isUnread: false) == .none)
+        #expect(TaskStatus.stopped.rowGlyph(isUnread: true) == .none)
+        #expect(TaskStatus.unknown.rowGlyph(isUnread: true) == .none)
+        #expect(TaskStatus.offline.rowGlyph(isUnread: true) == .none)
     }
 
     // MARK: - Inline notice

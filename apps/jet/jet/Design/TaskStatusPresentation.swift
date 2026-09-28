@@ -161,12 +161,16 @@ extension TaskStatus {
 
     func rowGlyph(isUnread: Bool) -> RowGlyph {
         if showsSpinner { return .spinner }
+        // Design §8 row-glyph column: offline rows are dimmed instead of marked,
+        // only a reply you haven't seen earns the unread dot, and stopped or unknown
+        // tasks show nothing.
         switch self {
-        case .offline, .needsPermission, .needsSignIn, .usageLimit, .gitUnconfirmed, .failed:
+        case .needsPermission, .needsSignIn, .usageLimit, .gitUnconfirmed, .failed:
             return systemImage.map(RowGlyph.symbol) ?? .none
-        case .unknown, .waitingForReply, .finished, .stopped, .notStarted,
-             .starting, .working, .reconnecting, .stopping:
+        case .waitingForReply, .finished:
             return isUnread ? .unreadDot : .none
+        case .offline, .unknown, .stopped, .notStarted, .starting, .working, .reconnecting, .stopping:
+            return .none
         }
     }
 }
