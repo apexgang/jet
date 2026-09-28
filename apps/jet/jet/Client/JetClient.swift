@@ -3094,6 +3094,7 @@ actor JetClient {
             throw JetClientFailure.presentation(.invalidResponse)
         }
         let registrability: JetProjectRegistrability
+        var suggestedRoot: String?
         switch verdict {
         case "registrable":
             guard let repository = value["repository"] as? [String: Any],
@@ -3135,10 +3136,15 @@ actor JetClient {
                 verdict: verdict,
                 detail: "Choose the repository root at \(topLevel)."
             )
+            suggestedRoot = topLevel
         default:
             throw JetClientFailure.presentation(.invalidResponse)
         }
-        return JetProjectPreview(root: root, registrability: registrability)
+        return JetProjectPreview(
+            root: root,
+            registrability: registrability,
+            suggestedRoot: suggestedRoot
+        )
     }
 
     private func decodeRegisteredProject(

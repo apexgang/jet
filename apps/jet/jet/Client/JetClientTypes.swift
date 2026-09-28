@@ -596,6 +596,14 @@ struct JetTimelineEntry: Sendable, Equatable, Identifiable {
     var sequence: UInt64?
     var rawCount: Int
     var approval: JetApprovalPresentation? = nil
+    /// When the Plane recorded the source Event; display-only.
+    var recordedAtUnixMilliseconds: Int64? = nil
+    /// The Run whose Event produced this entry, when the Event names one.
+    var runID: UUID? = nil
+    /// The Turn checkpoint a `change.checkpoint_recorded` entry refers to.
+    var checkpointTurn: UInt32? = nil
+    /// Background lifecycle detail shown only with Show Technical Activity.
+    var isTechnical = false
 }
 
 nonisolated struct JetProjectSummary: Sendable, Equatable, Identifiable {
@@ -622,6 +630,8 @@ nonisolated enum JetProjectRegistrability: Sendable, Equatable {
 nonisolated struct JetProjectPreview: Sendable, Equatable {
     let root: String
     let registrability: JetProjectRegistrability
+    /// The enclosing repository root when the chosen folder is inside a working tree.
+    var suggestedRoot: String? = nil
 
     var canRegister: Bool {
         if case .registrable = registrability { return true }

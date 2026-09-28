@@ -16,6 +16,15 @@ enum SidebarDestination: String, CaseIterable, Hashable, Sendable {
     case conversation
     case schedules
     case planes
+    case trash
+
+    /// Retired destinations that a restored scene maps back to a task.
+    var restoresAsConversation: Bool {
+        switch self {
+        case .search, .needsAttention, .schedules, .planes: true
+        case .newTask, .project, .conversation, .trash: false
+        }
+    }
 }
 
 enum WorkPanelTab: String, CaseIterable, Hashable, Sendable {
@@ -24,14 +33,19 @@ enum WorkPanelTab: String, CaseIterable, Hashable, Sendable {
     case terminal
     case run
 
+    /// Raw values stay for SceneStorage. `files` is Changes in edit mode and
+    /// `run` is titled Activity.
     var title: String {
         switch self {
         case .changes: "Changes"
-        case .files: "Files"
+        case .files: "Changes"
         case .terminal: "Terminal"
-        case .run: "Run"
+        case .run: "Activity"
         }
     }
+
+    /// The Details segments, in order.
+    static let inspectorTabs: [WorkPanelTab] = [.changes, .terminal, .run]
 }
 
 enum WorkCheckpointKind: String, CaseIterable, Hashable, Sendable {
@@ -136,78 +150,79 @@ struct WorkRefreshContinuity {
     }
 }
 
+// Internal for DesktopSession+*.swift extensions. Views use DesktopSession+Intents.
 @MainActor
 @Observable
 final class DesktopSession {
-    private struct PlaneConversationLoad: Sendable {
+    struct PlaneConversationLoad: Sendable {
         let planeRegistryID: UUID
         let result: Result<JetConversationPage, JetPresentationError>
     }
 
-    private struct PlaneSearchLoad: Sendable {
+    struct PlaneSearchLoad: Sendable {
         let planeRegistryID: UUID
         let planeName: String
         let result: Result<JetSearchResult, JetPresentationError>
     }
 
-    private struct PlaneConversationPageLoad: Sendable {
+    struct PlaneConversationPageLoad: Sendable {
         let planeRegistryID: UUID
         let result: Result<JetConversationPage, JetPresentationError>
     }
 
-    private struct PendingStart {
+    struct PendingStart {
         let conversationID: UUID
         let craft: String
         let prompt: String
         let commandID: UUID
     }
 
-    private struct PendingTurn {
+    struct PendingTurn {
         let conversationID: UUID
         let prompt: String
         let commandID: UUID
     }
 
-    private struct RunControlKey: Hashable {
+    struct RunControlKey: Hashable {
         let runID: UUID
         let control: JetRunControl
     }
 
-    private struct PairingGateIntent: Hashable {
+    struct PairingGateIntent: Hashable {
         let planeRegistryID: UUID
         let open: Bool
     }
 
-    private struct PairingConfirmationIntent: Hashable {
+    struct PairingConfirmationIntent: Hashable {
         let planeRegistryID: UUID
         let offerID: UUID
     }
 
-    private struct PairedClientAccessIntent: Hashable {
+    struct PairedClientAccessIntent: Hashable {
         let planeRegistryID: UUID
         let clientID: UUID
         let access: JetPairedClientAccess
     }
 
-    private struct PairedClientIntent: Hashable {
+    struct PairedClientIntent: Hashable {
         let planeRegistryID: UUID
         let clientID: UUID
     }
 
-    private struct PendingWorkEdit {
+    struct PendingWorkEdit {
         let path: String
         let content: String
         let commandID: UUID
     }
 
-    private struct PendingReview {
+    struct PendingReview {
         let path: String
         let line: UInt32
         let comment: String
         let commandID: UUID
     }
 
-    private struct PendingGitDelivery {
+    struct PendingGitDelivery {
         let request: JetGitDeliveryRequest
         let commandID: UUID
     }
@@ -218,7 +233,7 @@ final class DesktopSession {
         case failed(String)
     }
 
-    private enum FixtureLoadResult: Sendable {
+    enum FixtureLoadResult: Sendable {
         case success(DesktopFixtureCorpus)
         case failure(String)
     }
@@ -232,14 +247,32 @@ final class DesktopSession {
 
     var contentState: ContentState = .loading
     var sidebarSelection: SidebarDestination = .conversation
-    var selectedWorkPanel: WorkPanelTab = .run
+    var selectedWorkPanel: WorkPanelTab = .changes
     var isWorkPanelPresented = false
     var chosenCraftID: String?
-    var draft = ""
-    var isRenamePresented = false
+    /// Each destination's draft, in memory only.
+    var drafts: [DraftKey: String] = [:]
     var composerFocusRequest = 0
-    var actionNotice: String?
+    /// Asks the shell to reveal the sidebar (for example before focusing search).
+    var revealSidebarRequest = 0
+    var searchFocusRequest = 0
+    /// Asks the scene to open the Settings window after `requestedSettingsPane` changed.
+    var settingsOpenRequest = 0
+    /// The line above the composer.
+    var composerNotice: ComposerNotice?
     var actionError: JetPresentationError?
+    var presentedSheet: ShellSheet?
+    var pendingNavigation: PendingNavigation?
+    /// The person's own operation; background refreshes use the flags below.
+    var userOperation: UserOperation?
+    var isRefreshingConversation = false
+    var isLoadingMoreConversations = false
+    /// Set by Interrupt and Reply so the composer asks what to do instead.
+    var interruptThenReply = false
+    var composerPlaceholderOverride: String?
+    /// Bounded setup retries at 2, 5 and 15 seconds.
+    var setupRetryAttempt = 0
+    var setupRetryLimit = DesktopSession.setupRetryDelays.count
     var setupState: SetupState = .idle
     var connectionState: JetConnectionState = .disconnected
     var selectedProjectID: UUID?
@@ -269,7 +302,6 @@ final class DesktopSession {
     var selectedConversationID: UUID?
     var conversationSnapshot: JetConversationSnapshot?
     var conversationFreshness: JetConversationFreshness = .loading
-    var conversationOperation: String?
     var supervisionOperation: String?
     var timeline: [JetTimelineEntry] = []
     var turnQueue: JetTurnQueue?
@@ -319,60 +351,81 @@ final class DesktopSession {
     var notificationError: String?
     var requestedSettingsPane: JetSettingsPane?
 
-    private var scenarios: [DesktopFixtureState: DesktopFixtureScenario] = [:]
-    private var didLoadFixtures = false
-    private let makeJetClient: JetClientFactory?
-    private let makeRemoteClient: JetRemoteClientFactory?
-    private let claimRemotePairing: JetRemotePairingClaimer?
-    private let completeRemotePairing: JetRemotePairingCompleter?
-    private let saveRemoteProfiles: @MainActor ([JetRemotePlaneProfile]) -> Void
-    private let localPlaneRegistryID: UUID
-    private let notifications: (any JetNotificationDelivering)?
-    private let notificationPreference: JetNotificationPreference
-    private var client: JetClient?
-    private var remoteClients: [UUID: JetClient] = [:]
-    private var conversationPlaneRegistryIDs: [UUID: UUID] = [:]
-    private var planeConversationCursors: [UUID: UInt64] = [:]
-    private var planeNextConversationPages: [UUID: UUID] = [:]
-    private var planeConversations: [UUID: [JetConversationSummary]] = [:]
-    private var planeConnectionObservationTasks: [UUID: Task<Void, Never>] = [:]
-    private var connectionObservationTask: Task<Void, Never>?
-    private var registrationCommandID = UUID()
-    private var removalTrashCommandID = UUID()
-    private var removalPermanentCommandID = UUID()
-    private var accountCommandIDs: [String: UUID] = [:]
-    private var createCommandProjectID: UUID?
-    private var createCommandID = UUID()
-    private var pendingStart: PendingStart?
-    private var pendingTurn: PendingTurn?
-    private var withdrawalCommandIDs: [UUID: UUID] = [:]
-    private var runControlCommandIDs: [RunControlKey: UUID] = [:]
-    private var approvalRetryCommandIDs: [UUID: UUID] = [:]
-    private var eventObservationTasks: [UUID: Task<Void, Never>] = [:]
-    private var conversationRequest = 0
-    private var searchRequest = 0
-    private var workRequest = 0
-    private var workFileRequest = 0
-    private var workArtifactBytes = Data()
-    private var pendingWorkEdit: PendingWorkEdit?
-    private var pendingReview: PendingReview?
-    private var terminalOpenCommandID = UUID()
-    private var terminalCloseCommandIDs: [UUID: UUID] = [:]
-    private var terminalOffsets: [UUID: UInt64] = [:]
-    private var terminalDecoders: [UUID: TerminalTranscriptDecoder] = [:]
-    private var lastTerminalSize: (terminalID: UUID, rows: UInt16, columns: UInt16)?
-    private var terminalStreamTerminalID: UUID?
-    private var terminalObservationTask: Task<Void, Never>?
-    private var gitDeliveryObservationTask: Task<Void, Never>?
-    private var pendingGitDelivery: PendingGitDelivery?
-    private var gitDeliveryAcknowledgementCommandIDs: [UUID: UUID] = [:]
-    private var pairingGateCommandIDs: [PairingGateIntent: UUID] = [:]
-    private var openPairingCommandIDs: [UUID: UUID] = [:]
-    private var confirmPairingCommandIDs: [PairingConfirmationIntent: UUID] = [:]
-    private var pairedClientAccessCommandIDs: [PairedClientAccessIntent: UUID] = [:]
-    private var pairedClientRevokeCommandIDs: [PairedClientIntent: UUID] = [:]
-    private var remotePairingClaimCommandID = UUID()
-    private var remotePairingCompleteCommandID = UUID()
+    var scenarios: [DesktopFixtureState: DesktopFixtureScenario] = [:]
+    var didLoadFixtures = false
+    let makeJetClient: JetClientFactory?
+    let makeRemoteClient: JetRemoteClientFactory?
+    let claimRemotePairing: JetRemotePairingClaimer?
+    let completeRemotePairing: JetRemotePairingCompleter?
+    let saveRemoteProfiles: @MainActor ([JetRemotePlaneProfile]) -> Void
+    let localPlaneRegistryID: UUID
+    let notifications: (any JetNotificationDelivering)?
+    let notificationPreference: JetNotificationPreference
+    var client: JetClient?
+    var remoteClients: [UUID: JetClient] = [:]
+    var conversationPlaneRegistryIDs: [UUID: UUID] = [:]
+    var planeConversationCursors: [UUID: UInt64] = [:]
+    var planeNextConversationPages: [UUID: UUID] = [:]
+    var planeConversations: [UUID: [JetConversationSummary]] = [:]
+    var planeConnectionObservationTasks: [UUID: Task<Void, Never>] = [:]
+    var connectionObservationTask: Task<Void, Never>?
+    var registrationCommandID = UUID()
+    var removalTrashCommandID = UUID()
+    var removalPermanentCommandID = UUID()
+    var accountCommandIDs: [String: UUID] = [:]
+    var createCommandProjectID: UUID?
+    var createCommandID = UUID()
+    var pendingStart: PendingStart?
+    var pendingTurn: PendingTurn?
+    var withdrawalCommandIDs: [UUID: UUID] = [:]
+    var runControlCommandIDs: [RunControlKey: UUID] = [:]
+    var approvalRetryCommandIDs: [UUID: UUID] = [:]
+    var eventObservationTasks: [UUID: Task<Void, Never>] = [:]
+    var conversationRequest = 0
+    var searchRequest = 0
+    var workRequest = 0
+    var workFileRequest = 0
+    var workArtifactBytes = Data()
+    var pendingWorkEdit: PendingWorkEdit?
+    var pendingReview: PendingReview?
+    var terminalOpenCommandID = UUID()
+    var terminalCloseCommandIDs: [UUID: UUID] = [:]
+    var terminalOffsets: [UUID: UInt64] = [:]
+    var terminalDecoders: [UUID: TerminalTranscriptDecoder] = [:]
+    var lastTerminalSize: (terminalID: UUID, rows: UInt16, columns: UInt16)?
+    var terminalStreamTerminalID: UUID?
+    var terminalObservationTask: Task<Void, Never>?
+    var gitDeliveryObservationTask: Task<Void, Never>?
+    var pendingGitDelivery: PendingGitDelivery?
+    var gitDeliveryAcknowledgementCommandIDs: [UUID: UUID] = [:]
+    var pairingGateCommandIDs: [PairingGateIntent: UUID] = [:]
+    var openPairingCommandIDs: [UUID: UUID] = [:]
+    var confirmPairingCommandIDs: [PairingConfirmationIntent: UUID] = [:]
+    var pairedClientAccessCommandIDs: [PairedClientAccessIntent: UUID] = [:]
+    var pairedClientRevokeCommandIDs: [PairedClientIntent: UUID] = [:]
+    var remotePairingClaimCommandID = UUID()
+    var remotePairingCompleteCommandID = UUID()
+
+    let statusStore: TaskStatusStore
+    let transcripts: TranscriptStore
+    let memory: ClientMemory
+    let deliveries: DeliveryCoordinator
+    let notificationRouter: JetNotificationRouter
+    /// A session seeded for previews and screenshots: it renders live paths but
+    /// never reaches a Plane.
+    let isPreviewSession: Bool
+    @ObservationIgnored var setupRetryTask: Task<Void, Never>?
+    @ObservationIgnored var selectionLoadTask: Task<Void, Never>?
+    @ObservationIgnored var selectionGeneration = 0
+    @ObservationIgnored var conversationRefreshes = 0
+    /// Keeps a scope chosen through `showChanges` when the next change load starts.
+    @ObservationIgnored var keepsRequestedCheckpoint = false
+    @ObservationIgnored var restoreCommandIDs: [UUID: UUID] = [:]
+    /// Tasks this session saw moved to Jet Trash. A trashed task can still be
+    /// queried by ID, so a refresh must not bring it back as the open task.
+    @ObservationIgnored var trashedConversationIDs: Set<UUID> = []
+
+    static let setupRetryDelays: [Duration] = [.seconds(2), .seconds(5), .seconds(15)]
 
     init(
         makeJetClient: JetClientFactory? = nil,
@@ -385,8 +438,20 @@ final class DesktopSession {
         notifications: (any JetNotificationDelivering)? = nil,
         notificationPreference: @escaping JetNotificationPreference = {
             JetNotificationPreferences.isEnabled($0)
-        }
+        },
+        memory: ClientMemory? = nil,
+        isPreviewSession: Bool = false
     ) {
+        let memory = memory ?? ClientMemory()
+        self.memory = memory
+        statusStore = TaskStatusStore(memory: memory)
+        transcripts = TranscriptStore()
+        deliveries = DeliveryCoordinator()
+        notificationRouter = JetNotificationRouter(
+            notifications: notifications,
+            preference: notificationPreference
+        )
+        self.isPreviewSession = isPreviewSession
         self.makeJetClient = makeJetClient
         self.localPlaneRegistryID = localPlaneRegistryID
         self.remoteProfiles = remoteProfiles
@@ -422,6 +487,102 @@ final class DesktopSession {
                 conversationCursor: nil
             )
         }
+        configureStores()
+    }
+
+    /// Wires the stores to this session's clients. Closures hold the session weakly.
+    private func configureStores() {
+        notificationRouter.onDeliveryFailure = { [weak self] in
+            self?.notificationError = String(localized: "Jet couldn't show a notification.")
+        }
+        statusStore.configure { [weak self] conversationID, planeRegistryID in
+            guard let self else { throw CancellationError() }
+            let client = try await self.client(for: planeRegistryID)
+            let snapshot = try await client.conversation(conversationID)
+            var execution: JetRunExecution?
+            if let runID = snapshot.runs.last?.id {
+                execution = try await client.runExecution(runID: runID)
+            }
+            return (
+                cursor: max(snapshot.cursor, execution?.cursor ?? 0),
+                snapshot: snapshot,
+                execution: execution
+            )
+        }
+        transcripts.configure { [weak self] planeRegistryID, cursor in
+            guard let self else { throw CancellationError() }
+            return try await self.client(for: planeRegistryID).events(after: cursor)
+        }
+        deliveries.configure(
+            submit: { [weak self] key, request, commandID in
+                guard let self else { throw CancellationError() }
+                return try await self.client(for: key.planeRegistryID)
+                    .deliverGit(request, commandID: commandID)
+                    .deliveryID
+            },
+            fetch: { [weak self] key in
+                guard let self else { throw CancellationError() }
+                return try await self.client(for: key.planeRegistryID)
+                    .gitDeliveries(conversationID: key.conversationID)
+            },
+            onDeliveries: { [weak self] key, deliveries in
+                guard let self else { return }
+                self.statusStore.recordGitDeliveries(deliveries, conversationID: key.conversationID)
+                if self.selectedConversationID == key.conversationID {
+                    self.gitDeliveries = deliveries
+                }
+            }
+        )
+    }
+
+    /// Cancels work tied to this session's lifetime.
+    func teardown() {
+        setupRetryTask?.cancel()
+        setupRetryTask = nil
+        selectionLoadTask?.cancel()
+        selectionLoadTask = nil
+        for task in eventObservationTasks.values { task.cancel() }
+        eventObservationTasks = [:]
+        for task in planeConnectionObservationTasks.values { task.cancel() }
+        planeConnectionObservationTasks = [:]
+        connectionObservationTask?.cancel()
+        connectionObservationTask = nil
+        gitDeliveryObservationTask?.cancel()
+        gitDeliveryObservationTask = nil
+        transcripts.cancelReplay()
+        detachCurrentTerminal()
+    }
+
+    /// The draft of the current destination.
+    var draftKey: DraftKey {
+        if sidebarSelection == .newTask { return .newTask }
+        return selectedConversationID.map { .conversation($0) } ?? .newTask
+    }
+
+    var draft: String {
+        get { drafts[draftKey] ?? "" }
+        set {
+            let key = draftKey
+            if newValue.isEmpty {
+                drafts.removeValue(forKey: key)
+            } else {
+                drafts[key] = newValue
+            }
+            if composerNotice?.kind == .confirmation { composerNotice = nil }
+        }
+    }
+
+    var hasNewTaskDraft: Bool {
+        !(drafts[.newTask] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Compatibility for views that predate `userOperation`.
+    var conversationOperation: String? { userOperation?.rawValue }
+
+    /// Compatibility bridge to `composerNotice`; setting text shows an info notice.
+    var actionNotice: String? {
+        get { composerNotice?.text }
+        set { composerNotice = newValue.map { ComposerNotice(kind: .info, text: $0) } }
     }
 
     var scenario: DesktopFixtureScenario? {
@@ -501,7 +662,7 @@ final class DesktopSession {
 
     var selectedHarnessName: String {
         guard let craft = selectedSetupSnapshot?.capabilities.crafts.first(where: { $0.id == selectedCraftID })
-        else { return "Choose a Harness" }
+        else { return String(localized: "Choose an Assistant") }
         return Self.harnessLabel(craft.harnesses.first ?? craft.id)
     }
 
@@ -523,7 +684,7 @@ final class DesktopSession {
     }
 
     func chooseCraft(_ id: String) {
-        guard conversationOperation == nil,
+        guard userOperation == nil,
               selectedSetupSnapshot?.capabilities.crafts.contains(where: { $0.id == id }) == true
         else { return }
         chosenCraftID = id
@@ -539,7 +700,7 @@ final class DesktopSession {
     }
 
     var selectedConversationTitle: String {
-        selectedConversation?.title ?? "New task"
+        selectedConversation?.title ?? String(localized: "New Task")
     }
 
     var selectedRun: JetRunSummary? {
@@ -582,12 +743,12 @@ final class DesktopSession {
     var workPatchBytesLoaded: UInt64 { UInt64(workArtifactBytes.count) }
 
     var gitDeliveryUnavailableReason: String? {
-        guard usesLivePlane else { return "Connect to a Plane to deliver this work." }
-        guard planeIsConnected else { return "Reconnect to the Plane to deliver this work." }
+        guard usesLivePlane else { return String(localized: "Connect to a computer to keep changes.") }
+        guard planeIsConnected else { return String(localized: "Not connected to \(selectedPlaneName).") }
         guard selectedSetupSnapshot?.capabilities.gitIsAvailable == true else {
-            return "The Plane reports Git as unavailable."
+            return String(localized: "Git isn't available on \(selectedPlaneName).")
         }
-        guard workDiff != nil else { return "Load a retained Change checkpoint first." }
+        guard workDiff != nil else { return String(localized: "Load the changes first.") }
         return nil
     }
 
@@ -610,6 +771,7 @@ final class DesktopSession {
 
     var planeConnectionLabel: String {
         switch connectionState {
+        case .disconnected where setupStateIsLoading: "Starting"
         case .disconnected: setupStateIsIdle ? "Not checked" : "Offline"
         case .connecting: "Connecting"
         case .connected: "Connected"
@@ -639,8 +801,13 @@ final class DesktopSession {
         requestedSettingsPane = pane
     }
 
-    private var setupStateIsIdle: Bool {
+    var setupStateIsIdle: Bool {
         if case .idle = setupState { return true }
+        return false
+    }
+
+    var setupStateIsLoading: Bool {
+        if case .loading = setupState { return true }
         return false
     }
 
@@ -676,11 +843,16 @@ final class DesktopSession {
         }
     }
 
+    /// Loads This Mac's setup. It never navigates: New Task shows what is missing
+    /// inline. `openWhenIncomplete` is kept for source compatibility.
     func loadSetup(openWhenIncomplete: Bool = false) async {
-        guard makeJetClient != nil else { return }
+        guard makeJetClient != nil, !isPreviewSession else { return }
         if setupSnapshot == nil { setupState = .loading }
         do {
             let snapshot = try await client(for: localPlaneRegistryID).setupSnapshot()
+            setupRetryTask?.cancel()
+            setupRetryTask = nil
+            setupRetryAttempt = 0
             setupState = .ready(snapshot)
             updatePlane(localPlaneRegistryID) { plane in
                 plane.planeID = snapshot.status.planeID
@@ -689,18 +861,10 @@ final class DesktopSession {
                 plane.conversationCursor = snapshot.status.cursor
             }
             if snapshot.issue(for: .projects) == nil,
+               newTaskPlaneRegistryID == localPlaneRegistryID,
                !snapshot.projects.projects.contains(where: { $0.id == selectedProjectID })
             {
                 selectedProjectID = snapshot.projects.projects.first?.id
-            }
-            let needsProject = snapshot.issue(for: .projects) == nil
-                && snapshot.projects.projects.isEmpty
-            let needsAccount = snapshot.issue(for: .accounts) == nil
-                && snapshot.accounts.bindings.isEmpty
-            if openWhenIncomplete, needsProject || needsAccount
-            {
-                sidebarSelection = .project
-                isWorkPanelPresented = false
             }
         } catch {
             let failure = presentationError(error)
@@ -708,15 +872,38 @@ final class DesktopSession {
             updatePlane(localPlaneRegistryID) { plane in
                 plane.failure = failure
             }
-            connectionState = failure.retryable
-                ? .reconnecting(attempt: 1)
-                : .failed(failure)
+            scheduleSetupRetry(after: failure)
         }
         await loadRemotePlaneSnapshots()
     }
 
+    /// Retries a retryable setup failure at 2, 5 and 15 seconds. Reconnecting is
+    /// shown only while a retry is really scheduled; afterwards setup has failed.
+    func scheduleSetupRetry(after failure: JetPresentationError) {
+        setupRetryTask?.cancel()
+        setupRetryTask = nil
+        guard failure.retryable, setupRetryAttempt < setupRetryLimit else {
+            connectionState = .failed(failure)
+            return
+        }
+        setupRetryAttempt += 1
+        let delays = Self.setupRetryDelays
+        let delay = delays[min(setupRetryAttempt, delays.count) - 1]
+        connectionState = .reconnecting(attempt: setupRetryAttempt)
+        setupRetryTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self else { return }
+            self.setupRetryTask = nil
+            await self.loadSetup()
+            if self.setupSnapshot != nil { await self.loadConversations() }
+        }
+    }
+
+    /// Refreshes every computer's task list. A refresh never replaces New Task, a
+    /// project page, Jet Trash or the open task; selection falls back to New Task
+    /// only when the open task disappeared.
     func loadConversations(restoring restoredID: UUID? = nil) async {
-        guard makeJetClient != nil else { return }
+        guard makeJetClient != nil, !isPreviewSession else { return }
         conversationRequest += 1
         let request = conversationRequest
         if conversations.isEmpty { conversationFreshness = .loading }
@@ -799,10 +986,16 @@ final class DesktopSession {
             ? .live
             : (conversations.isEmpty ? .failed : .cached)
 
+        // New Task, a project page and Jet Trash keep their selection. The list
+        // shows load failures itself, so no composer notice is written here.
+        guard sidebarSelection == .conversation else { return }
         let previousConversationID = selectedConversationID
         let candidate = restoredID ?? selectedConversationID
         var restoredSnapshot: JetConversationSnapshot?
-        if let candidate, !conversations.contains(where: { $0.id == candidate }) {
+        if let candidate,
+           !conversations.contains(where: { $0.id == candidate }),
+           !trashedConversationIDs.contains(candidate)
+        {
             for (planeID, client) in targets {
                 if let snapshot = try? await client.conversation(candidate) {
                     restoredSnapshot = snapshot
@@ -813,38 +1006,72 @@ final class DesktopSession {
                 }
             }
         }
-        guard request == conversationRequest else { return }
-        let resolvedConversationID = candidate.flatMap { wanted in
-            conversations.contains(where: { $0.id == wanted }) ? wanted : nil
-        } ?? conversations.first?.id
-        if resolvedConversationID != previousConversationID {
-            detachCurrentTerminal()
-            timeline = []
-            conversationSnapshot = nil
-            resetWorkPanel()
+        // The person may have opened another task while this refresh waited; their
+        // choice stands and loads itself.
+        guard request == conversationRequest,
+              sidebarSelection == .conversation,
+              selectedConversationID == previousConversationID
+        else { return }
+        let resolvedConversationID = Self.resolveSelection(
+            candidate: candidate,
+            previous: previousConversationID,
+            available: conversations.map(\.id),
+            isNewTask: false
+        )
+        guard let resolvedConversationID else {
+            if successfulLoads < planes.count,
+               let candidate,
+               !trashedConversationIDs.contains(candidate)
+            {
+                // A computer couldn't be reached, so the task may still exist: keep it
+                // open with its saved view instead of calling it gone.
+                if candidate != previousConversationID { switchConversation(to: candidate) }
+                return
+            }
+            beginNewTask()
+            if candidate != nil {
+                composerNotice = ComposerNotice(
+                    kind: .info,
+                    text: String(localized: "That task is no longer available.")
+                )
+            }
+            return
         }
-        selectedConversationID = resolvedConversationID
+        if resolvedConversationID != previousConversationID {
+            switchConversation(to: resolvedConversationID)
+        }
         if let restoredSnapshot,
            restoredSnapshot.conversation.id == selectedConversationID
         {
             conversationSnapshot = restoredSnapshot
+            recordSelectedSnapshot(restoredSnapshot)
             await loadRunSupervision()
-        } else if selectedConversationID != nil {
-            await loadSelectedConversation()
         } else {
-            conversationSnapshot = nil
-            turnQueue = nil
-            runExecution = nil
-            resetWorkPanel()
-        }
-        if successfulLoads == 0, let failure = unavailablePlanes.first?.failure {
-            actionNotice = failure.message
+            await loadSelectedConversation()
         }
     }
 
+    /// The task a refresh keeps selected: the wanted task, else the one already
+    /// open, never another task and never a task while New Task is showing.
+    static func resolveSelection(
+        candidate: UUID?,
+        previous: UUID?,
+        available: [UUID],
+        isNewTask: Bool
+    ) -> UUID? {
+        guard !isNewTask else { return nil }
+        let available = Set(available)
+        if let candidate, available.contains(candidate) { return candidate }
+        if let previous, available.contains(previous) { return previous }
+        return nil
+    }
+
     func loadMoreConversations() async {
-        guard !planeNextConversationPages.isEmpty, conversationOperation == nil else { return }
-        conversationOperation = "page"
+        guard !isPreviewSession,
+              !planeNextConversationPages.isEmpty,
+              !isLoadingMoreConversations
+        else { return }
+        isLoadingMoreConversations = true
         let pending = planeNextConversationPages
         let loads = await withTaskGroup(
             of: PlaneConversationPageLoad.self,
@@ -907,10 +1134,13 @@ final class DesktopSession {
         rebuildConversationAggregation()
         nextConversationPage = planeNextConversationPages.values.first
         if requiresSnapshot { await loadConversations() }
-        conversationOperation = nil
+        isLoadingMoreConversations = false
     }
 
+    /// Searches every computer. Failures stay with the results; they never write
+    /// the composer notice.
     func searchConversations() async {
+        guard !isPreviewSession else { return }
         searchRequest += 1
         let request = searchRequest
         let text = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -995,25 +1225,81 @@ final class DesktopSession {
             indexedThrough: indexedThrough,
             failures: failures
         )
-        if hits.isEmpty, let failure = failures.values.first {
-            actionNotice = failure.message
-        }
         if request == searchRequest { searchIsLoading = false }
     }
 
+    /// Opens a task. State switches at once, showing the cached transcript; the
+    /// snapshot load is debounced by 150 ms so arrowing through rows stays calm.
     func selectConversation(_ conversationID: UUID) {
         if selectedConversationID != conversationID {
-            detachCurrentTerminal()
-            timeline = []
-            conversationSnapshot = nil
-            turnQueue = nil
-            runExecution = nil
-            resetWorkPanel()
+            switchConversation(to: conversationID)
         }
-        selectedConversationID = conversationID
         sidebarSelection = .conversation
-        actionNotice = nil
-        Task { await loadSelectedConversation() }
+        composerNotice = nil
+        markSelectedRepliesSeen()
+        statusStore.noteSelected(conversationID)
+        scheduleSelectedConversationLoad()
+    }
+
+    /// Replaces the open task's state with another task's, keeping the previous
+    /// transcript in the cache.
+    func switchConversation(to conversationID: UUID) {
+        stashSelectedTranscript()
+        detachCurrentTerminal()
+        selectionLoadTask?.cancel()
+        conversationSnapshot = nil
+        turnQueue = nil
+        runExecution = nil
+        resetWorkPanel()
+        selectedConversationID = conversationID
+        timeline = transcripts.entries(for: conversationID)
+        interruptThenReply = false
+        composerPlaceholderOverride = nil
+    }
+
+    /// Leaves the open task for New Task, a project page or Jet Trash.
+    func leaveConversation() {
+        stashSelectedTranscript()
+        detachCurrentTerminal()
+        selectionLoadTask?.cancel()
+        selectedConversationID = nil
+        conversationSnapshot = nil
+        turnQueue = nil
+        runExecution = nil
+        timeline = []
+        resetWorkPanel()
+        interruptThenReply = false
+        composerPlaceholderOverride = nil
+    }
+
+    /// Saves the open task's timeline into the transcript cache and marks the
+    /// replies the person saw there.
+    func stashSelectedTranscript() {
+        guard let selectedConversationID else { return }
+        markSelectedRepliesSeen()
+        transcripts.save(timeline, for: selectedConversationID)
+    }
+
+    /// The open task is read: its newest reply counts as seen. This runs when a task
+    /// is opened and left, not per Event, so streaming never writes preferences.
+    func markSelectedRepliesSeen() {
+        guard let selectedConversationID else { return }
+        let latestReply = max(
+            statusStore.facts[selectedConversationID]?.lastReplySequence ?? 0,
+            timeline.last { $0.kind == .agent }?.sequence ?? 0
+        )
+        if latestReply > 0 { memory.markSeen(selectedConversationID, sequence: latestReply) }
+    }
+
+    func scheduleSelectedConversationLoad() {
+        selectionGeneration += 1
+        let generation = selectionGeneration
+        selectionLoadTask?.cancel()
+        selectionLoadTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled, let self, self.selectionGeneration == generation else { return }
+            await self.loadSelectedConversation()
+        }
     }
 
     func selectSearchHit(_ hit: JetFederatedSearchHit) {
@@ -1021,32 +1307,67 @@ final class DesktopSession {
         selectConversation(hit.hit.conversationID)
     }
 
-    private func loadSelectedConversation() async {
-        guard let selectedConversationID else { return }
-        conversationOperation = "snapshot"
+    func loadSelectedConversation() async {
+        guard usesLivePlane, !isPreviewSession,
+              let selectedConversationID
+        else { return }
+        conversationRefreshes += 1
+        isRefreshingConversation = true
+        defer {
+            conversationRefreshes -= 1
+            isRefreshingConversation = conversationRefreshes > 0
+        }
         do {
             let snapshot = try await activeClient().conversation(selectedConversationID)
             guard self.selectedConversationID == selectedConversationID else { return }
             conversationSnapshot = snapshot
             mergeConversation(snapshot.conversation)
             conversationFreshness = .live
+            recordSelectedSnapshot(snapshot)
             await loadRunSupervision()
         } catch {
             guard self.selectedConversationID == selectedConversationID else { return }
             conversationFreshness = conversationSnapshot == nil ? .failed : .cached
-            actionNotice = presentationError(error).message
+            let failure = presentationError(error)
+            // Offline is shown by the banner and the send blocker, not a notice.
+            if failure.category != .offline {
+                composerNotice = ComposerNotice(
+                    kind: .warning,
+                    text: String(localized: "Jet couldn't refresh this task."),
+                    action: .tryAgainConnection
+                )
+            }
         }
-        conversationOperation = nil
+    }
+
+    /// Feeds a fresh snapshot of the open task to the status and transcript stores.
+    func recordSelectedSnapshot(_ snapshot: JetConversationSnapshot) {
+        let execution = runExecution?.run.conversationID == snapshot.conversation.id
+            ? runExecution
+            : nil
+        statusStore.record(
+            snapshot: snapshot,
+            execution: execution,
+            cursor: max(snapshot.cursor, execution?.cursor ?? 0)
+        )
+        let planeRegistryID = conversationPlaneRegistryIDs[snapshot.conversation.id]
+            ?? selectedPlaneRegistryID
+        transcripts.didLoad(
+            snapshot: snapshot,
+            planeRegistryID: planeRegistryID,
+            headCursor: planeConversationCursors[planeRegistryID] ?? snapshot.cursor
+        )
     }
 
     func loadRunSupervision() async {
+        guard !isPreviewSession else { return }
         guard usesLivePlane, let conversationID = selectedConversationID else {
             turnQueue = nil
             runExecution = nil
             return
         }
-        supervisionOperation = "refresh"
-        defer { supervisionOperation = nil }
+        // A background refresh never sets `supervisionOperation`, so it can't
+        // block Interrupt, Stop Assistant or Remove.
         do {
             let client = try await activeClient()
             async let queue = client.turnQueue(conversationID: conversationID)
@@ -1065,9 +1386,18 @@ final class DesktopSession {
                 turnQueue = nextQueue
                 runExecution = nil
             }
+            if let snapshot = conversationSnapshot, snapshot.conversation.id == conversationID {
+                recordSelectedSnapshot(snapshot)
+            }
         } catch {
             guard selectedConversationID == conversationID else { return }
-            actionNotice = presentationError(error).message
+            if presentationError(error).category != .offline {
+                composerNotice = ComposerNotice(
+                    kind: .warning,
+                    text: String(localized: "Jet couldn't refresh this task."),
+                    action: .tryAgainConnection
+                )
+            }
         }
         if selectedConversationID == conversationID, selectedRun != nil {
             await loadWorkPanel()
@@ -1077,6 +1407,7 @@ final class DesktopSession {
     }
 
     func loadWorkPanel(preserveContinuity: Bool = true) async {
+        guard !isPreviewSession else { return }
         guard usesLivePlane,
               let conversationID = selectedConversationID,
               let run = selectedRun
@@ -1091,9 +1422,10 @@ final class DesktopSession {
         workNotice = nil
         workNoticeError = nil
         let previousRunID = workDiff?.runID
-        if previousRunID != run.id {
+        if previousRunID != run.id, !keepsRequestedCheckpoint {
             checkpointKind = run.lifecycle.isLive ? .current : .final
         }
+        keepsRequestedCheckpoint = false
         let requestedScope = selectedChangeScope
         let previousTarget = workTarget
         let previousSelectedPath = preserveContinuity
@@ -1176,7 +1508,7 @@ final class DesktopSession {
                     }
                 } catch {
                     workTerminals = []
-                    workNotice = "Changes loaded, but Workspace terminals are unavailable."
+                    workNotice = String(localized: "Changes loaded, but terminals aren't available right now.")
                 }
             } else {
                 workTerminals = []
@@ -1196,6 +1528,7 @@ final class DesktopSession {
     }
 
     func loadGitDeliveries(startObservation: Bool = true) async {
+        guard !isPreviewSession else { return }
         guard usesLivePlane, let conversationID = selectedConversationID else {
             gitDeliveries = []
             gitDeliveryError = nil
@@ -1207,6 +1540,7 @@ final class DesktopSession {
             let deliveries = try await activeClient().gitDeliveries(
                 conversationID: conversationID
             )
+            statusStore.recordGitDeliveries(deliveries, conversationID: conversationID)
             guard selectedConversationID == conversationID else { return }
             gitDeliveries = deliveries
         } catch {
@@ -1237,10 +1571,10 @@ final class DesktopSession {
             gitDeliveryConfirmation = try makeGitDeliveryRequest()
         } catch let error as JetPresentationError {
             gitDeliveryError = error
-            gitDeliveryNotice = error.message
+            gitDeliveryNotice = plainMessage(for: error)
         } catch {
             gitDeliveryError = .invalidResponse
-            gitDeliveryNotice = JetPresentationError.invalidResponse.message
+            gitDeliveryNotice = plainMessage(for: .invalidResponse)
         }
     }
 
@@ -1296,11 +1630,11 @@ final class DesktopSession {
                 commandID: commandID
             )
             gitDeliveryAcknowledgementCommandIDs[delivery.id] = nil
-            gitDeliveryNotice = "The uncertain outcome was marked as reviewed. Jet did not repeat the Git operation."
+            gitDeliveryNotice = String(localized: "Marked as checked. Jet didn't repeat or undo the Git step.")
             await loadGitDeliveries()
         } catch {
             gitDeliveryError = presentationError(error)
-            gitDeliveryNotice = gitDeliveryError?.message
+            gitDeliveryNotice = gitDeliveryError.map(plainMessage(for:))
         }
         gitDeliveryOperation = nil
     }
@@ -1316,19 +1650,19 @@ final class DesktopSession {
         do {
             notificationAuthorization = try await notifications.requestAuthorization()
             if notificationAuthorization == .denied {
-                notificationError = "Notifications are denied in System Settings."
+                notificationError = String(localized: "Notifications are turned off for Jet in System Settings.")
             }
         } catch {
-            notificationError = "Jet could not update notification permission."
+            notificationError = String(localized: "Jet couldn't update notification permission.")
         }
         return notificationAuthorization.permitsDelivery
     }
 
-    private func makeGitDeliveryRequest() throws -> JetGitDeliveryRequest {
+    func makeGitDeliveryRequest() throws -> JetGitDeliveryRequest {
         guard let conversationID = selectedConversationID, let diff = workDiff else {
             throw JetPresentationError.invalidInput(
                 code: "git.checkpoint_unavailable",
-                message: "Load a retained Change checkpoint before delivery."
+                message: String(localized: "Load the changes before keeping them.")
             )
         }
         let operation: JetGitOperation
@@ -1341,7 +1675,7 @@ final class DesktopSession {
             guard diff.latestTurn > 0 else {
                 throw JetPresentationError.invalidInput(
                     code: "git.checkpoint_unavailable",
-                    message: "This Run has no retained Turn checkpoint to commit."
+                    message: String(localized: "No finished reply has changes to commit yet.")
                 )
             }
             operation = .commit
@@ -1353,7 +1687,7 @@ final class DesktopSession {
             guard diff.latestTurn > 0 else {
                 throw JetPresentationError.invalidInput(
                     code: "git.checkpoint_unavailable",
-                    message: "This Run has no retained Turn checkpoint for a pull request."
+                    message: String(localized: "No finished reply has changes for a pull request yet.")
                 )
             }
             let remote = try validatedGitInput(gitRemoteName, label: "remote")
@@ -1370,54 +1704,59 @@ final class DesktopSession {
         )
     }
 
-    private func validatedGitInput(_ value: String, label: String) throws -> String {
+    func validatedGitInput(_ value: String, label: String) throws -> String {
         guard !value.isEmpty,
               value.utf8.count <= 255,
               !value.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.contains),
               !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
         else {
+            let message = switch label {
+            case "branch": String(localized: "Enter a branch name without spaces, up to 255 bytes.")
+            case "remote": String(localized: "Enter a remote name without spaces, up to 255 bytes.")
+            default: String(localized: "Enter a base branch without spaces, up to 255 bytes.")
+            }
             throw JetPresentationError.invalidInput(
                 code: "git.\(label.replacingOccurrences(of: " ", with: "_"))_invalid",
-                message: "Enter a \(label) using 1 to 255 UTF-8 bytes without whitespace or control characters."
+                message: message
             )
         }
         return value
     }
 
-    private func submitPendingGitDelivery() async {
+    func submitPendingGitDelivery() async {
         guard let pendingGitDelivery else { return }
         gitDeliveryOperation = "submit"
         gitDeliveryNotice = nil
         gitDeliveryError = nil
         do {
-            let queued = try await activeClient().deliverGit(
+            _ = try await activeClient().deliverGit(
                 pendingGitDelivery.request,
                 commandID: pendingGitDelivery.commandID
             )
             self.pendingGitDelivery = nil
             gitDeliveryAdmissionUncertain = nil
-            gitDeliveryNotice = "Delivery \(queued.deliveryID.uuidString.prefix(8)) was queued. Its durable outcome appears below."
+            gitDeliveryNotice = String(localized: "Jet started this Git step. Its result appears below.")
             await loadGitDeliveries()
         } catch let failure as JetClientFailure {
             guard case .commandOutcomeUnknown = failure else {
                 self.pendingGitDelivery = nil
                 gitDeliveryError = presentationError(failure)
-                gitDeliveryNotice = gitDeliveryError?.message
+                gitDeliveryNotice = gitDeliveryError.map(plainMessage(for:))
                 gitDeliveryOperation = nil
                 return
             }
             gitDeliveryAdmissionUncertain = pendingGitDelivery.request
             gitDeliveryError = presentationError(failure)
-            gitDeliveryNotice = "Jet could not confirm whether the Plane admitted this request. Check delivery history before retrying the same request."
+            gitDeliveryNotice = String(localized: "Jet couldn't confirm it received the request. Check the status before sending the same request again.")
         } catch {
             self.pendingGitDelivery = nil
             gitDeliveryError = presentationError(error)
-            gitDeliveryNotice = gitDeliveryError?.message
+            gitDeliveryNotice = gitDeliveryError.map(plainMessage(for:))
         }
         gitDeliveryOperation = nil
     }
 
-    private func startGitDeliveryObservationIfNeeded() {
+    func startGitDeliveryObservationIfNeeded() {
         gitDeliveryObservationTask?.cancel()
         guard gitDeliveries.contains(where: { $0.outcome == .pending }),
               let conversationID = selectedConversationID
@@ -1462,7 +1801,7 @@ final class DesktopSession {
             await loadRunSupervision()
         case let .resumeEvents(after):
             observeEvents(for: selectedPlaneRegistryID, after: after)
-            workNotice = "Activity reconnected from the requested checkpoint."
+            workNotice = String(localized: "Activity reconnected.")
         }
     }
 
@@ -1484,7 +1823,7 @@ final class DesktopSession {
             workNextPage = page.nextPage
         } catch {
             let failure = presentationError(error)
-            workNotice = failure.message
+            workNotice = plainMessage(for: failure)
             workNoticeError = failure
             applyRevisionConflict(failure)
             if failure.restart?.requiresPaginationSnapshot == true {
@@ -1525,7 +1864,7 @@ final class DesktopSession {
                 guard digest == diff.artifact.sha256 else {
                     throw JetClientFailure.presentation(.invalidResponse)
                 }
-                workNotice = "The complete patch was verified."
+                workNotice = String(localized: "All changes loaded.")
             }
         } catch {
             recordWorkFailure(error)
@@ -1597,7 +1936,7 @@ final class DesktopSession {
                 revision: revision
             )
             pendingWorkEdit = nil
-            workNotice = "Saved through the selected Workspace."
+            workNotice = String(localized: "Saved.")
         } catch {
             recordWorkFailure(error)
         }
@@ -1641,7 +1980,7 @@ final class DesktopSession {
             )
             pendingReview = nil
             reviewComment = ""
-            workNotice = "The review comment was added as one queued Turn."
+            workNotice = String(localized: "Comment sent as a message.")
             await loadRunSupervision()
         } catch {
             recordWorkFailure(error)
@@ -1727,7 +2066,7 @@ final class DesktopSession {
             if let index = workTerminals.firstIndex(where: { $0.id == terminalID }) {
                 workTerminals[index] = terminal
             }
-            workNotice = "The Workspace terminal was closed."
+            workNotice = String(localized: "Terminal closed.")
         } catch {
             recordWorkFailure(error)
         }
@@ -1758,7 +2097,7 @@ final class DesktopSession {
         Task { await resizeAttachedTerminal() }
     }
 
-    private func resizeAttachedTerminal() async {
+    func resizeAttachedTerminal() async {
         guard let terminalID = attachedTerminalID else { return }
         if let lastTerminalSize,
            lastTerminalSize.terminalID == terminalID,
@@ -1779,7 +2118,7 @@ final class DesktopSession {
         }
     }
 
-    private func receiveTerminal(_ event: JetTerminalEvent, terminalID: UUID) {
+    func receiveTerminal(_ event: JetTerminalEvent, terminalID: UUID) {
         guard terminalStreamTerminalID == terminalID else { return }
         switch event {
         case .attached:
@@ -1813,19 +2152,28 @@ final class DesktopSession {
             }
             attachedTerminalID = nil
             terminalStreamTerminalID = nil
-            workNotice = "The terminal session finished."
+            workNotice = String(localized: "Terminal session ended.")
         }
     }
 
+    /// Removes a waiting message and puts its text back into an empty composer.
     func withdrawTurn(_ turn: JetTurnQueueEntry) async {
+        await removeQueuedMessage(turn)
+    }
+
+    /// Sends `withdraw_turn` with a retained Command ID. Returns true once the core
+    /// accepted it.
+    @discardableResult
+    func performWithdrawal(_ turn: JetTurnQueueEntry) async -> Bool {
         guard supervisionOperation == nil,
               turn.withdrawable,
               turn.state == .queued,
               let conversationID = selectedConversationID
         else {
-            return
+            return false
         }
         supervisionOperation = "withdraw"
+        defer { supervisionOperation = nil }
         let commandID = withdrawalCommandIDs[turn.id] ?? UUID()
         withdrawalCommandIDs[turn.id] = commandID
         do {
@@ -1835,23 +2183,23 @@ final class DesktopSession {
                 commandID: commandID
             )
             withdrawalCommandIDs.removeValue(forKey: turn.id)
-            actionNotice = "The queued Turn was withdrawn."
             await loadRunSupervision()
+            return true
         } catch {
-            actionNotice = presentationError(error).message
+            composerNotice = failureNotice(for: error)
+            return false
         }
-        supervisionOperation = nil
     }
 
+    /// Asks for confirmation of Interrupt or Stop Assistant. Neither opens Details.
     func requestRunControl(_ control: JetRunControl) {
         guard (control == .interruptTurn ? canInterruptTurn : canStopRun) else { return }
         runControlConfirmation = control
-        selectedWorkPanel = .run
-        isWorkPanelPresented = true
     }
 
     func cancelRunControl() {
         runControlConfirmation = nil
+        interruptThenReply = false
     }
 
     func confirmRunControl() async {
@@ -1873,12 +2221,25 @@ final class DesktopSession {
             )
             runControlCommandIDs.removeValue(forKey: key)
             runControlConfirmation = nil
-            actionNotice = control == .interruptTurn
-                ? "Interrupt requested. Waiting for the active Turn to end."
-                : "Stop requested. Waiting for the Run to end."
+            if control == .interruptTurn {
+                composerNotice = ComposerNotice(kind: .info, text: String(localized: "Interrupting…"))
+                if interruptThenReply {
+                    composerPlaceholderOverride = selectedAssistantName.map {
+                        String(localized: "Tell \($0) what to do instead…")
+                    } ?? String(localized: "Tell the assistant what to do instead…")
+                }
+                interruptThenReply = false
+                composerFocusRequest += 1
+            } else {
+                composerNotice = ComposerNotice(
+                    kind: .info,
+                    text: selectedAssistantName.map { String(localized: "Stopping \($0)…") }
+                        ?? String(localized: "Stopping the assistant…")
+                )
+            }
             await loadRunSupervision()
         } catch {
-            actionNotice = presentationError(error).message
+            composerNotice = failureNotice(for: error)
         }
         supervisionOperation = nil
     }
@@ -1901,7 +2262,10 @@ final class DesktopSession {
                 commandID: commandID
             )
             approvalRetryCommandIDs.removeValue(forKey: reviewID)
-            actionNotice = "One exact review retry was authorized."
+            composerNotice = ComposerNotice(
+                kind: .confirmation,
+                text: String(localized: "The safety reviewer will check this request again.")
+            )
             if let index = timeline.firstIndex(where: { $0.approval?.reviewID == reviewID }),
                let existing = timeline[index].approval
             {
@@ -1920,12 +2284,13 @@ final class DesktopSession {
                 )
             }
         } catch {
-            actionNotice = presentationError(error).message
+            composerNotice = failureNotice(for: error)
         }
         supervisionOperation = nil
     }
 
     func requestAddProject() {
+        leaveConversation()
         newTaskPlaneRegistryID = localPlaneRegistryID
         sidebarSelection = .project
         isWorkPanelPresented = false
@@ -1934,6 +2299,7 @@ final class DesktopSession {
     }
 
     func showProjects() {
+        leaveConversation()
         newTaskPlaneRegistryID = localPlaneRegistryID
         sidebarSelection = .project
         isWorkPanelPresented = false
@@ -1952,6 +2318,7 @@ final class DesktopSession {
         else {
             return
         }
+        leaveConversation()
         newTaskPlaneRegistryID = planeRegistryID
         selectedProjectID = projectID
         sidebarSelection = .project
@@ -1968,7 +2335,7 @@ final class DesktopSession {
             projectPreview = try await activeClient().previewProject(path: url.path)
             registrationCommandID = UUID()
         } catch {
-            setupNotice = presentationError(error).message
+            setupNotice = plainMessage(for: presentationError(error))
         }
         setupOperation = nil
     }
@@ -1983,11 +2350,11 @@ final class DesktopSession {
                 commandID: registrationCommandID
             )
             self.projectPreview = nil
-            setupNotice = "\(project.name) is ready."
+            setupNotice = String(localized: "Added “\(project.name)”.")
             await loadSetup()
             selectedProjectID = project.id
         } catch {
-            setupNotice = presentationError(error).message
+            setupNotice = plainMessage(for: presentationError(error))
         }
         setupOperation = nil
     }
@@ -2002,7 +2369,7 @@ final class DesktopSession {
             removalTrashCommandID = UUID()
             removalPermanentCommandID = UUID()
         } catch {
-            setupNotice = presentationError(error).message
+            setupNotice = plainMessage(for: presentationError(error))
         }
         setupOperation = nil
     }
@@ -2030,13 +2397,13 @@ final class DesktopSession {
             permanentRemovalAllowed = false
             let name = URL(fileURLWithPath: removed.root).lastPathComponent
             setupNotice = removed.disposition == "trashed"
-                ? "\(name) was moved to Trash."
-                : "\(name) was deleted."
+                ? String(localized: "Moved the “\(name)” folder to the Trash.")
+                : String(localized: "Deleted the “\(name)” folder.")
             await loadSetup()
         } catch {
             let failure = presentationError(error)
             permanentRemovalAllowed = failure.code == "project.trash_unavailable"
-            setupNotice = failure.message
+            setupNotice = plainMessage(for: failure)
         }
         setupOperation = nil
     }
@@ -2053,24 +2420,31 @@ final class DesktopSession {
                 commandID: commandID
             )
             accountCommandIDs.removeValue(forKey: provider.provider)
-            setupNotice = "\(binding.label) is connected."
+            setupNotice = String(localized: "\(binding.label) is connected.")
             await loadSetup()
         } catch {
-            setupNotice = presentationError(error).message
+            setupNotice = plainMessage(for: presentationError(error))
         }
         setupOperation = nil
     }
 
     func skipRemotePairing() {
         remotePairingSkipped = true
-        setupNotice = "Remote pairing was skipped. You can return here at any time."
+        setupNotice = String(localized: "You can connect another computer later in Settings.")
     }
 
     func chooseNewTaskPlane(_ planeRegistryID: UUID) {
         guard let plane = planes.first(where: { $0.id == planeRegistryID }) else { return }
+        let changed = newTaskPlaneRegistryID != planeRegistryID
         newTaskPlaneRegistryID = planeRegistryID
-        selectedProjectID = plane.snapshot?.projects.projects.first?.id
-        actionNotice = nil
+        let project = plane.snapshot?.projects.projects.first
+        selectedProjectID = project?.id
+        composerNotice = changed ? project.map {
+            ComposerNotice(
+                kind: .info,
+                text: String(localized: "Project changed to \($0.name) on \(plane.name).")
+            )
+        } : nil
     }
 
     func refreshPlanes() async {
@@ -2097,10 +2471,10 @@ final class DesktopSession {
             }
             await loadPlaneSnapshot(planeRegistryID)
             remotePairingNotice = open
-                ? "This Plane now accepts one new pairing."
-                : "This Plane no longer accepts new pairings."
+                ? String(localized: "This computer now accepts one new connection.")
+                : String(localized: "This computer no longer accepts new connections.")
         } catch {
-            remotePairingNotice = presentationError(error).message
+            remotePairingNotice = plainMessage(for: presentationError(error))
         }
         remotePairingOperation = nil
     }
@@ -2128,7 +2502,7 @@ final class DesktopSession {
             openPairingCommandIDs.removeValue(forKey: planeRegistryID)
             await loadPlaneSnapshot(planeRegistryID)
         } catch {
-            remotePairingNotice = presentationError(error).message
+            remotePairingNotice = plainMessage(for: presentationError(error))
         }
         remotePairingOperation = nil
     }
@@ -2155,9 +2529,9 @@ final class DesktopSession {
             )
             confirmPairingCommandIDs.removeValue(forKey: intent)
             await loadPlaneSnapshot(planeRegistryID)
-            remotePairingNotice = "The target confirmed the matching authentication string."
+            remotePairingNotice = String(localized: "The other computer confirmed the matching words.")
         } catch {
-            remotePairingNotice = presentationError(error).message
+            remotePairingNotice = plainMessage(for: presentationError(error))
         }
         remotePairingOperation = nil
     }
@@ -2187,10 +2561,10 @@ final class DesktopSession {
             pairedClientAccessCommandIDs.removeValue(forKey: intent)
             await loadPlaneSnapshot(planeRegistryID)
             remotePairingNotice = enabled
-                ? "The client can control this Plane again."
-                : "The client was disabled. Its key remains paired."
+                ? String(localized: "That Jet app can connect again.")
+                : String(localized: "That Jet app is turned off. It stays paired.")
         } catch {
-            remotePairingNotice = presentationError(error).message
+            remotePairingNotice = plainMessage(for: presentationError(error))
         }
         remotePairingOperation = nil
     }
@@ -2229,9 +2603,9 @@ final class DesktopSession {
             pairedClientRevokeCommandIDs.removeValue(forKey: intent)
             cancelPairedClientRevocation()
             await loadPlaneSnapshot(planeRegistryID)
-            remotePairingNotice = "The client key was revoked from this Plane."
+            remotePairingNotice = String(localized: "That Jet app can no longer connect.")
         } catch {
-            remotePairingNotice = presentationError(error).message
+            remotePairingNotice = plainMessage(for: presentationError(error))
         }
         remotePairingOperation = nil
     }
@@ -2251,9 +2625,9 @@ final class DesktopSession {
             )
             // The one-time secret is no longer needed after a successful claim.
             remotePairingSecret = ""
-            remotePairingNotice = "Compare this authentication string on both devices, then confirm it on the target Plane."
+            remotePairingNotice = String(localized: "Check that both computers show the same words, then confirm on the other computer.")
         } catch {
-            remotePairingNotice = presentationError(error).message
+            remotePairingNotice = plainMessage(for: presentationError(error))
         }
         remotePairingOperation = nil
     }
@@ -2303,11 +2677,11 @@ final class DesktopSession {
             saveRemoteProfiles(remoteProfiles)
             remotePairingClaim = nil
             remotePairingSecret = ""
-            newTaskPlaneRegistryID = profileID
+            // Pairing never switches the computer New Task uses.
             await loadPlaneSnapshot(profileID)
-            remotePairingNotice = "The remote Plane is paired and uses encrypted SSH standard I/O."
+            remotePairingNotice = String(localized: "Connected. New tasks still start on This Mac.")
         } catch {
-            remotePairingNotice = presentationError(error).message
+            remotePairingNotice = plainMessage(for: presentationError(error))
         }
         remotePairingOperation = nil
     }
@@ -2355,12 +2729,14 @@ final class DesktopSession {
         }
         saveRemoteProfiles(remoteProfiles)
         rebuildConversationAggregation()
-        remotePairingNotice = "The SSH connection was removed from this Mac. The target still retains its pairing until an owner revokes it there."
+        remotePairingNotice = String(localized: "Removed from this Mac. Its tasks stay on that computer.")
     }
 
+    /// Restores the scene. Retired destinations (search, needs attention,
+    /// schedules and computers) reopen the last task instead.
     func restore(selection: String, workPanel: String, panelPresented: Bool) {
         if let selection = SidebarDestination(rawValue: selection) {
-            sidebarSelection = selection
+            sidebarSelection = selection.restoresAsConversation ? .conversation : selection
         }
         if let workPanel = WorkPanelTab(rawValue: workPanel) {
             selectedWorkPanel = workPanel
@@ -2370,47 +2746,36 @@ final class DesktopSession {
     }
 
     func beginNewTask() {
-        detachCurrentTerminal()
+        leaveConversation()
         sidebarSelection = .newTask
-        selectedConversationID = nil
-        conversationSnapshot = nil
-        turnQueue = nil
-        runExecution = nil
-        timeline = []
-        resetWorkPanel()
         isWorkPanelPresented = false
-        actionNotice = nil
+        composerNotice = nil
         composerFocusRequest += 1
     }
 
     func selectSearch() {
         sidebarSelection = .search
         isWorkPanelPresented = false
-        actionNotice = nil
+        composerNotice = nil
     }
 
     func applySidebarSelection() {
-        actionNotice = nil
+        composerNotice = nil
         switch sidebarSelection {
         case .newTask:
-            detachCurrentTerminal()
-            selectedConversationID = nil
-            conversationSnapshot = nil
-            turnQueue = nil
-            runExecution = nil
-            timeline = []
-            resetWorkPanel()
+            leaveConversation()
             isWorkPanelPresented = false
             composerFocusRequest += 1
         case .search:
             isWorkPanelPresented = false
         case .needsAttention:
             if usesLivePlane {
-                actionNotice = attentionCount == 0
-                    ? "No current Run needs attention."
-                    : "Showing the selected Run items that need attention."
-                selectedWorkPanel = .run
-                isWorkPanelPresented = true
+                // Open the first task that needs you, otherwise New Task.
+                if let conversationID = needsYouConversationIDs.first {
+                    selectConversation(conversationID)
+                } else {
+                    beginNewTask()
+                }
             } else {
                 showScenario(.approval, fallback: .recovery)
                 isWorkPanelPresented = true
@@ -2421,17 +2786,21 @@ final class DesktopSession {
         case .conversation:
             break
         case .schedules:
-            actionNotice = "Schedules are managed in Work Settings on macOS."
+            break
         case .planes:
+            isWorkPanelPresented = false
+        case .trash:
+            leaveConversation()
             isWorkPanelPresented = false
         }
     }
 
+    /// Renames the open task against the revision the person saw.
     func renameTask(_ name: String, revision: UInt64, commandID: UUID) async -> Bool {
         guard let conversation = selectedConversation,
-              planeIsConnected, conversationOperation == nil else { return false }
-        conversationOperation = "rename"
-        defer { conversationOperation = nil }
+              planeIsConnected, userOperation == nil else { return false }
+        userOperation = .renaming
+        defer { userOperation = nil }
         do {
             let client = try await activeClient()
             let updated = try await client.renameConversation(id: conversation.id, revision: revision, name: name, commandID: commandID)
@@ -2442,37 +2811,40 @@ final class DesktopSession {
             let failure = presentationError(error)
             if failure.category == .conflict {
                 await loadSelectedConversation()
-                actionNotice = "This task changed. Use its latest version before saving. Your new name was kept."
+                composerNotice = ComposerNotice(
+                    kind: .warning,
+                    text: String(localized: "This task changed while you were renaming it. Your new name was kept; save it again.")
+                )
             } else {
-                actionNotice = failure.message
+                composerNotice = failureNotice(for: failure)
             }
             return false
         }
     }
 
+    /// Sends the draft. A task that already has a Run continues with
+    /// `submit_turn`, so the core resumes the same assistant; `start_run` starts
+    /// only a task's first Run. A new task's draft moves to that task once it
+    /// exists and clears only after the core accepted the message.
     func submitDraft() async {
-        guard canSubmitDraft, conversationOperation == nil else { return }
-        guard planeIsConnected else {
-            actionNotice = "Reconnect to the Plane before sending. Your draft was kept."
+        guard userOperation == nil else { return }
+        if let blocker = sendBlocker {
+            if let message = blocker.message {
+                composerNotice = ComposerNotice(kind: .warning, text: message, action: blocker.action)
+            }
             return
         }
-        guard let craft = selectedCraftID else {
-            actionNotice = "Install an available Craft before starting work."
-            return
-        }
-
-        conversationOperation = "send"
-        actionNotice = nil
-        actionError = nil
+        guard let route = sendRoute else { return }
         let prompt = draft
+        let craft = selectedCraftID
+        userOperation = route == .startRun ? .starting : .sending
+        defer { userOperation = nil }
+        composerNotice = nil
+        actionError = nil
         do {
             var conversationID = selectedConversationID
             if conversationID == nil {
-                guard let selectedProjectID else {
-                    actionNotice = "Choose a Project before starting a task."
-                    conversationOperation = nil
-                    return
-                }
+                guard let selectedProjectID else { return }
                 if createCommandProjectID != selectedProjectID {
                     createCommandProjectID = selectedProjectID
                     createCommandID = UUID()
@@ -2484,18 +2856,18 @@ final class DesktopSession {
                 createCommandProjectID = nil
                 createCommandID = UUID()
                 mergeConversation(conversation)
-                conversationID = conversation.id
-                self.selectedConversationID = conversation.id
+                // This client created the task, so it sees its whole history.
+                transcripts.markObservedStart(conversation.id)
+                moveNewTaskDraft(to: conversation.id)
+                switchConversation(to: conversation.id)
                 sidebarSelection = .conversation
+                conversationID = conversation.id
                 conversationSnapshot = try await activeClient().conversation(conversation.id)
             }
+            guard let conversationID else { return }
 
-            guard let conversationID else {
-                conversationOperation = nil
-                actionNotice = "Jet could not prepare this Conversation. Try again."
-                return
-            }
-            if hasLiveRun {
+            switch route {
+            case .submitTurn:
                 let pending = pendingTurnFor(
                     conversationID: conversationID,
                     prompt: prompt
@@ -2506,7 +2878,13 @@ final class DesktopSession {
                     commandID: pending.commandID
                 )
                 pendingTurn = nil
-            } else {
+            case .startRun:
+                guard let craft else {
+                    throw JetPresentationError.invalidInput(
+                        code: "craft.unavailable",
+                        message: String(localized: "Install Claude Code or Codex to start.")
+                    )
+                }
                 let pending = pendingStartFor(
                     conversationID: conversationID,
                     craft: craft,
@@ -2519,27 +2897,41 @@ final class DesktopSession {
                     commandID: pending.commandID
                 )
                 pendingStart = nil
+                memory.recordAssistant(craft, for: conversationID)
             }
-            if draft == prompt && selectedConversationID == conversationID { draft = "" }
-            actionNotice = "Message sent. Jet will pick it up in order."
+            clearSentDraft(prompt, for: conversationID)
+            if selectedConversationID == conversationID { composerPlaceholderOverride = nil }
+            userOperation = nil
             await loadSelectedConversation()
         } catch {
             let failure = presentationError(error)
             actionError = failure
-            actionNotice = failure.message
+            composerNotice = failureNotice(for: failure)
+            userOperation = nil
             await loadConversations()
         }
-        conversationOperation = nil
+    }
+
+    /// A task created from New Task takes the New Task draft with it.
+    func moveNewTaskDraft(to conversationID: UUID) {
+        guard let text = drafts.removeValue(forKey: .newTask) else { return }
+        drafts[.conversation(conversationID)] = text
+    }
+
+    /// Clears a task's draft after the core accepted it, unless it was edited since.
+    func clearSentDraft(_ prompt: String, for conversationID: UUID) {
+        let key = DraftKey.conversation(conversationID)
+        if drafts[key] == prompt { drafts.removeValue(forKey: key) }
     }
 
     func showFixture(_ state: DesktopFixtureState) {
-        actionNotice = nil
+        composerNotice = nil
         showScenario(state)
     }
 
     func conversationPlaneName(_ conversationID: UUID) -> String {
         guard let planeRegistryID = conversationPlaneRegistryIDs[conversationID] else {
-            return "Plane"
+            return String(localized: "Computer")
         }
         return planeName(planeRegistryID)
     }
@@ -2550,7 +2942,7 @@ final class DesktopSession {
         Task { await loadFoundationFixture() }
     }
 
-    private func resetWorkPanel() {
+    func resetWorkPanel() {
         workRequest += 1
         workFileRequest += 1
         workDiff = nil
@@ -2592,7 +2984,7 @@ final class DesktopSession {
         detachCurrentTerminal()
     }
 
-    private func detachCurrentTerminal() {
+    func detachCurrentTerminal() {
         terminalObservationTask?.cancel()
         terminalObservationTask = nil
         let terminalID = terminalStreamTerminalID
@@ -2606,14 +2998,14 @@ final class DesktopSession {
         }
     }
 
-    private func recordWorkFailure(_ error: Error) {
+    func recordWorkFailure(_ error: Error) {
         let failure = presentationError(error)
-        workNotice = failure.message
+        workNotice = plainMessage(for: failure)
         workNoticeError = failure
         applyRevisionConflict(failure)
     }
 
-    private func applyRevisionConflict(_ error: JetPresentationError) {
+    func applyRevisionConflict(_ error: JetPresentationError) {
         guard let conflict = error.revisionConflict else { return }
         switch conflict.safeState {
         case let .conversation(id, revision):
@@ -2666,7 +3058,7 @@ final class DesktopSession {
         }
     }
 
-    private func mergeConversation(_ conversation: JetConversationSummary) {
+    func mergeConversation(_ conversation: JetConversationSummary) {
         let planeRegistryID = selectedPlaneRegistryID
         conversationPlaneRegistryIDs[conversation.id] = planeRegistryID
         if let index = planeConversations[planeRegistryID, default: []]
@@ -2679,7 +3071,7 @@ final class DesktopSession {
         rebuildConversationAggregation()
     }
 
-    private func pendingStartFor(
+    func pendingStartFor(
         conversationID: UUID,
         craft: String,
         prompt: String
@@ -2701,7 +3093,7 @@ final class DesktopSession {
         return pending
     }
 
-    private func pendingTurnFor(
+    func pendingTurnFor(
         conversationID: UUID,
         prompt: String
     ) -> PendingTurn {
@@ -2720,8 +3112,8 @@ final class DesktopSession {
         return pending
     }
 
-    private func observeEvents(for planeRegistryID: UUID, after initialCursor: UInt64) {
-        guard eventObservationTasks[planeRegistryID] == nil else { return }
+    func observeEvents(for planeRegistryID: UUID, after initialCursor: UInt64) {
+        guard !isPreviewSession, eventObservationTasks[planeRegistryID] == nil else { return }
         eventObservationTasks[planeRegistryID] = Task { [weak self] in
             guard let self else { return }
             var cursor = initialCursor
@@ -2743,17 +3135,25 @@ final class DesktopSession {
                     let failure = presentationError(error)
                     updatePlane(planeRegistryID) { $0.failure = failure }
                     if failure.restart?.requiresEventSnapshot == true {
-                        if selectedPlaneRegistryID == planeRegistryID {
+                        // Events were missed, so cached status and transcripts for this
+                        // computer can no longer be trusted to be continuous.
+                        let affected = conversationIDs(on: planeRegistryID)
+                        statusStore.reset(conversationIDs: affected)
+                        transcripts.reset(conversationIDs: affected)
+                        if selectedPlaneRegistryID == planeRegistryID, selectedConversationID != nil {
                             timeline = []
-                            actionNotice = "The activity cursor expired on \(planeName(planeRegistryID)). Jet refreshed its task snapshot."
+                            composerNotice = ComposerNotice(
+                                kind: .info,
+                                text: String(localized: "Jet refreshed this task.")
+                            )
                         }
                         await loadConversations()
                         cursor = planeConversationCursors[planeRegistryID] ?? 0
                         continue
                     }
-                    if selectedPlaneRegistryID == planeRegistryID {
-                        if conversationSnapshot != nil { conversationFreshness = .cached }
-                        actionNotice = failure.message
+                    // The banner and the status show that this view is saved, not live.
+                    if selectedPlaneRegistryID == planeRegistryID, conversationSnapshot != nil {
+                        conversationFreshness = .cached
                     }
                     try? await Task.sleep(for: .seconds(1))
                 }
@@ -2761,92 +3161,104 @@ final class DesktopSession {
         }
     }
 
-    private func receive(_ event: JetEvent, from planeRegistryID: UUID) async {
-        await deliverNotificationIfNeeded(for: event)
-        if event.conversationID == selectedConversationID,
-           selectedPlaneRegistryID == planeRegistryID
-        {
-            let projections = event.timelineProjections()
-            if projections.isEmpty {
-                groupRawEvent(sequence: event.sequence)
-            } else {
-                for projection in projections {
-                    mergeTimeline(projection)
+    /// Every Conversation this session knows on one computer.
+    func conversationIDs(on planeRegistryID: UUID) -> [UUID] {
+        var ids = planeConversations[planeRegistryID, default: []].map(\.id)
+        let known = Set(ids)
+        ids += conversationPlaneRegistryIDs
+            .filter { $0.value == planeRegistryID && !known.contains($0.key) }
+            .map(\.key)
+        return ids
+    }
+
+    func receive(_ event: JetEvent, from planeRegistryID: UUID) async {
+        statusStore.record(event, planeRegistryID: planeRegistryID)
+        await notificationRouter.handle(event, planeRegistryID: planeRegistryID)
+        let projections = Self.stamped(event.timelineProjections(), from: event)
+        if let conversationID = event.conversationID {
+            if conversationID == selectedConversationID,
+               selectedPlaneRegistryID == planeRegistryID
+            {
+                var dropped = false
+                if projections.isEmpty {
+                    dropped = TranscriptStore.groupRaw(sequence: event.sequence, into: &timeline)
+                } else {
+                    for projection in projections {
+                        dropped = TranscriptStore.merge(projection, into: &timeline) || dropped
+                    }
                 }
+                transcripts.save(timeline, for: conversationID)
+                if dropped { transcripts.markPartial(conversationID) }
+                if event.kind == "run.lifecycle_changed"
+                    || event.kind == "run.activity_changed"
+                    || event.kind == "turn.changed"
+                {
+                    await loadSelectedConversation()
+                } else if event.kind.hasPrefix("approval.")
+                    || event.kind == "run.control_requested"
+                    || event.kind == "run.terminated"
+                {
+                    await loadRunSupervision()
+                }
+            } else {
+                transcripts.ingest(
+                    projections: projections,
+                    rawSequence: event.sequence,
+                    conversationID: conversationID
+                )
             }
-            if event.kind == "run.lifecycle_changed"
-                || event.kind == "run.activity_changed"
-                || event.kind == "turn.changed"
-            {
-                await loadSelectedConversation()
-            } else if event.kind.hasPrefix("approval.")
-                || event.kind == "run.control_requested"
-                || event.kind == "run.terminated"
-            {
-                await loadRunSupervision()
+            switch event.kind {
+            case "conversation.created":
+                transcripts.markObservedStart(conversationID)
+            case "conversation.trashed":
+                trashedConversationIDs.insert(conversationID)
+                statusStore.remove(conversationID)
+                transcripts.remove(conversationID)
+            case "conversation.restored":
+                trashedConversationIDs.remove(conversationID)
+            default:
+                break
             }
         }
-        if ["conversation.created", "conversation.name_changed", "conversation.trashed"]
-            .contains(event.kind)
-        {
+        if [
+            "conversation.created",
+            "conversation.name_changed",
+            "conversation.trashed",
+            "conversation.restored",
+        ].contains(event.kind) {
             await loadConversations()
         }
     }
 
-    private func deliverNotificationIfNeeded(for event: JetEvent) async {
-        guard let notifications,
-              let kind = event.notificationKind(),
-              notificationPreference(kind),
-              let conversationID = event.conversationID
-        else { return }
-        do {
-            try await notifications.deliver(
-                JetUserNotification(
-                    eventID: event.eventID,
-                    conversationID: conversationID,
-                    kind: kind
-                )
-            )
-        } catch {
-            notificationError = "Jet could not deliver a desktop notification."
+    /// Adds the Event's time, Run and checkpoint Turn to its projections.
+    static func stamped(_ projections: [JetTimelineEntry], from event: JetEvent) -> [JetTimelineEntry] {
+        guard !projections.isEmpty else { return projections }
+        let checkpointTurn = event.kind == "change.checkpoint_recorded"
+            ? checkpointTurn(of: event)
+            : nil
+        return projections.map { projection in
+            var entry = projection
+            if entry.recordedAtUnixMilliseconds == nil {
+                entry.recordedAtUnixMilliseconds = event.recordedAtUnixMilliseconds
+            }
+            if entry.runID == nil { entry.runID = event.runID }
+            if entry.checkpointTurn == nil { entry.checkpointTurn = checkpointTurn }
+            return entry
         }
     }
 
-    private func mergeTimeline(_ entry: JetTimelineEntry) {
-        if entry.kind == .approval,
-           let index = timeline.firstIndex(where: { $0.id == entry.id })
-        {
-            timeline[index] = entry
-        } else if entry.kind == .user,
-           let index = timeline.firstIndex(where: { $0.id == entry.id })
-        {
-            timeline[index].text += entry.text
-            timeline[index].sequence = entry.sequence
-        } else {
-            timeline.append(entry)
-            if timeline.count > 256 { timeline.removeFirst(timeline.count - 256) }
-        }
+    /// Reads only the bounded `turn` number of a checkpoint Event (ASVS 1.5.2).
+    static func checkpointTurn(of event: JetEvent) -> UInt32? {
+        guard let data = event.payload.source.data(using: .utf8),
+              data.count <= 65_536,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let turn = object["turn"] as? NSNumber,
+              turn.int64Value > 0, turn.int64Value <= Int64(UInt32.max)
+        else { return nil }
+        return UInt32(turn.int64Value)
     }
 
-    private func groupRawEvent(sequence: UInt64) {
-        if let index = timeline.indices.last, timeline[index].rawCount > 0 {
-            timeline[index].rawCount += 1
-            timeline[index].text = "\(timeline[index].rawCount) background updates"
-            timeline[index].sequence = sequence
-        } else {
-            timeline.append(
-                JetTimelineEntry(
-                    id: "raw-\(sequence)",
-                    kind: .activity,
-                    text: "1 background update",
-                    sequence: sequence,
-                    rawCount: 1
-                )
-            )
-        }
-    }
-
-    private func showScenario(
+    func showScenario(
         _ state: DesktopFixtureState,
         fallback: DesktopFixtureState? = nil
     ) {
@@ -2855,11 +3267,11 @@ final class DesktopSession {
         }
     }
 
-    private func activeClient() async throws -> JetClient {
+    func activeClient() async throws -> JetClient {
         try await client(for: selectedPlaneRegistryID)
     }
 
-    private func client(for planeRegistryID: UUID) async throws -> JetClient {
+    func client(for planeRegistryID: UUID) async throws -> JetClient {
         if planeRegistryID == localPlaneRegistryID {
             if let client { return client }
             guard let makeJetClient else {
@@ -2892,7 +3304,7 @@ final class DesktopSession {
         }
     }
 
-    private func observeConnection(of client: JetClient) {
+    func observeConnection(of client: JetClient) {
         connectionObservationTask?.cancel()
         connectionObservationTask = Task { [weak self] in
             guard let self else { return }
@@ -2921,7 +3333,7 @@ final class DesktopSession {
         }
     }
 
-    private func observeConnection(of client: JetClient, planeRegistryID: UUID) {
+    func observeConnection(of client: JetClient, planeRegistryID: UUID) {
         planeConnectionObservationTasks[planeRegistryID]?.cancel()
         planeConnectionObservationTasks[planeRegistryID] = Task { [weak self] in
             let states = await client.connectionStates()
@@ -2944,7 +3356,7 @@ final class DesktopSession {
         }
     }
 
-    private func loadRemotePlaneSnapshots() async {
+    func loadRemotePlaneSnapshots() async {
         await withTaskGroup(of: Void.self) { group in
             for profile in remoteProfiles {
                 group.addTask { [weak self] in
@@ -2954,7 +3366,7 @@ final class DesktopSession {
         }
     }
 
-    private func loadPlaneSnapshot(_ planeRegistryID: UUID) async {
+    func loadPlaneSnapshot(_ planeRegistryID: UUID) async {
         do {
             let snapshot = try await client(for: planeRegistryID).setupSnapshot()
             updatePlane(planeRegistryID) { plane in
@@ -2977,7 +3389,7 @@ final class DesktopSession {
         }
     }
 
-    private func updatePlane(
+    func updatePlane(
         _ planeRegistryID: UUID,
         _ update: (inout JetPlanePresentation) -> Void
     ) {
@@ -2985,7 +3397,7 @@ final class DesktopSession {
         update(&planes[index])
     }
 
-    private func rebuildConversationAggregation() {
+    func rebuildConversationAggregation() {
         conversations = planeConversations.values
             .flatMap { $0 }
             .sorted { left, right in
@@ -2998,29 +3410,85 @@ final class DesktopSession {
             }
     }
 
-    private func planeName(_ planeRegistryID: UUID) -> String {
-        planes.first(where: { $0.id == planeRegistryID })?.name ?? "Plane"
+    func planeName(_ planeRegistryID: UUID) -> String {
+        planes.first(where: { $0.id == planeRegistryID })?.name ?? String(localized: "Computer")
     }
 
-    private func presentationError(_ error: Error) -> JetPresentationError {
+    func presentationError(_ error: Error) -> JetPresentationError {
+        Self.presentationError(error)
+    }
+
+    /// Maps any error to a stable presentation error. Command IDs, native error
+    /// text and installer command output never reach casual copy.
+    static func presentationError(_ error: Error) -> JetPresentationError {
         switch error {
-        case let JetClientFailure.presentation(error): error
-        case let JetClientFailure.commandOutcomeUnknown(commandID):
-            JetPresentationError(
+        case let error as JetPresentationError: return error
+        case let JetClientFailure.presentation(error): return error
+        case JetClientFailure.commandOutcomeUnknown:
+            return JetPresentationError(
                 category: .outcomeUnknown,
                 code: "command.outcome_unknown",
-                message: "Jet could not confirm this change. Refresh before trying again. Command \(commandID.uuidString.prefix(8)).",
+                message: String(localized: "Jet couldn't confirm whether that went through. Check the task before trying again."),
                 retryable: false,
                 recoveryActions: []
             )
         case is JetIdentityFailure:
-            JetPresentationError(
+            return JetPresentationError(
                 category: .unavailable,
                 code: "credential.keychain_unavailable",
-                message: "Jet could not use this installation's pairing key in Keychain.",
+                message: String(localized: "Jet couldn't read its key from your Keychain."),
                 retryable: true
             )
-        default: .invalidResponse
+        case is CancellationError:
+            return .cancelled
+        default:
+#if os(macOS)
+            if let installer = error as? JetLocalCoreInstaller.InstallerError {
+                return JetPresentationError(
+                    category: .unavailable,
+                    code: installer.code,
+                    message: installer.errorDescription ?? String(localized: "Jet couldn't start its helper on this Mac."),
+                    retryable: installer.isRetryable
+                )
+            }
+#endif
+            return .invalidResponse
         }
+    }
+
+    /// Plain copy for a failure. Categories whose wire messages are technical get
+    /// a sentence here; specific messages such as invalid input are kept.
+    func plainMessage(for failure: JetPresentationError) -> String {
+        switch failure.category {
+        case .offline:
+            String(localized: "Can't reach \(selectedPlaneName) right now.")
+        case .outcomeUnknown:
+            String(localized: "Jet couldn't confirm whether that went through. Check the task before trying again.")
+        case .invalidResponse:
+            String(localized: "Jet got a response it couldn't use. Try again, or update Jet.")
+        case .incompatible:
+            String(localized: "This version of Jet can't work with \(selectedPlaneName). Update Jet.")
+        case .overloaded, .rateLimited:
+            String(localized: "Jet is busy right now. Try again in a moment.")
+        case .cancelled:
+            String(localized: "Cancelled.")
+        case .internalFailure:
+            String(localized: "Something went wrong on \(selectedPlaneName). Try again.")
+        case .invalidInput, .unauthorized, .conflict, .unavailable, .notFound:
+            failure.message
+        }
+    }
+
+    /// A composer notice for a failed request. The error itself stays in `actionError`.
+    func failureNotice(for error: Error) -> ComposerNotice {
+        let failure = presentationError(error)
+        if failure.category == .offline {
+            return ComposerNotice(
+                kind: .warning,
+                text: plainMessage(for: failure),
+                action: .tryAgainConnection
+            )
+        }
+        return ComposerNotice(kind: .error, text: plainMessage(for: failure))
     }
 }

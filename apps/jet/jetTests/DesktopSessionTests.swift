@@ -163,7 +163,7 @@ struct DesktopSessionTests {
     }
 
     @Test
-    func selectingAnotherConversationClearsThePreviousTimeline() {
+    func selectingAnotherConversationShowsOnlyItsOwnTimeline() {
         let first = JetConversationSummary(
             id: UUID(), revision: nil, title: "First", createdAtUnixMilliseconds: 1,
             projectID: nil
@@ -185,6 +185,11 @@ struct DesktopSessionTests {
 
         #expect(session.selectedConversationID == second.id)
         #expect(session.timeline.isEmpty)
+
+        session.selectConversation(first.id)
+
+        #expect(session.selectedConversationID == first.id)
+        #expect(session.timeline.map(\.id) == ["old"])
     }
 
     @Test
