@@ -140,9 +140,14 @@ extension DesktopSession {
         let execution = runExecution?.run.conversationID == conversationID ? runExecution : nil
         let latestRun = snapshot.runs.last
         let lifecycle = execution?.run.lifecycle ?? latestRun?.lifecycle
+        // Until the Run's execution loads, keep the activity the store already knows
+        // for the same Run, so a task waiting for permission doesn't flicker to Working.
+        let stored = statusStore.facts[conversationID]
+        let activity = execution?.activity
+            ?? (execution == nil && stored?.runID != nil && stored?.runID == latestRun?.id ? stored?.activity : nil)
         return TaskStatusFacts(
             lifecycle: lifecycle,
-            activity: lifecycle?.isLive == true ? execution?.activity : nil,
+            activity: lifecycle?.isLive == true ? activity : nil,
             runID: execution?.run.id ?? latestRun?.id,
             hasRuns: !snapshot.runs.isEmpty || execution != nil,
             hasRecordedChanges: hasKnownChanges,

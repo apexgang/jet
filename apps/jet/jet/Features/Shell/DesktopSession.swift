@@ -690,9 +690,11 @@ final class DesktopSession {
         chosenCraftID = id
     }
 
+    /// An explicit "New Task in Project" command, so it also focuses the composer.
     func useProjectForNewTask(_ id: UUID, on planeID: UUID) {
         selectProject(id, on: planeID)
         beginNewTask()
+        composerFocusRequest += 1
     }
 
     var selectedConversation: JetConversationSummary? {

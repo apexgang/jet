@@ -514,6 +514,41 @@ struct SessionSelectionTests {
         #expect(session.taskStatus(for: open.id) == .offline)
     }
 
+    @Test
+    func openingATaskKeepsItsKnownActivityUntilTheExecutionLoads() {
+        let session = Self.connected()
+        let task = Self.addTask(session, "Waiting task")
+        let activeRun = Self.run(for: task, lifecycle: .active)
+        session.statusStore.record(
+            snapshot: Self.snapshot(task, runs: [activeRun]),
+            execution: JetRunExecution(
+                cursor: 5, run: activeRun, activity: .waitingForApproval, needsAttention: true, termination: nil
+            ),
+            cursor: 5
+        )
+        #expect(session.needsYouConversationIDs == [task.id])
+
+        // Opening it loads the snapshot first; the execution arrives one round trip later.
+        session.sidebarSelection = .conversation
+        session.selectedConversationID = task.id
+        session.conversationSnapshot = Self.snapshot(task, runs: [activeRun])
+        session.runExecution = nil
+        session.conversationFreshness = .live
+
+        #expect(session.taskStatus(for: task.id) == .needsPermission)
+        #expect(session.selectedTaskStatus == .needsPermission)
+        #expect(session.needsYouConversationIDs == [task.id])
+    }
+
+    @Test
+    func newTaskInProjectFocusesTheComposer() {
+        let session = Self.connected()
+        let before = session.composerFocusRequest
+        session.useProjectForNewTask(Self.project.id, on: session.localPlaneRegistryID)
+        #expect(session.composerFocusRequest == before + 1)
+        #expect(session.sidebarSelection == .newTask)
+    }
+
     // MARK: - Loads
 
     @Test
