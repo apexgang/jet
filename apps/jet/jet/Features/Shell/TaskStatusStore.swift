@@ -27,7 +27,9 @@ final class TaskStatusStore {
     }
 
     /// Records a Conversation snapshot and, when known, its latest Run's execution.
-    /// A record whose cursor is older than the facts already held is ignored.
+    /// A record whose cursor is older than the facts already held is ignored. A
+    /// snapshot alone says nothing about activity, so it keeps the activity its
+    /// latest Run last reported while that Run is live.
     func record(snapshot: JetConversationSnapshot, execution: JetRunExecution?, cursor: UInt64) {
         let conversationID = snapshot.conversation.id
         var next = facts[conversationID] ?? TaskStatusFacts()
@@ -39,8 +41,16 @@ final class TaskStatusStore {
                 ? execution
                 : nil
         }
+        let activity: JetRunActivity?
+        if let matchingExecution {
+            activity = matchingExecution.activity
+        } else if execution == nil, let runID = next.runID, runID == latestRun?.id {
+            activity = next.activity
+        } else {
+            activity = nil
+        }
         next.lifecycle = matchingExecution?.run.lifecycle ?? latestRun?.lifecycle
-        next.activity = next.lifecycle?.isLive == true ? matchingExecution?.activity : nil
+        next.activity = next.lifecycle?.isLive == true ? activity : nil
         next.runID = matchingExecution?.run.id ?? latestRun?.id
         next.hasRuns = !snapshot.runs.isEmpty || matchingExecution != nil
         next.lastSequence = cursor

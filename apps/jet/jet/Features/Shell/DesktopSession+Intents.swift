@@ -85,6 +85,19 @@ extension DesktopSession {
         return false
     }
 
+    /// A computer is offline when its connection failed, or when it is
+    /// disconnected or reconnecting after a recorded failure. Connecting and
+    /// reconnecting blips alone never make its tasks read Offline.
+    func isComputerOffline(_ planeRegistryID: UUID) -> Bool {
+        guard let plane = planes.first(where: { $0.id == planeRegistryID }) else { return true }
+        let connection = planeRegistryID == localPlaneRegistryID ? connectionState : plane.connection
+        switch connection {
+        case .connected, .connecting: return false
+        case .failed: return true
+        case .disconnected, .reconnecting: return plane.failure != nil
+        }
+    }
+
     /// Computer names appear in rows and subtitles only with two or more computers.
     var showsComputerNames: Bool { planes.count > 1 }
 
@@ -109,19 +122,32 @@ extension DesktopSession {
     // MARK: - Status
 
     /// The open task's status, derived only from its snapshot, execution,
-    /// freshness and Git deliveries.
+    /// freshness and Git deliveries. Unlike its row, it also reads Offline while
+    /// the task shows a saved view.
     var selectedTaskStatus: TaskStatus {
-        guard usesLivePlane, let conversationID = selectedConversationID else { return .unknown }
+        guard usesLivePlane, selectedConversationID != nil else { return .unknown }
         let isOffline = !planeIsConnected || conversationFreshness == .cached
-        guard let snapshot = conversationSnapshot, snapshot.conversation.id == conversationID else {
-            return isOffline ? .offline : .unknown
-        }
+        guard let facts = selectedTaskFacts else { return isOffline ? .offline : .unknown }
+        return TaskStatus.derive(facts: facts, isOffline: isOffline, phase: currentPhase)
+    }
+
+    /// The open task's facts from its loaded snapshot, or nil before it loads.
+    private var selectedTaskFacts: TaskStatusFacts? {
+        guard let conversationID = selectedConversationID,
+              let snapshot = conversationSnapshot,
+              snapshot.conversation.id == conversationID
+        else { return nil }
         let execution = runExecution?.run.conversationID == conversationID ? runExecution : nil
         let latestRun = snapshot.runs.last
         let lifecycle = execution?.run.lifecycle ?? latestRun?.lifecycle
-        let facts = TaskStatusFacts(
+        // Until the Run's execution loads, keep the activity the store already knows
+        // for the same Run, so a task waiting for permission doesn't flicker to Working.
+        let stored = statusStore.facts[conversationID]
+        let activity = execution?.activity
+            ?? (execution == nil && stored?.runID != nil && stored?.runID == latestRun?.id ? stored?.activity : nil)
+        return TaskStatusFacts(
             lifecycle: lifecycle,
-            activity: lifecycle?.isLive == true ? execution?.activity : nil,
+            activity: lifecycle?.isLive == true ? activity : nil,
             runID: execution?.run.id ?? latestRun?.id,
             hasRuns: !snapshot.runs.isEmpty || execution != nil,
             hasRecordedChanges: hasKnownChanges,
@@ -129,20 +155,21 @@ extension DesktopSession {
                 $0.conversationID == conversationID && $0.needsAcknowledgement
             }
         )
-        return TaskStatus.derive(facts: facts, isOffline: isOffline, phase: currentPhase)
     }
 
-    /// Any task's status. The open task uses its live state; others use the store.
+    /// Any task's status, as its sidebar row shows it. The open task uses its live
+    /// state; others use the store. A task reads Offline only while its computer
+    /// is offline (`isComputerOffline`), never during a connecting blip.
     func taskStatus(for conversationID: UUID) -> TaskStatus {
         guard usesLivePlane else { return .unknown }
-        if conversationID == selectedConversationID {
-            let status = selectedTaskStatus
-            if status != .unknown { return status }
-        }
         let planeRegistryID = conversationPlaneRegistryIDs[conversationID] ?? localPlaneRegistryID
+        let isOffline = isComputerOffline(planeRegistryID)
+        if conversationID == selectedConversationID, let facts = selectedTaskFacts {
+            return TaskStatus.derive(facts: facts, isOffline: isOffline, phase: currentPhase)
+        }
         return TaskStatus.derive(
             facts: statusStore.facts[conversationID],
-            isOffline: !isPlaneConnected(planeRegistryID),
+            isOffline: isOffline,
             phase: nil
         )
     }
@@ -438,23 +465,22 @@ extension DesktopSession {
         isWorkPanelPresented = true
     }
 
-    /// Opens Details › Changes at the requested scope.
+    /// Opens Details › Changes at the requested scope. All Changes is the
+    /// `.current` checkpoint, whether or not the Run has finished.
     func showChanges(_ request: ChangesRequest) {
         guard canShowDetails else { return }
         guardUnsavedEdits { [weak self] in
             guard let self else { return }
-            let run = selectedRun
-            let wholeTask: WorkCheckpointKind = run?.lifecycle.isLive == false ? .final : .current
             switch request {
             case .all:
-                checkpointKind = wholeTask
+                checkpointKind = .current
             case .lastReply:
                 checkpointKind = .turn
                 checkpointTurn = max(1, workDiff?.latestTurn ?? latestCheckpointTurn ?? 1)
             case let .reply(turn, runID):
-                if let runID, let run, runID != run.id {
+                if let runID, let run = selectedRun, runID != run.id {
                     // Change scopes are per Run; an earlier Run's reply shows all changes.
-                    checkpointKind = wholeTask
+                    checkpointKind = .current
                 } else {
                     checkpointKind = .turn
                     checkpointTurn = max(1, turn)

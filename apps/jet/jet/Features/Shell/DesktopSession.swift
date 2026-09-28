@@ -690,9 +690,11 @@ final class DesktopSession {
         chosenCraftID = id
     }
 
+    /// An explicit "New Task in Project" command, so it also focuses the composer.
     func useProjectForNewTask(_ id: UUID, on planeID: UUID) {
         selectProject(id, on: planeID)
         beginNewTask()
+        composerFocusRequest += 1
     }
 
     var selectedConversation: JetConversationSummary? {
@@ -1247,6 +1249,8 @@ final class DesktopSession {
         stashSelectedTranscript()
         detachCurrentTerminal()
         selectionLoadTask?.cancel()
+        // A history replay belongs to the task being left.
+        transcripts.cancelReplay()
         conversationSnapshot = nil
         turnQueue = nil
         runExecution = nil
@@ -1262,6 +1266,7 @@ final class DesktopSession {
         stashSelectedTranscript()
         detachCurrentTerminal()
         selectionLoadTask?.cancel()
+        transcripts.cancelReplay()
         selectedConversationID = nil
         conversationSnapshot = nil
         turnQueue = nil
@@ -1327,8 +1332,10 @@ final class DesktopSession {
             await loadRunSupervision()
         } catch {
             guard self.selectedConversationID == selectedConversationID else { return }
-            conversationFreshness = conversationSnapshot == nil ? .failed : .cached
             let failure = presentationError(error)
+            // A cancelled load says nothing about the task: its view stays as it was.
+            guard !Task.isCancelled, failure.category != .cancelled else { return }
+            conversationFreshness = conversationSnapshot == nil ? .failed : .cached
             // Offline is shown by the banner and the send blocker, not a notice.
             if failure.category != .offline {
                 composerNotice = ComposerNotice(
@@ -1391,7 +1398,10 @@ final class DesktopSession {
             }
         } catch {
             guard selectedConversationID == conversationID else { return }
-            if presentationError(error).category != .offline {
+            let failure = presentationError(error)
+            // A cancelled refresh is not a failure; whoever cancelled it moves on.
+            guard !Task.isCancelled, failure.category != .cancelled else { return }
+            if failure.category != .offline {
                 composerNotice = ComposerNotice(
                     kind: .warning,
                     text: String(localized: "Jet couldn't refresh this task."),
@@ -1407,11 +1417,15 @@ final class DesktopSession {
     }
 
     func loadWorkPanel(preserveContinuity: Bool = true) async {
-        guard !isPreviewSession else { return }
+        guard !isPreviewSession else {
+            keepsRequestedCheckpoint = false
+            return
+        }
         guard usesLivePlane,
               let conversationID = selectedConversationID,
               let run = selectedRun
         else {
+            keepsRequestedCheckpoint = false
             resetWorkPanel()
             return
         }
@@ -1422,8 +1436,9 @@ final class DesktopSession {
         workNotice = nil
         workNoticeError = nil
         let previousRunID = workDiff?.runID
+        // Another Run starts at All Changes unless `showChanges` asked for a scope.
         if previousRunID != run.id, !keepsRequestedCheckpoint {
-            checkpointKind = run.lifecycle.isLive ? .current : .final
+            checkpointKind = .current
         }
         keepsRequestedCheckpoint = false
         let requestedScope = selectedChangeScope
@@ -2745,12 +2760,14 @@ final class DesktopSession {
         applySidebarSelection()
     }
 
+    /// Opens New Task without moving focus, so arrowing onto its row keeps the
+    /// sidebar's keyboard focus. ⌘N, the toolbar button and Return on the row
+    /// bump `composerFocusRequest` themselves.
     func beginNewTask() {
         leaveConversation()
         sidebarSelection = .newTask
         isWorkPanelPresented = false
         composerNotice = nil
-        composerFocusRequest += 1
     }
 
     func selectSearch() {
@@ -2765,7 +2782,6 @@ final class DesktopSession {
         case .newTask:
             leaveConversation()
             isWorkPanelPresented = false
-            composerFocusRequest += 1
         case .search:
             isWorkPanelPresented = false
         case .needsAttention:
@@ -2837,8 +2853,16 @@ final class DesktopSession {
         guard let route = sendRoute else { return }
         let prompt = draft
         let craft = selectedCraftID
-        userOperation = route == .startRun ? .starting : .sending
-        defer { userOperation = nil }
+        let operation: UserOperation = route == .startRun ? .starting : .sending
+        userOperation = operation
+        // Released once, and only while it is still this call's: a rename or send
+        // started during the refresh below keeps its own operation.
+        var holdsOperation = true
+        func releaseOperation() {
+            if holdsOperation, userOperation == operation { userOperation = nil }
+            holdsOperation = false
+        }
+        defer { releaseOperation() }
         composerNotice = nil
         actionError = nil
         do {
@@ -2901,13 +2925,13 @@ final class DesktopSession {
             }
             clearSentDraft(prompt, for: conversationID)
             if selectedConversationID == conversationID { composerPlaceholderOverride = nil }
-            userOperation = nil
+            releaseOperation()
             await loadSelectedConversation()
         } catch {
             let failure = presentationError(error)
             actionError = failure
             composerNotice = failureNotice(for: failure)
-            userOperation = nil
+            releaseOperation()
             await loadConversations()
         }
     }

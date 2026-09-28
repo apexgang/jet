@@ -103,6 +103,27 @@ struct SessionSelectionTests {
         #expect(calm.sidebarSelection == .newTask)
     }
 
+    @Test
+    func selectingNewTaskLeavesFocusInTheSidebar() {
+        let session = Self.connected()
+        _ = Self.openTask(session, lifecycle: .completed)
+        let focusRequest = session.composerFocusRequest
+
+        // Arrowing onto the New Task row goes through the sidebar selection.
+        session.sidebarItem = .newTask
+        #expect(session.sidebarSelection == .newTask)
+        #expect(session.composerFocusRequest == focusRequest)
+
+        _ = Self.openTask(session, lifecycle: .completed)
+        session.beginNewTask()
+        #expect(session.sidebarSelection == .newTask)
+        #expect(session.composerFocusRequest == focusRequest)
+
+        session.sidebarSelection = .newTask
+        session.applySidebarSelection()
+        #expect(session.composerFocusRequest == focusRequest)
+    }
+
     // MARK: - Drafts
 
     @Test
@@ -332,6 +353,38 @@ struct SessionSelectionTests {
     }
 
     @Test
+    func aFailedSendKeepsARenameStartedDuringItsRefresh() async {
+        let factory = ClientFactoryProbe()
+        let session = Self.connected(isPreviewSession: false) { try await factory.makeClient() }
+        factory.onCall = { [weak session] call in
+            // The first call is the send; the second is the task-list refresh after it failed.
+            if call == 2 { session?.userOperation = .renaming }
+        }
+        _ = Self.openTask(session, lifecycle: .active, activity: .waitingForUser)
+        session.draft = "Thanks"
+
+        await session.submitDraft()
+
+        #expect(factory.calls >= 2)
+        #expect(session.actionError == .offline)
+        #expect(session.userOperation == .renaming)
+    }
+
+    @Test
+    func aFailedSendReleasesItsOwnOperation() async {
+        let factory = ClientFactoryProbe()
+        let session = Self.connected(isPreviewSession: false) { try await factory.makeClient() }
+        _ = Self.openTask(session, lifecycle: .active, activity: .waitingForUser)
+        session.draft = "Thanks"
+
+        await session.submitDraft()
+
+        #expect(session.actionError == .offline)
+        #expect(session.userOperation == nil)
+        #expect(session.draft == "Thanks")
+    }
+
+    @Test
     func composerCopyFollowsTheTask() {
         let session = Self.connected()
         session.beginNewTask()
@@ -375,6 +428,157 @@ struct SessionSelectionTests {
 
         _ = Self.openTask(session, lifecycle: .active, activity: .working)
         #expect(session.statusNotice == nil)
+    }
+
+    // MARK: - Offline computers
+
+    @Test
+    func connectionBlipsNeverTurnTasksOffline() {
+        let session = Self.connected()
+        let local = session.localPlaneRegistryID
+        let blocked = Self.addTask(session, "Blocked task")
+        Self.recordNeedsPermission(blocked, in: session)
+
+        for state in [JetConnectionState.connecting, .reconnecting(attempt: 1), .disconnected] {
+            Self.setLocalConnection(state, in: session)
+            #expect(!session.isComputerOffline(local), "\(state)")
+            #expect(session.taskStatus(for: blocked.id) == .needsPermission, "\(state)")
+            #expect(session.needsYouConversationIDs == [blocked.id], "\(state)")
+        }
+    }
+
+    @Test
+    func aComputerIsOfflineOnlyAfterAFailure() {
+        let session = Self.connected()
+        let local = session.localPlaneRegistryID
+        let blocked = Self.addTask(session, "Blocked task")
+        Self.recordNeedsPermission(blocked, in: session)
+
+        Self.setLocalConnection(.reconnecting(attempt: 2), in: session)
+        session.updatePlane(local) { $0.failure = .offline }
+        #expect(session.isComputerOffline(local))
+        #expect(session.taskStatus(for: blocked.id) == .offline)
+        #expect(session.needsYouConversationIDs.isEmpty)
+
+        session.updatePlane(local) { $0.failure = nil }
+        Self.setLocalConnection(.failed(.offline), in: session)
+        #expect(session.isComputerOffline(local))
+        #expect(session.taskStatus(for: blocked.id) == .offline)
+
+        Self.setLocalConnection(.connected(Self.negotiation), in: session)
+        session.updatePlane(local) { $0.failure = .offline }
+        #expect(!session.isComputerOffline(local))
+        #expect(session.taskStatus(for: blocked.id) == .needsPermission)
+        // A computer Jet no longer knows can't be reached.
+        #expect(session.isComputerOffline(UUID()))
+    }
+
+    @Test
+    func eachComputerDecidesItsOwnTasksOffline() {
+        let session = Self.connected()
+        let studio = JetPlanePresentation(
+            id: UUID(), name: "Studio Mac", endpoint: "alex@studio.example", isLocal: false,
+            planeID: UUID(), connection: .reconnecting(attempt: 1), snapshot: nil, failure: nil,
+            conversationCursor: nil
+        )
+        session.planes.append(studio)
+        let remote = Self.addTask(session, "Remote task")
+        session.conversationPlaneRegistryIDs[remote.id] = studio.id
+        Self.recordNeedsPermission(remote, in: session)
+        let local = Self.addTask(session, "Local task")
+        Self.recordNeedsPermission(local, in: session)
+
+        #expect(!session.isComputerOffline(studio.id))
+        #expect(session.taskStatus(for: remote.id) == .needsPermission)
+
+        session.updatePlane(studio.id) { $0.failure = .offline }
+        #expect(session.isComputerOffline(studio.id))
+        #expect(session.taskStatus(for: remote.id) == .offline)
+        #expect(session.taskStatus(for: local.id) == .needsPermission)
+        #expect(session.needsYouConversationIDs == [local.id])
+    }
+
+    @Test
+    func theOpenTasksRowStaysLiveWhileItsViewIsSaved() {
+        let session = Self.connected()
+        let open = Self.openTask(session, lifecycle: .active, activity: .waitingForApproval)
+        Self.setLocalConnection(.reconnecting(attempt: 1), in: session)
+        session.conversationFreshness = .cached
+
+        // The open task shows its saved view; its row keeps the live status.
+        #expect(session.selectedTaskStatus == .offline)
+        #expect(session.taskStatus(for: open.id) == .needsPermission)
+        #expect(session.needsYouConversationIDs == [open.id])
+
+        session.updatePlane(session.localPlaneRegistryID) { $0.failure = .offline }
+        #expect(session.taskStatus(for: open.id) == .offline)
+    }
+
+    @Test
+    func openingATaskKeepsItsKnownActivityUntilTheExecutionLoads() {
+        let session = Self.connected()
+        let task = Self.addTask(session, "Waiting task")
+        let activeRun = Self.run(for: task, lifecycle: .active)
+        session.statusStore.record(
+            snapshot: Self.snapshot(task, runs: [activeRun]),
+            execution: JetRunExecution(
+                cursor: 5, run: activeRun, activity: .waitingForApproval, needsAttention: true, termination: nil
+            ),
+            cursor: 5
+        )
+        #expect(session.needsYouConversationIDs == [task.id])
+
+        // Opening it loads the snapshot first; the execution arrives one round trip later.
+        session.sidebarSelection = .conversation
+        session.selectedConversationID = task.id
+        session.conversationSnapshot = Self.snapshot(task, runs: [activeRun])
+        session.runExecution = nil
+        session.conversationFreshness = .live
+
+        #expect(session.taskStatus(for: task.id) == .needsPermission)
+        #expect(session.selectedTaskStatus == .needsPermission)
+        #expect(session.needsYouConversationIDs == [task.id])
+    }
+
+    @Test
+    func newTaskInProjectFocusesTheComposer() {
+        let session = Self.connected()
+        let before = session.composerFocusRequest
+        session.useProjectForNewTask(Self.project.id, on: session.localPlaneRegistryID)
+        #expect(session.composerFocusRequest == before + 1)
+        #expect(session.sidebarSelection == .newTask)
+    }
+
+    // MARK: - Loads
+
+    @Test
+    func aCancelledLoadLeavesTheTaskAsItWas() async {
+        let session = Self.connected(isPreviewSession: false)
+        _ = Self.openTask(session, lifecycle: .completed)
+
+        await session.loadSelectedConversation()
+        #expect(session.conversationFreshness == .live)
+        #expect(session.composerNotice == nil)
+
+        await session.loadRunSupervision()
+        #expect(session.conversationFreshness == .live)
+        #expect(session.composerNotice == nil)
+    }
+
+    @Test
+    func aFailedLoadShowsTheSavedView() async {
+        let session = Self.connected(isPreviewSession: false) {
+            throw JetClientFailure.presentation(.invalidResponse)
+        }
+        _ = Self.openTask(session, lifecycle: .completed)
+
+        await session.loadSelectedConversation()
+        #expect(session.conversationFreshness == .cached)
+        #expect(session.composerNotice?.text == "Jet couldn't refresh this task.")
+
+        session.composerNotice = nil
+        await session.loadRunSupervision()
+        #expect(session.composerNotice?.text == "Jet couldn't refresh this task.")
     }
 
     // MARK: - Setup
@@ -430,7 +634,9 @@ struct SessionSelectionTests {
 
         let owned = session.presentationError(JetLocalCoreInstaller.InstallerError.otherChannel("brew"))
         #expect(owned.code == "core.owned_by_other_channel")
-        #expect(owned.message == "Jet from Homebrew already runs this Mac's helper.")
+        #expect(owned.message == "Another copy of Jet already runs this Mac's helper.")
+        #expect(!owned.message.contains("brew"))
+        #expect(!owned.retryable)
 
         let failed = session.presentationError(
             JetLocalCoreInstaller.InstallerError.commandFailed("launchctl", "Bootstrap failed: 5: Input/output error")
@@ -487,6 +693,47 @@ struct SessionSelectionTests {
         session.toggleDetails()
         #expect(!session.isWorkPanelPresented)
         #expect(WorkPanelTab.inspectorTabs.map(\.title) == ["Changes", "Terminal", "Activity"])
+    }
+
+    @Test
+    func allChangesIsTheCurrentCheckpointForFinishedTasks() async {
+        let session = Self.connected()
+        _ = Self.openTask(session, lifecycle: .completed)
+        session.checkpointKind = .turn
+
+        session.showChanges(.all)
+        #expect(session.checkpointKind == .current)
+        #expect(session.selectedWorkPanel == .changes)
+        #expect(session.isWorkPanelPresented)
+
+        session.showChanges(.reply(turn: 2, runID: session.selectedRun?.id))
+        #expect(session.checkpointKind == .turn)
+        #expect(session.checkpointTurn == 2)
+
+        // An earlier Run's reply shows all changes.
+        session.showChanges(.reply(turn: 2, runID: UUID()))
+        #expect(session.checkpointKind == .current)
+
+        // A preview session never loads, so the requested scope isn't kept for later.
+        #expect(session.keepsRequestedCheckpoint)
+        await session.loadWorkPanel(preserveContinuity: false)
+        #expect(!session.keepsRequestedCheckpoint)
+    }
+
+    @Test
+    func anotherRunsChangesStartAtAllChanges() async {
+        let session = Self.connected(isPreviewSession: false)
+        _ = Self.openTask(session, lifecycle: .completed)
+        session.checkpointKind = .final
+
+        await session.loadWorkPanel()
+        #expect(session.checkpointKind == .current)
+
+        // A task without Runs has no changes to load; the request isn't kept.
+        _ = Self.openTask(session, lifecycle: nil)
+        session.keepsRequestedCheckpoint = true
+        await session.loadWorkPanel()
+        #expect(!session.keepsRequestedCheckpoint)
     }
 
     @Test
@@ -632,6 +879,8 @@ struct SessionSelectionTests {
         let offline = DesktopSession.preview { DesktopPreviewData.offline($0) }
         #expect(offline.selectedTaskStatus == .offline)
         #expect(offline.sendBlocker == .notConnected(computer: "This Mac"))
+        #expect(offline.isComputerOffline(offline.localPlaneRegistryID))
+        #expect(offline.taskStatus(for: DesktopPreviewData.paymentDependencies.id) == .offline)
     }
 #endif
 
@@ -643,23 +892,30 @@ struct SessionSelectionTests {
         protocolVersion: 1, minorVersion: 43, codec: "json-v1", frameLimits: .protocolMaximum
     )
 
-    static func liveSession() -> DesktopSession {
+    /// A session on the live path. A preview session never reaches a Plane; with
+    /// `isPreviewSession: false`, every client request goes through `makeJetClient`.
+    static func liveSession(
+        isPreviewSession: Bool = true,
+        makeJetClient: @escaping JetClientFactory = { throw CancellationError() }
+    ) -> DesktopSession {
         let suite = "jet.tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         return DesktopSession(
-            makeJetClient: { throw CancellationError() },
+            makeJetClient: makeJetClient,
             notificationPreference: { _ in false },
             memory: ClientMemory(defaults: defaults),
-            isPreviewSession: true
+            isPreviewSession: isPreviewSession
         )
     }
 
     static func connected(
         projects: [JetProjectSummary] = [project],
-        crafts: [JetInstalledCraft] = [claude]
+        crafts: [JetInstalledCraft] = [claude],
+        isPreviewSession: Bool = true,
+        makeJetClient: @escaping JetClientFactory = { throw CancellationError() }
     ) -> DesktopSession {
-        let session = liveSession()
+        let session = liveSession(isPreviewSession: isPreviewSession, makeJetClient: makeJetClient)
         let snapshot = JetSetupSnapshot(
             status: JetPlaneStatus(
                 cursor: 1, planeID: UUID(), daemonStarts: 1, startedAtUnixMilliseconds: 1,
@@ -736,6 +992,24 @@ struct SessionSelectionTests {
         return conversation
     }
 
+    /// Records that a task's live Run waits for a permission.
+    static func recordNeedsPermission(_ conversation: JetConversationSummary, in session: DesktopSession) {
+        let activeRun = Self.run(for: conversation, lifecycle: .active)
+        session.statusStore.record(
+            snapshot: Self.snapshot(conversation, runs: [activeRun]),
+            execution: JetRunExecution(
+                cursor: 5, run: activeRun, activity: .waitingForApproval, needsAttention: true, termination: nil
+            ),
+            cursor: 5
+        )
+    }
+
+    /// Sets This Mac's connection the way the client's connection stream does.
+    static func setLocalConnection(_ state: JetConnectionState, in session: DesktopSession) {
+        session.connectionState = state
+        session.updatePlane(session.localPlaneRegistryID) { $0.connection = state }
+    }
+
     static func unknownDelivery(for conversationID: UUID) -> JetGitDelivery {
         JetGitDelivery(
             id: UUID(),
@@ -772,5 +1046,19 @@ struct SessionSelectionTests {
             payloadVersion: 1,
             payload: JetRawJSON(source: payload)
         )
+    }
+}
+
+/// Stands in for the client factory: every call fails as offline after
+/// `onCall` runs, so a test can act between a request and its follow-up.
+@MainActor
+final class ClientFactoryProbe {
+    private(set) var calls = 0
+    var onCall: (Int) -> Void = { _ in }
+
+    func makeClient() throws -> JetClient {
+        calls += 1
+        onCall(calls)
+        throw JetClientFailure.presentation(.offline)
     }
 }

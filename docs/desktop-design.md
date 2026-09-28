@@ -560,7 +560,7 @@ While `!canStartTask`, an inline checklist shows three items.
   - Failure: "Jet couldn't start its helper.", the mapped reason, Try Again,
     and a Details disclosure with the code and Copy.
     `core.install_incomplete` adds Reinstall Jet….
-    `core.owned_by_other_channel` reads "Jet from Homebrew already runs this
+    `core.owned_by_other_channel` reads "Another copy of Jet already runs this
     Mac's helper." `core.start_failed` shows the generic failure.
   - Done: "Jet is running".
 - Project: "Choose the Git repository you want to work on." with Add Project…
