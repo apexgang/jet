@@ -211,6 +211,48 @@ struct TaskStatusTests {
     }
 
     @Test
+    func aSnapshotAloneKeepsItsRunsActivity() {
+        let store = TaskStatusStore(memory: ClientMemoryTests.isolatedMemory())
+        let conversation = JetConversationSummary(
+            id: UUID(), revision: 1, title: "Task", createdAtUnixMilliseconds: 1, projectID: nil
+        )
+        let first = run(conversation, .active)
+        store.record(
+            snapshot: snapshot(conversation, [first], cursor: 10),
+            execution: JetRunExecution(cursor: 10, run: first, activity: .waitingForApproval, needsAttention: true, termination: nil),
+            cursor: 10
+        )
+
+        // A snapshot without an execution keeps what the same live Run reported.
+        store.record(snapshot: snapshot(conversation, [first], cursor: 11), execution: nil, cursor: 11)
+        #expect(store.facts[conversation.id]?.activity == .waitingForApproval)
+        #expect(store.facts[conversation.id]?.lastSequence == 11)
+        #expect(store.needsYouConversationIDs == [conversation.id])
+
+        // Another Run's snapshot doesn't inherit it.
+        let second = run(conversation, .active)
+        store.record(snapshot: snapshot(conversation, [first, second], cursor: 12), execution: nil, cursor: 12)
+        #expect(store.facts[conversation.id]?.runID == second.id)
+        #expect(store.facts[conversation.id]?.activity == nil)
+        #expect(store.needsYouConversationIDs.isEmpty)
+
+        // A finished Run has no activity, even from a snapshot alone.
+        store.record(
+            snapshot: snapshot(conversation, [first, second], cursor: 13),
+            execution: JetRunExecution(cursor: 13, run: second, activity: .waitingForAuth, needsAttention: true, termination: nil),
+            cursor: 13
+        )
+        #expect(store.facts[conversation.id]?.activity == .waitingForAuth)
+        let finished = JetRunSummary(
+            id: second.id, conversationID: conversation.id, revision: 2, lifecycle: .completed,
+            title: "Task", createdAtUnixMilliseconds: 1, endedAtUnixMilliseconds: 2
+        )
+        store.record(snapshot: snapshot(conversation, [first, finished], cursor: 14), execution: nil, cursor: 14)
+        #expect(store.facts[conversation.id]?.lifecycle == .completed)
+        #expect(store.facts[conversation.id]?.activity == nil)
+    }
+
+    @Test
     func storeTracksUnconfirmedGitStepsAndForgets() {
         let store = TaskStatusStore(memory: ClientMemoryTests.isolatedMemory())
         let conversationID = UUID()
@@ -236,6 +278,24 @@ struct TaskStatusTests {
 
     private func facts(_ lifecycle: JetRunLifecycle?, _ activity: JetRunActivity?) -> TaskStatusFacts {
         TaskStatusFacts(lifecycle: lifecycle, activity: activity, runID: UUID(), hasRuns: lifecycle != nil)
+    }
+
+    private func run(_ conversation: JetConversationSummary, _ lifecycle: JetRunLifecycle) -> JetRunSummary {
+        JetRunSummary(
+            id: UUID(), conversationID: conversation.id, revision: 1, lifecycle: lifecycle,
+            title: conversation.title, createdAtUnixMilliseconds: 1,
+            endedAtUnixMilliseconds: lifecycle.isLive ? nil : 2
+        )
+    }
+
+    private func snapshot(
+        _ conversation: JetConversationSummary,
+        _ runs: [JetRunSummary],
+        cursor: UInt64
+    ) -> JetConversationSnapshot {
+        JetConversationSnapshot(
+            cursor: cursor, conversation: conversation, workspaceID: nil, workspaceRoot: nil, runs: runs
+        )
     }
 
     private func agent(_ text: String) -> JetTimelineEntry {

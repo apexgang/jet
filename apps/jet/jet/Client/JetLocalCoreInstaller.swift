@@ -125,7 +125,7 @@ enum JetLocalCoreInstaller {
             case .invalidPayload:
                 String(localized: "Jet's helper is incomplete. Reinstall Jet from its latest release.")
             case .otherChannel:
-                String(localized: "Jet from Homebrew already runs this Mac's helper.")
+                String(localized: "Another copy of Jet already runs this Mac's helper.")
             case .commandFailed:
                 String(localized: "Jet couldn't start its helper on this Mac.")
             }

@@ -433,7 +433,11 @@ enum DesktopPreviewData {
     static func offline(_ session: DesktopSession) {
         waitingWithChanges(session)
         session.connectionState = .disconnected
-        session.updatePlane(session.localPlaneRegistryID) { $0.connection = .disconnected }
+        session.updatePlane(session.localPlaneRegistryID) { plane in
+            plane.connection = .disconnected
+            // A recorded failure makes the computer offline, not just between connections.
+            plane.failure = .offline
+        }
         session.conversationFreshness = .cached
     }
 
