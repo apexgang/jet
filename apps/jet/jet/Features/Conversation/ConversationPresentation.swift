@@ -1,22 +1,6 @@
 import Foundation
 
 extension JetEvent {
-    func notificationKind() -> JetNotificationKind? {
-        switch kind {
-        case "approval.requested":
-            return .approval
-        case "run.lifecycle_changed":
-            guard let state = payloadObject?["to"] as? String else { return nil }
-            switch state {
-            case "completed": return .completion
-            case "failed", "lost": return .failure
-            default: return nil
-            }
-        default:
-            return nil
-        }
-    }
-
     func timelineProjections() -> [JetTimelineEntry] {
         guard let payload = payloadObject else { return [] }
 
@@ -80,7 +64,8 @@ extension JetEvent {
         }
     }
 
-    private var payloadObject: [String: Any]? {
+    /// The event payload as a bounded JSON object. Shared with the notification projection.
+    var payloadObject: [String: Any]? {
         guard let data = payload.source.data(using: .utf8),
               data.count <= 1_048_576,
               let object = try? JSONSerialization.jsonObject(with: data),
