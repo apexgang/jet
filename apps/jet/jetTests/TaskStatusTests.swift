@@ -274,6 +274,31 @@ struct TaskStatusTests {
         #expect(store.facts.isEmpty)
     }
 
+    // MARK: - Event status signals
+
+    @Test(arguments: StatusSignalCase.all)
+    func eventsMapToStatusSignals(_ testCase: StatusSignalCase) {
+        let event = JetEvent(
+            sequence: 1,
+            eventID: UUID(),
+            actor: JetRawJSON(source: #"{"type":"harness"}"#),
+            origin: nil,
+            recordedAtUnixMilliseconds: 1,
+            conversationID: UUID(),
+            runID: testCase.hasRun ? UUID() : nil,
+            kind: testCase.kind,
+            payloadVersion: 1,
+            payload: JetRawJSON(source: testCase.payload)
+        )
+        #expect(event.statusSignal == testCase.expected)
+        #expect(event.notificationKind() == testCase.expected?.notificationKind)
+    }
+
+    @Test(arguments: StatusSignalCase.notifications)
+    func signalsRaiseTheDesignsNotifications(_ signal: JetEventStatusSignal, _ expected: JetNotificationKind?) {
+        #expect(signal.notificationKind == expected)
+    }
+
     // MARK: - Helpers
 
     private func facts(_ lifecycle: JetRunLifecycle?, _ activity: JetRunActivity?) -> TaskStatusFacts {
@@ -301,4 +326,178 @@ struct TaskStatusTests {
     private func agent(_ text: String) -> JetTimelineEntry {
         JetTimelineEntry(id: UUID().uuidString, kind: .agent, text: text, sequence: 1, rawCount: 0)
     }
+}
+
+/// One row of the Event → status signal table.
+nonisolated struct StatusSignalCase: Sendable, CustomTestStringConvertible {
+    let name: String
+    let kind: String
+    var payload = "{}"
+    var hasRun = true
+    let expected: JetEventStatusSignal?
+
+    var testDescription: String { name }
+
+    static func output(_ blocks: [(kind: String, text: String)]) -> String {
+        let presentation = blocks.map { block in
+            json(["kind": block.kind, "text": block.text])
+        }
+        return json(["native_json": "{}", "presentation_json": presentation])
+    }
+
+    static func json(_ object: Any) -> String {
+        let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return data.map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+    }
+
+    static let all: [StatusSignalCase] = [
+        StatusSignalCase(name: "run created", kind: "run.created", expected: .runCreated),
+        StatusSignalCase(name: "run created without a Run", kind: "run.created", hasRun: false, expected: nil),
+        StatusSignalCase(
+            name: "lifecycle",
+            kind: "run.lifecycle_changed",
+            payload: #"{"from":"active","to":"completed"}"#,
+            expected: .lifecycle(from: .active, to: .completed)
+        ),
+        StatusSignalCase(
+            name: "lifecycle without from",
+            kind: "run.lifecycle_changed",
+            payload: #"{"to":"lost"}"#,
+            expected: .lifecycle(from: nil, to: .lost)
+        ),
+        StatusSignalCase(
+            name: "lifecycle with an unknown from",
+            kind: "run.lifecycle_changed",
+            payload: #"{"from":"paused","to":"failed"}"#,
+            expected: .lifecycle(from: nil, to: .failed)
+        ),
+        StatusSignalCase(
+            name: "lifecycle to an unknown state",
+            kind: "run.lifecycle_changed",
+            payload: #"{"from":"active","to":"paused"}"#,
+            expected: nil
+        ),
+        StatusSignalCase(name: "lifecycle without to", kind: "run.lifecycle_changed", payload: #"{"from":"active"}"#, expected: nil),
+        StatusSignalCase(
+            name: "lifecycle, malformed JSON",
+            kind: "run.lifecycle_changed",
+            payload: #"{"to":"completed""#,
+            expected: nil
+        ),
+        StatusSignalCase(
+            name: "lifecycle, oversized payload",
+            kind: "run.lifecycle_changed",
+            payload: #"{"to":"completed","padding":""# + String(repeating: "x", count: 1_048_576) + #""}"#,
+            expected: nil
+        ),
+        StatusSignalCase(name: "working", kind: "run.activity_changed", payload: #"{"activity":"working"}"#, expected: .activity(.working)),
+        StatusSignalCase(
+            name: "waiting for approval",
+            kind: "run.activity_changed",
+            payload: #"{"activity":"waiting_for_approval"}"#,
+            expected: .activity(.waitingForApproval)
+        ),
+        StatusSignalCase(
+            name: "waiting for auth",
+            kind: "run.activity_changed",
+            payload: #"{"activity":"waiting_for_auth"}"#,
+            expected: .activity(.waitingForAuth)
+        ),
+        StatusSignalCase(
+            name: "waiting for quota",
+            kind: "run.activity_changed",
+            payload: #"{"activity":"waiting_for_quota"}"#,
+            expected: .activity(.waitingForQuota)
+        ),
+        StatusSignalCase(
+            name: "waiting for the person",
+            kind: "run.activity_changed",
+            payload: #"{"activity":"waiting_for_user"}"#,
+            expected: .activity(.waitingForUser)
+        ),
+        StatusSignalCase(
+            name: "reconnecting",
+            kind: "run.activity_changed",
+            payload: #"{"activity":"reconnecting"}"#,
+            expected: .activity(.reconnecting)
+        ),
+        StatusSignalCase(name: "null activity", kind: "run.activity_changed", payload: #"{"activity":null}"#, expected: .activity(nil)),
+        StatusSignalCase(name: "missing activity", kind: "run.activity_changed", payload: "{}", expected: .activity(nil)),
+        StatusSignalCase(name: "unknown activity", kind: "run.activity_changed", payload: #"{"activity":"dreaming"}"#, expected: nil),
+        StatusSignalCase(name: "non-string activity", kind: "run.activity_changed", payload: #"{"activity":3}"#, expected: nil),
+        StatusSignalCase(name: "activity, malformed JSON", kind: "run.activity_changed", payload: "not json", expected: nil),
+        StatusSignalCase(name: "activity, array payload", kind: "run.activity_changed", payload: "[]", expected: nil),
+        StatusSignalCase(
+            name: "markdown reply",
+            kind: "run.output",
+            payload: output([("markdown", "The redirect loop is fixed.")]),
+            expected: .output(hasReply: true, toolName: nil)
+        ),
+        StatusSignalCase(
+            name: "tool name",
+            kind: "run.output",
+            payload: output([("text", "Edit")]),
+            expected: .output(hasReply: false, toolName: "Edit")
+        ),
+        StatusSignalCase(
+            name: "thinking text",
+            kind: "run.output",
+            payload: output([("text", "Let me read the failing test first.")]),
+            expected: nil
+        ),
+        StatusSignalCase(
+            name: "reply and the last tool",
+            kind: "run.output",
+            payload: output([("text", "Read"), ("markdown", "Found it."), ("text", "Bash")]),
+            expected: .output(hasReply: true, toolName: "Bash")
+        ),
+        StatusSignalCase(
+            name: "unknown blocks",
+            kind: "run.output",
+            payload: json(["native_json": "{}", "presentation_json": [#"{"kind":"actions","actions":[]}"#, "not json"]]),
+            expected: nil
+        ),
+        StatusSignalCase(
+            name: "oversized block",
+            kind: "run.output",
+            payload: output([("markdown", String(repeating: "x", count: 131_072))]),
+            expected: nil
+        ),
+        StatusSignalCase(
+            name: "reply after the first 32 blocks",
+            kind: "run.output",
+            payload: output(Array(repeating: ("text", "Thinking about it."), count: 32) + [("markdown", "Done.")]),
+            expected: nil
+        ),
+        StatusSignalCase(name: "output without blocks", kind: "run.output", payload: #"{"native_json":"{}"}"#, expected: nil),
+        StatusSignalCase(name: "input", kind: "turn.input", payload: #"{"text":"private"}"#, expected: .input),
+        StatusSignalCase(name: "changes recorded", kind: "change.checkpoint_recorded", expected: .changesRecorded),
+        StatusSignalCase(name: "approval requested", kind: "approval.requested", payload: #"{"request":{}}"#, expected: .approvalRequested),
+        StatusSignalCase(name: "trashed", kind: "conversation.trashed", expected: .trashed),
+        StatusSignalCase(name: "approval reviewed", kind: "approval.reviewed", expected: nil),
+        StatusSignalCase(name: "run terminated", kind: "run.terminated", expected: nil),
+        StatusSignalCase(name: "conversation created", kind: "conversation.created", expected: nil),
+    ]
+
+    static let notifications: [(JetEventStatusSignal, JetNotificationKind?)] = [
+        (.approvalRequested, .approval),
+        (.activity(.waitingForAuth), .approval),
+        (.activity(.waitingForQuota), .approval),
+        (.activity(.waitingForApproval), nil),
+        (.activity(.waitingForUser), .completion),
+        (.activity(.working), nil),
+        (.activity(.reconnecting), nil),
+        (.activity(nil), nil),
+        (.lifecycle(from: .active, to: .completed), .completion),
+        (.lifecycle(from: .active, to: .failed), .failure),
+        (.lifecycle(from: nil, to: .lost), .failure),
+        (.lifecycle(from: .stopping, to: .canceled), nil),
+        (.lifecycle(from: .starting, to: .active), nil),
+        (.lifecycle(from: .active, to: .stopping), nil),
+        (.runCreated, nil),
+        (.output(hasReply: true, toolName: nil), nil),
+        (.input, nil),
+        (.changesRecorded, nil),
+        (.trashed, nil),
+    ]
 }
