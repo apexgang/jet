@@ -150,7 +150,8 @@ struct DesktopSessionTests {
                 kind: .user,
                 text: "Ship Wave 1.3",
                 sequence: 7,
-                rawCount: 0
+                rawCount: 0,
+                recordedAtUnixMilliseconds: 1
             ),
         ])
         let projected = output.timelineProjections()

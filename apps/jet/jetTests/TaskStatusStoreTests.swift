@@ -366,7 +366,7 @@ struct TaskStatusStoreTests {
 
     @Test
     func failedSeedsWaitBeforeRetrying() async {
-        let clock = ManualClock()
+        let clock = StatusManualClock()
         let fetch = FakeFetch()
         let store = Self.store(fetch: fetch, clock: clock)
         let task = UUID()
@@ -448,7 +448,7 @@ struct TaskStatusStoreTests {
     static func store(
         memory: ClientMemory? = nil,
         fetch: FakeFetch? = nil,
-        clock: ManualClock? = nil
+        clock: StatusManualClock? = nil
     ) -> TaskStatusStore {
         let memory = memory ?? ClientMemoryTests.isolatedMemory()
         let store: TaskStatusStore
@@ -593,7 +593,7 @@ final class FakeFetch {
 }
 
 @MainActor
-final class ManualClock {
+final class StatusManualClock {
     private(set) var now = ContinuousClock.now
 
     func advance(by duration: Duration) {

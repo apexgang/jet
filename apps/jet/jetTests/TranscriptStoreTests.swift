@@ -255,7 +255,7 @@ struct TranscriptStoreTests {
     func theTimeBudgetDropsTheUnfinishedWindow() async {
         let journal = FakeJournal()
         journal.pageEvents = 5
-        let clock = ManualClock()
+        let clock = TranscriptManualClock()
         journal.onFetch = { _ in clock.now += .seconds(1) }
         let task = UUID()
         journal.events = (1 ... 100).map { output(UInt64($0), task, "Line \($0)") }
@@ -443,7 +443,7 @@ struct TranscriptStoreTests {
     @Test
     func automaticRetriesWaitFifteenSecondsAndStopAfterThree() async {
         let journal = FakeJournal()
-        let clock = ManualClock()
+        let clock = TranscriptManualClock()
         let store = makeStore(journal, clock: clock)
         let task = UUID()
         journal.head = 60
@@ -714,7 +714,7 @@ struct TranscriptStoreTests {
     func progressNeverDecreasesAndStaysBelowOne() async {
         let journal = FakeJournal()
         journal.pageEvents = 4
-        let clock = ManualClock()
+        let clock = TranscriptManualClock()
         let store = makeStore(journal, clock: clock)
         let task = UUID()
         journal.events = (1 ... 60).map { output(UInt64($0), task, "Line \($0)", recordedAt: Self.createdAt + Int64($0) * 60_000) }
@@ -872,11 +872,11 @@ struct TranscriptStoreTests {
     private func makeStore(
         _ journal: FakeJournal,
         budget: TranscriptStore.ReplayBudget? = nil,
-        clock: ManualClock? = nil
+        clock: TranscriptManualClock? = nil
     ) -> TranscriptStore {
         let store = TranscriptStore(
             budget: budget ?? Self.small,
-            clock: (clock ?? ManualClock()).replayClock,
+            clock: (clock ?? TranscriptManualClock()).replayClock,
             now: { Date(timeIntervalSince1970: 1_790_600_000) }
         )
         store.configure { planeRegistryID, after in
@@ -1012,7 +1012,7 @@ nonisolated enum CombineRule: String, CaseIterable, Sendable {
 
 /// A replay clock the test moves by hand.
 @MainActor
-final class ManualClock {
+final class TranscriptManualClock {
     var now: Duration = .zero
 
     var replayClock: TranscriptStore.ReplayClock {
