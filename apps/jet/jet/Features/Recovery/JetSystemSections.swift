@@ -1,216 +1,339 @@
 import SwiftUI
 
-struct JetSystemSection: View {
+/// Shown first in Settings › Advanced while the store is read-only: the backups
+/// Jet can restore from.
+struct JetRecoverySection: View {
     @Bindable var model: JetRecoveryModel
-    let planeName: String
-    let diskPressure: Bool
-    let diagnosticErrors: [JetPresentationError]
+    let computerName: String
     @State private var pendingSnapshot: JetRecoverySnapshot?
-    @State private var confirmPurge = false
-    @State private var showDiagnosticCodes = false
 
     var body: some View {
-        Section("Service health") {
-            if model.isLoading && model.health == nil { ProgressView("Checking Plane health") }
-            if model.health != nil && model.issues[.health] != nil {
-                Text("Showing the last observed health state. Repair controls are unavailable until refresh succeeds.")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            if let health = model.health {
-                LabeledContent("Plane", value: planeName)
-                LabeledContent("Jet core", value: health.daemonVersion)
-                LabeledContent("Platform", value: health.platform)
-                if !health.capabilitiesAvailable {
-                    Text("Capabilities could not be refreshed. Recovery status below is from the Plane status query.")
-                        .font(.caption).foregroundStyle(.orange)
+        if let health = model.health, model.isReadOnly {
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    SettingsStatusLabel(
+                        text: String(localized: "Jet paused changes to protect your data."),
+                        systemImage: "exclamationmark.triangle.fill",
+                        tint: .orange
+                    )
+                    .fontWeight(.medium)
+                    Text("Restore a backup to continue. Your tasks stay readable.")
+                        .settingsCaption()
                 }
-                LabeledContent("Started", value: health.daemonStartedAt.formatted(date: .abbreviated, time: .shortened))
-                LabeledContent("Daemon starts", value: health.daemonStarts.formatted())
-                LabeledContent("Credential store", value: health.credentialStore.label)
+                if health.snapshots.isEmpty {
+                    Text("No backups to restore from.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(health.snapshots) { snapshot in
+                    HStack {
+                        Text(BackupPresentation.line(snapshot))
+                        Spacer()
+                        Button("Restore…") { pendingSnapshot = snapshot }
+                            .disabled(!canRestore(health))
+                    }
+                }
+                if health.deletionLedger == "corrupt" {
+                    SettingsStatusLabel(
+                        text: String(localized: "Restoring is unavailable because Jet's record of deleted tasks is damaged."),
+                        systemImage: "exclamationmark.triangle.fill",
+                        tint: .orange
+                    )
+                    .font(.system(size: JetDesign.TextSize.control))
+                }
+                if let issue = model.issues[.health] {
+                    SettingsIssueRow(error: issue, sentence: String(localized: "Couldn't restore the backup."))
+                }
+            } header: {
+                Text("Data Protection")
+            }
+            .confirmationDialog(
+                pendingTitle,
+                isPresented: Binding(get: { pendingSnapshot != nil }, set: { if !$0 { pendingSnapshot = nil } }),
+                titleVisibility: .visible
+            ) {
+                if let snapshot = pendingSnapshot {
+                    Button("Restore", role: .destructive) {
+                        pendingSnapshot = nil
+                        Task { await model.restoreSnapshot(snapshot) }
+                    }
+                }
+                Button("Cancel", role: .cancel) { pendingSnapshot = nil }
+            } message: {
+                Text("Jet replaces its data on \(computerName) with this backup. Changes made after it may be lost. The damaged data is kept aside.")
+            }
+        }
+    }
+
+    private func canRestore(_ health: JetSystemHealth) -> Bool {
+        model.operation == nil && model.issues[.health] == nil && health.deletionLedger != "corrupt"
+    }
+
+    private var pendingTitle: String {
+        guard let pendingSnapshot else { return String(localized: "Restore the backup?") }
+        return String(localized: "Restore the backup from \(BackupPresentation.date(pendingSnapshot.takenAt))?")
+    }
+}
+
+/// The background service on one computer: versions, tools, sign-in storage,
+/// assistants, and backups while the store is serving.
+struct JetServiceSection: View {
+    @Bindable var model: JetRecoveryModel
+    let computerName: String
+    let isLocal: Bool
+    let diskPressure: Bool
+    @State private var confirmsPurge = false
+
+    var body: some View {
+        Section("Background Service") {
+            if let health = model.health {
+                LabeledContent("Jet service", value: health.daemonVersion)
+                LabeledContent("Platform", value: health.platform)
+                LabeledContent("Running since", value: health.daemonStartedAt.formatted(date: .abbreviated, time: .shortened))
+                LabeledContent("Git", value: gitVersion(health))
+                LabeledContent("Keychain", value: keychainLabel(health.credentialStore))
                 ForEach(health.crafts) { craft in
                     LabeledContent("Craft \(craft.id)", value: craft.version)
                 }
-                ForEach(health.externalTools) { tool in
-                    LabeledContent(tool.tool, value: toolVersion(tool))
-                }
                 if !health.degradedCapabilities.isEmpty {
-                    Text("Degraded: \(health.degradedCapabilities.joined(separator: ", "))")
-                        .foregroundStyle(.orange)
+                    SettingsStatusLabel(
+                        text: String(localized: "Limited: \(health.degradedCapabilities.joined(separator: ", "))"),
+                        systemImage: "exclamationmark.triangle.fill",
+                        tint: .orange
+                    )
                 }
-                if diskPressure {
-                    Text("Disk pressure blocked a recent write. Free space on the Plane and refresh before retrying. Existing reads remain available.")
-                        .foregroundStyle(.orange)
-                }
-                LabeledContent("Store", value: health.recoveryState ?? "Not reported by this Plane")
-                LabeledContent("Deletion ledger", value: health.deletionLedger ?? "Not reported")
-                LabeledContent("Security audit", value: auditLabel(health.auditIntegrity))
-                if case let .degraded(reason) = health.auditIntegrity {
-                    Text("Audit integrity failed: \(reason). Export the evidence and review the gap before beginning a new audit epoch outside this view.")
-                        .foregroundStyle(.orange)
-                }
-                Text("Runner version and live free disk space are not reported by this protocol. A storage.disk_pressure refusal identifies admission pressure when it occurs.")
-                    .font(.caption).foregroundStyle(.secondary)
+            } else if model.isLoading {
+                Text("Loading…").foregroundStyle(.secondary)
             }
-            Button("Refresh Health") { Task { await model.refresh() } }
-                .disabled(model.operation != nil)
-            RecoveryIssue(error: model.issues[.health])
+            if diskPressure {
+                SettingsStatusLabel(
+                    text: isLocal
+                        ? String(localized: "Your Mac is almost out of disk space. Jet paused new work.")
+                        : String(localized: "\(computerName) is almost out of disk space. Jet paused new work."),
+                    systemImage: "externaldrive.badge.exclamationmark",
+                    tint: .orange
+                )
+            }
+            if let issue = model.issues[.health], !model.isReadOnly {
+                SettingsIssueRow(error: issue, sentence: model.health == nil
+                    ? String(localized: "Couldn't check the background service.")
+                    : String(localized: "Showing what Jet saw last."))
+            }
         }
 
-        Section("Recovery snapshots") {
-            if let health = model.health {
-                if let reason = health.recoveryReason {
-                    Text("The Plane is read-only: \(reason.replacingOccurrences(of: "_", with: " ")).")
-                        .foregroundStyle(.orange)
+        if let health = model.health, health.recoveryState == "serving" {
+            Section("Backups") {
+                if let latest = health.snapshots.first {
+                    LabeledContent("Latest backup", value: BackupPresentation.line(latest))
                 }
-                if health.snapshots.isEmpty { Text("No verified Recovery snapshots.").foregroundStyle(.secondary) }
-                ForEach(health.snapshots) { snapshot in
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(snapshot.takenAt.formatted(date: .abbreviated, time: .shortened))
-                            Text("\(snapshot.reason) · \(ByteCountFormatter.string(fromByteCount: Int64(clamping: snapshot.bytes), countStyle: .file))")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if health.recoveryState == "read_only" {
-                            Button("Restore") { pendingSnapshot = snapshot }
-                                .disabled(model.operation != nil || model.issues[.health] != nil || health.deletionLedger == "corrupt")
-                        }
-                    }
-                }
-                if health.recoveryState == "serving" {
-                    Button("Purge Older Snapshots", role: .destructive) { confirmPurge = true }
-                        .disabled(model.operation != nil || model.issues[.health] != nil || health.auditIntegrity != .trusted)
-                }
-            } else {
-                Text("Connect to this Plane to inspect verified snapshots.")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .confirmationDialog(
-            "Restore this Recovery snapshot?",
-            isPresented: Binding(get: { pendingSnapshot != nil }, set: { if !$0 { pendingSnapshot = nil } }),
-            titleVisibility: .visible
-        ) {
-            if let snapshot = pendingSnapshot {
-                Button("Replace Plane Store", role: .destructive) {
-                    pendingSnapshot = nil
-                    Task { await model.restoreSnapshot(snapshot) }
+                LabeledContent("Backups", value: health.snapshots.count.formatted())
+                if health.auditIntegrity == .trusted, !health.snapshots.isEmpty {
+                    Button("Remove Older Backups…") { confirmsPurge = true }
+                        .disabled(model.operation != nil || model.issues[.health] != nil)
                 }
             }
-            Button("Cancel", role: .cancel) { pendingSnapshot = nil }
-        } message: {
-            Text("Jet will replace the read-only store on \(planeName) with this snapshot. Later state may be lost; the damaged store is kept aside. The Deletion ledger is reapplied, and the audit may need review afterward.")
-        }
-        .confirmationDialog(
-            "Purge older Recovery snapshots?",
-            isPresented: $confirmPurge,
-            titleVisibility: .visible
-        ) {
-            Button("Create New Snapshot and Purge", role: .destructive) {
-                Task { await model.purgeSnapshots() }
-            }
-            Button("Cancel", role: .cancel) { confirmPurge = false }
-        } message: {
-            Text("Jet will create a verified snapshot, then remove older snapshots that predate recorded deletions. Those older recovery points cannot be restored later.")
-        }
-
-        Section("Diagnostics") {
-            Text("Status and stable error codes stay on this device. Jet does not upload diagnostics. This view omits prompts, file content, terminal output, credentials, and raw native errors.")
-                .font(.caption).foregroundStyle(.secondary)
-            Toggle("Show recent error codes", isOn: $showDiagnosticCodes)
-            if showDiagnosticCodes {
-                if diagnosticErrors.isEmpty && model.issues.isEmpty {
-                    Text("No recent errors in this view.").foregroundStyle(.secondary)
+            .confirmationDialog(
+                "Remove older backups?",
+                isPresented: $confirmsPurge,
+                titleVisibility: .visible
+            ) {
+                Button("Remove", role: .destructive) {
+                    Task { await model.purgeSnapshots() }
                 }
-                ForEach(Array(Set((diagnosticErrors + Array(model.issues.values)).map(\.code))).sorted(), id: \.self) { code in
-                    Text(code).font(.caption.monospaced())
-                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Jet makes a fresh backup first. Older backups from before tasks were deleted can't be restored later.")
             }
         }
     }
 
-    private func toolVersion(_ tool: JetExternalToolSummary) -> String {
-        switch tool.availability {
-        case let .present(version): version
-        case .missing: "Unavailable"
+    private func gitVersion(_ health: JetSystemHealth) -> String {
+        guard let git = health.externalTools.first(where: { $0.tool == "git" }) else {
+            return String(localized: "Not reported")
+        }
+        switch git.availability {
+        case let .present(version): return version
+        case .missing: return String(localized: "Not installed")
         }
     }
 
-    private func auditLabel(_ integrity: JetAuditIntegrity) -> String {
-        switch integrity {
-        case .trusted: "Trusted"
-        case .degraded: "Degraded"
-        case .unavailable: "Not reported"
+    private func keychainLabel(_ state: JetCredentialStoreState) -> String {
+        switch state {
+        case .available: String(localized: "Ready")
+        case .locked: String(localized: "Locked")
+        case .unavailable: String(localized: "Can't reach it")
         }
     }
 }
 
+/// Security Audit: how long records are kept, whether they are trusted, and
+/// the records themselves.
 struct JetAuditSection: View {
     @Bindable var model: JetRecoveryModel
-    @State private var showReferences = false
+    let settings: JetSettingsModel
+    let computerName: String
+    @State private var showsReferences = false
 
     var body: some View {
-        Section("Security audit") {
-            Text("Structured decisions only. Prompts, files, terminal output, credentials, and target identities are hidden here by default.")
-                .font(.caption).foregroundStyle(.secondary)
-            Toggle("Show target references", isOn: $showReferences)
-            if model.isLoadingAudit && model.auditEntries.isEmpty { ProgressView("Loading audit") }
-            if !model.auditEntries.isEmpty && model.issues[.audit] != nil {
-                Text("Showing the last observed audit page.").font(.caption).foregroundStyle(.orange)
-            }
-            if model.auditEntries.isEmpty && model.issues[.audit] == nil && !model.isLoadingAudit {
-                Text("No audit records in this page.").foregroundStyle(.secondary)
-            }
-            ForEach(model.auditEntries) { entry in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.decision).font(.headline)
-                    Text("\(entry.recordedAt.formatted(date: .abbreviated, time: .shortened)) · \(entry.actor) · \(entry.outcome) · \(entry.risk)")
-                    Text(showReferences ? "\(entry.targetKind): \(entry.targetReference)" : "Target reference hidden")
+        Section("Security Audit") {
+            SettingCountRow(
+                settings: settings,
+                key: "security.audit_retention_days",
+                title: String(localized: "Keep audit records for"),
+                unit: String(localized: "days"),
+                minimum: 90,
+                computerName: computerName
+            )
+            LabeledContent("Status") {
+                if let health = model.health {
+                    switch health.auditIntegrity {
+                    case .trusted:
+                        SettingsStatusLabel(text: String(localized: "Trusted"), systemImage: "checkmark.shield.fill", tint: .green)
+                    case .degraded:
+                        SettingsStatusLabel(text: String(localized: "Needs review"), systemImage: "exclamationmark.shield.fill", tint: .orange)
+                    case .unavailable:
+                        Text("Not reported").foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text(model.isLoading ? String(localized: "Loading…") : String(localized: "Not reported"))
+                        .foregroundStyle(.secondary)
                 }
-                .font(.caption)
-                .padding(.vertical, 3)
             }
-            if model.hasMoreAudit {
-                Button("Load More Audit Records") { Task { await model.loadMoreAudit() } }
-                    .disabled(model.isLoadingAudit)
+            if case let .degraded(reason)? = model.health?.auditIntegrity {
+                Text("Some audit records don't add up (\(reason)). Keep the evidence and review it before relying on the audit.")
+                    .settingsCaption()
             }
-            RecoveryIssue(error: model.issues[.audit])
+            DisclosureGroup("Audit Records") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Show what each record is about", isOn: $showsReferences)
+                        .font(.system(size: JetDesign.TextSize.control))
+                    if model.isLoadingAudit && model.auditEntries.isEmpty {
+                        Text("Loading…").foregroundStyle(.secondary)
+                    }
+                    if model.auditEntries.isEmpty && model.issues[.audit] == nil && !model.isLoadingAudit {
+                        Text("No audit records yet.").foregroundStyle(.secondary)
+                    }
+                    ForEach(model.auditEntries) { entry in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.decision.replacingOccurrences(of: "_", with: " "))
+                            Text("\(entry.recordedAt.formatted(date: .abbreviated, time: .shortened)) · \(entry.actor) · \(entry.outcome) · \(entry.risk)")
+                                .settingsCaption()
+                            if showsReferences {
+                                Text("\(entry.targetKind): \(entry.targetReference)")
+                                    .font(.system(size: JetDesign.TextSize.metadata, design: .monospaced))
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                    if model.hasMoreAudit {
+                        Button("Load More") { Task { await model.loadMoreAudit() } }
+                            .disabled(model.isLoadingAudit)
+                    }
+                    if let issue = model.issues[.audit] {
+                        SettingsIssueRow(error: issue, sentence: String(localized: "Couldn't load audit records."))
+                    }
+                }
+                .padding(.top, 6)
+            }
         }
     }
 }
 
-#Preview("Recovery offline") {
-    let model = JetRecoveryModel(makeAccess: { _ in
-        throw JetClientFailure.presentation(.offline)
-    })
-    model.issues[.health] = .offline
-    return Form {
-        JetSystemSection(model: model, planeName: "This Mac", diskPressure: false, diagnosticErrors: [])
-        JetAuditSection(model: model)
+/// Backup rows: "Sep 26, 09:14 · Daily · 412 KB".
+enum BackupPresentation {
+    static func line(_ snapshot: JetRecoverySnapshot) -> String {
+        let size = ByteCountFormatter.string(fromByteCount: Int64(clamping: snapshot.bytes), countStyle: .file)
+        return [date(snapshot.takenAt), reason(snapshot.reason), size].joined(separator: " · ")
     }
-    .formStyle(.grouped)
-    .frame(width: 820, height: 680)
+
+    static func date(_ date: Date) -> String {
+        date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+    }
+
+    static func reason(_ reason: String) -> String {
+        switch reason {
+        case "daily": String(localized: "Daily")
+        case "migration": String(localized: "Before an update")
+        case "maintenance": String(localized: "Before maintenance")
+        default: reason.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
 }
 
-#Preview("Recovery ready") {
-    let model = JetRecoveryModel(makeAccess: { _ in
-        throw JetClientFailure.presentation(.offline)
-    })
-    model.health = JetSystemHealth(
-        planeID: UUID(), daemonVersion: "1.40", daemonStarts: 12,
-        daemonStartedAt: Date(timeIntervalSince1970: 1_750_000_000),
-        platform: "macOS · arm64", capabilitiesAvailable: true,
-        externalTools: [], crafts: [], degradedCapabilities: [],
-        credentialStore: .available, recoveryState: "serving", recoveryReason: nil,
-        snapshots: [JetRecoverySnapshot(
-            name: "plane-1750000000000-daily.sqlite3", reason: "daily",
-            takenAt: Date(timeIntervalSince1970: 1_750_000_000), bytes: 405_504
-        )], deletionLedger: "verified", auditIntegrity: .trusted
-    )
-    return Form {
-        JetSystemSection(model: model, planeName: "This Mac", diskPressure: false, diagnosticErrors: [])
-        JetAuditSection(model: model)
+/// A summary for bug reports, built from versions, states and stable codes only.
+/// It never includes computer names, SSH addresses, task titles, paths or
+/// error messages.
+enum JetDiagnosticSummary {
+    static func make(
+        appVersion: String?,
+        isLocal: Bool,
+        connection: JetConnectionState,
+        health: JetSystemHealth?,
+        capabilities: JetCapabilitySummary?,
+        errors: [JetPresentationError]
+    ) -> String {
+        var lines = ["Jet diagnostic summary"]
+        lines.append("App: \(appVersion.map(token) ?? "unknown")")
+        lines.append("Computer: \(isLocal ? "this Mac" : "another computer")")
+        lines.append("Connection: \(connectionLabel(connection))")
+        if let health {
+            lines.append("Service: \(token(health.daemonVersion)) · \(token(health.platform)) · \(health.daemonStarts) starts")
+            lines.append("Store: \(token(health.recoveryState ?? "not reported"))\(health.recoveryReason.map { " (\(token($0)))" } ?? "")")
+            lines.append("Deletion ledger: \(token(health.deletionLedger ?? "not reported"))")
+            lines.append("Security audit: \(auditLabel(health.auditIntegrity))")
+            lines.append("Backups: \(health.snapshots.count)")
+            lines.append("Keychain: \(health.credentialStore.rawValue)")
+            let tools = health.externalTools.map { tool in
+                switch tool.availability {
+                case let .present(version): "\(token(tool.tool)) \(token(version))"
+                case .missing: "\(token(tool.tool)) missing"
+                }
+            }
+            lines.append("Tools: \(tools.isEmpty ? "none" : tools.joined(separator: ", "))")
+            let crafts = health.crafts.map { "\(token($0.id)) \(token($0.version))" }
+            lines.append("Crafts: \(crafts.isEmpty ? "none" : crafts.joined(separator: ", "))")
+            let degraded = health.degradedCapabilities.map(token)
+            lines.append("Degraded: \(degraded.isEmpty ? "none" : degraded.joined(separator: ", "))")
+        } else if let capabilities {
+            lines.append("Service: \(token(capabilities.coreVersion)) · \(token(capabilities.platform))")
+            lines.append("Keychain: \(capabilities.credentialStore.rawValue)")
+        } else {
+            lines.append("Service: not reported")
+        }
+        let codes = Set(errors.map(\.code).filter(isStableCode)).sorted()
+        lines.append("Recent error codes: \(codes.isEmpty ? "none" : codes.joined(separator: ", "))")
+        return lines.joined(separator: "\n")
     }
-    .formStyle(.grouped)
-    .frame(width: 820, height: 680)
+
+    /// Stable codes look like `storage.disk_pressure`.
+    static func isStableCode(_ code: String) -> Bool {
+        guard !code.isEmpty, code.count <= 80 else { return false }
+        let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789_.")
+        return code.allSatisfy { allowed.contains($0) } && !code.hasPrefix(".") && !code.hasSuffix(".")
+    }
+
+    /// Keeps only the leading version-like text, so nothing else can slip into
+    /// the summary: "2.0 (alex@host)" becomes "2.0".
+    private static func token(_ value: String) -> String {
+        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-")
+        let kept = String(value.prefix(64).prefix { allowed.contains($0) })
+        return kept.isEmpty ? "unknown" : kept
+    }
+
+    private static func connectionLabel(_ state: JetConnectionState) -> String {
+        switch state {
+        case .disconnected: "disconnected"
+        case .connecting: "connecting"
+        case let .connected(negotiation): "connected (protocol \(negotiation.protocolVersion).\(negotiation.minorVersion))"
+        case let .reconnecting(attempt): "reconnecting (attempt \(attempt))"
+        case let .failed(error): "failed (\(isStableCode(error.code) ? error.code : "unknown"))"
+        }
+    }
+
+    private static func auditLabel(_ integrity: JetAuditIntegrity) -> String {
+        switch integrity {
+        case .trusted: "trusted"
+        case let .degraded(reason): "degraded (\(token(reason)))"
+        case .unavailable: "not reported"
+        }
+    }
 }
