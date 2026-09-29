@@ -1,97 +1,148 @@
 import SwiftUI
 
-struct FilesWorkView: View {
+/// Changes in edit mode: one changed file in a plain text editor. Saving is bound
+/// to the revision the file was opened at; every exit asks about unsaved edits.
+struct DetailsFileEditor: View {
     @Bindable var session: DesktopSession
+    @Bindable var model: DetailsPanelModel
+
+    @FocusState private var editorFocused: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            WorkSectionHeader(
-                title: "Workspace file",
-                detail: session.editableFile?.path ?? "Choose a changed file"
-            ) {
-                if !session.workFiles.isEmpty {
-                    Menu("Choose") {
-                        ForEach(session.workFiles) { file in
-                            Button(file.path) { Task { await session.selectWorkFile(file.path) } }
-                        }
-                    }
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
+            Text(caption)
+                .font(.system(size: JetDesign.TextSize.metadata))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var path: String { session.selectedWorkFilePath ?? session.editableFile?.path ?? "" }
+    private var name: String { DesktopSession.detailsFileName(path) }
+    private var folder: String { (path as NSString).deletingLastPathComponent }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: session.hasUnsavedFileEdit ? String(localized: "\(name) — Edited") : name)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !folder.isEmpty {
+                    Text(verbatim: folder)
+                        .font(.system(size: JetDesign.TextSize.metadata))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
             }
-            Divider()
+            Spacer(minLength: 8)
+            Button("Done") { session.finishEditingFile(reload: model.savedDuringEdit) }
+                .accessibilityIdentifier("file-edit-done")
+        }
+    }
 
-            if session.selectedWorkFilePath == nil {
-                WorkPanelEmptyState(
-                    title: "No file selected",
-                    message: "Choose a file in Changes. Only files from this Run can be opened here.",
-                    symbol: "doc"
-                )
-            } else if session.workOperation == "file", session.editableFile == nil {
-                ProgressView("Loading file")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let file = session.editableFile, file.content != nil {
-                VStack(spacing: 0) {
-                    HStack {
-                        Text("\(file.content?.utf8.count ?? 0) bytes")
-                        Spacer()
-                        Text("Revision bound")
-                            .help(file.revision.label)
-                    }
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
+    private var caption: String {
+        let project = session.detailsProjectName
+        if session.detailsWorksInProjectFolder {
+            return project.map { String(localized: "You're editing this file in your \($0) folder.") }
+                ?? String(localized: "You're editing this file in your project folder.")
+        }
+        return project.map {
+            String(localized: "You're editing the working copy. Your \($0) folder doesn't change until you keep the changes.")
+        } ?? String(localized: "You're editing the working copy. Your project folder doesn't change until you keep the changes.")
+    }
 
-                    TextEditor(text: $session.fileDraft)
-                        .font(.system(.caption, design: .monospaced))
-                        .scrollContentBackground(.hidden)
-                        .padding(8)
-                        .background(Color.primary.opacity(0.035))
-                        .accessibilityLabel("Edit \(file.path)")
-
-                    HStack {
-                        Button("Reload") { Task { await session.selectWorkFile(file.path) } }
-                        Spacer()
-                        Button("Save Edit") { Task { await session.saveSelectedWorkFile() } }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(session.workOperation != nil || session.fileDraft == file.content)
-                    }
-                    .padding(12)
-
-                    Divider()
-                    VStack(alignment: .leading, spacing: 9) {
-                        Text("Review comment").font(.subheadline.weight(.semibold))
-                        TextField("Line", value: $session.reviewLine, format: .number)
-                            .textFieldStyle(.roundedBorder)
-                        TextField(
-                            "Describe the issue or requested change",
-                            text: $session.reviewComment,
-                            axis: .vertical
-                        )
-                        .lineLimit(3 ... 6)
-                        .textFieldStyle(.roundedBorder)
-                        HStack {
-                            Spacer()
-                            Button("Add Review Comment") {
-                                Task { await session.submitSelectedReview() }
-                            }
-                            .disabled(
-                                session.workOperation != nil
-                                    || session.reviewLine == 0
-                                    || session.reviewComment.trimmingCharacters(
-                                        in: .whitespacesAndNewlines
-                                    ).isEmpty
-                            )
-                        }
-                    }
-                    .padding(14)
+    @ViewBuilder
+    private var content: some View {
+        if let file = session.editableFile, file.content != nil {
+            TextEditor(text: $session.fileDraft)
+                .font(.system(size: JetDesign.TextSize.control, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .autocorrectionDisabled()
+                .focused($editorFocused)
+                .reportsTextEditing(editorFocused)
+                .padding(6)
+                .background(.background, in: RoundedRectangle(cornerRadius: JetDesign.fieldRadius))
+                .overlay {
+                    RoundedRectangle(cornerRadius: JetDesign.fieldRadius)
+                        .strokeBorder(.separator, lineWidth: 1)
                 }
-            } else {
-                WorkPanelEmptyState(
-                    title: "Content unavailable",
-                    message: "The file may be binary, oversized, deleted, or no longer available as bounded UTF-8 text.",
-                    symbol: "doc.badge.ellipsis"
-                )
+                .accessibilityLabel(Text("Contents of \(name)"))
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+        } else if session.editableFile == nil {
+            ProgressView("Opening \(name)…")
+        } else {
+            ContentUnavailableView {
+                Label("Can't Edit This File", systemImage: "doc.badge.ellipsis")
+            } description: {
+                Text("Jet can edit text files up to 128 KB.")
+            } actions: {
+                Button("Done") { session.finishEditingFile(reload: model.savedDuringEdit) }
             }
         }
     }
 }
+
+/// Edit mode's footer: Revert…, then Save (⌘S).
+struct DetailsEditorFooter: View {
+    @Bindable var session: DesktopSession
+    @Bindable var model: DetailsPanelModel
+
+    @State private var confirmsRevert = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button("Revert…") { confirmsRevert = true }
+                .disabled(!session.hasUnsavedFileEdit || session.workOperation != nil)
+                .accessibilityIdentifier("file-edit-revert")
+                .confirmationDialog(
+                    Text("Discard your edits to \(name)?"),
+                    isPresented: $confirmsRevert,
+                    titleVisibility: .visible
+                ) {
+                    Button("Discard Edits", role: .destructive) { session.revertFileEdits() }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This can't be undone.")
+                }
+            // WP8: .focusedSceneValue(\.hasOpenDialog, confirmsRevert ? true : nil) once WP5 defines the key (critic 4.8).
+            Spacer(minLength: 0)
+            Button(session.workOperation == "save" ? String(localized: "Saving…") : String(localized: "Save")) {
+                Task {
+                    if await session.saveEditedFile() { model.savedDuringEdit = true }
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut("s")
+            .disabled(!canSave)
+            .help(session.detailsIsOffline ? String(localized: "Reconnect to save.") : "")
+            .accessibilityIdentifier("file-edit-save")
+        }
+        .padding(12)
+    }
+
+    private var name: String {
+        DesktopSession.detailsFileName(session.editableFile?.path ?? session.selectedWorkFilePath ?? "")
+    }
+
+    private var canSave: Bool {
+        session.hasUnsavedFileEdit
+            && session.workOperation == nil
+            && !session.detailsIsOffline
+            && session.editableFile?.content != nil
+    }
+}
+
+#if DEBUG
+#Preview { DesktopPreviewScenes.details[0].makeView() }
+#endif
