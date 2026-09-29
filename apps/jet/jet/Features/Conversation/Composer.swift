@@ -78,7 +78,7 @@ enum ComposerSizeLimit: Equatable {
     }
 
     static func label(bytes: Int, limit: Int = JetTurnQueue.maximumPromptBytes) -> String {
-        String(localized: "\(bytes.formatted()) of \(limit.formatted()) bytes")
+        String(localized: "\(JetCopy.number(bytes)) of \(JetCopy.number(limit)) bytes")
     }
 }
 

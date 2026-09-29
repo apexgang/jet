@@ -261,7 +261,7 @@ struct NotificationRouterTests {
     func theDockBadgeCountsTasksThatNeedYou() {
         #expect(JetDockBadge.label(for: 0) == nil)
         #expect(JetDockBadge.label(for: -1) == nil)
-        #expect(JetDockBadge.label(for: 3) == 3.formatted())
+        #expect(JetDockBadge.label(for: 3) == JetCopy.number(3))
     }
 #endif
 

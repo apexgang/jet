@@ -131,7 +131,7 @@ extension JetAppDelegate: nonisolated UNUserNotificationCenterDelegate {
 /// The Dock badge: the number of tasks that need the person, or nothing.
 enum JetDockBadge {
     static func label(for count: Int) -> String? {
-        count > 0 ? count.formatted() : nil
+        count > 0 ? JetCopy.number(count) : nil
     }
 }
 

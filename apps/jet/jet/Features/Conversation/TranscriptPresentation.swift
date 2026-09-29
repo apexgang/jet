@@ -328,7 +328,7 @@ enum TranscriptFormat {
         _ ms: Int64,
         now: Date = .now,
         calendar: Calendar = .autoupdatingCurrent,
-        locale: Locale = .autoupdatingCurrent
+        locale: Locale = JetCopy.uiLocale
     ) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1_000)
         var style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
@@ -347,7 +347,7 @@ enum TranscriptFormat {
         _ ms: Int64,
         now: Date = .now,
         calendar: Calendar = .autoupdatingCurrent,
-        locale: Locale = .autoupdatingCurrent
+        locale: Locale = JetCopy.uiLocale
     ) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1_000)
         var style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)

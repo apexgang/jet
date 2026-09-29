@@ -400,7 +400,7 @@ struct SettingSizeRow: View {
 
 /// Parses what a person typed into a number field.
 enum SettingNumberInput {
-    static func parse(_ text: String, locale: Locale = .autoupdatingCurrent) -> UInt32? {
+    static func parse(_ text: String, locale: Locale = JetCopy.uiLocale) -> UInt32? {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if let separator = locale.groupingSeparator, !separator.isEmpty {
             trimmed = trimmed.replacingOccurrences(of: separator, with: "")

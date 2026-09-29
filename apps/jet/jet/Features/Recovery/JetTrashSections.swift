@@ -166,7 +166,7 @@ enum LibraryCopy {
     static func shortDate(
         _ date: Date,
         now: Date,
-        locale: Locale = .autoupdatingCurrent,
+        locale: Locale = JetCopy.uiLocale,
         timeZone: TimeZone = .autoupdatingCurrent
     ) -> String {
         var calendar = Calendar(identifier: .gregorian)

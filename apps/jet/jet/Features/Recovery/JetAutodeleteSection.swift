@@ -334,7 +334,7 @@ private struct CleanUpCandidateRow: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .lineLimit(1)
-            Text("Last used \(candidate.lastActiveAt.formatted(.dateTime.month(.abbreviated).day()))")
+            Text("Last used \(JetCopy.shortDate(candidate.lastActiveAt))")
                 .settingsCaption()
             if !candidate.protections.isEmpty {
                 let sentences = candidate.protections.compactMap(CleanUpProtection.sentence)
@@ -401,7 +401,7 @@ private struct CustomCleanUpRules: View {
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(2 ... 4)
                 HStack {
-                    Text("\(model.rulePrompt.utf8.count.formatted()) / 4,096 bytes")
+                    Text("\(JetCopy.number(model.rulePrompt.utf8.count)) / \(JetCopy.number(4_096)) bytes")
                         .settingsCaption()
                     Spacer()
                     Button("Check Rule") { Task { await model.compileRule() } }

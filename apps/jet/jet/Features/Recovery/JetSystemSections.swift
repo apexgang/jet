@@ -88,7 +88,7 @@ struct JetServiceSection: View {
             if let health = model.health {
                 LabeledContent("Jet service", value: health.daemonVersion)
                 LabeledContent("Platform", value: health.platform)
-                LabeledContent("Running since", value: health.daemonStartedAt.formatted(date: .abbreviated, time: .shortened))
+                LabeledContent("Running since", value: JetCopy.dateTime(health.daemonStartedAt))
                 LabeledContent("Git", value: gitVersion(health))
                 LabeledContent("Keychain", value: keychainLabel(health.credentialStore))
                 ForEach(health.crafts) { craft in
@@ -125,7 +125,7 @@ struct JetServiceSection: View {
                 if let latest = health.snapshots.first {
                     LabeledContent("Latest backup", value: BackupPresentation.line(latest))
                 }
-                LabeledContent("Backups", value: health.snapshots.count.formatted())
+                LabeledContent("Backups", value: JetCopy.number(health.snapshots.count))
                 if health.auditIntegrity == .trusted, !health.snapshots.isEmpty {
                     Button("Remove Older Backups…") { confirmsPurge = true }
                         .disabled(model.operation != nil || model.issues[.health] != nil)
@@ -215,7 +215,7 @@ struct JetAuditSection: View {
                     ForEach(model.auditEntries) { entry in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(entry.decision.replacingOccurrences(of: "_", with: " "))
-                            Text("\(entry.recordedAt.formatted(date: .abbreviated, time: .shortened)) · \(entry.actor) · \(entry.outcome) · \(entry.risk)")
+                            Text("\(JetCopy.dateTime(entry.recordedAt)) · \(entry.actor) · \(entry.outcome) · \(entry.risk)")
                                 .settingsCaption()
                             if showsReferences {
                                 Text("\(entry.targetKind): \(entry.targetReference)")
@@ -241,12 +241,12 @@ struct JetAuditSection: View {
 /// Backup rows: "Sep 26, 09:14 · Daily · 412 KB".
 enum BackupPresentation {
     static func line(_ snapshot: JetRecoverySnapshot) -> String {
-        let size = ByteCountFormatter.string(fromByteCount: Int64(clamping: snapshot.bytes), countStyle: .file)
+        let size = JetCopy.byteCount(Int64(clamping: snapshot.bytes))
         return [date(snapshot.takenAt), reason(snapshot.reason), size].joined(separator: " · ")
     }
 
     static func date(_ date: Date) -> String {
-        date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+        date.formatted(.dateTime.month(.abbreviated).day().hour().minute().locale(JetCopy.uiLocale))
     }
 
     static func reason(_ reason: String) -> String {

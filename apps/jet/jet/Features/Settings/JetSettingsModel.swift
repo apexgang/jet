@@ -814,7 +814,7 @@ enum JetSettingDefaults {
             return StorageSize(mebibytes: mebibytes).label
         default:
             guard case let .count(count) = value(key) else { return nil }
-            return count.formatted()
+            return JetCopy.number(count)
         }
     }
 }
@@ -831,7 +831,7 @@ struct UsageWindowPresentation: Equatable {
         _ window: JetQuotaWindowSummary,
         now: Date = .now,
         calendar: Calendar = .autoupdatingCurrent,
-        locale: Locale = .autoupdatingCurrent
+        locale: Locale = JetCopy.uiLocale
     ) {
         if case .unreachable = window.freshness {
             fraction = nil

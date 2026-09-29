@@ -13,7 +13,7 @@ enum ScheduleCopy {
     }
 
     /// "Berlin · Central European Time".
-    static func zoneLabel(_ timeZoneID: String, locale: Locale = .autoupdatingCurrent) -> String {
+    static func zoneLabel(_ timeZoneID: String, locale: Locale = JetCopy.uiLocale) -> String {
         let city = city(timeZoneID)
         guard let name = TimeZone(identifier: timeZoneID)?.localizedName(for: .generic, locale: locale),
               name != city
@@ -22,13 +22,13 @@ enum ScheduleCopy {
     }
 
     /// "HH:MM:SS" as the locale writes a time of day, such as "9:00 AM".
-    static func time(localTime: String, locale: Locale = .autoupdatingCurrent) -> String {
+    static func time(localTime: String, locale: Locale = JetCopy.uiLocale) -> String {
         let parts = localTime.split(separator: ":").compactMap { Int($0) }
         guard parts.count >= 2 else { return localTime }
         return time(hour: parts[0], minute: parts[1], locale: locale)
     }
 
-    static func time(hour: Int, minute: Int, locale: Locale = .autoupdatingCurrent) -> String {
+    static func time(hour: Int, minute: Int, locale: Locale = JetCopy.uiLocale) -> String {
         let utc = TimeZone(identifier: "UTC") ?? .gmt
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = utc
@@ -36,13 +36,13 @@ enum ScheduleCopy {
         return date.formatted(Date.FormatStyle(locale: locale, calendar: calendar, timeZone: utc).hour().minute())
     }
 
-    static func summary(localTime: String, timeZone: String, locale: Locale = .autoupdatingCurrent) -> String {
+    static func summary(localTime: String, timeZone: String, locale: Locale = JetCopy.uiLocale) -> String {
         let time = time(localTime: localTime, locale: locale)
         return String(localized: "Every day at \(time) (\(city(timeZone)))")
     }
 
     /// The notice after saving: "Repeats daily at 9:00 AM (Berlin)."
-    static func savedNotice(localTime: String, timeZone: String, locale: Locale = .autoupdatingCurrent) -> String {
+    static func savedNotice(localTime: String, timeZone: String, locale: Locale = JetCopy.uiLocale) -> String {
         let time = time(localTime: localTime, locale: locale)
         return String(localized: "Repeats daily at \(time) (\(city(timeZone))).")
     }
@@ -52,7 +52,7 @@ enum ScheduleCopy {
         unixMilliseconds: Int64,
         timeZone: String,
         now: Date = .now,
-        locale: Locale = .autoupdatingCurrent
+        locale: Locale = JetCopy.uiLocale
     ) -> String {
         let zone = TimeZone(identifier: timeZone) ?? .autoupdatingCurrent
         let date = Date(timeIntervalSince1970: TimeInterval(unixMilliseconds) / 1_000)
@@ -470,7 +470,7 @@ struct RepeatDailySheet: View {
             .textFieldStyle(.roundedBorder)
             .labelsHidden()
             if model.showsByteCount {
-                Text("\(model.messageBytes.formatted()) of \(RepeatDailyModel.maximumBytes.formatted()) bytes")
+                Text("\(JetCopy.number(model.messageBytes)) of \(JetCopy.number(RepeatDailyModel.maximumBytes)) bytes")
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(model.messageBytes > RepeatDailyModel.maximumBytes ? .red : .secondary)

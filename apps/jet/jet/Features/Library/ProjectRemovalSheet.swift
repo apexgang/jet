@@ -26,10 +26,10 @@ struct ProjectRemovalSheet: View {
 
             Grid(alignment: .leading, horizontalSpacing: JetDesign.gap, verticalSpacing: 6) {
                 fact("Folder", preview.root)
-                fact("Size", ByteCountFormatter.string(fromByteCount: Int64(clamping: preview.diskUseBytes), countStyle: .file))
-                fact("Changed files", preview.dirtyFiles.formatted())
-                fact("Unpushed commits", preview.unpushedCommits.formatted())
-                fact("Working copies", preview.workspaceCount.formatted())
+                fact("Size", JetCopy.byteCount(Int64(clamping: preview.diskUseBytes)))
+                fact("Changed files", JetCopy.number(preview.dirtyFiles))
+                fact("Unpushed commits", JetCopy.number(preview.unpushedCommits))
+                fact("Working copies", JetCopy.number(preview.workspaceCount))
             }
 
             let obstacles = Self.obstacleSentences(preview)

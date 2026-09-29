@@ -169,7 +169,7 @@ final class MoveToTrashModel {
     static func dateText(
         _ date: Date?,
         now: Date,
-        locale: Locale = .autoupdatingCurrent,
+        locale: Locale = JetCopy.uiLocale,
         timeZone: TimeZone = .autoupdatingCurrent
     ) -> String? {
         date.map { LibraryCopy.shortDate($0, now: now, locale: locale, timeZone: timeZone) }

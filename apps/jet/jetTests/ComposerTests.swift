@@ -55,7 +55,7 @@ struct ComposerTests {
         #expect(ComposerSizeLimit.state(bytes: 65_536) == .near(65_536))
         #expect(ComposerSizeLimit.state(bytes: 65_537) == .over(65_537))
         #expect(ComposerSizeLimit.label(bytes: 70_000)
-            == "\(70_000.formatted()) of \(65_536.formatted()) bytes")
+            == "\(JetCopy.number(70_000)) of \(JetCopy.number(65_536)) bytes")
     }
 
     @Test

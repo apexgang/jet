@@ -197,6 +197,22 @@ struct TaskStatusPresentationTests {
     }
 
     @Test
+    func theInterfaceLocaleFollowsTheAppLanguageAndKeepsTheRegion() {
+        let russia = Locale.Region("RU")
+        let english = JetCopy.uiLocale(preferredLocalization: "en", region: russia)
+        #expect(english.language.languageCode == .english)
+        #expect(english.region == russia)
+        // An English interface on a Russian-region Mac reads English relative times.
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let text = JetCopy.relative(ms: Int64((now.timeIntervalSince1970 - 7_200) * 1_000), now: now, locale: english)
+        #expect(text.contains("ago"))
+
+        #expect(JetCopy.uiLocale(preferredLocalization: nil, region: nil).language.languageCode == .english)
+        #expect(JetCopy.uiLocale(preferredLocalization: "Base", region: nil).language.languageCode == .english)
+        #expect(JetCopy.uiLocale(preferredLocalization: "en-GB", region: russia).region == Locale.Region("GB"))
+    }
+
+    @Test
     func transcriptScaleStepsRunFrom85To200Percent() {
         #expect(JetDesign.transcriptScaleKey == "jet.transcript.text-scale")
         #expect(JetDesign.transcriptScaleSteps.first == 0.85)

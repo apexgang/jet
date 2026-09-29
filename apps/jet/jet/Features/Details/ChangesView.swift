@@ -784,7 +784,7 @@ struct CommentOnLineForm: View {
         if Double(bytes) > Double(Self.maximumBytes) * 0.8 {
             let over = bytes > Self.maximumBytes
             Label {
-                Text("\(bytes.formatted()) of \(Self.maximumBytes.formatted()) bytes")
+                Text("\(JetCopy.number(bytes)) of \(JetCopy.number(Self.maximumBytes)) bytes")
             } icon: {
                 Image(systemName: over ? "exclamationmark.triangle.fill" : "info.circle")
             }

@@ -358,8 +358,7 @@ private struct ConnectedAppRow: View {
     }
 
     private var subtitle: String {
-        let date = Date(timeIntervalSince1970: TimeInterval(client.pairedAtUnixMilliseconds) / 1_000)
-            .formatted(.dateTime.month(.abbreviated).day())
+        let date = JetCopy.shortDate(Date(timeIntervalSince1970: TimeInterval(client.pairedAtUnixMilliseconds) / 1_000))
         return client.access == .enabled
             ? String(localized: "Paired \(date)")
             : String(localized: "Paired \(date) · Access off")

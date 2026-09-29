@@ -182,27 +182,27 @@ struct DetailsTechnicalDetails: View {
             DetailsTechnicalRow("Run ID", run.id.uuidString.lowercased())
             DetailsTechnicalRow("Run lifecycle", run.lifecycle.rawValue)
             DetailsTechnicalRow("Run activity", session.runExecution?.activity?.rawValue ?? "—")
-            DetailsTechnicalRow("Run revision", run.revision.formatted())
+            DetailsTechnicalRow("Run revision", JetCopy.number(run.revision))
         }
         if let snapshot = session.detailsSnapshot {
-            DetailsTechnicalRow("Runs", snapshot.runs.count.formatted())
+            DetailsTechnicalRow("Runs", JetCopy.number(snapshot.runs.count))
             DetailsTechnicalRow("Workspace ID", snapshot.workspaceID?.uuidString.lowercased() ?? "None (local checkout)")
             if let root = snapshot.workspaceRoot {
                 DetailsTechnicalRow("Workspace root", root)
             }
-            DetailsTechnicalRow("Event cursor", snapshot.cursor.formatted())
+            DetailsTechnicalRow("Event cursor", JetCopy.number(snapshot.cursor))
         }
         if let diff = session.workDiff {
             DetailsTechnicalRow("Diff scope", diff.scope.label)
-            DetailsTechnicalRow("Latest checkpoint Turn", diff.latestTurn.formatted())
+            DetailsTechnicalRow("Latest checkpoint Turn", JetCopy.number(diff.latestTurn))
             DetailsTechnicalRow(
                 "Patch artifact",
-                "\(ByteCountFormatter.string(fromByteCount: Int64(diff.artifact.size), countStyle: .file)) · \(diff.artifact.availability.rawValue) · \(String(diff.artifact.sha256.prefix(12)))"
+                "\(JetCopy.byteCount(Int64(diff.artifact.size))) · \(diff.artifact.availability.rawValue) · \(String(diff.artifact.sha256.prefix(12)))"
             )
             .help(diff.artifact.sha256)
             DetailsTechnicalRow(
                 "Patch loaded",
-                "\(session.workPatchBytesLoaded.formatted()) of \(diff.artifact.size.formatted()) bytes"
+                "\(JetCopy.number(session.workPatchBytesLoaded)) of \(JetCopy.number(diff.artifact.size)) bytes"
             )
         }
         if let file = session.editableFile {
@@ -217,7 +217,7 @@ struct DetailsTechnicalDetails: View {
                 "Turn \(turn.sequence) · \(turn.state.rawValue) · \(turn.source.rawValue)"
             )
         }
-        Text("Up to \(JetTurnQueue.maximumEntries) unsettled Turns · \(JetTurnQueue.maximumPromptBytes.formatted()) bytes per prompt")
+        Text("Up to \(JetTurnQueue.maximumEntries) unsettled Turns · \(JetCopy.number(JetTurnQueue.maximumPromptBytes)) bytes per prompt")
             .font(.system(size: JetDesign.TextSize.metadata))
             .foregroundStyle(.secondary)
     }

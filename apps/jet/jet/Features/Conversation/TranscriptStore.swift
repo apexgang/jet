@@ -678,7 +678,7 @@ final class TranscriptStore {
     ) -> HistoryNotice? {
         let hasRuns = record.facts?.hasRuns == true
         let summary = record.facts.map {
-            Self.summary($0, now: now(), locale: .autoupdatingCurrent, timeZone: .autoupdatingCurrent)
+            Self.summary($0, now: now(), locale: JetCopy.uiLocale, timeZone: .autoupdatingCurrent)
         }
         switch historyState(for: conversationID, liveIsEmpty: live.isEmpty) {
         case let .loading(progress):

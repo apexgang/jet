@@ -150,7 +150,7 @@ struct AllowConnectionSheet: View {
     /// "1:52".
     static func countdown(until date: Date, now: Date) -> String {
         let seconds = max(0, Int(date.timeIntervalSince(now).rounded(.up)))
-        return Duration.seconds(seconds).formatted(.time(pattern: .minuteSecond))
+        return Duration.seconds(seconds).formatted(.time(pattern: .minuteSecond).locale(JetCopy.uiLocale))
     }
 }
 
