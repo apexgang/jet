@@ -1,11 +1,17 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 @main
 struct jetApp: App {
     @State private var session: DesktopSession
+    // WP4: @NSApplicationDelegateAdaptor(JetAppDelegate.self) private var appDelegate
 
     init() {
 #if os(macOS)
+        // Jet has one main window, so it never offers window tabs.
+        NSWindow.allowsAutomaticWindowTabbing = false
         let socketURL = JetClient.defaultLocalSocketURL(
             homeDirectory: FileManager.default.homeDirectoryForCurrentUser
         )
@@ -61,15 +67,18 @@ struct jetApp: App {
 #if os(macOS)
         Window("Jet", id: "main") {
             ContentView(session: session)
+            // WP4: ContentView(session: session).jetAppDelegate(appDelegate, session: session)
         }
         .defaultLaunchBehavior(.presented)
         .defaultSize(width: 1280, height: 800)
+        .windowResizability(.contentMinSize)
         .commands {
             JetCommands(session: session)
         }
 
         Settings {
             JetSettingsView(session: session)
+                .tint(JetDesign.accent)
         }
 #else
         WindowGroup {

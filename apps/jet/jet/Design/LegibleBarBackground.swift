@@ -1,5 +1,8 @@
 import SwiftUI
 
+/// A bar background that stays opaque when Reduce Transparency is on.
+///
+/// Fixture (iOS) views only; the live path uses system bars.
 struct LegibleBarBackground: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 

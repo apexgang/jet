@@ -9,23 +9,10 @@ struct ContentView: View {
 }
 
 #if DEBUG
-#Preview("New Task") {
-    DesktopPreviewScenes.view("new-task")
+#Preview("Working") {
+    ContentView(session: .preview { DesktopPreviewData.working($0) })
         .frame(width: 1280, height: 800)
 }
-
-#if os(macOS)
-#Preview("Compact") {
-    DesktopPreviewScenes.view("task-compact")
-        .frame(width: 900, height: 600)
-}
-
-#Preview("Wide dark") {
-    DesktopPreviewScenes.view("task-waiting-changes")
-        .frame(width: 1600, height: 900)
-        .preferredColorScheme(.dark)
-}
-#endif
 #endif
 
 #Preview("Fixture") {
