@@ -153,8 +153,6 @@ enum HistoryPreviewData {
         [
             entry("7a3c0000-0000-4000-8000-000000000611", .user, "Sign-in feels slow on staging. Can you find out why?", sequence: 1_002, minutes: 0),
             entry("1003-output-0", .agent, "`readSession` decodes the session cookie twice on every request. I'll decode it once and keep the result for the rest of the request.", sequence: 1_003, minutes: 1),
-            entry("1005-output-0", .agent, "Read", sequence: 1_005, minutes: 2),
-            entry("1006-output-0", .agent, "Edit", sequence: 1_006, minutes: 3),
             JetTimelineEntry(
                 id: "1008-result",
                 kind: .result,
@@ -193,7 +191,6 @@ enum HistoryPreviewData {
     static var permissionLive: [JetTimelineEntry] {
         [
             permission(.allowed, sequence: 1_030, minutes: 3),
-            entry("1031-output-0", .agent, "Bash", sequence: 1_031, minutes: 4),
             entry("1032-output-0", .agent, "All **42 tests** pass.", sequence: 1_032, minutes: 5),
         ]
     }

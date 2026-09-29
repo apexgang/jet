@@ -746,7 +746,9 @@ private struct ComposerCaptionView: View {
             }
             Text(caption.text)
                 .foregroundStyle(caption.tone == .warning || caption.tone == .error ? .primary : .secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                // Wraps by priority, not fixedSize: a fixed vertical size here made
+                // narrow windows with Details loop on AppKit constraint passes.
+                .layoutPriority(1)
             if let action = caption.action {
                 Button(action.title) { perform(action) }
 #if os(macOS)

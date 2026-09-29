@@ -275,7 +275,7 @@ struct DetailsKeepFooter: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let ref = session.detailsConversationRef {
-                KeepChangesStatusLine(session: session, ref: ref)
+                KeepChangesStatusLine(session: session, ref: ref, isStacked: true)
             }
             HStack {
                 Spacer(minLength: 0)
@@ -283,7 +283,7 @@ struct DetailsKeepFooter: View {
                 Button("Keep Changes…") { session.presentKeepChanges(mode: .plan) }
                     .buttonStyle(.bordered)
                     // Nothing to keep under "No Changes Yet".
-                    .disabled(!session.canKeepChanges || !session.hasKnownChanges)
+                    .disabled(!session.canKeepChanges || !hasChangesToKeep)
                     .help(keepHelp)
                     .accessibilityIdentifier("keep-changes-details")
             }
@@ -291,9 +291,16 @@ struct DetailsKeepFooter: View {
         .padding(12)
     }
 
+    /// A loaded All Changes diff decides; otherwise recorded changes do (a
+    /// narrower scope can be empty while the task still has changes to keep).
+    private var hasChangesToKeep: Bool {
+        if session.changesScopeChoice == .all, let diff = session.workDiff { return diff.totalFiles > 0 }
+        return session.hasKnownChanges
+    }
+
     private var keepHelp: String {
         if let reason = session.keepChangesUnavailableReason { return reason }
-        if !session.hasKnownChanges { return String(localized: "No changes to keep yet.") }
+        if !hasChangesToKeep { return String(localized: "No changes to keep yet.") }
         return String(localized: "Review the changes and choose how to keep them.")
     }
 }

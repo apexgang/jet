@@ -353,10 +353,14 @@ extension KeepChangesSummary.Tone {
 struct KeepChangesStatusLine: View {
     @Bindable var session: DesktopSession
     let ref: ConversationRef
+    /// Always stacks the message over its actions. The Details footer uses it: a
+    /// ViewThatFits in the narrow inspector's bottom bar made its height overflow
+    /// the window.
+    var isStacked = false
 
     var body: some View {
         if let summary = session.keepChangesSummary(for: ref) {
-            KeepChangesStatusContent(session: session, ref: ref, summary: summary)
+            KeepChangesStatusContent(session: session, ref: ref, summary: summary, isStacked: isStacked)
                 .task(id: ref) { await session.observeDeliveries(for: ref) }
                 .onChange(of: session.gitDeliveries) { _, deliveries in
                     guard ref.conversationID == session.selectedConversationID else { return }
@@ -370,24 +374,35 @@ private struct KeepChangesStatusContent: View {
     let session: DesktopSession
     let ref: ConversationRef
     let summary: KeepChangesSummary
+    let isStacked: Bool
 
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 16) {
-                message
-                Spacer(minLength: 12)
-                actions
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                message
-                actions
+        Group {
+            if isStacked {
+                stacked
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 16) {
+                        message
+                        Spacer(minLength: 12)
+                        actions
+                    }
+                    stacked
+                }
             }
         }
         .frame(maxWidth: JetDesign.readingWidth, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("keep-changes-status")
+    }
+
+    private var stacked: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            message
+            actions
+        }
     }
 
     private var message: some View {
@@ -399,12 +414,12 @@ private struct KeepChangesStatusContent: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .font(.system(size: JetDesign.TextSize.navigation, weight: .medium))
                         .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .modifier(WrapsFully(isOn: !isStacked))
                     ForEach(summary.details, id: \.self) { detail in
                         Text(detail)
                             .font(.system(size: JetDesign.TextSize.metadata))
                             .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .modifier(WrapsFully(isOn: !isStacked))
                     }
                 }
             }
@@ -413,15 +428,24 @@ private struct KeepChangesStatusContent: View {
             .accessibilityValue(Text(summary.details.joined(separator: "\n")))
 
             if let command = summary.switchCommand {
-                // One line when it fits; otherwise the command gets its own line.
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        switchLabel
-                        switchCommand(command)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        switchLabel
-                        switchCommand(command)
+                Group {
+                    if isStacked {
+                        VStack(alignment: .leading, spacing: 2) {
+                            switchLabel
+                            switchCommand(command)
+                        }
+                    } else {
+                        // One line when it fits; otherwise the command gets its own line.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                switchLabel
+                                switchCommand(command)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                switchLabel
+                                switchCommand(command)
+                            }
+                        }
                     }
                 }
                 .padding(.leading, 24)
@@ -440,7 +464,6 @@ private struct KeepChangesStatusContent: View {
             Text(command)
                 .font(.system(size: JetDesign.TextSize.control, design: .monospaced))
                 .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
             DeliveryCopyButton(title: String(localized: "Copy Command"), value: command, iconOnly: true)
                 .buttonStyle(.borderless)
                 .controlSize(.small)
@@ -526,6 +549,22 @@ private struct KeepChangesStatusContent: View {
             session.presentKeepChanges(for: ref)
         case .howToSetUp, .openPullRequest, .copyBranchName:
             break
+        }
+    }
+}
+
+/// A fixed vertical size keeps wrapped text from truncating inside ViewThatFits.
+/// The stacked Details footer goes without: measured at its minimum width, a fixed
+/// vertical size reported a height taller than the window (windows use
+/// `.contentMinSize`), so the whole window content overflowed.
+private struct WrapsFully: ViewModifier {
+    let isOn: Bool
+
+    func body(content: Content) -> some View {
+        if isOn {
+            content.fixedSize(horizontal: false, vertical: true)
+        } else {
+            content
         }
     }
 }
