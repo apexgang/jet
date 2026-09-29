@@ -1,11 +1,19 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 @main
 struct jetApp: App {
     @State private var session: DesktopSession
+#if os(macOS)
+    @NSApplicationDelegateAdaptor(JetAppDelegate.self) private var appDelegate
+#endif
 
     init() {
 #if os(macOS)
+        // Jet has one main window, so it never offers window tabs.
+        NSWindow.allowsAutomaticWindowTabbing = false
         let socketURL = JetClient.defaultLocalSocketURL(
             homeDirectory: FileManager.default.homeDirectoryForCurrentUser
         )
@@ -61,19 +69,26 @@ struct jetApp: App {
 #if os(macOS)
         Window("Jet", id: "main") {
             ContentView(session: session)
+                .jetAppDelegate(appDelegate, session: session)
+                // Dates and numbers follow the interface language (JetCopy.uiLocale).
+                .environment(\.locale, JetCopy.uiLocale)
         }
         .defaultLaunchBehavior(.presented)
         .defaultSize(width: 1280, height: 800)
+        .windowResizability(.contentMinSize)
         .commands {
             JetCommands(session: session)
         }
 
         Settings {
             JetSettingsView(session: session)
+                .tint(JetDesign.accent)
+                .environment(\.locale, JetCopy.uiLocale)
         }
 #else
         WindowGroup {
             ContentView(session: session)
+                .environment(\.locale, JetCopy.uiLocale)
         }
 #endif
     }

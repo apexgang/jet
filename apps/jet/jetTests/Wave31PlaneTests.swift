@@ -129,6 +129,271 @@ struct Wave31PlaneTests {
     }
 }
 
+@MainActor
+struct Wave31PairingTests {
+    private let plane = UUID()
+
+    @Test
+    func allowingOpensTheGateOnlyWhenClosedAndClosesOnlyWhatItOpened() async {
+        let closed = PairingAccessFake(gate: "closed")
+        let model = makeModel(closed)
+        await model.beginAllowing(on: plane)
+        #expect(model.ownsGate)
+        #expect(await closed.gateChanges == ["open"])
+        await model.endAllowing()
+        #expect(await closed.gateChanges == ["open", "closed"])
+        #expect(!model.ownsGate)
+        #expect(model.allowPhase == .idle)
+
+        let open = PairingAccessFake(gate: "open")
+        let other = makeModel(open)
+        await other.beginAllowing(on: plane)
+        #expect(!other.ownsGate)
+        await other.endAllowing()
+        #expect(await open.gateChanges.isEmpty)
+        #expect(await open.gate == "open")
+    }
+
+    @Test
+    func theSheetFollowsTheOfferUntilTheOtherMacIsListed() async throws {
+        let access = PairingAccessFake(gate: "closed")
+        let model = makeModel(access)
+        let clientID = UUID()
+
+        await model.beginAllowing(on: plane)
+        #expect(model.allowPhase == .showingCode("4821-0937"))
+        #expect(await model.pollOnce())
+        #expect(model.allowPhase == .showingCode("4821-0937"))
+
+        await access.claim(clientID: clientID, numbers: "482-913")
+        #expect(await model.pollOnce())
+        #expect(model.allowPhase == .comparing("482-913"))
+        #expect(model.claimingClientID == clientID)
+
+        await model.confirmCodesMatch()
+        #expect(model.allowPhase == .waitingForOtherMac)
+        #expect(await access.confirmedNumbers == ["482-913"])
+        #expect(await model.pollOnce())
+        #expect(model.allowPhase == .waitingForOtherMac)
+
+        await access.complete()
+        #expect(await model.pollOnce() == false)
+        #expect(model.allowPhase == .connected)
+        #expect(model.clients(of: plane, fallback: nil).map(\.id) == [clientID])
+    }
+
+    @Test
+    func anExpiredCodeEndsTheSheet() async {
+        let access = PairingAccessFake(gate: "closed")
+        let model = makeModel(access)
+        await model.beginAllowing(on: plane)
+
+        await access.end("expired")
+        #expect(await model.pollOnce() == false)
+        #expect(model.allowPhase == .ended(.expired))
+
+        // An offer that is simply gone after its expiry also reads as expired.
+        let later = PairingAccessFake(gate: "closed")
+        let clock = TestClock(now: Date(timeIntervalSince1970: 1_000))
+        let other = makeModel(later, now: { clock.now })
+        await other.beginAllowing(on: plane)
+        clock.now = Date(timeIntervalSince1970: 1_000 + 121)
+        await later.dropOffer()
+        #expect(await other.pollOnce() == false)
+        #expect(other.allowPhase == .ended(.expired))
+
+        let tooMany = PairingAccessFake(gate: "closed")
+        let third = makeModel(tooMany)
+        await third.beginAllowing(on: plane)
+        await tooMany.end("too_many_attempts")
+        await third.pollOnce()
+        #expect(third.allowPhase == .ended(.tooManyAttempts))
+    }
+
+    @Test
+    func dontMatchClosesTheGateAndNeverConfirms() async {
+        let access = PairingAccessFake(gate: "closed")
+        let model = makeModel(access)
+        await model.beginAllowing(on: plane)
+        await access.claim(clientID: UUID(), numbers: "482-913")
+        await model.pollOnce()
+        #expect(model.allowPhase == .comparing("482-913"))
+
+        await model.codesDontMatch()
+
+        #expect(await access.confirmedNumbers.isEmpty)
+        #expect(await access.gate == "closed")
+        #expect(model.allowPhase == .ended(.stopped))
+        #expect(!model.ownsGate)
+        await model.endAllowing()
+        #expect(await access.gateChanges == ["open", "closed"])
+    }
+
+    @Test
+    func anUnconfirmedMatchKeepsItsCommandIDForTheExplicitRetry() async {
+        let access = PairingAccessFake(gate: "closed")
+        let model = makeModel(access)
+        await model.beginAllowing(on: plane)
+        await access.claim(clientID: UUID(), numbers: "482-913")
+        await model.pollOnce()
+
+        await access.failNextConfirm(.commandOutcomeUnknown(commandID: UUID()))
+        await model.confirmCodesMatch()
+        #expect(model.issue?.category == .outcomeUnknown)
+        #expect(model.allowPhase == .comparing("482-913"))
+        #expect(await access.confirmCommandIDs.count == 1)
+
+        await model.confirmCodesMatch()
+        let ids = await access.confirmCommandIDs
+        #expect(ids.count == 2)
+        #expect(ids[0] == ids[1])
+        #expect(model.allowPhase == .waitingForOtherMac)
+    }
+
+    @Test(arguments: [
+        ("1234-5678", true),
+        ("12345678", true),
+        (" 1234 5678 ", true),
+        ("123", false),
+        ("1234-567", false),
+        ("1234-567a", false),
+        ("123456789", false),
+        ("", false),
+    ])
+    func pairingCodesAreEightDigits(_ code: String, valid: Bool) {
+        #expect(PairingCode.isValid(code) == valid)
+    }
+
+    private func makeModel(
+        _ access: PairingAccessFake,
+        now: @escaping @Sendable () -> Date = { Date(timeIntervalSince1970: 1_000) }
+    ) -> ComputerPairingModel {
+        ComputerPairingModel(
+            makeAccess: { _ in access },
+            now: now,
+            sleep: { _ in throw CancellationError() }
+        )
+    }
+}
+
+private final class TestClock: @unchecked Sendable {
+    // Written only from the test's main actor before the model reads it.
+    var now: Date
+
+    init(now: Date) {
+        self.now = now
+    }
+}
+
+/// One computer's Pairing: a gate, at most one offer and the paired Jet apps.
+private actor PairingAccessFake: JetPairingAccess {
+    private(set) var gate: String
+    private(set) var gateChanges: [String] = []
+    private(set) var confirmedNumbers: [String] = []
+    private(set) var confirmCommandIDs: [UUID] = []
+    private var pending: JetPendingPairing?
+    private var clients: [JetPairedClientSummary] = []
+    private var nextConfirmFailure: JetClientFailure?
+    private let offerID = UUID()
+
+    init(gate: String) {
+        self.gate = gate
+    }
+
+    func claim(clientID: UUID, numbers: String) {
+        pending = offer(.awaitingConfirmation(clientID: clientID, authenticationString: numbers))
+    }
+
+    func complete() {
+        guard let clientID = pending?.progress.clientID else { return }
+        pending = nil
+        clients.append(JetPairedClientSummary(
+            id: clientID,
+            access: .enabled,
+            pairedAtUnixMilliseconds: 1_000_000,
+            pairingProtocol: "jet.pairing.v1",
+            publicKey: String(repeating: "ab", count: 32)
+        ))
+    }
+
+    func end(_ reason: String) {
+        pending = offer(.ended(reason: reason))
+    }
+
+    func dropOffer() {
+        pending = nil
+    }
+
+    func failNextConfirm(_ failure: JetClientFailure) {
+        nextConfirmFailure = failure
+    }
+
+    func pairing() async throws -> JetPairingSummary {
+        JetPairingSummary(cursor: 1, gate: gate, clients: clients, pending: pending)
+    }
+
+    func setPairingGate(_ gate: String, commandID: UUID) async throws -> String {
+        gateChanges.append(gate)
+        self.gate = gate
+        if gate == "closed", pending != nil {
+            pending = offer(.ended(reason: "gate_closed"))
+        }
+        return gate
+    }
+
+    func openManualPairing(commandID: UUID) async throws -> JetOpenedPairing {
+        guard gate == "open" else {
+            throw JetClientFailure.presentation(.invalidInput(code: "pairing.gate_closed", message: "Closed."))
+        }
+        let offered = offer(.offered)
+        pending = offered
+        return JetOpenedPairing(disclosure: .manualCode("4821-0937"), pending: offered)
+    }
+
+    func confirmPairing(
+        offerID: UUID,
+        authenticationString: String,
+        commandID: UUID
+    ) async throws -> JetPendingPairing {
+        confirmCommandIDs.append(commandID)
+        if let failure = nextConfirmFailure {
+            nextConfirmFailure = nil
+            throw failure
+        }
+        guard let clientID = pending?.progress.clientID else {
+            throw JetClientFailure.presentation(.invalidInput(code: "pairing.offer_ended", message: "Ended."))
+        }
+        confirmedNumbers.append(authenticationString)
+        let confirmed = offer(.confirmed(clientID: clientID, authenticationString: authenticationString))
+        pending = confirmed
+        return confirmed
+    }
+
+    func setPairedClientAccess(
+        clientID: UUID,
+        access: JetPairedClientAccess,
+        commandID: UUID
+    ) async throws -> JetPairedClientSummary {
+        throw JetClientFailure.presentation(.invalidInput(code: "pairing.client_missing", message: "Missing."))
+    }
+
+    func revokePairedClient(clientID: UUID, commandID: UUID) async throws -> UUID {
+        clients.removeAll { $0.id == clientID }
+        return clientID
+    }
+
+    private func offer(_ progress: JetPairingProgress) -> JetPendingPairing {
+        JetPendingPairing(
+            id: offerID,
+            method: "manual_code",
+            progress: progress,
+            attemptsRemaining: 5,
+            openedAtUnixMilliseconds: 1_000_000,
+            expiresAtUnixMilliseconds: 1_120_000
+        )
+    }
+}
+
 private actor CapturingConnectionSigner: JetConnectionSigning {
     nonisolated let clientID: UUID
     private(set) var signedBytes: Data?
