@@ -15,7 +15,7 @@ struct AssistantsSettingsPane: View {
             Group {
                 Section {
                     ForEach(AssistantKind.allCases) { assistant in
-                        AssistantRow(
+                        AssistantSettingsRow(
                             settings: settings,
                             assistant: assistant,
                             state: state(of: assistant),
@@ -196,7 +196,7 @@ enum AssistantSignInState {
     }
 }
 
-private struct AssistantRow: View {
+private struct AssistantSettingsRow: View {
     let settings: JetSettingsModel
     let assistant: AssistantKind
     let state: AssistantSignInState
