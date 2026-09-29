@@ -221,7 +221,7 @@ enum DesktopPreviewData {
             action: #"{"command":"npm install stripe@17.4.0 @stripe/stripe-js@5.2.0","cwd":"/Users/alex/code/billing-service"}"#,
             target: "/Users/alex/code/billing-service",
             scope: "This action once",
-            consequence: "The Run stays paused until this request is decided. Manual approval decisions are not available through the current client protocol.",
+            consequence: "This reply stays paused until the request is answered.",
             rationale: nil,
             state: .requested,
             canAuthorizeRetry: false

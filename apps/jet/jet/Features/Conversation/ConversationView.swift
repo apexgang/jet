@@ -35,15 +35,15 @@ struct ConversationView: View {
     private var fixtureContent: some View {
         switch session.contentState {
         case .loading:
-            ProgressView("Loading workspace")
+            ProgressView("Loading Tasks…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case let .failed(message):
             ContentUnavailableView {
-                Label("Workspace unavailable", systemImage: "exclamationmark.triangle")
+                Label("Couldn't Load Tasks", systemImage: "exclamationmark.triangle")
             } description: {
                 Text(message)
             } actions: {
-                Button("Try again", action: session.retryFixtureLoad)
+                Button("Try Again", action: session.retryFixtureLoad)
             }
         case let .ready(scenario):
             VStack(spacing: 0) {
