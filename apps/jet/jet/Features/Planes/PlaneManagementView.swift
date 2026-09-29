@@ -1,10 +1,5 @@
 import SwiftUI
 
-/// The old name of the Computers pane, kept while the main window still shows it.
-/// WP11: the lead deletes this typealias in wave 3, once WP5 removes the `.planes`
-/// destination from the detail switch.
-typealias PlaneManagementView = ComputersSettingsPane
-
 /// Settings › Computers, the only home for computers: This Mac and the Jet apps
 /// connected to it, the other computers this Mac uses, and connecting another.
 struct ComputersSettingsPane: View {

@@ -181,10 +181,8 @@ enum ComposerNoticeSlot: Equatable {
     }
 }
 
-// WP7: the lead may swap NotificationOffer for WP4's session.shouldOfferNotifications,
-// turnOnNotifications() and declineNotificationOffer() in wave 3 (critic 2.9). The
-// rule and the writes below already match WP4's amended behaviour.
-/// The one-time offer after a task started in this app (design §6.6).
+/// The one-time offer after a task started in this app (design §6.6). The rule is
+/// `DesktopSession.shouldOfferNotifications`; this adds the composer's notices.
 enum NotificationOffer {
     static let preferenceKeys = [
         JetNotificationPreferences.approvalsKey,
@@ -205,12 +203,8 @@ enum NotificationOffer {
     /// every notification preference.
     static func turnOn(session: DesktopSession, defaults: UserDefaults = .standard) async {
         guard !session.isPreviewSession else { return }
-        session.memory.notificationOfferShown = true
         let conversationID = session.selectedConversationID
-        let granted = await session.requestNotificationAuthorization()
-        if granted {
-            for key in preferenceKeys { defaults.set(true, forKey: key) }
-        }
+        let granted = await session.turnOnNotifications(defaults: defaults)
         guard session.selectedConversationID == conversationID else { return }
         session.composerNotice = granted
             ? ComposerNotice(
@@ -226,7 +220,7 @@ enum NotificationOffer {
     /// Not Now, or the offer went away: it is never shown again.
     static func decline(session: DesktopSession) {
         guard !session.isPreviewSession, !session.memory.notificationOfferShown else { return }
-        session.memory.notificationOfferShown = true
+        session.declineNotificationOffer()
     }
 }
 
@@ -288,8 +282,6 @@ struct WorkspaceComposer: View {
             // The notification offer isn't shown once notifications were refused.
             if placement == .task { await session.refreshNotificationAuthorization() }
         }
-        // WP7: the lead applies WP5's `isComposerFocused` focused value here in
-        // wave 3 (critic 4.2), next to `reportsTextEditing` on the field.
 
         switch placement {
         case .task:
@@ -312,13 +304,9 @@ struct WorkspaceComposer: View {
     }
 
     private var offerEligible: Bool {
-        guard let conversationID = session.selectedConversationID else { return false }
-        return NotificationOffer.isEligible(
-            offerShown: session.memory.notificationOfferShown,
-            authorization: session.notificationAuthorization,
-            anyPreferenceOn: approvalsOn || completionsOn || failuresOn,
-            startedHere: session.memory.assistant(for: conversationID) != nil
-        )
+        // Read so the offer hides as soon as a notification preference turns on.
+        _ = (approvalsOn, completionsOn, failuresOn)
+        return session.shouldOfferNotifications
     }
 
     @ViewBuilder private var noticeSlot: some View {
@@ -392,7 +380,7 @@ struct WorkspaceComposer: View {
             .focused(composerFocused)
             .accessibilityLabel("Task message")
             .accessibilityHint(session.composerPlaceholder)
-            .reportsTextEditing(composerFocused.wrappedValue)
+            .reportsComposerEditing(composerFocused.wrappedValue)
 #endif
     }
 
@@ -431,7 +419,7 @@ struct WorkspaceComposer: View {
                 }
                 .accessibilityLabel("Task message")
                 .accessibilityHint(session.composerPlaceholder)
-                .reportsTextEditing(composerFocused.wrappedValue)
+                .reportsComposerEditing(composerFocused.wrappedValue)
         }
         .overlay(alignment: .topLeading) {
             if draft.isEmpty {
@@ -642,7 +630,7 @@ struct WorkspaceComposer: View {
             returnSends: returnSends,
             startsTask: session.nextSendStartsNewRun
         ))
-        .accessibilityHint("Command-Return")
+        .accessibilityHint(returnSends ? String(localized: "Return") : String(localized: "Command-Return"))
         .accessibilityIdentifier("send-task")
 #if !os(macOS)
         // On macOS the Task menu owns ⌘↩.
@@ -751,11 +739,9 @@ private struct ComposerCaptionView: View {
                     .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 3 }
             case .warning:
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(.orange)
             case .error:
                 Image(systemName: "xmark.octagon.fill")
-                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(.red)
             }
             Text(caption.text)

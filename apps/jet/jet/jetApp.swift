@@ -6,7 +6,9 @@ import AppKit
 @main
 struct jetApp: App {
     @State private var session: DesktopSession
-    // WP4: @NSApplicationDelegateAdaptor(JetAppDelegate.self) private var appDelegate
+#if os(macOS)
+    @NSApplicationDelegateAdaptor(JetAppDelegate.self) private var appDelegate
+#endif
 
     init() {
 #if os(macOS)
@@ -67,7 +69,9 @@ struct jetApp: App {
 #if os(macOS)
         Window("Jet", id: "main") {
             ContentView(session: session)
-            // WP4: ContentView(session: session).jetAppDelegate(appDelegate, session: session)
+                .jetAppDelegate(appDelegate, session: session)
+                // Dates and numbers follow the interface language (JetCopy.uiLocale).
+                .environment(\.locale, JetCopy.uiLocale)
         }
         .defaultLaunchBehavior(.presented)
         .defaultSize(width: 1280, height: 800)
@@ -79,10 +83,12 @@ struct jetApp: App {
         Settings {
             JetSettingsView(session: session)
                 .tint(JetDesign.accent)
+                .environment(\.locale, JetCopy.uiLocale)
         }
 #else
         WindowGroup {
             ContentView(session: session)
+                .environment(\.locale, JetCopy.uiLocale)
         }
 #endif
     }

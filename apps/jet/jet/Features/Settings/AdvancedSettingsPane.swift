@@ -27,51 +27,55 @@ struct AdvancedSettingsPane: View {
                     diskPressure: diskPressure
                 )
 
-                Section {
-                    SettingSizeRow(
-                        settings: settings,
-                        key: "storage.disposable_mib",
-                        title: String(localized: "Temporary files"),
-                        minimum: 0,
-                        computerName: computerName
-                    )
-                    SettingSizeRow(
-                        settings: settings,
-                        key: "artifact.max_mib",
-                        title: String(localized: "Largest file a task can save"),
-                        minimum: 1,
-                        computerName: computerName
-                    )
-                    SettingSizeRow(
-                        settings: settings,
-                        key: "artifact.run_mib",
-                        title: String(localized: "Files per assistant session"),
-                        minimum: 1,
-                        computerName: computerName
-                    )
-                } header: {
-                    Text("Storage")
-                } footer: {
-                    Text("Jet stops adding files at these sizes. Nothing you keep is deleted.")
-                        .settingsCaption()
-                }
+                Group {
+                    Section {
+                        SettingSizeRow(
+                            settings: settings,
+                            key: "storage.disposable_mib",
+                            title: String(localized: "Temporary files"),
+                            minimum: 0,
+                            computerName: computerName
+                        )
+                        SettingSizeRow(
+                            settings: settings,
+                            key: "artifact.max_mib",
+                            title: String(localized: "Largest file a task can save"),
+                            minimum: 1,
+                            computerName: computerName
+                        )
+                        SettingSizeRow(
+                            settings: settings,
+                            key: "artifact.run_mib",
+                            title: String(localized: "Files per assistant session"),
+                            minimum: 1,
+                            computerName: computerName
+                        )
+                    } header: {
+                        Text("Storage")
+                    } footer: {
+                        Text("Jet stops adding files at these sizes. Nothing you keep is deleted.")
+                            .settingsCaption()
+                    }
 
-                Section("Limits") {
-                    SettingToggleRow(
-                        settings: settings,
-                        key: "energy.constrained",
-                        title: String(localized: "Always use the low-power limit"),
-                        computerName: computerName
-                    )
-                    SettingToggleRow(
-                        settings: settings,
-                        key: "energy.foreground_override",
-                        title: String(localized: "Let messages you send go past the limit"),
-                        computerName: computerName
-                    )
-                }
+                    Section("Limits") {
+                        SettingToggleRow(
+                            settings: settings,
+                            key: "energy.constrained",
+                            title: String(localized: "Always use the low-power limit"),
+                            computerName: computerName
+                        )
+                        SettingToggleRow(
+                            settings: settings,
+                            key: "energy.foreground_override",
+                            title: String(localized: "Let messages you send go past the limit"),
+                            computerName: computerName
+                        )
+                    }
 
-                ExtensionsSection(settings: settings, computerName: computerName)
+                    ExtensionsSection(settings: settings, computerName: computerName)
+                }
+                // Every write fails while Jet protects its data; only Restore helps.
+                .disabled(recovery.isReadOnly)
 
                 Section("Diagnostics") {
                     HStack(spacing: 12) {
@@ -91,6 +95,7 @@ struct AdvancedSettingsPane: View {
                 }
 
                 JetAuditSection(model: recovery, settings: settings, computerName: computerName)
+                    .disabled(recovery.isReadOnly)
             }
             .disabled(settings.isUnreachable)
 

@@ -162,9 +162,10 @@ struct ShellCommandState: Equatable {
         }
         taskRef = isTask ? session.selectedConversationRef : nil
         isConnected = session.planeIsConnected
-        // WP9: also `|| session.deliveries.pendingConfirmation != nil` once the
-        // coordinator hosts the Git confirmations.
+        // The Git confirmations live in the delivery coordinator, which
+        // `isModalPresented` doesn't know about.
         modal = session.isModalPresented || hasOpenDialog
+            || session.deliveries.pendingConfirmation != nil
         sendTitle = session.nextSendStartsNewRun ? String(localized: "Start Task") : String(localized: "Send")
         canSend = session.canSend && !modal && (!isEditingText || isComposerFocused)
         let controlsRun = isConnected && !modal && session.supervisionOperation == nil
@@ -183,8 +184,8 @@ struct ShellCommandState: Equatable {
         canCopyWorkingCopyPath = isTask && session.workingCopyPath != nil
         canMoveToTrash = isTask && isConnected && !isEditingText && !modal
         canReviewChanges = isTask && session.selectedRun != nil
-        canCheckGitStatus = isTask && isConnected
-        gitStepToCheck = isTask ? session.gitDeliveries.first(where: \.needsAcknowledgement) : nil
+        canCheckGitStatus = isTask && session.canCheckGitStatus
+        gitStepToCheck = isTask ? session.uncheckedGitDelivery : nil
     }
 }
 
@@ -283,11 +284,14 @@ struct ShellToolbar: ViewModifier {
     @Bindable var session: DesktopSession
     let detailWidth: CGFloat
 
+    /// A dialog or popover the session doesn't track (Revert…, a comment form).
+    @FocusedValue(\.hasOpenDialog) private var hasOpenDialog
+
     func body(content: Content) -> some View {
 #if os(macOS)
         if session.usesLivePlane {
             let destination = ShellDestination(session: session)
-            let state = ShellCommandState(session: session)
+            let state = ShellCommandState(session: session, hasOpenDialog: hasOpenDialog == true)
             content
                 .navigationTitle(ShellTitle.title(for: session, destination: destination))
                 .navigationSubtitle(ShellTitle.subtitle(for: session, destination: destination))
@@ -413,9 +417,7 @@ struct ShellToolbar: ViewModifier {
         let isLocal = session.isLocalPlane(planeRegistryID)
         Button {
             guard let project else { return }
-            session.guardUnsavedEdits {
-                session.useProjectForNewTask(project.id, on: planeRegistryID)
-            }
+            session.startNewTask(in: project.id, on: planeRegistryID)
         } label: {
             if let project {
                 Text("New Task in “\(project.name)”")
@@ -427,9 +429,7 @@ struct ShellToolbar: ViewModifier {
         if isLocal {
             Button("Show in Finder") {
                 guard let project else { return }
-                NSWorkspace.shared.activateFileViewerSelecting([
-                    URL(fileURLWithPath: project.root, isDirectory: true),
-                ])
+                session.revealInFinder(path: project.root)
             }
             .disabled(project == nil)
         }

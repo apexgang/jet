@@ -281,12 +281,6 @@ final class TaskStatusStore {
 
     // MARK: - Seen and unread
 
-    // WP4: optional lead change — DesktopSession.leaveConversation could call
-    // `statusStore.noteSelected(nil)`, so `selectedConversationID` and
-    // `isUnread` here stop treating the last opened task as open after the
-    // person leaves it for New Task, a project or Jet Trash. The session's own
-    // `isUnread` doesn't depend on it.
-
     /// The person opened a task, or left the open one (nil). Opening marks the
     /// task's replies seen. An explicit nil also marks the task being left,
     /// because its replies were on screen until now; switching straight to

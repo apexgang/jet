@@ -10,8 +10,7 @@ enum ShellBanner: Equatable, Sendable {
     static let diskPressureCode = "storage.disk_pressure"
     static let recoveryReadOnlyCode = "recovery.read_only"
     /// Storage and recovery live in Settings › Advanced.
-    /// WP11 adds .advanced; the lead replaces this in wave 3.
-    static let advancedPane = JetSettingsPane(rawValue: "advanced") ?? .safety
+    static let advancedPane = JetSettingsPane.advanced
 
     var text: String {
         switch self {

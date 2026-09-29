@@ -11,13 +11,6 @@ struct ProjectPageView: View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onAppear { session.clearStaleLibraryNotice() }
-            // remove in wave 3: Add Project… still sets the old importer flag; the
-            // Add Project sheet replaces the importer this page used to host.
-            .onChange(of: session.isProjectImporterPresented, initial: true) { _, isPresented in
-                guard isPresented else { return }
-                session.isProjectImporterPresented = false
-                session.presentAddProject(droppedURL: nil)
-            }
 #if !os(macOS)
             .navigationTitle(session.selectedProject?.name ?? String(localized: "Project"))
 #endif
@@ -128,7 +121,7 @@ private struct ProjectPageForm: View {
     private var tasksSection: some View {
         Section("Tasks in This Project") {
             Button("New Task in “\(project.name)”", systemImage: "square.and.pencil") {
-                session.startNewTask(inProject: project.id, on: planeRegistryID)
+                session.startNewTask(in: project.id, on: planeRegistryID)
             }
             .buttonStyle(.borderedProminent)
             .accessibilityIdentifier("project-new-task")
@@ -168,6 +161,7 @@ private struct ProjectPageForm: View {
             ReplyFinishSection(
                 model: model,
                 projectName: project.name,
+                computerName: session.planeDisplayName(planeRegistryID),
                 isDisabled: isOffline,
                 perform: perform
             )

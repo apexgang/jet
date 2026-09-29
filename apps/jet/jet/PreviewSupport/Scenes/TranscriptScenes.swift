@@ -2,7 +2,7 @@
 import SwiftUI
 
 extension DesktopPreviewScenes {
-    /// Transcript states (WP6). WP13's history scenes are appended by the lead.
+    /// Transcript states (WP6). WP13's history scenes are in `history`.
     @MainActor static var transcript: [DesktopPreviewScene] {
         typealias P = TranscriptPreviewData
         return [

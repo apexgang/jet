@@ -1,62 +1,14 @@
 import Foundation
 
-/// The earlier-history row above the transcript. It mirrors WP13's
-/// `TranscriptStore.HistoryNotice` case for case.
-// WP6: once WP13 lands, replace this enum with
-// `typealias TranscriptHistoryNotice = TranscriptStore.HistoryNotice`.
-enum TranscriptHistoryNotice: Equatable, Sendable {
-    /// Replaying earlier messages; nil progress is indeterminate.
-    case loading(progress: Double?)
-    /// Earlier messages can't be shown; `summary` reads "Started Sep 26 · …".
-    case unavailable(summary: String?, canRetry: Bool)
-    case noMessages
-
-    var title: String {
-        switch self {
-        case .loading: String(localized: "Loading earlier messages…")
-        case .unavailable(_, true): String(localized: "Couldn't load earlier messages.")
-        case .unavailable: String(localized: "Earlier messages aren't available on this Mac.")
-        case .noMessages: String(localized: "No Messages Yet")
-        }
-    }
-}
+/// The earlier-history row above the transcript (WP13's replay).
+typealias TranscriptHistoryNotice = TranscriptStore.HistoryNotice
 
 // What the transcript reads from the session (design §6.5). Views call these
 // instead of assembling session state themselves.
 extension DesktopSession {
     /// The entries the transcript renders: replayed history, then the live timeline.
     var transcriptSourceEntries: [JetTimelineEntry] {
-        // WP13: transcriptEntries
-        timeline
-    }
-
-    /// The earlier-history row, or nil when the whole history is shown.
-    var transcriptHistoryNotice: TranscriptHistoryNotice? {
-        // WP13: historyNotice. Until the replay lands, this reads the cache's state.
-        guard let conversationID = selectedConversationID,
-              let snapshot = conversationSnapshot,
-              snapshot.conversation.id == conversationID
-        else { return nil }
-        let isEmpty = transcriptSourceEntries.isEmpty
-        if snapshot.runs.isEmpty { return isEmpty ? .noMessages : nil }
-        switch transcripts.historyState(for: conversationID) {
-        case let .loading(progress):
-            return .loading(progress: progress)
-        case .unavailable:
-            return .unavailable(summary: interimHistorySummary(snapshot), canRetry: false)
-        case .partial where isEmpty:
-            return .unavailable(summary: interimHistorySummary(snapshot), canRetry: false)
-        case .complete where isEmpty:
-            return .noMessages
-        case .partial, .complete, .notStarted:
-            return nil
-        }
-    }
-
-    /// Try Again on "Couldn't load earlier messages."
-    func transcriptRetryEarlierMessages() {
-        // WP13: retryEarlierMessages()
-        Task { await loadSelectedConversation() }
+        transcriptEntries
     }
 
     func transcriptContext(showsTechnical: Bool) -> TranscriptContext {
@@ -117,15 +69,5 @@ extension DesktopSession {
         } else {
             composerFocusRequest += 1
         }
-    }
-
-    private func interimHistorySummary(_ snapshot: JetConversationSnapshot) -> String {
-        let started = TranscriptFormat.day(snapshot.conversation.createdAtUnixMilliseconds)
-        guard let last = snapshot.runs.last, !last.lifecycle.isLive,
-              let ended = snapshot.runs.compactMap(\.endedAtUnixMilliseconds).max()
-        else {
-            return String(localized: "Started \(started)")
-        }
-        return String(localized: "Started \(started) · Last run ended \(TranscriptFormat.day(ended))")
     }
 }

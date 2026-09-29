@@ -262,10 +262,11 @@ struct SettingCountRow: View {
                             .focused($isFocused)
                             .onSubmit { commit(current: current) }
                             .disabled(settings.isSaving(key, scope: scope))
-                            .accessibilityLabel(Text(title))
-                            .accessibilityValue(Text(unit))
+                            // The unit goes in the label, so VoiceOver still reads the number.
+                            .accessibilityLabel(Text(verbatim: "\(title) (\(unit))"))
                         Text(unit)
                             .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
                     }
                 } label: {
                     Text(title)

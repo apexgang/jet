@@ -1,9 +1,6 @@
 #if DEBUG
 import SwiftUI
 
-// WP13: DesktopPreviewScenes.all is frozen, so these scenes aren't listed yet.
-// The lead adds `+ history` to `DesktopPreviewScenes.all` (or appends `history`
-// to WP6's `transcript` group); the ids must stay unique across groups.
 extension DesktopPreviewScenes {
     /// Transcript history (WP13): the replay's loading row, the summary card,
     /// replayed history before live entries, Try Again, a merged permission and
@@ -216,7 +213,7 @@ enum HistoryPreviewData {
             scope: "This action once",
             consequence: state == .allowed
                 ? "The reviewer allowed this exact action once."
-                : "The Run stays paused until this request is decided. Manual approval decisions are not available through the current client protocol.",
+                : "This reply stays paused until the request is answered.",
             rationale: nil,
             state: state,
             canAuthorizeRetry: false

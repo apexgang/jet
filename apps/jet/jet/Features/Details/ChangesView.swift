@@ -22,6 +22,9 @@ struct DetailsChangesView: View {
             stateContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        // Interrupt (⌘.) and the other shell commands wait while a form is open
+        // (critic 4.8). Set here, not inside the popovers, which are their own windows.
+        .focusedSceneValue(\.hasOpenDialog, model.commentPath != nil || model.rangeEditorShown ? true : nil)
         .onChange(of: session.latestReplyNumber) { _, latest in
             // Last Reply follows new replies as they finish.
             guard model.followsLastReply, latest > 0, session.changesScopeChoice != .lastReply else { return }
@@ -418,7 +421,6 @@ struct ChangesScopeBar: View {
                 },
                 onCancel: { model.rangeEditorShown = false }
             )
-            // WP8: .focusedSceneValue(\.hasOpenDialog, true) once WP5 defines the key (critic 4.8).
         }
     }
 
@@ -511,8 +513,19 @@ struct ChangesRangeForm: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Custom Range")
                 .font(.headline)
-            Stepper("From Reply \(from)", value: $from, in: 1 ... max(1, to))
-            Stepper("To Reply \(to)", value: $to, in: from ... max(from, latest))
+            // A grid, so the two steppers line up whatever the label widths.
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                GridRow {
+                    Text("From Reply \(from)").accessibilityHidden(true)
+                    Stepper("From Reply \(from)", value: $from, in: 1 ... max(1, to))
+                        .labelsHidden()
+                }
+                GridRow {
+                    Text("To Reply \(to)").accessibilityHidden(true)
+                    Stepper("To Reply \(to)", value: $to, in: from ... max(from, latest))
+                        .labelsHidden()
+                }
+            }
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
                 Button("Cancel", action: onCancel)
@@ -769,7 +782,6 @@ struct CommentOnLineForm: View {
         .padding(16)
         .frame(width: 320)
         .reportsTextEditing(focusedField != nil)
-        // WP8: .focusedSceneValue(\.hasOpenDialog, true) once WP5 defines the key (critic 4.8).
         .onAppear { focusedField = .comment }
     }
 

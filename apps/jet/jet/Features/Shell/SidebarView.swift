@@ -278,7 +278,7 @@ struct SidebarView: View {
                 planeRegistryID: session.planeRegistryID(for: id) ?? session.localPlaneRegistryID
             )
         }
-        // WP4: .onDisappear { session.statusStore.noteHidden(id) }
+        .onDisappear { session.statusStore.noteHidden(id) }
     }
 
     // MARK: - Search
@@ -441,7 +441,7 @@ struct SidebarView: View {
     @ViewBuilder
     private func projectMenu(_ project: JetPlaneProject) -> some View {
         Button("New Task in “\(project.project.name)”") {
-            session.newTaskFromSidebar(in: project)
+            session.startNewTask(in: project.project.id, on: project.planeRegistryID)
         }
         if session.sidebarCanRevealProject(project) {
             Button("Show in Finder") {

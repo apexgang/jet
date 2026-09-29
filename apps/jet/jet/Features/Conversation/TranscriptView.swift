@@ -27,7 +27,7 @@ struct TranscriptView: View {
     var body: some View {
         let rows = session.transcriptRows(showsTechnical: showsTechnical)
         let top = session.transcriptTop(rowsAreEmpty: rows.isEmpty)
-        let notice = session.transcriptHistoryNotice
+        let notice = session.historyNotice
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
                 TranscriptTopView(top: top, session: session)
@@ -228,7 +228,7 @@ private struct TranscriptHistoryRow: View {
                     }
                     HStack(spacing: 8) {
                         if canRetry {
-                            Button("Try Again", action: session.transcriptRetryEarlierMessages)
+                            Button("Try Again", action: session.retryEarlierMessages)
                                 .buttonStyle(.bordered)
                                 .accessibilityIdentifier("transcript-history-retry")
                         }

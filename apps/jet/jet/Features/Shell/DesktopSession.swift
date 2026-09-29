@@ -276,7 +276,6 @@ final class DesktopSession {
     var setupState: SetupState = .idle
     var connectionState: JetConnectionState = .disconnected
     var selectedProjectID: UUID?
-    var isProjectImporterPresented = false
     var projectPreview: JetProjectPreview?
     var removalPreview: JetProjectRemovalPreview?
     var permanentRemovalAllowed = false
@@ -1264,6 +1263,7 @@ final class DesktopSession {
     /// Leaves the open task for New Task, a project page or Jet Trash.
     func leaveConversation() {
         stashSelectedTranscript()
+        statusStore.noteSelected(nil)
         detachCurrentTerminal()
         selectionLoadTask?.cancel()
         transcripts.cancelReplay()
@@ -1289,8 +1289,10 @@ final class DesktopSession {
     /// is opened and left, not per Event, so streaming never writes preferences.
     func markSelectedRepliesSeen() {
         guard let selectedConversationID else { return }
+        // The store's latest reply includes one its facts haven't copied yet
+        // (streaming output doesn't rewrite facts per chunk).
         let latestReply = max(
-            statusStore.facts[selectedConversationID]?.lastReplySequence ?? 0,
+            statusStore.latestReplySequence(selectedConversationID),
             timeline.last { $0.kind == .agent }?.sequence ?? 0
         )
         if latestReply > 0 { memory.markSeen(selectedConversationID, sequence: latestReply) }
@@ -2302,15 +2304,6 @@ final class DesktopSession {
             composerNotice = failureNotice(for: error)
         }
         supervisionOperation = nil
-    }
-
-    func requestAddProject() {
-        leaveConversation()
-        newTaskPlaneRegistryID = localPlaneRegistryID
-        sidebarSelection = .project
-        isWorkPanelPresented = false
-        isProjectImporterPresented = true
-        setupNotice = nil
     }
 
     func showProjects() {

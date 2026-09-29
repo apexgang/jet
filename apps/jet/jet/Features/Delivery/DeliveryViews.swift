@@ -1,22 +1,5 @@
 import SwiftUI
 
-/// Temporary bridge for Details › Changes until the inspector's footer shows the
-/// Keep status line and Activity embeds `GitActivityList` (the lead deletes it in
-/// wave 3). The manual Git form is gone: every step goes through Keep Changes.
-struct DeliveryWorkView: View {
-    @Bindable var session: DesktopSession
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if let ref = session.selectedDeliveryRef {
-                KeepChangesStatusLine(session: session, ref: ref)
-            }
-            GitActivityList(session: session)
-        }
-        .padding(14)
-    }
-}
-
 // MARK: - Step copy (design §6.9)
 
 /// The words for each Git step and its states. `branch` and `remote` are Git
@@ -378,8 +361,9 @@ private struct KeepChangesSupport: ViewModifier {
                 session.cancelGitDeliveryAcknowledgement()
                 session.requestMarkAsChecked(delivery)
             }
-            .onChange(of: announcement) { _, text in
-                guard let text else { return }
+            .onChange(of: announcementKey) { old, new in
+                // Only a change on the same task is news; opening another task isn't.
+                guard let text = new.text, old.ref == new.ref else { return }
                 AccessibilityNotification.Announcement(text).post()
             }
             .task(id: connectedPlaneIDs) {
@@ -407,6 +391,10 @@ private struct KeepChangesSupport: ViewModifier {
         )
     }
 
+    private var announcementKey: AnnouncementKey {
+        AnnouncementKey(ref: session.selectedDeliveryRef, text: announcement)
+    }
+
     /// The selected task's Keep outcome worth announcing: success, a warning or an
     /// error, never progress.
     private var announcement: String? {
@@ -424,4 +412,9 @@ private struct KeepChangesSupport: ViewModifier {
     private var connectedPlaneIDs: [UUID] {
         session.planes.map(\.id).filter { session.isPlaneConnected($0) }
     }
+}
+
+private struct AnnouncementKey: Equatable {
+    let ref: ConversationRef?
+    let text: String?
 }

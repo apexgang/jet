@@ -650,6 +650,8 @@ final class ReplyFinishModel {
 struct ReplyFinishSection: View {
     @Bindable var model: ReplyFinishModel
     let projectName: String
+    /// The computer that holds the GitHub token, for "How to Set Up…".
+    let computerName: String
     let isDisabled: Bool
     let perform: @MainActor (LibraryIssue.Action) -> Void
 
@@ -658,6 +660,8 @@ struct ReplyFinishSection: View {
             Picker("When a Reply Finishes", selection: selection(current: choice)) {
                 ForEach(model.choices, id: \.self) { option in
                     Text(model.title(for: option))
+                        // The radio circles alone dim too faintly to read as disabled.
+                        .foregroundStyle(isDisabled ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                         .tag(option)
                         .disabled(option == .custom)
                 }
@@ -675,8 +679,6 @@ struct ReplyFinishSection: View {
                 ForEach(captions(for: choice), id: \.self) { line in
                     Text(line)
                 }
-                // WP10: the lead adds WP9's GitHubSetupButton(computer:) ("How to Set Up…")
-                // here in wave 3, after "Needs a GitHub token saved for Jet in your Keychain."
                 if model.savingRow == .replyFinish {
                     SavingLabel()
                 }
@@ -684,6 +686,12 @@ struct ReplyFinishSection: View {
             .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+
+            // Outside the caption stack, so its popover doesn't inherit the dimmed style.
+            if choice == .preset(.saveAndOpenPullRequest) {
+                GitHubSetupButton(computer: computerName)
+                    .controlSize(.small)
+            }
 
             if model.issueRow == .replyFinish, let issue = model.issue {
                 LibraryNoticeRow(issue: issue, perform: { perform($0) })
@@ -822,6 +830,7 @@ struct TaskSettingsSheet: View {
                 ReplyFinishSection(
                     model: model,
                     projectName: projectName,
+                    computerName: session.planeDisplayName(ref.planeRegistryID),
                     isDisabled: isOffline,
                     perform: perform
                 )

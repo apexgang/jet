@@ -1,10 +1,8 @@
 #if DEBUG
 import SwiftUI
 
-// WP7: other packages' task scenes show the one-time notification offer, because
-// `DesktopSession.preview` starts with fresh client memory. The lead may set
-// `session.memory.notificationOfferShown = true` in `DesktopSession.preview`
-// (frozen); `composer-notification-offer` below sets it back to false itself.
+// `DesktopSession.preview` marks the one-time notification offer as shown, so
+// only `composer-notification-offer` below (which clears it) shows the offer.
 extension DesktopPreviewScenes {
     /// Composer states (WP7), 1000×260.
     @MainActor static var composer: [DesktopPreviewScene] {

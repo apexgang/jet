@@ -115,7 +115,7 @@ struct DetailsEditorFooter: View {
                 } message: {
                     Text("This can't be undone.")
                 }
-            // WP8: .focusedSceneValue(\.hasOpenDialog, confirmsRevert ? true : nil) once WP5 defines the key (critic 4.8).
+                .focusedSceneValue(\.hasOpenDialog, confirmsRevert ? true : nil)
             Spacer(minLength: 0)
             Button(session.workOperation == "save" ? String(localized: "Saving…") : String(localized: "Save")) {
                 Task {
@@ -125,7 +125,7 @@ struct DetailsEditorFooter: View {
             .buttonStyle(.borderedProminent)
             .keyboardShortcut("s")
             .disabled(!canSave)
-            .help(session.detailsIsOffline ? String(localized: "Reconnect to save.") : "")
+            .help(saveHelp)
             .accessibilityIdentifier("file-edit-save")
         }
         .padding(12)
@@ -133,6 +133,14 @@ struct DetailsEditorFooter: View {
 
     private var name: String {
         DesktopSession.detailsFileName(session.editableFile?.path ?? session.selectedWorkFilePath ?? "")
+    }
+
+    /// Why Save is unavailable, or what it does.
+    private var saveHelp: String {
+        if session.detailsIsOffline { return String(localized: "Reconnect to save.") }
+        if session.workOperation == "save" { return String(localized: "Saving your edits…") }
+        if !session.hasUnsavedFileEdit { return String(localized: "No edits to save yet.") }
+        return String(localized: "Save your edits to \(name) (⌘S)")
     }
 
     private var canSave: Bool {

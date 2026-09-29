@@ -107,11 +107,6 @@ extension DesktopSession {
             .sorted { $0.createdAtUnixMilliseconds > $1.createdAtUnixMilliseconds }
     }
 
-    /// New Task in “web-app”, after the unsaved-edit check.
-    func startNewTask(inProject projectID: UUID, on planeRegistryID: UUID) {
-        guardUnsavedEdits { [weak self] in self?.useProjectForNewTask(projectID, on: planeRegistryID) }
-    }
-
     /// Show in Finder applies to folders on this Mac.
     func canRevealInFinder(on planeRegistryID: UUID) -> Bool {
 #if os(macOS)
@@ -158,10 +153,11 @@ extension DesktopSession {
     func finishMoveToTrash(_ ref: ConversationRef, title: String) {
         trashedConversationIDs.insert(ref.conversationID)
         if selectedConversationID == ref.conversationID {
-            // WP10: the lead passes the sidebar order (Needs You first) in wave 3.
+            // The row below in sidebar order, where Needs You comes first.
+            let sections = sidebarSections
             let next = Self.taskToSelect(
                 afterRemoving: ref.conversationID,
-                orderedIDs: conversations.map(\.id)
+                orderedIDs: (sections.needsYou + sections.tasks).map(\.id)
             )
             if let next {
                 selectConversation(next)

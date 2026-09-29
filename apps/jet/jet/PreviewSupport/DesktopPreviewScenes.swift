@@ -14,7 +14,7 @@ struct DesktopPreviewScene: Identifiable {
 /// its own file under PreviewSupport/Scenes.
 enum DesktopPreviewScenes {
     @MainActor static var all: [DesktopPreviewScene] {
-        shell + sidebar + transcript + composer + newTask + details + keepChanges + library + settings
+        shell + sidebar + status + transcript + history + composer + newTask + details + keepChanges + library + settings
     }
 
     /// The view of the scene with this id, for `#Preview` blocks.

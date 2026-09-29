@@ -282,71 +282,19 @@ struct DetailsKeepFooter: View {
                 // Bordered: the toolbar holds the prominent Keep.
                 Button("Keep Changes…") { session.presentKeepChanges(mode: .plan) }
                     .buttonStyle(.bordered)
-                    .disabled(!session.canKeepChanges)
-                    .help(session.keepChangesUnavailableReason
-                        ?? String(localized: "Review the changes and choose how to keep them."))
+                    // Nothing to keep under "No Changes Yet".
+                    .disabled(!session.canKeepChanges || !session.hasKnownChanges)
+                    .help(keepHelp)
                     .accessibilityIdentifier("keep-changes-details")
             }
         }
         .padding(12)
     }
-}
 
-// MARK: - Kept for other packages
-
-// Kept for DeliveryViews.swift (WP9); wave 3 removes if unused.
-struct WorkSectionHeader<Actions: View>: View {
-    let title: String
-    let detail: String
-    let actions: Actions
-
-    init(
-        title: String,
-        detail: String,
-        @ViewBuilder actions: () -> Actions
-    ) {
-        self.title = title
-        self.detail = detail
-        self.actions = actions()
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(detail)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer(minLength: 6)
-            actions
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-}
-
-extension WorkSectionHeader where Actions == EmptyView {
-    init(title: String, detail: String) {
-        self.init(title: title, detail: detail) { EmptyView() }
-    }
-}
-
-// Kept for DeliveryViews.swift (WP9); wave 3 removes if unused.
-struct WorkPanelEmptyState: View {
-    let title: String
-    let message: String
-    let symbol: String
-
-    var body: some View {
-        ContentUnavailableView {
-            Label(title, systemImage: symbol)
-        } description: {
-            Text(message)
-        }
-        .padding()
+    private var keepHelp: String {
+        if let reason = session.keepChangesUnavailableReason { return reason }
+        if !session.hasKnownChanges { return String(localized: "No changes to keep yet.") }
+        return String(localized: "Review the changes and choose how to keep them.")
     }
 }
 

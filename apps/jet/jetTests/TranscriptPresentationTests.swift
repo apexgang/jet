@@ -476,7 +476,7 @@ struct TranscriptPresentationTests {
         #expect(last.queue?.ordinal == 1)
         #expect(live.title == "Working… · Editing files")
         #expect(session.transcriptTop(rowsAreEmpty: rows.isEmpty) == .none)
-        #expect(session.transcriptHistoryNotice == nil)
+        #expect(session.historyNotice == nil)
     }
 
     @Test
@@ -503,7 +503,7 @@ struct TranscriptPresentationTests {
             cursor: 1, conversation: DesktopPreviewData.loginRedirect, workspaceID: nil, workspaceRoot: nil, runs: []
         )
         session.timeline = []
-        #expect(session.transcriptHistoryNotice == .noMessages)
+        #expect(session.historyNotice == .noMessages)
     }
 #endif
 

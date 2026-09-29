@@ -190,7 +190,7 @@ struct DetailsTerminalView: View {
                 } message: { _ in
                     Text("Commands running in it stop.")
                 }
-            // WP8: .focusedSceneValue(\.hasOpenDialog, model.terminalPendingClose != nil ? true : nil) once WP5 defines the key (critic 4.8).
+                .focusedSceneValue(\.hasOpenDialog, model.terminalPendingClose != nil ? true : nil)
         }
     }
 

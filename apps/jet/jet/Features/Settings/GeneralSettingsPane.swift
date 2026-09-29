@@ -11,9 +11,7 @@ struct GeneralSettingsPane: View {
     // ASVS 14.3.3: these are client-owned preferences. They contain no Jet
     // content, credential, path, or connection proof.
     @AppStorage("jet.settings.restore-last-task") private var restoresLastTask = true
-    // WP11: WP7 names this key `ComposerPreferences.returnSendsKey`; the lead
-    // switches to the constant in wave 3.
-    @AppStorage("jet.composer.return-sends") private var returnSends = false
+    @AppStorage(ComposerPreferences.returnSendsKey) private var returnSends = false
     @AppStorage(JetDesign.transcriptScaleKey) private var transcriptScale = 1.0
     @AppStorage(JetNotificationPreferences.approvalsKey) private var approvalNotifications = false
     @AppStorage(JetNotificationPreferences.completionsKey) private var completionNotifications = false
@@ -85,9 +83,7 @@ struct GeneralSettingsPane: View {
                 )
                 .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
-                Button("Open System Settings…") {
-                    if let url = Self.notificationSettingsURL { openURL(url) }
-                }
+                Button("Open System Settings…", action: openNotificationSettings)
                 .buttonStyle(.bordered)
             }
         case .provisional:
@@ -124,14 +120,11 @@ struct GeneralSettingsPane: View {
     }
 
     /// Jet's page in System Settings › Notifications.
-    static var notificationSettingsURL: URL? {
+    private func openNotificationSettings() {
 #if os(macOS)
-        // WP11: the lead switches to WP4's `session.openNotificationSettings()` in wave 3.
-        URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(Bundle.main.bundleIdentifier ?? "")")
+        session.openNotificationSettings()
 #elseif canImport(UIKit)
-        URL(string: UIApplication.openNotificationSettingsURLString)
-#else
-        nil
+        if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
 #endif
     }
 }

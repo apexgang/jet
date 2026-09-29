@@ -92,7 +92,8 @@ struct JetCommands: Commands {
             Button("Bigger") {
                 if let scale = TranscriptTextScale.bigger(than: textScale) { textScale = scale }
             }
-            .keyboardShortcut("+", modifiers: .command)
+            // ⌘= (the unshifted key most Mac apps accept for Bigger on US layouts).
+            .keyboardShortcut("=", modifiers: .command)
             .disabled(TranscriptTextScale.bigger(than: textScale) == nil)
             Button("Smaller") {
                 if let scale = TranscriptTextScale.smaller(than: textScale) { textScale = scale }
@@ -136,7 +137,8 @@ struct JetCommands: Commands {
                     Button("Delete Everywhere…") {
                         if let ref = s.taskRef { session.presentMoveToTrash(ref, deleteEverywhere: true) }
                     }
-                    .disabled(!s.canEditTask)
+                    // Same gate as the primary item, so ⌥⌘⌫ never fires while typing.
+                    .disabled(!s.canMoveToTrash)
                 }
             }
             .disabled(!inMainWindow)
@@ -159,17 +161,13 @@ struct JetCommands: Commands {
                 Button("Open Draft Pull Request…") { session.presentKeepChanges(mode: .single(.draftPullRequest)) }
                     .disabled(!s.canKeepChanges)
                 Divider()
-                // WP9: Check Git Status becomes `session.checkGitStatus()` (disabled when
-                // !canCheckGitStatus) and Mark as Checked… `session.requestMarkAsChecked()`
-                // (disabled when `uncheckedGitDelivery == nil`); the lead wires both in wave 3.
                 Button("Check Git Status") {
-                    Task { await session.loadGitDeliveries(startObservation: false) }
+                    Task { await session.checkGitStatus() }
                 }
                 .disabled(!s.canCheckGitStatus)
                 Button("Mark as Checked…") {
                     guard let delivery = s.gitStepToCheck else { return }
-                    session.showDetails(.run)
-                    session.reviewGitDeliveryAcknowledgement(delivery)
+                    session.requestMarkAsChecked(delivery)
                 }
                 .disabled(s.gitStepToCheck == nil || s.modal)
             }
@@ -202,17 +200,14 @@ struct JetCommands: Commands {
 
     private func newTaskButton(_ item: JetPlaneProject) -> some View {
         Button(item.project.name) {
-            session.guardUnsavedEdits {
-                session.useProjectForNewTask(item.project.id, on: item.planeRegistryID)
-            }
+            session.startNewTask(in: item.project.id, on: item.planeRegistryID)
         }
     }
 
     /// Sends the draft, unless an input method is still composing text: marked text
     /// is never sent.
     private func send() {
-        // Lead (wave 3): switch to WP7's composer helper for this check.
-        if (NSApp.keyWindow?.firstResponder as? NSTextInputClient)?.hasMarkedText() == true { return }
+        if ComposerTextInput.hasMarkedText { return }
         Task { await session.submitDraft() }
     }
 }

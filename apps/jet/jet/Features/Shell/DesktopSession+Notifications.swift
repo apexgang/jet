@@ -14,12 +14,15 @@ extension DesktopSession {
         return shouldOfferNotifications(for: conversationID)
     }
 
+    /// Preview sessions have no notification center but still render the offer.
     func shouldOfferNotifications(for conversationID: UUID) -> Bool {
-        notifications != nil
-            && !memory.notificationOfferShown
-            && notificationAuthorization != .denied
-            && !JetNotificationKind.allCases.contains { notificationPreference($0) }
-            && memory.assistant(for: conversationID) != nil
+        (notifications != nil || isPreviewSession)
+            && NotificationOffer.isEligible(
+                offerShown: memory.notificationOfferShown,
+                authorization: notificationAuthorization,
+                anyPreferenceOn: JetNotificationKind.allCases.contains { notificationPreference($0) },
+                startedHere: memory.assistant(for: conversationID) != nil
+            )
     }
 
     /// Turn On: asks for permission and, when it is granted, turns on all three

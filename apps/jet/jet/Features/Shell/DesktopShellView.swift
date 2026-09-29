@@ -56,8 +56,8 @@ struct DesktopShellView: View {
         .onChange(of: session.settingsOpenRequest) { openSettings() }
 #endif
         .modifier(ShellPresentations(session: session))
-        // WP9: .keepChangesSupport(session: session) hosts the Keep Changes and Git
-        // step confirmations here (lead, wave 3).
+        // Hosts the Git step confirmations (Mark as Checked…, Try Again…).
+        .keepChangesSupport(session: session)
         // Inside the tint, so sheets and dialogs keep the copper accent too.
         .tint(JetDesign.accent)
         .task { await bootstrap() }

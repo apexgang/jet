@@ -473,15 +473,6 @@ extension DesktopSession {
 
     // MARK: Project rows
 
-    // WP10 also offers these as DesktopSession+Library intents; the lead converges
-    // the callers in wave 3 (critic 3.19).
-
-    func newTaskFromSidebar(in project: JetPlaneProject) {
-        guardUnsavedEdits { [weak self] in
-            self?.useProjectForNewTask(project.project.id, on: project.planeRegistryID)
-        }
-    }
-
     /// Opens the project first, then its removal review. The review is prepared
     /// only when the project really is the open one, so it never asks another
     /// computer.

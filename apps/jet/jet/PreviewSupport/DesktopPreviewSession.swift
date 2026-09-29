@@ -15,6 +15,8 @@ extension DesktopSession {
             memory: ClientMemory(defaults: defaults),
             isPreviewSession: true
         )
+        // The one-time notification offer shows only in the scene made for it.
+        session.memory.notificationOfferShown = true
         configure(session)
         return session
     }

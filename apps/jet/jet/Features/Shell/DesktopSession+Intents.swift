@@ -425,7 +425,6 @@ extension DesktopSession {
             || removalPreview != nil
             || gitDeliveryConfirmation != nil
             || gitDeliveryAcknowledgementConfirmation != nil
-            || isProjectImporterPresented
             || pairedClientPendingRevocation != nil
     }
 
