@@ -1237,6 +1237,30 @@ has no bundled `jetd`, so its native runtime checks covered disconnected/setup
 and local UI interactions. Connected mutations were verified by protocol and
 state tests. These are open validation gates, not simulated successful runs.
 
+#### Native macOS redesign (September 29, 2026)
+
+The SwiftUI redesign was checked on macOS 27 with the Command Line Tools and the
+macOS 26.5 SDK, building the app sources as a Swift package:
+
+- The full `jetTests` suite passes, including the framed-protocol integration
+  test and `CopyLintTests`, which scans the feature views' user-facing strings
+  for the domain words in the lexicon's Avoid list. Its allowlist names the
+  places the design permits them (Settings › Advanced, Connection Details and
+  the Stop and Move to Jet Trash reviews).
+- Every preview scene (139, most in light and dark) was rendered in a real window
+  and reviewed. Two narrow-window layout loops found there were fixed: text with a
+  fixed vertical size inside the composer's caption and the Details footer made
+  `.contentMinSize` windows overflow or trap in AppKit constraint passes.
+- Dates and numbers follow the interface language with the person's region
+  (`JetCopy.uiLocale`), so an English interface on a Russian-region Mac reads
+  "25 min. ago" and "21 Sep at 17:01".
+
+Not verified by these checks: the Xcode-built app (menu key equivalents,
+notification clicks, the Dock badge, reopening from the Dock, copper accent in
+active windows), the iOS build, input-method composition in the composer, and
+VoiceOver. The screenshot harness renders inactive windows, so prominent buttons
+appear grey there.
+
 ## Decision ledger
 
 ### Confirmed decisions
