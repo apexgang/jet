@@ -21,7 +21,7 @@ mod compatibility;
 mod drain;
 mod layout;
 mod live_helpers;
-mod manifest;
+pub(crate) mod manifest;
 
 use self::{
 	compatibility::{Activation, Refusal},

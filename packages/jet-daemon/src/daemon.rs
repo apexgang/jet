@@ -1,7 +1,7 @@
 //! Daemon lifecycle: lock, store, listener, serve, drain, shut down.
 
 use crate::diagnostics::core_failure;
-use jet_core::{Core, WorkspaceHome};
+use jet_core::{BundledCraft, Core, WorkspaceHome};
 use jet_runtime::{
 	DaemonMetadata, DebugLogging, Diagnostic, DiagnosticComponent,
 	DiagnosticLog, ExecutableRole, InstallationChannel, IpcError, JetHome,
@@ -82,6 +82,9 @@ pub(crate) async fn run(
 			return ExitCode::from(EXIT_FAILURE);
 		}
 	};
+	// Read once, before anything can swap the `current` link this start
+	// was launched through (ADR-0107).
+	let bundled = crate::craft::bundled::release();
 	// The start is recorded only once the daemon can actually serve.
 	let core = match Core::start(store, WorkspaceHome(home.workspaces_dir()))
 		.await
@@ -120,7 +123,9 @@ pub(crate) async fn run(
 		.count("pid", u64::from(metadata.pid))
 		.emit();
 	match core.recovery_mode() {
-		jet_core::RecoveryMode::Serving => reconcile_at_start(&core).await,
+		jet_core::RecoveryMode::Serving => {
+			reconcile_at_start(&core, &bundled).await;
+		}
 		jet_core::RecoveryMode::ReadOnly(reason) => {
 			// ADR-0077: the damaged store is served read-only, exactly as
 			// found, until an owner restores a verified snapshot. Nothing
@@ -200,10 +205,11 @@ pub(crate) async fn run(
 			}
 		}
 	});
+	let recovery_bundled = bundled.clone();
 	let recovery = tokio::spawn(async move {
 		if recovery_core.recovery_mode() != jet_core::RecoveryMode::Serving {
 			recovery_core.wait_until_serving().await;
-			reconcile_at_start(&recovery_core).await;
+			reconcile_at_start(&recovery_core, &recovery_bundled).await;
 		}
 		// The day's first Recovery snapshot, then the sweeps it precedes,
 		// run once the Plane serves: the copy costs what the store weighs
@@ -222,7 +228,7 @@ pub(crate) async fn run(
 			if recovery_core.recovery_mode() != jet_core::RecoveryMode::Serving
 			{
 				recovery_core.wait_until_serving().await;
-				reconcile_at_start(&recovery_core).await;
+				reconcile_at_start(&recovery_core, &recovery_bundled).await;
 			}
 			let mut retry = false;
 			if let Err(error) = recovery_core.reconcile_crafts().await {
@@ -445,7 +451,7 @@ pub(crate) async fn run(
 /// Settles what a previous daemon left unfinished before new Commands are
 /// served, in the order the durable state requires. Each step reports its
 /// own failure and the next still runs.
-async fn reconcile_at_start(core: &Arc<Core>) {
+async fn reconcile_at_start(core: &Arc<Core>, bundled: &[BundledCraft]) {
 	if let Err(error) = core.reconcile_crafts().await {
 		core_failure(
 			DiagnosticComponent::Craft,
@@ -470,6 +476,19 @@ async fn reconcile_at_start(core: &Arc<Core>) {
 			"cannot reconcile Craft installations",
 			&error,
 		);
+	}
+	// The release's own Crafts follow, so a confirmed installation of the
+	// same id is already in place and keeps it (ADR-0107).
+	if !bundled.is_empty() {
+		match core.register_bundled_crafts(bundled.to_vec()).await {
+			Ok(registration) => crate::craft::bundled::report(&registration),
+			Err(error) => core_failure(
+				DiagnosticComponent::Craft,
+				"cannot register the bundled Crafts",
+				&error,
+			),
+		}
+		crate::craft::bundled::check_listed(&core.capabilities().await);
 	}
 	// A promotion a previous daemon did not finish is settled from what its
 	// destination holds before any client can ask for another (ADR-0064,

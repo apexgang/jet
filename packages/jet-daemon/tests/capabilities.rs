@@ -63,8 +63,9 @@ async fn a_plane_reports_the_machine_it_runs_on() {
 				ExternalTool::Ssh,
 				ExternalTool::Tailscale
 			],
-			// A fresh Plane has installed no Craft, so it says plainly that
-			// it can run no Harness.
+			// A fresh Plane has installed no Craft, and a development
+			// `jetd` has no release manifest beside it to register Bundled
+			// Crafts from, so it says plainly that it can run no Harness.
 			vec![],
 			vec![],
 			true,

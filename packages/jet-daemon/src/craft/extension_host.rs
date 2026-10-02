@@ -112,6 +112,7 @@ impl Extensions {
 			return Err(unavailable());
 		}
 		let mut command = Command::new(&pin.executable);
+		crate::craft::harness_path::apply(&mut command);
 		command
 			.arg("--extensions-v1")
 			.current_dir("/")
