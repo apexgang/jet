@@ -85,8 +85,11 @@ serves on a Plane whose Security audit is trusted, it reads the
 pins, and publishes `claude-code.json` and `codex.json` with
 `same_user_executable` trust and `"origin": "bundled"`. Each change is recorded
 in the Security audit as `craft.bundled_registered`, attributed to Jet
-applying verified release metadata. A development `jetd` with no manifest
-beside it registers nothing.
+applying its own release metadata. The record commits before the manifest
+is published, and a publication that then fails is recorded as failed. A
+development `jetd` with no manifest beside it registers nothing. While the
+Security audit is not trusted, registration waits; it runs as soon as an
+owner begins a new audit epoch or restores a snapshot, without a restart.
 
 An installed Craft always wins over a Bundled Craft with the same id:
 

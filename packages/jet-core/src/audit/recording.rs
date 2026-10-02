@@ -115,13 +115,15 @@ pub(crate) async fn record_craft_revocation(
 	Ok(())
 }
 
-/// Records that `jetd` registered the Bundled Craft its release pins at
-/// `digest` (ADR-0107). It is attributed to the same internal actor as a
-/// revocation: Jet applying verified release metadata on this Plane. A new
-/// actor kind would fail an older `jetd`'s audit read after a rollback.
+/// Records that `jetd` registers, or failed to register, the Bundled Craft
+/// its release pins at `digest` (ADR-0107). It is attributed to the same
+/// internal actor as a revocation: Jet applying its own release metadata on
+/// this Plane. A new actor kind would fail an older `jetd`'s audit read
+/// after a rollback.
 pub(crate) async fn record_bundled_craft_registration(
 	tx: &mut WriteTransaction,
 	digest: &str,
+	outcome: AuditOutcome,
 	now_unix_ms: i64,
 ) -> Result<(), CoreError> {
 	tx.append_audit_record(NewAuditRecord {
@@ -132,7 +134,7 @@ pub(crate) async fn record_bundled_craft_registration(
 		target_id: Some(digest.into()),
 		decision: "craft.bundled_registered".into(),
 		risk: AuditRisk::Elevated,
-		outcome: AuditOutcome::Succeeded,
+		outcome,
 	})
 	.await?;
 	Ok(())

@@ -18,6 +18,7 @@ use crate::{
 	},
 	store_recovery::RecoveryMode,
 };
+use jet_store::AuditOutcome;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -171,10 +172,21 @@ impl Core {
 			MAX_ARTIFACT_BYTES,
 			staging,
 		)
-		.await?;
-		let manifest_home = home.to_owned();
+		.await
+		.map_err(|error| match error.code.as_str() {
+			"craft.artifact_mismatch" => bundled_mismatch(),
+			"craft.local_file_invalid" => source_unusable(),
+			_ => error,
+		})?;
+		// The record commits before the manifest makes the Craft live, so a
+		// registration never widens access unrecorded (ADR-0105). One that
+		// then fails is recorded as failed; one a crash interrupts is
+		// retried, and recorded again, on the next start.
 		let sha256 = craft.sha256.clone();
-		crate::filesystem::blocking(move || {
+		self.record_registration(&sha256, AuditOutcome::Succeeded)
+			.await?;
+		let manifest_home = home.to_owned();
+		let published = crate::filesystem::blocking(move || {
 			let manifest =
 				manifest(&manifest_home, &craft, specification, size)?;
 			publication::publish_manifest(
@@ -185,18 +197,34 @@ impl Core {
 				previous.as_deref(),
 			)
 		})
-		.await?
-		.map_err(|_| publication::installation_failed())?;
+		.await
+		.and_then(|published| {
+			published.map_err(|_| publication::installation_failed())
+		});
+		if let Err(error) = published {
+			// The failure is reported either way; its record is best effort.
+			let _ = self
+				.record_registration(&sha256, AuditOutcome::Failed)
+				.await;
+			return Err(error);
+		}
+		Ok(BundledOutcome::Registered)
+	}
+
+	async fn record_registration(
+		&self,
+		sha256: &str,
+		outcome: AuditOutcome,
+	) -> Result<(), CoreError> {
 		let now = self.now_unix_ms();
 		self.store
 			.write(async |tx| {
 				crate::audit::record_bundled_craft_registration(
-					tx, &sha256, now,
+					tx, sha256, outcome, now,
 				)
 				.await
 			})
-			.await?;
-		Ok(BundledOutcome::Registered)
+			.await
 	}
 }
 
@@ -301,6 +329,14 @@ fn bundled_invalid() -> CoreError {
 	CoreError::invalid_input(
 		"craft.bundled_invalid",
 		"the Bundled Craft's release metadata is invalid",
+	)
+}
+
+fn bundled_mismatch() -> CoreError {
+	CoreError::invalid_input(
+		"craft.bundled_mismatch",
+		"the Bundled Craft executable does not match the digest its release \
+		 pins",
 	)
 }
 
@@ -630,10 +666,7 @@ capabilities = ["runs"]
 			done(&[
 				(
 					"codex",
-					BundledOutcome::Failed(Box::new(CoreError::invalid_input(
-						"craft.artifact_mismatch",
-						"the downloaded Artifact does not match the confirmed SHA-256",
-					)))
+					BundledOutcome::Failed(Box::new(bundled_mismatch()))
 				),
 				("claude-code", BundledOutcome::Registered),
 			])
