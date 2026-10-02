@@ -36,9 +36,9 @@ or the `audit` recipe in `justfile`), and in the pull request that adds it.
   out-argument. Optimized builds can then dereference a null pointer and crash.
   The fix exists only in glib 0.20.
 - **No upgrade:** every Tauri Linux stack requires `gtk ^0.18` and
-  `webkit2gtk =2.0.2`, which require `glib ^0.18`. This covers `tauri` 2.11.6
-  (the latest stable release, which Jet uses), `tauri-runtime-wry` 2.11.4,
-  `wry` 0.57.0, `tao` 0.37.0 and `tauri` 3.0.0-alpha.2, as checked on crates.io.
+  `webkit2gtk =2.0.2`, which require `glib ^0.18`. This covers `tauri` 2.12.1
+  (the latest stable release, which Jet uses), `tauri-runtime-wry` 2.12.1,
+  `wry` 0.57.0, `tao` 0.37.1 and `tauri` 3.0.0-alpha.4, as checked on crates.io.
   `gtk` 0.19 uses glib 0.22, but no WebKitGTK binding or Tauri release uses it.
 - **Not reachable:** outside glib's own tests, no crate in the graph calls
   `array_iter_str` or `VariantStrIter`. The check covered every crate that
@@ -70,14 +70,14 @@ or the `audit` recipe in `justfile`), and in the pull request that adds it.
 
 ## Unmaintained crates (informational)
 
-`cargo deny` also marks six crates as unmaintained. Tauri pulls in all of them,
-and none has an upgrade:
+`cargo deny` also marks one crate as unmaintained. Tauri pulls it in, and it
+has no upgrade:
 
 - `proc-macro-error` 1.0.4 (RUSTSEC-2024-0370), a build-time macro reached
   through `glib-macros` and `gtk3-macros`.
-- `unic-char-property`, `unic-char-range`, `unic-common`, `unic-ucd-ident` and
-  `unic-ucd-version` 0.9.0 (RUSTSEC-2025-0081, 0075, 0080, 0100 and 0098),
-  reached through `urlpattern` and `tauri-utils`.
+
+The five `unic-*` 0.9.0 crates (RUSTSEC-2025-0081, 0075, 0080, 0100 and 0098)
+left the graph with Tauri 2.12, whose `tauri-utils` 2.10 uses `urlpattern` 0.6.
 
 An unmaintained crate is not a vulnerability. `deny.toml` fails only when Jet
 depends on an unmaintained crate directly.
