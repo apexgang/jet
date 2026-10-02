@@ -4,7 +4,10 @@
 
 mod support;
 
-use jet_protocol::{CapabilitySnapshot, CraftSpecification, DegradedCondition};
+use jet_protocol::{
+	CapabilityObservation, CapabilitySnapshot, CraftSpecification,
+	DegradedCondition,
+};
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -13,6 +16,7 @@ use std::{
 	process::Stdio,
 	time::Duration,
 };
+use uuid::Uuid;
 
 const EXECUTABLES: [&str; 4] =
 	["jetd", "jetfueld", "jet-craft-claude", "jet-craft-codex"];
@@ -73,8 +77,14 @@ async fn serve(executable: &Path, home: &Path) -> support::Daemon {
 fn listed(
 	daemon: &support::Daemon,
 ) -> (Vec<(String, String, Vec<String>)>, bool) {
-	let capabilities: CapabilitySnapshot =
-		serde_json::from_value(daemon.ready["capabilities"].clone()).unwrap();
+	listed_in(
+		serde_json::from_value(daemon.ready["capabilities"].clone()).unwrap(),
+	)
+}
+
+fn listed_in(
+	capabilities: CapabilitySnapshot,
+) -> (Vec<(String, String, Vec<String>)>, bool) {
 	(
 		capabilities
 			.crafts
@@ -209,6 +219,65 @@ async fn a_homebrew_keg_serves_its_bundled_crafts_through_its_bin_symlink() {
 
 		assert_eq!(listed(&daemon), both(&version));
 		assert_registered(&home, &libexec);
+	})
+	.await
+	.unwrap();
+}
+
+const STORE: [&str; 3] =
+	["plane.sqlite3", "plane.sqlite3-wal", "plane.sqlite3-shm"];
+
+/// Copies the store files that exist from `from` into `to`, removing any
+/// that `from` lacks, and leaves the audit head where it is.
+fn copy_store(from: &Path, to: &Path) {
+	std::fs::create_dir_all(to).unwrap();
+	for name in STORE {
+		if from.join(name).exists() {
+			std::fs::copy(from.join(name), to.join(name)).unwrap();
+		} else if to.join(name).exists() {
+			std::fs::remove_file(to.join(name)).unwrap();
+		}
+	}
+}
+
+#[tokio::test]
+async fn bundled_crafts_deferred_by_a_doubted_audit_register_once_it_is_trusted()
+ {
+	tokio::time::timeout(Duration::from_secs(60), async {
+		let dir = tempfile::tempdir_in("/tmp").unwrap();
+		let home = dir.path().join("jet");
+		let release = dir.path().join("payload");
+		let version = payload(&release);
+		// A store from before the release registered anything, while the
+		// audit head moves on past it.
+		let mut daemon = support::start_jetd(&home).await;
+		daemon.child.kill().await.unwrap();
+		copy_store(&home, &dir.path().join("before"));
+		let mut daemon = serve(&release.join("jetd"), &home).await;
+		assert_eq!(listed(&daemon), both(&version));
+		daemon.child.kill().await.unwrap();
+		copy_store(&dir.path().join("before"), &home);
+		for id in ["claude-code", "codex"] {
+			std::fs::remove_file(home.join(format!("crafts/{id}.json")))
+				.unwrap();
+		}
+
+		let daemon = serve(&release.join("jetd"), &home).await;
+		assert_eq!(listed(&daemon), (Vec::new(), true));
+		let client = support::connect(&daemon, Uuid::new_v4()).await;
+		client.begin_audit_epoch(Uuid::now_v7()).await.unwrap();
+
+		loop {
+			let capabilities = client
+				.capabilities(CapabilityObservation::LastObserved)
+				.await
+				.unwrap();
+			if listed_in(capabilities) == both(&version) {
+				break;
+			}
+			tokio::time::sleep(Duration::from_millis(20)).await;
+		}
+		assert_registered(&home, &release);
 	})
 	.await
 	.unwrap();

@@ -122,9 +122,11 @@ pub(crate) async fn run(
 		.identity("version", &metadata.version)
 		.count("pid", u64::from(metadata.pid))
 		.emit();
-	match core.recovery_mode() {
+	// Registration the Security audit holds back is owed until an owner
+	// trusts the audit again, which the maintenance loop below waits out.
+	let bundled_pending = match core.recovery_mode() {
 		jet_core::RecoveryMode::Serving => {
-			reconcile_at_start(&core, &bundled).await;
+			reconcile_at_start(&core, &bundled).await
 		}
 		jet_core::RecoveryMode::ReadOnly(reason) => {
 			// ADR-0077: the damaged store is served read-only, exactly as
@@ -141,8 +143,10 @@ pub(crate) async fn run(
 			)
 			.failure(&format!("{reason:?}"))
 			.emit();
+			// The restoration's reconciliation registers them.
+			crate::craft::bundled::Pending::Settled
 		}
-	}
+	};
 	// ADR-0086: the Plane reports what it can do at startup, on the one
 	// line a launcher reads, and on demand afterwards. The line precedes
 	// the workers, so the maintenance a start owes never holds it up
@@ -207,9 +211,11 @@ pub(crate) async fn run(
 	});
 	let recovery_bundled = bundled.clone();
 	let recovery = tokio::spawn(async move {
+		let mut bundled_pending = bundled_pending;
 		if recovery_core.recovery_mode() != jet_core::RecoveryMode::Serving {
 			recovery_core.wait_until_serving().await;
-			reconcile_at_start(&recovery_core, &recovery_bundled).await;
+			bundled_pending =
+				reconcile_at_start(&recovery_core, &recovery_bundled).await;
 		}
 		// The day's first Recovery snapshot, then the sweeps it precedes,
 		// run once the Plane serves: the copy costs what the store weighs
@@ -228,7 +234,21 @@ pub(crate) async fn run(
 			if recovery_core.recovery_mode() != jet_core::RecoveryMode::Serving
 			{
 				recovery_core.wait_until_serving().await;
-				reconcile_at_start(&recovery_core, &recovery_bundled).await;
+				bundled_pending =
+					reconcile_at_start(&recovery_core, &recovery_bundled).await;
+			}
+			// Beginning a new audit epoch wakes this loop like any Command,
+			// so Bundled Crafts deferred while the audit was in doubt are
+			// registered without a restart (ADR-0107).
+			if bundled_pending == crate::craft::bundled::Pending::UntilTrusted
+				&& recovery_core.security().await
+					== jet_core::SecurityState::Trusted
+			{
+				bundled_pending = crate::craft::bundled::register(
+					&recovery_core,
+					&recovery_bundled,
+				)
+				.await;
 			}
 			let mut retry = false;
 			if let Err(error) = recovery_core.reconcile_crafts().await {
@@ -450,8 +470,12 @@ pub(crate) async fn run(
 
 /// Settles what a previous daemon left unfinished before new Commands are
 /// served, in the order the durable state requires. Each step reports its
-/// own failure and the next still runs.
-async fn reconcile_at_start(core: &Arc<Core>, bundled: &[BundledCraft]) {
+/// own failure and the next still runs. Returns whether the Bundled Crafts
+/// still wait for a trusted Security audit.
+async fn reconcile_at_start(
+	core: &Arc<Core>,
+	bundled: &[BundledCraft],
+) -> crate::craft::bundled::Pending {
 	if let Err(error) = core.reconcile_crafts().await {
 		core_failure(
 			DiagnosticComponent::Craft,
@@ -479,17 +503,7 @@ async fn reconcile_at_start(core: &Arc<Core>, bundled: &[BundledCraft]) {
 	}
 	// The release's own Crafts follow, so a confirmed installation of the
 	// same id is already in place and keeps it (ADR-0107).
-	if !bundled.is_empty() {
-		match core.register_bundled_crafts(bundled.to_vec()).await {
-			Ok(registration) => crate::craft::bundled::report(&registration),
-			Err(error) => core_failure(
-				DiagnosticComponent::Craft,
-				"cannot register the bundled Crafts",
-				&error,
-			),
-		}
-		crate::craft::bundled::check_listed(&core.capabilities().await);
-	}
+	let bundled = crate::craft::bundled::register(core, bundled).await;
 	// A promotion a previous daemon did not finish is settled from what its
 	// destination holds before any client can ask for another (ADR-0064,
 	// ADR-0067).
@@ -540,6 +554,7 @@ async fn reconcile_at_start(core: &Arc<Core>, bundled: &[BundledCraft]) {
 			&error,
 		);
 	}
+	bundled
 }
 
 /// Closes the store so SQLite checkpoints its write-ahead log on the way

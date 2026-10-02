@@ -9,7 +9,7 @@
 use crate::installation::manifest::ReleaseManifest;
 use jet_core::{
 	BundledCraft, BundledOutcome, BundledRegistration, CapabilitySnapshot,
-	CraftId,
+	Core, CraftId,
 };
 use jet_runtime::{Diagnostic, DiagnosticComponent};
 use std::path::Path;
@@ -83,18 +83,48 @@ fn release_in(directory: &Path, version: &str) -> Vec<BundledCraft> {
 		.collect()
 }
 
+/// Whether registration still waits for the Security audit to be trusted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Pending {
+	/// Registration ran, or there is nothing to register.
+	Settled,
+	/// The audit was not trusted, so registration is owed once an owner
+	/// begins a new audit epoch.
+	UntilTrusted,
+}
+
+/// Registers the release's Bundled Crafts and reports what happened.
+pub(crate) async fn register(core: &Core, crafts: &[BundledCraft]) -> Pending {
+	if crafts.is_empty() {
+		return Pending::Settled;
+	}
+	let pending = match core.register_bundled_crafts(crafts.to_vec()).await {
+		Ok(registration) => report(&registration),
+		Err(error) => {
+			crate::diagnostics::core_failure(
+				DiagnosticComponent::Craft,
+				"cannot register the bundled Crafts",
+				&error,
+			);
+			Pending::Settled
+		}
+	};
+	check_listed(&core.capabilities().await);
+	pending
+}
+
 /// Reports what registration did, one Diagnostic per Bundled Craft that
 /// did not simply stay registered.
-pub(crate) fn report(registration: &BundledRegistration) {
+fn report(registration: &BundledRegistration) -> Pending {
 	let outcomes = match registration {
 		BundledRegistration::Deferred => {
 			Diagnostic::warn(
 				DiagnosticComponent::Craft,
-				"the bundled Crafts are not registered while the Security \
-				 audit is not trusted",
+				"the bundled Crafts wait for the Security audit to be \
+				 trusted again",
 			)
 			.emit();
-			return;
+			return Pending::UntilTrusted;
 		}
 		BundledRegistration::Done(outcomes) => outcomes,
 	};
@@ -127,12 +157,13 @@ pub(crate) fn report(registration: &BundledRegistration) {
 		};
 		diagnostic.identity("craft", id).emit();
 	}
+	Pending::Settled
 }
 
 /// Warns about a Bundled Craft the Capability snapshot does not list,
 /// which registration alone cannot tell: a damaged Artifact of the right
 /// size is only found when the snapshot verifies it.
-pub(crate) fn check_listed(capabilities: &CapabilitySnapshot) {
+fn check_listed(capabilities: &CapabilitySnapshot) {
 	for (_, id, _) in CRAFTS {
 		if !capabilities
 			.crafts
