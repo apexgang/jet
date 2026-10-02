@@ -296,14 +296,18 @@ finds it on the PATH `jetd` hands it. A service manager starts `jetd` with a
 minimal PATH, so `jetd` gives the helper and every Craft process the PATH it
 inherited followed by `$HOME/.local/bin`, `$HOME/.claude/local`,
 `$HOME/.npm-global/bin`, `$HOME/.bun/bin`, `$HOME/.volta/bin`,
-`/opt/homebrew/bin`, `/home/linuxbrew/.linuxbrew/bin`, `/usr/local/bin`,
-`/usr/bin`, and `/bin`, whether or not they exist yet. An inherited entry
-always comes first. A Harness installed through a version manager such as nvm,
-asdf, or mise lives in a version-specific directory `jetd` does not guess:
-symlink it into `~/.local/bin`, or add its directory to the service
-definition's PATH with a systemd drop-in or the LaunchAgent's
-`EnvironmentVariables`. Terminals and the external-tool probe keep the PATH
-`jetd` was started with.
+`$HOME/.asdf/shims`, `$HOME/.local/share/mise/shims`, `/opt/homebrew/bin`,
+`/home/linuxbrew/.linuxbrew/bin`, `/usr/local/bin`, `/usr/bin`, and `/bin`.
+An inherited entry always comes first. The PATH is built for each process,
+so a Harness installed after `jetd` started is found without a restart. An
+appended directory is used only when it exists and it and every directory
+above it belong to root or to the user `jetd` runs as and cannot be written
+by others, so on a shared host another account's Homebrew prefix never
+supplies this user's Harness. A Harness installed through nvm lives in a
+version-specific directory `jetd` does not guess: symlink it into
+`~/.local/bin`, or add its directory to the service definition's PATH with a
+systemd drop-in or the LaunchAgent's `EnvironmentVariables`. Terminals and
+the external-tool probe keep the PATH `jetd` was started with.
 
 ## Tests
 
