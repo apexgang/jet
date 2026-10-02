@@ -383,7 +383,7 @@
           ]
         },
         {
-          "description": "Jet applied signed release revocations on this Plane.",
+          "description": "Jet applied its own release metadata on this Plane: signed Craft\ndigest revocations, and the Bundled Crafts of the running release\n(ADR-0107). The kind keeps its name so an older `jetd` still reads it.",
           "type": "object",
           "properties": {
             "type": {

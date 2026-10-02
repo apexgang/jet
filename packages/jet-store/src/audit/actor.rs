@@ -10,7 +10,9 @@ pub enum AuditActorRecord {
 		/// The client's durable identity.
 		client_id: Uuid,
 	},
-	/// Jet applied verified release metadata on this Plane.
+	/// Jet applied its own release metadata on this Plane: signed Craft
+	/// digest revocations, and the Bundled Crafts of the running release
+	/// (ADR-0107). The kind keeps its name so an older `jetd` still reads it.
 	CraftRevocation,
 	/// The retention sweep acted on a Conversation's own policy or a
 	/// grace period that ended (ADR-0015).

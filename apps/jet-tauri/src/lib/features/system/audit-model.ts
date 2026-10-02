@@ -23,9 +23,11 @@ const DECISIONS: Readonly<Record<string, string>> = {
   "conversation.deletion_authorized": "Task deletion everywhere requested",
   "conversation.forgotten": "Task forgotten",
   "conversation.restored": "Task restored from Jet Trash",
+  "craft.bundled_registered": "Built-in Harness package registered",
   "craft.developer_mode_cleared": "Developer mode setting cleared",
   "craft.developer_mode_disabled": "Developer mode turned off",
   "craft.developer_mode_enabled": "Developer mode turned on",
+  "craft.digest_revoked": "Harness package revoked",
   "craft.disabled": "Harness package disabled",
   "craft.installation_approved": "Harness package installation approved",
   "execution.resolution_requested": "Retained process resolution requested",
@@ -77,7 +79,9 @@ export function decisionLabel(decision: string): string {
 const ACTORS: Record<AuditActorKind, string> = {
   this_device: "This computer",
   other_client: "Another device",
-  craft_revocation: "Harness package revocation",
+  // Jet applying its own release metadata: revocations and the Harness
+  // packages each release ships (ADR-0107).
+  craft_revocation: "Jet release",
   retention: "Jet Trash cleanup",
 };
 
