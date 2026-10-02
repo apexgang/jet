@@ -251,10 +251,7 @@ pub(super) fn route(transfers: &Transfers, frame: &Frame) -> Result<bool, ()> {
 		) || matches!(
 			decode_control::<StreamControl>(payload),
 			Ok(StreamControl::ArtifactFinished { .. })
-		) || matches!(
-			decode_control::<ServerMessage>(payload),
-			Ok(ServerMessage::Error { .. })
-		);
+		) || is_error(payload);
 		if completed {
 			transfers.remove(&frame.stream_id());
 		}

@@ -30,11 +30,23 @@ jet-protocol = { path = "jet-protocol" }
 jet-runtime = { path = "jet-runtime" }
 jet-store = { path = "jet-store" }
 
-clap = { version = "4", features = ["derive"] }
+# Colored output and "did you mean" suggestions are dropped (ADR-0059): the
+# executables are driven by the GUI, service managers and SSH, not typed at.
+clap = { version = "4", default-features = false, features = [
+	"derive",
+	"error-context",
+	"help",
+	"std",
+	"usage",
+] }
 ed25519-dalek = "3"
 getrandom = "0.4"
 hex = "0.4"
 libfuzzer-sys = "0.4"
+# Jet installs no `log` logger and no `tracing` subscriber, so every record
+# its dependencies emit is dropped at run time. Release builds compile the
+# call sites out instead (ADR-0059); `jet-daemon` names these only for that.
+log = { version = "0.4", features = ["release_max_level_off"] }
 pretty_assertions = "1"
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
 filedescriptor = "0.8.3"
@@ -55,6 +67,9 @@ sqlx = { version = "0.9", default-features = false, features = [
 subtle = "2"
 tempfile = "3"
 thiserror = "2"
+tracing = { version = "0.1", default-features = false, features = [
+	"release_max_level_off",
+] }
 toml_edit = { version = "0.25.13", features = ["serde"] }
 toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
 tokio = { version = "1", features = [
@@ -70,7 +85,13 @@ tokio = { version = "1", features = [
 	"time",
 ] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-chrono-tz = "0.10.4"
+# Schedules resolve IANA zones against the compact TZif database bundled into
+# jetd, never the host's zoneinfo, so every Plane selects the same instants
+# (ADR-0080).
+jiff = { version = "0.2.37", default-features = false, features = [
+	"std",
+	"tzdb-bundle-always",
+] }
 uuid = { version = "1", features = ["serde", "v4", "v5", "v7"] }
 # The Secret Service is spoken to over the session bus in process (ADR-0076);
 # the tokio integration alone, so no second executor is linked.
@@ -88,8 +109,10 @@ lto = true
 codegen-units = 1
 panic = "abort"
 
-# Release profiles by role (ADR-0059). `jetd` balances speed and size with
-# thin LTO; `jetfueld` and the bundled Crafts take the size-first profile.
+# Release profiles (ADR-0059, amended 2026-09-25). Every shipped executable,
+# `jetd` included, builds with the size-first `release-small`: under
+# `release` no `jetd` slice fits its 12 MiB budget (ADR-0054). `release`
+# stays as the base `release-small` inherits and for `just build-release`.
 # Both keep line tables and leave symbols in place so `just release-package`
 # can split them into separate crash-symbol artifacts before stripping.
 [profile.release]

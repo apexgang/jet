@@ -1,4 +1,5 @@
-# This workflow is managed by gh actions-lock.
+# Actions are pinned to full commit SHAs (repository policy); the comment
+# names the release tag each SHA was verified against.
 # CodeQL code scanning for every language in the repository (issue #176).
 #
 # GitHub's default setup cannot analyze the Swift GUI: the Xcode project
@@ -55,12 +56,12 @@ jobs:
             build-mode: manual
             os: macos-latest
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: github/codeql-action/init@v4.38.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-      - uses: extractions/setup-just@v4.0.0
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
         if: matrix.language == 'swift'
       - name: Compile the Xcode GUI for macOS under the CodeQL tracer
         if: matrix.language == 'swift'
@@ -73,6 +74,6 @@ jobs:
         if: matrix.language == 'swift'
         working-directory: packages
         run: just contracts-test-swift
-      - uses: github/codeql-action/analyze@v4.38.1
+      - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           category: /language:${{ matrix.language }}

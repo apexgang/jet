@@ -14,8 +14,8 @@
  *
  * `--dry-run` runs everything except the app: the WebDriver client against
  * a fake driver process (this file's `fake-driver` mode) whose app is a
- * `sleep` under another name, the page script compiled as the webview
- * would, /proc sampling of real processes, a fake systemd and `jetd core`
+ * `sleep` under another name and which takes only the journey's page
+ * script, /proc sampling of real processes, a fake systemd and `jetd core`
  * answering from a scratch home, screenshots, diagnostics and the report.
  * It never touches the real home. `--quiet` prints progress only when it
  * fails.

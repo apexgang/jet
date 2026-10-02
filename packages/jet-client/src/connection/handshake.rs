@@ -1,6 +1,6 @@
 //! Restricted negotiation shared by local IPC and authenticated SSH I/O.
 
-use crate::{Client, ClientError};
+use crate::{Client, ClientError, connection::Reply};
 use jet_protocol::{
 	CODEC_JSON_V1, ClientHello, ConnectionProof, Frame, FrameLimits,
 	FrameReader, FrameWriter, PREFACE, PROTOCOL_MINOR, PROTOCOL_VERSION,
@@ -63,6 +63,23 @@ impl Client {
 		identity: &impl ClientIdentity,
 	) -> Result<Self, ClientError>
 	where
+		R: AsyncRead + Unpin + Send + 'static,
+		W: AsyncWrite + Unpin + Send + 'static,
+	{
+		Self::authenticate(read, write, identity).await
+	}
+}
+
+impl<M> Client<M> {
+	/// [`Client::connect_remote`] for a connection that reads its replies
+	/// as `M`.
+	pub(crate) async fn authenticate<R, W>(
+		read: R,
+		write: W,
+		identity: &impl ClientIdentity,
+	) -> Result<Self, ClientError>
+	where
+		M: Reply,
 		R: AsyncRead + Unpin + Send + 'static,
 		W: AsyncWrite + Unpin + Send + 'static,
 	{

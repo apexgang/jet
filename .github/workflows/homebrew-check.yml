@@ -1,4 +1,5 @@
-# This workflow is managed by gh actions-lock.
+# Actions are pinned to full commit SHAs (repository policy); the comment
+# names the release tag each SHA was verified against.
 # Install the core formula `jet` and the Linux desktop cask `jet-app` from a
 # local `apexgang/tap` before anything reaches the real tap. Both are rendered
 # from the x86_64 artifacts the calling workflow built, with file:// URLs, then
@@ -34,12 +35,12 @@ jobs:
       HOMEBREW_NO_ENV_HINTS: 1
       HOMEBREW_NO_INSTALL_CLEANUP: 1
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/download-artifact@v8.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: jet-core-x86_64-unknown-linux-gnu
           path: ${{ runner.temp }}/jet-homebrew/core
-      - uses: actions/download-artifact@v8.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: jet-desktop-linux-x86_64-unknown-linux-gnu
           path: ${{ runner.temp }}/jet-homebrew/desktop
@@ -146,7 +147,7 @@ jobs:
           done
           cat "$RUNNER_TEMP/jetd-status.json"
           exit 1
-      # The case ConditionFileIsExecutable exists for: the daemon is still
+      # The case RestartPreventExitStatus=203 exists for: the daemon is still
       # running when the cask and formula go, and its unit stays behind.
       - name: Uninstall while running and require no restart loop
         run: |
@@ -165,18 +166,24 @@ jobs:
           test -f "$HOME/.config/systemd/user/$unit"
           test ! -e "$HOME/Applications/Jet.AppImage"
           # The orphaned daemon exits as it does after a drain. Restart=always
-          # tries again after RestartSec, and the condition skips that start.
+          # tries once more after RestartSec; that exec fails with status 203,
+          # which RestartPreventExitStatus turns into a stop. (systemd does
+          # not re-check conditions on a Restart= restart.)
           systemctl --user kill "$unit"
           state() { systemctl --user show "$unit" -p "$1" --value; }
+          stopped() { [[ $(state ActiveState) =~ ^(inactive|failed)$ ]]; }
           for _ in $(seq 30); do
-            [[ $(state ActiveState) == inactive && $(state ConditionResult) == no ]] && break
+            stopped && break
             sleep 1
           done
           systemctl --user status "$unit" --no-pager || true
-          [[ $(state ActiveState) == inactive && $(state ConditionResult) == no ]]
+          stopped
           restarts=$(state NRestarts)
           sleep 10
-          [[ $(state ActiveState) == inactive && $(state NRestarts) == "$restarts" ]]
+          stopped && [[ $(state NRestarts) == "$restarts" ]]
+          # The next login's start is skipped by the condition instead.
+          systemctl --user start "$unit"
+          [[ $(state ConditionResult) == no ]] && stopped
           if pgrep -u "$(id -u)" -x jetd; then
             echo 'jetd is still running after its formula was removed.' >&2
             exit 1

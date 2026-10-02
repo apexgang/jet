@@ -245,6 +245,7 @@ mod tests {
             "ExecStart=%h/.jet/core/current/jetd serve --channel gui",
             "KillMode=process",
             "Restart=always",
+            "RestartPreventExitStatus=203",
         ] {
             assert!(
                 UNIT_TEMPLATE.lines().any(|candidate| candidate == line),

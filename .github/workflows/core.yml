@@ -1,4 +1,5 @@
-# This workflow is managed by gh actions-lock.
+# Actions are pinned to full commit SHAs (repository policy); the comment
+# names the release tag each SHA was verified against.
 # The v1 release contract's test gate (issue #58): the ordinary suite, the
 # lints, the migration conventions, and the dependency envelope on both
 # supported core platforms (ADR-0032). Reference performance and idle
@@ -29,7 +30,7 @@ jobs:
       core: ${{ steps.changes.outputs.core }}
       tauri: ${{ steps.changes.outputs.tauri }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select checks
         id: changes
         working-directory: .
@@ -51,16 +52,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Test native macOS packaging
         if: runner.os == 'macOS'
         working-directory: .
         run: python3 -m unittest discover -s .github/tests -p test_packaging.py -v
-      - uses: extractions/setup-just@v4.0.0
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
       - name: Set up Rust
         working-directory: .
         run: bash .github/scripts/setup-rust.sh test
-      - uses: actions/cache/restore@v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache
         with:
           path: |
@@ -82,7 +83,7 @@ jobs:
         run: rustup component add clippy
       - name: Lint
         run: just clippy -- -D warnings
-      - uses: taiki-e/install-action@v2.87.13
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
         with:
           tool: cargo-nextest@0.9.144
       - name: Run the suite
@@ -95,7 +96,7 @@ jobs:
         if: ${{ !cancelled() && steps.cache.outcome == 'success' }}
         working-directory: .
         run: python3 .github/scripts/cache_sources.py save
-      - uses: actions/cache/save@v6.1.0
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' }}
         with:
           path: |
@@ -125,16 +126,16 @@ jobs:
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_DEV_DEBUG: 0
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the WebKitGTK build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev \
             libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-      - uses: oven-sh/setup-bun@v2.2.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.2
-      - uses: extractions/setup-just@v4.0.0
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
       - name: Set up Rust
         working-directory: .
         run: |
@@ -143,7 +144,7 @@ jobs:
           done | sort -u | while read -r toolchain; do
             rustup toolchain install "$toolchain" --profile minimal --component rustfmt --component clippy
           done
-      - uses: taiki-e/install-action@v2.87.13
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
         with:
           tool: cargo-deny@0.20.2
       - name: Install the locked frontend dependencies
@@ -171,7 +172,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Require every selected job
         working-directory: .
         env:

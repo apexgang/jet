@@ -171,9 +171,15 @@ downgrades either. If another commit, such as the Swift release's, changes
 without pushing; rerun it.
 
 Failed size gates retain build artifacts for seven days but prevent publication.
-The historical `jetd` size overage is documented in
+Sizes and the profile each executable builds with are recorded in
 [Core distribution](../../docs/core-distribution.md); this workflow does not relax
-that budget. macOS GUI signing and notarization remain separate distribution steps.
+any budget. macOS GUI signing and notarization remain separate distribution steps.
+
+`release-size.yml` runs the same package and gate steps for the three labels on
+pull requests that change `packages/`, the packaging files, `release.py`, or
+`setup-rust.sh`, and lists every executable's stripped size per architecture
+slice in the job summary. It builds the profiles release.toml configures and
+fails when a slice is over its budget.
 
 `packaging.yml` rehearses the Linux x86_64 half of a release on pull requests
 that touch packaging inputs, and on demand: it builds and gates the core
@@ -225,15 +231,16 @@ replace the newer formula. See
 
 ## Validation
 
-Run `python3 -m unittest discover -s .github/tests -v`, `actionlint`, and
-`gh actions-lock --verify-local` after editing automation. The release tests
-run `ruby -c` on the rendered formula and cask, so they need Ruby, and sign
-and verify updater signatures with the `openssl` command (OpenSSL 3.0 or
-later). Regenerate action pins in enrolled workflows with `gh actions-lock`.
-Run `just release-envelope` and `just fmt` from `packages/` after moving
-release tooling or changing its inputs.
+Run `python3 -m unittest discover -s .github/tests -v` and `actionlint`
+after editing automation. The release tests run `ruby -c` on the rendered
+formula and cask, so they need Ruby, and sign and verify updater signatures
+with the `openssl` command (OpenSSL 3.0 or later). Run `just release-envelope`
+and `just fmt` from `packages/` after moving release tooling or changing its
+inputs.
 
-`swift-release.yml` uses literal commit SHAs for every external action and is
-not enrolled in `actions.lock`: the lockfile tool rewrites those refs to tags,
-which would undo the required SHA pins. Verify its action SHAs against the
-upstream release tags when updating them.
+The repository requires every external action to be pinned to a full commit
+SHA; a tag reference fails the run at startup. Each workflow writes
+`uses: owner/action@<sha> # vX.Y.Z`, and every workflow uses the same commit
+for an action. When updating a pin, resolve the release tag upstream (for
+example `gh api repos/<owner>/<action>/commits/<tag> --jq .sha`) and update
+every workflow that uses it; the automation tests check the shape.

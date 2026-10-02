@@ -81,7 +81,10 @@ impl Broker {
 
 		let client = match tokio::time::timeout(
 			std::time::Duration::from_secs(15),
-			jet_client::Client::connect_ssh(&endpoint, &self.identity),
+			jet_client::RemoteToolClient::connect_ssh(
+				&endpoint,
+				&self.identity,
+			),
 		)
 		.await
 		{

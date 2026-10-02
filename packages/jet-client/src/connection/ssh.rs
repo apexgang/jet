@@ -1,6 +1,6 @@
 //! System SSH endpoint authentication, independent of Jet Pairing.
 
-use crate::{Client, ClientError, ClientIdentity};
+use crate::{Client, ClientError, ClientIdentity, connection::Reply};
 use std::process::{Command, Stdio};
 
 /// A system SSH destination (`[user@]host` or an SSH-config host alias).
@@ -79,6 +79,20 @@ impl Client {
 		endpoint: &SshEndpoint,
 		identity: &impl ClientIdentity,
 	) -> Result<Self, ClientError> {
+		Self::launch_ssh(endpoint, identity).await
+	}
+}
+
+impl<M> Client<M> {
+	/// [`Client::connect_ssh`] for a connection that reads its replies as
+	/// `M`.
+	pub(crate) async fn launch_ssh(
+		endpoint: &SshEndpoint,
+		identity: &impl ClientIdentity,
+	) -> Result<Self, ClientError>
+	where
+		M: Reply,
+	{
 		let mut command = tokio::process::Command::from(endpoint.command());
 		let mut child = command
 			.stdin(Stdio::piped())
@@ -88,7 +102,7 @@ impl Client {
 			.spawn()?;
 		let read = child.stdout.take().ok_or(ClientError::Closed)?;
 		let write = child.stdin.take().ok_or(ClientError::Closed)?;
-		let mut client = Self::connect_remote(read, write, identity).await?;
+		let mut client = Self::authenticate(read, write, identity).await?;
 		client.ssh = Some(child);
 		Ok(client)
 	}

@@ -10,7 +10,9 @@
 payload_mib = 30
 increase_percent = 5
 
-# What each profile must say in Cargo.toml (ADR-0059).
+# What each profile must say in Cargo.toml (ADR-0059). Every executable
+# below builds with `release-small`; `release` is checked because
+# `release-small` inherits its panic, codegen-unit, and symbol settings.
 [profiles.release]
 opt-level = "s"
 lto = "thin"
@@ -29,7 +31,7 @@ dependents = ["jet-daemon", "jet-core", "jet-store"]
 
 [executables.jetd]
 package = "jet-daemon"
-profile = "release"
+profile = "release-small"
 limit_mib = 12
 workspace = ["jet-client", "jet-core", "jet-protocol", "jet-runtime", "jet-store"]
 forbidden = ["jet-craft-sdk"]
@@ -42,8 +44,8 @@ workspace = ["jet-protocol", "jet-runtime"]
 forbidden = [
 	"age",
 	"chrono",
-	"chrono-tz",
 	"ed25519-dalek",
+	"jiff",
 	"libsqlite3-sys",
 	"reqwest",
 	"rustls",
@@ -61,8 +63,8 @@ workspace = ["jet-craft-sdk", "jet-protocol"]
 forbidden = [
 	"age",
 	"chrono",
-	"chrono-tz",
 	"ed25519-dalek",
+	"jiff",
 	"libsqlite3-sys",
 	"portable-pty",
 	"reqwest",
@@ -79,8 +81,8 @@ workspace = ["jet-craft-sdk", "jet-protocol"]
 forbidden = [
 	"age",
 	"chrono",
-	"chrono-tz",
 	"ed25519-dalek",
+	"jiff",
 	"libsqlite3-sys",
 	"portable-pty",
 	"reqwest",

@@ -5,8 +5,9 @@
 [Unit]
 Description=Jet daemon for this user's Plane
 Documentation=https://github.com/apexgang/jet
-# Nothing to start until `jetd core activate` made `current`; without this
-# a missing core would restart and fail every two seconds.
+# Nothing to start until `jetd core activate` made `current`. systemd checks
+# conditions on a start, not on a Restart= restart, so RestartPreventExitStatus
+# below ends the loop when the core disappears while the unit runs.
 ConditionFileIsExecutable=%h/.jet/core/current/jetd
 
 [Service]
@@ -24,6 +25,9 @@ KillMode=process
 # `current` names now. `systemctl --user stop` still stops it.
 Restart=always
 RestartSec=2
+# 203 is systemd's status for an ExecStart it could not run: the core is
+# gone, so retrying every two seconds would only fail again.
+RestartPreventExitStatus=203
 
 [Install]
 WantedBy=default.target

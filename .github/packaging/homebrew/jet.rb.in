@@ -55,8 +55,10 @@ class Jet < Formula
       </dict></plist>
     PLIST
     # Uninstalling the jet-app cask autoremoves this formula but leaves the
-    # unit `brew services` installed. The condition turns the next restart of
-    # the removed executable into a skipped start instead of a restart loop.
+    # unit `brew services` installed. systemd checks conditions only on a
+    # start, so the condition skips the unit at the next login, and
+    # RestartPreventExitStatus=203 (the executable could not be run) ends the
+    # Restart= loop of a daemon that was running when the formula went.
     (prefix/"jet-homebrew.service").write <<~SERVICE
       [Unit]
       Description=Jet daemon
@@ -68,6 +70,7 @@ class Jet < Formula
       TimeoutStopSec=15
       Restart=always
       RestartSec=2
+      RestartPreventExitStatus=203
       [Install]
       WantedBy=default.target
     SERVICE

@@ -19,6 +19,9 @@ use std::{io, path::PathBuf};
 pub(crate) async fn blocking<T: Send + 'static>(
 	work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, CoreError> {
+	// Boxed, so the blocking task is compiled once per answer type rather
+	// than once per caller.
+	let work: Box<dyn FnOnce() -> T + Send> = Box::new(work);
 	tokio::task::spawn_blocking(work).await.map_err(|error| {
 		CoreError::internal("filesystem.task_failed", error.to_string())
 	})

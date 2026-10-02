@@ -188,8 +188,10 @@ async fn rolling_output_reports_an_exact_gap_and_obeys_receiver_credit() {
 		"dd if=/dev/zero bs=1048576 count=9 2>/dev/null; printf 'ROLLED\\n'\n",
 	)
 	.await;
+	// Nine MiB through a PTY on an unoptimized CI build can take well over
+	// 15 s on a busy macOS runner (#226); the bound only catches a stall.
 	let displaced =
-		tokio::time::timeout(std::time::Duration::from_secs(15), async {
+		tokio::time::timeout(std::time::Duration::from_secs(60), async {
 			let mut cursor = 0;
 			loop {
 				let Frame::Control { payload, .. } = wire.receive_frame().await

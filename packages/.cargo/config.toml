@@ -4,3 +4,26 @@
 # the build. `cargo sqlx prepare` sets SQLX_OFFLINE=false on the `cargo
 # check` it spawns, which wins over this, so `just sqlx-prepare` still works.
 SQLX_OFFLINE = "true"
+
+# The bundled SQLite build (ADR-0057) keeps what Jet uses: WAL, FTS5, JSON,
+# foreign keys on by default, STAT4 and the column metadata SQLx reads.
+# libsqlite3-sys also compiles in FTS3, R*Tree, the dbstat table, soundex()
+# and run-time extension loading, which no Jet schema or query reaches;
+# leave those out (ADR-0059).
+LIBSQLITE3_FLAGS = "-USQLITE_ENABLE_FTS3 -USQLITE_ENABLE_FTS3_PARENTHESIS -USQLITE_ENABLE_RTREE -USQLITE_ENABLE_DBSTAT_VTAB -USQLITE_SOUNDEX -USQLITE_ENABLE_LOAD_EXTENSION -DSQLITE_OMIT_LOAD_EXTENSION"
+
+# Pack relative relocations into DT_RELR on the Linux targets (ADR-0054).
+# The executables are PIE, so nearly all their dynamic relocations are
+# relative. As 24-byte RELA entries they cost `jetd` about 1.6 MiB before
+# the dependency changes of #215 and about 0.7 MiB after them; packed, they
+# take under 8 KiB. The linker records a GLIBC_ABI_DT_RELR version need, so
+# a binary refuses to load on glibc older than 2.36 instead of starting
+# unrelocated. Built on the Ubuntu 24.04 runners the executables already
+# need glibc 2.39. Without `--target` these flags also reach build scripts,
+# so building on Linux needs glibc 2.36 or newer. Mach-O rebase information
+# is already compact (about 12 KB in `jetd`), so no Apple target is listed.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,-z,pack-relative-relocs"]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,-z,pack-relative-relocs"]

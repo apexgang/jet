@@ -97,8 +97,10 @@ and end in "not installed" unless a core is already there.
 **Service managers.** The unit and the autostart entry are the packaging
 templates themselves, `include_str!` of `.github/packaging/linux/jetd.service`
 and `jetd-autostart.desktop`. The unit gained
-`ConditionFileIsExecutable=%h/.jet/core/current/jetd`, so a missing core no
-longer restarts and fails every two seconds, and
+`ConditionFileIsExecutable=%h/.jet/core/current/jetd`, so a missing core is
+skipped at start, `RestartPreventExitStatus=203`, so a core removed while the
+unit runs does not restart and fail every two seconds (systemd does not
+re-check conditions on a `Restart=` restart), and
 `Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin`, because
 Harness CLIs such as `claude` usually live in `~/.local/bin`.
 `KillMode=process` and `Restart=always` are unchanged. systemd counts as
@@ -351,9 +353,13 @@ Linux formula at the same or a newer version and never touches
 `Casks/jet.rb`. The template keeps `class Jet` and its `version "@VERSION@"`
 line, which the Swift scripts parse. Homebrew's audit calls that line
 redundant with the URL, hence `--except=version`. The generated systemd unit
-gained `ConditionFileIsExecutable=#{opt_bin}/jetd`: uninstalling the cask
-autoremoves the formula but leaves the unit `brew services` installed, and
-the condition turns its next restart into a skipped start. A `caveats` block
+gained `ConditionFileIsExecutable=#{opt_bin}/jetd` and
+`RestartPreventExitStatus=203`: uninstalling the cask autoremoves the formula
+but leaves the unit `brew services` installed. A running daemon's next
+`Restart=` attempt fails to exec (status 203) and stops there, because
+systemd does not re-check conditions on such restarts; the condition skips
+the unit at the next login. The first CI run of `homebrew-check` showed the
+condition alone looping. A `caveats` block
 names `brew services start apexgang/tap/jet`.
 
 **The `jet-app` cask** (`jet-app.rb.in`) is Linux-only: `depends_on :linux`,

@@ -28,11 +28,18 @@ reports for the build and are what activation reasons about. Labels are
 `x86_64` slice. Crash symbols ship separately as
 `jet-core-symbols-<version>-<label>` with a `.debug` file per executable
 on Linux and a `.dSYM` bundle on macOS; the payload executables are
-stripped.
+stripped. The Linux release `jetd` is also linked without
+`.eh_frame_hdr` (`jet-daemon/build.rs`). It aborts on panic, so the
+table only served in-process backtraces: `RUST_BACKTRACE` now prints
+the panic message and location without frames. `.eh_frame` stays, so
+gdb, eu-stack, and systemd-coredump still walk a core dump with or
+without the symbols. Every Linux executable packs its relative
+relocations into `DT_RELR` (`packages/.cargo/config.toml`), so it
+refuses to load on glibc older than 2.36; built on Ubuntu 24.04 the
+executables already need glibc 2.39.
 
-`just release-package --target <triple>` builds `jetd` with the
-`release` profile and the helper and Crafts with `release-small`
-(ADR-0059), splits and strips symbols, writes the manifest by running the
+`just release-package --target <triple>` builds all four executables
+with the `release-small` profile (ADR-0059), splits and strips symbols, writes the manifest by running the
 freshly built `jetd core describe`, and archives payload and symbols.
 Two Apple targets given together are merged with `lipo` into one
 universal payload. `.github/workflows/release.yml` runs it for the three
@@ -133,23 +140,70 @@ bundles, the cask, and the updater manifest are built and published.
   a release profile in `Cargo.toml` no longer says what ADR-0059
   requires.
 
-Measured on Linux x86_64 at this change:
+Measured on Linux x86_64 at this change and accepted in
+`release-baseline.json`:
 
 | Executable | Profile | Stripped size | Budget |
 | --- | --- | --- | --- |
-| `jetd` | `release` (opt-level `s`, thin LTO) | 17.08 MiB | 12 MiB |
-| `jetfueld` | `release-small` (opt-level `z`, fat LTO) | 1.02 MiB | 3 MiB |
-| `jet-craft-claude` | `release-small` | 1.71 MiB | 6 MiB |
-| `jet-craft-codex` | `release-small` | 1.63 MiB | 6 MiB |
+| `jetd` | `release-small` (opt-level `z`, fat LTO) | 12,342,792 bytes (11.77 MiB) | 12 MiB |
+| `jetfueld` | `release-small` | 1,019,248 bytes (0.97 MiB) | 3 MiB |
+| `jet-craft-claude` | `release-small` | 1,745,624 bytes (1.66 MiB) | 6 MiB |
+| `jet-craft-codex` | `release-small` | 1,781,616 bytes (1.70 MiB) | 6 MiB |
 
-`jetd` is over its budget, so `just release-check` and the release
-workflow fail on it until the daemon is smaller; the workflow still
-uploads the failed payload for inspection. Under the size-first
-profile (opt-level `z`, fat LTO) the same `jetd` measured 14.09 MiB, so
-the profile choice is not what puts it over; the budget needs dependency
-work, which this change does not attempt. `just release-accept` never records a size
-over budget, so the baseline file holds no `jetd` size and the drift
-rule cannot anchor above the limit.
+The payload totals 16.11 MiB against 30 MiB. `jetd` has 240,120 bytes
+(1.9%) of room on this slice. Issue #215 brought it
+down from 18.31 MiB (19,203,248 bytes at 0fde750, as #215 records).
+The changes:
+
+- `jetd` builds with `release-small` instead of `release` (opt-level
+  `s`, thin LTO); ADR-0059 records the change in its 2026-09-25
+  amendment. The workspace's development profile, under which the
+  ADR-0022 and ADR-0055 budgets are measured, is already opt-level `z`
+  with fat LTO.
+- Schedules resolve zones with jiff and its bundled tz database instead
+  of chrono-tz. The zone data moves from tzdb 2025b (chrono-tz 0.10.4)
+  to 2026c (jiff-tzdb 0.1.8). Under 2026c Morocco stays at +00 from
+  2026-09-20, and British Columbia and Alberta stay at -07 and -06 from
+  2026-11-01. Schedules in `Africa/Casablanca`, `Africa/El_Aaiun`,
+  `America/Vancouver`, `America/Edmonton` and their links fire at the new
+  instants. A firing persisted before the upgrade keeps its instant
+  (ADR-0080); every later one follows 2026c.
+- clap drops colored output and "did you mean" suggestions, and
+  release builds compile out the `log` and `tracing` call sites in
+  dependencies.
+- The bundled SQLite leaves out FTS3, R*Tree, dbstat, soundex, and
+  extension loading.
+- Relative relocations are packed into `DT_RELR`, and the Linux `jetd`
+  has no `.eh_frame_hdr`. Neither applies to macOS.
+- Store transactions, the blocking filesystem helper, and reply
+  classification in the daemon and the No-Visa client are compiled once
+  instead of once per caller or per reply kind.
+
+TLS stays on rustls with reqwest's aws-lc-rs provider, so every HTTPS
+connection `jetd` makes, including the GitHub API calls that carry the
+user's token, keeps the hybrid post-quantum X25519MLKEM768 key
+exchange. rustls is at 0.23.45, which fixes RUSTSEC-2026-0285. The ring
+provider would save 668,968 bytes on Linux x86_64 but offers only
+X25519, P-256, and P-384.
+
+CI measured the stripped `jetd` on every slice with these changes under
+both profiles, with rustls on the ring provider #215 tried at the time:
+
+| Slice | `release` (opt-level `s`, thin LTO) | `release-small` (opt-level `z`, fat LTO) |
+| --- | ---: | ---: |
+| Linux x86_64 | 13.32 MiB | 11,673,824 bytes (11.13 MiB) |
+| Linux aarch64 | 12.39 MiB | 9,653,504 bytes (9.21 MiB) |
+| macOS x86_64 | 13.36 MiB | 9,987,376 bytes (9.52 MiB) |
+| macOS arm64 | 12.24 MiB | 7,640,832 bytes (7.29 MiB) |
+
+Every slice was over 12 MiB under `release` and under it with
+`release-small`. With aws-lc kept, only Linux x86_64 has been measured
+here; the other slices had at least 2.4 MiB of room, and
+`.github/workflows/release-size.yml` measures all three labels with the
+configured profiles on every pull request that touches the core and
+fails when a slice is over budget. Identical code folding
+(`-Wl,--icf=all` with rust-lld) would remove about 110 KiB more under
+fat LTO and is not applied.
 
 ## Versions under the Jet home
 
