@@ -70,14 +70,14 @@ or the `audit` recipe in `justfile`), and in the pull request that adds it.
 
 ## Unmaintained crates (informational)
 
-`cargo deny` also marks six crates as unmaintained. Tauri pulls in all of them,
-and none has an upgrade:
+`cargo deny` also marks one crate as unmaintained. Tauri pulls it in, and it
+has no upgrade:
 
 - `proc-macro-error` 1.0.4 (RUSTSEC-2024-0370), a build-time macro reached
   through `glib-macros` and `gtk3-macros`.
-- `unic-char-property`, `unic-char-range`, `unic-common`, `unic-ucd-ident` and
-  `unic-ucd-version` 0.9.0 (RUSTSEC-2025-0081, 0075, 0080, 0100 and 0098),
-  reached through `urlpattern` and `tauri-utils`.
+
+The five `unic-*` 0.9.0 crates (RUSTSEC-2025-0081, 0075, 0080, 0100 and 0098)
+left the graph with Tauri 2.12, whose `tauri-utils` 2.10 uses `urlpattern` 0.6.
 
 An unmaintained crate is not a vulnerability. `deny.toml` fails only when Jet
 depends on an unmaintained crate directly.
