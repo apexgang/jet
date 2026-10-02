@@ -1,4 +1,4 @@
-//! Grace-period collection for unreferenced third-party Craft Artifacts.
+//! Grace-period collection for unreferenced Craft Artifacts.
 
 use crate::{
 	CoreError,
@@ -17,6 +17,7 @@ use std::{
 	time::{Duration, SystemTime},
 };
 
+const REVOCATIONS: &[u8] = b"revocations.json";
 const UNREFERENCED_GRACE: Duration = Duration::from_secs(24 * 60 * 60);
 const DIRECTORY_FLAGS: OFlags = OFlags::RDONLY
 	.union(OFlags::DIRECTORY)
@@ -39,6 +40,14 @@ pub(crate) async fn collect_unreferenced(
 		};
 		referenced.insert(plan.artifact_sha256);
 	}
+	// A Run still in progress may restart its Craft at the digest it pinned
+	// (ADR-0018), after its default moved to another release's Bundled
+	// Craft. A walk this version cannot finish fails closed.
+	let Ok(pins) = crate::craft::lifecycle::active_craft_pins(store).await
+	else {
+		return Ok(());
+	};
+	referenced.extend(pins.into_iter().map(|(_, pin)| pin.sha256));
 	crate::filesystem::blocking(move || collect(&home, &mut referenced, now))
 		.await?
 		.map_err(|_| craft_publication::installation_failed())
@@ -55,7 +64,10 @@ fn collect(
 	for entry in Dir::read_from(&home)? {
 		let entry = entry?;
 		let name = entry.file_name();
-		if !name.to_bytes().ends_with(b".json") {
+		// Signed revocations share the directory and reference no Artifact.
+		if !name.to_bytes().ends_with(b".json")
+			|| name.to_bytes() == REVOCATIONS
+		{
 			continue;
 		}
 		let Some(file) = open_regular(&home, name)? else {
@@ -189,4 +201,116 @@ fn read_manifest(file: File) -> std::io::Result<InstallationManifest> {
 	}
 	serde_json::from_reader(std::io::Read::take(file, 256 * 1024 + 1))
 		.map_err(std::io::Error::other)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::{
+		Command, CommandOutcome, Core, RetentionPolicy, RunLifecycle,
+		WorkingTreeRequest,
+		run::tests::{install_craft, start_core},
+		test_support::{actor, register_repository, request},
+	};
+
+	const LATER: Duration = Duration::from_secs(25 * 60 * 60);
+
+	/// Starts a Run pinned to the fixture Craft, then removes the Craft's
+	/// manifest so only the Run still references its digest.
+	async fn pinned_run(dir: &Path) -> (Core, crate::RunId, PathBuf) {
+		let core = start_core(&dir.join("plane.sqlite3")).await;
+		let project_id = register_repository(&core, &dir.join("repo")).await;
+		install_craft(dir);
+		let CommandOutcome::ConversationCreated(conversation) = core
+			.execute(
+				&actor(),
+				request(Command::CreateConversation {
+					retention: RetentionPolicy::Retain,
+					working_tree: WorkingTreeRequest::LocalCheckout {
+						project_id,
+					},
+				}),
+			)
+			.await
+			.unwrap()
+		else {
+			panic!("Conversation")
+		};
+		let CommandOutcome::RunCreated(run) = core
+			.execute(
+				&actor(),
+				request(Command::StartRun {
+					conversation_id: conversation.conversation_id,
+					craft: "fake".into(),
+					prompt: "Make a change".into(),
+				}),
+			)
+			.await
+			.unwrap()
+		else {
+			panic!("Run")
+		};
+		let manifest: serde_json::Value = serde_json::from_slice(
+			&std::fs::read(dir.join("crafts/fake.json")).unwrap(),
+		)
+		.unwrap();
+		std::fs::remove_file(dir.join("crafts/fake.json")).unwrap();
+		let pinned = old_artifact(dir, manifest["sha256"].as_str().unwrap());
+		(core, run.run_id, pinned)
+	}
+
+	fn old_artifact(dir: &Path, sha256: &str) -> PathBuf {
+		let artifacts = dir.join("crafts/artifacts");
+		std::fs::create_dir_all(&artifacts).unwrap();
+		let artifact = artifacts.join(sha256);
+		std::fs::write(&artifact, b"artifact").unwrap();
+		artifact
+	}
+
+	async fn collect_later(core: &Core, dir: &Path) {
+		collect_unreferenced(
+			&core.store,
+			dir.join("crafts"),
+			SystemTime::now() + LATER,
+		)
+		.await
+		.unwrap();
+	}
+
+	#[tokio::test]
+	async fn an_artifact_a_run_in_progress_pins_is_kept_until_the_run_ends() {
+		let dir = tempfile::tempdir().unwrap();
+		let (core, run, pinned) = pinned_run(dir.path()).await;
+
+		collect_later(&core, dir.path()).await;
+		assert!(pinned.exists());
+
+		core.store
+			.write(async |tx| {
+				tx.update_run_lifecycle(run.0, RunLifecycle::Failed, 0)
+					.await
+			})
+			.await
+			.unwrap();
+		collect_later(&core, dir.path()).await;
+		assert!(!pinned.exists());
+	}
+
+	#[tokio::test]
+	async fn signed_revocations_do_not_stop_collection() {
+		let dir = tempfile::tempdir().unwrap();
+		let core =
+			crate::test_support::start_core(&dir.path().join("plane.sqlite3"))
+				.await;
+		let unreferenced = old_artifact(dir.path(), &"ab".repeat(32));
+		std::fs::write(
+			dir.path().join("crafts/revocations.json"),
+			br#"{"signature":"","revoked":[]}"#,
+		)
+		.unwrap();
+
+		collect_later(&core, dir.path()).await;
+
+		assert!(!unreferenced.exists());
+	}
 }

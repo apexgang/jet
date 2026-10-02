@@ -211,7 +211,10 @@ async fn hash_bounded_file(
 	.map_err(|_| local_file_invalid())
 }
 
-fn open_bounded_file(path: &Path, limit: u64) -> std::io::Result<fs::File> {
+pub(crate) fn open_bounded_file(
+	path: &Path,
+	limit: u64,
+) -> std::io::Result<fs::File> {
 	let file = fs::OpenOptions::new()
 		.read(true)
 		.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)

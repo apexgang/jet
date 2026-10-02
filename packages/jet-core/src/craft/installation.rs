@@ -155,10 +155,35 @@ pub(crate) struct InstallationManifest {
 	pub(crate) publisher_claim: String,
 	pub(crate) commit: String,
 	pub(crate) trust: CraftTrust,
+	/// Omitted for installed Crafts, so their manifests stay byte-identical
+	/// and a `jetd` that predates Bundled Crafts still reads every manifest.
+	#[serde(default, skip_serializing_if = "CraftOrigin::is_installed")]
+	pub(crate) origin: CraftOrigin,
 	pub(crate) executable: PathBuf,
 	pub(crate) sha256: String,
 	pub(crate) artifact_size: u64,
 	pub(crate) specification: CraftSpecification,
+}
+
+/// Who put an installed Craft's manifest in place, which decides whether
+/// `jetd` may replace it with the Bundled Craft of its own release.
+#[derive(
+	Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CraftOrigin {
+	/// A confirmed third-party or Developer Mode installation, never replaced
+	/// by a Bundled Craft.
+	#[default]
+	Installed,
+	/// A Bundled Craft `jetd` registered from its release (ADR-0107).
+	Bundled,
+}
+
+impl CraftOrigin {
+	fn is_installed(&self) -> bool {
+		*self == Self::Installed
+	}
 }
 
 /// Verified installation data staged before the authoritative transaction.

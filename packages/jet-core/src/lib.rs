@@ -164,6 +164,7 @@ pub use conversation::{
 	Conversation, ConversationId, ConversationList, ConversationOrigin,
 	ConversationSnapshot, PageCursor, Revision, Run, RunId,
 };
+pub use craft::bundled::{BundledCraft, BundledOutcome, BundledRegistration};
 pub use craft::installation::{
 	BrokerPermission, CraftHostAccess, CraftInstallationConfirmation,
 	CraftInstallationPreview, CraftSource, CraftTrust,
