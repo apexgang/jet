@@ -191,7 +191,7 @@ update check in a task spawned from `.setup()`, which never waits for it.
 
 ### App updates (§B)
 
-- `tauri-plugin-updater` 2.12, Rust only with `rustls-tls`, registered only
+- `tauri-plugin-updater` 2.13, Rust only with `rustls-tls`, registered only
   when the configuration has `plugins.updater` with a public key and at
   least one endpoint. The webview has no updater permission. Five Settings
   commands are the whole surface: `load_app_update`, `watch_app_update`,
@@ -655,7 +655,7 @@ Outside the app data directory:
 
 | Contact | When | What it sends |
 | --- | --- | --- |
-| `GET https://github.com/apexgang/jet/releases/latest/download/latest.json`, following GitHub's redirect | Release builds with updates on: once, 10 s after the launch pass, when "Check for updates automatically" is on (the default), and on "Check for updates" | The computer's address and the time, with the user agent `tauri-plugin-updater/2.12.0` and `Accept: application/json`. The URL carries no Jet version, client ID or Plane data |
+| `GET https://github.com/apexgang/jet/releases/latest/download/latest.json`, following GitHub's redirect | Release builds with updates on: once, 10 s after the launch pass, when "Check for updates automatically" is on (the default), and on "Check for updates" | The computer's address and the time, with the user agent `tauri-plugin-updater/2.13.0` and `Accept: application/json`. The URL carries no Jet version, client ID or Plane data |
 | The bundle URL `latest.json` names, on the same release | "Install Jet <version>" | Which release this computer downloads |
 | The system `ssh` to each remote Plane the user added | While that Plane is connected (Wave 3.1) | ssh's own traffic to a host the user chose |
 

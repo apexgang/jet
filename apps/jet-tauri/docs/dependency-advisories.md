@@ -36,9 +36,9 @@ or the `audit` recipe in `justfile`), and in the pull request that adds it.
   out-argument. Optimized builds can then dereference a null pointer and crash.
   The fix exists only in glib 0.20.
 - **No upgrade:** every Tauri Linux stack requires `gtk ^0.18` and
-  `webkit2gtk =2.0.2`, which require `glib ^0.18`. This covers `tauri` 2.11.6
-  (the latest stable release, which Jet uses), `tauri-runtime-wry` 2.11.4,
-  `wry` 0.57.0, `tao` 0.37.0 and `tauri` 3.0.0-alpha.2, as checked on crates.io.
+  `webkit2gtk =2.0.2`, which require `glib ^0.18`. This covers `tauri` 2.12.1
+  (the latest stable release, which Jet uses), `tauri-runtime-wry` 2.12.1,
+  `wry` 0.57.0, `tao` 0.37.1 and `tauri` 3.0.0-alpha.4, as checked on crates.io.
   `gtk` 0.19 uses glib 0.22, but no WebKitGTK binding or Tauri release uses it.
 - **Not reachable:** outside glib's own tests, no crate in the graph calls
   `array_iter_str` or `VariantStrIter`. The check covered every crate that

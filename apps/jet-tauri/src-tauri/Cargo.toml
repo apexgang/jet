@@ -38,13 +38,13 @@ zeroize = "1"
 # `process` spawns the system ssh for remote Planes.
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 uuid = { version = "1", features = ["v4"] }
-tauri-plugin-dialog = "2.7.3"
+tauri-plugin-dialog = "2.8.0"
 tauri-plugin-notification = "2"
 # Signed app updates from the GitHub release (`jet/updates.rs`). Registered
 # only when the release configuration has `plugins.updater`; the webview gets
 # no updater permission. Linux bundles are the raw deb/rpm/AppImage, so the
 # v1 `zip` archives and the Windows/macOS system proxy are not needed.
-tauri-plugin-updater = { version = "2.12", default-features = false, features = ["rustls-tls"] }
+tauri-plugin-updater = { version = "2.13", default-features = false, features = ["rustls-tls"] }
 # Orders bundled and installed core versions (`jet/local_service`); already
 # in the graph through Tauri.
 semver = "1"
