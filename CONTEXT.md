@@ -240,6 +240,10 @@ _Avoid_: Jet plugin, UI plugin, generic extension
 The versioned declaration of a Jet Craft's identity, compatibility, supported Harness features, Jet-enforced broker permissions, expected host access, and distributable Artifacts.
 _Avoid_: Plugin manifest, harness configuration
 
+**Bundled Craft**:
+A Jet Craft shipped in the same release payload as jetd and registered by jetd at the digest that release pins, without a third-party confirmation.
+_Avoid_: Built-in plugin, default Craft
+
 **Presentation block**:
 A platform-neutral description of harness content or interaction that a GUI client can render without harness-specific plugin code. It accompanies rather than replaces the harness-native event.
 _Avoid_: Normalized harness event, native event

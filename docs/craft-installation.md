@@ -73,3 +73,29 @@ the confirmation `developer_source`. Developer Mode removes release
 provenance; it does not bypass the exact-confirmation, digest, permission,
 host-access, or same-user trust disclosures. Jet rechecks Developer Mode in
 the transaction that accepts the installation.
+
+## Bundled Crafts
+
+The Claude Code and Codex Crafts ship in the same release payload as `jetd`
+and need no discovery or confirmation (ADR-0098, ADR-0107). Each time `jetd`
+serves on a Plane whose Security audit is trusted, it reads the
+`manifest.json` beside its own canonical executable. When that manifest is for
+`jetd`'s own version, `jetd` copies each Bundled Craft into
+`~/.jet/crafts/artifacts`, verifying the copy against the digest the manifest
+pins, and publishes `claude-code.json` and `codex.json` with
+`same_user_executable` trust and `"origin": "bundled"`. Each change is recorded
+in the Security audit as `craft.bundled_registered`, attributed to Jet
+applying verified release metadata. A development `jetd` with no manifest
+beside it registers nothing.
+
+An installed Craft always wins over a Bundled Craft with the same id:
+
+- a missing manifest is created;
+- a bundled manifest is replaced when the release pins another digest;
+- an installed manifest, from a verified release or Developer Mode, is kept;
+- a manifest `jetd` cannot read is kept, with a warning on every start; and
+- a revoked digest is not registered.
+
+Installing a third-party Craft over `claude-code` or `codex` is an ordinary
+update of the bundled registration, and it keeps the id from then on. Deleting
+`~/.jet/crafts/<id>.json` restores the Bundled Craft at the next start.

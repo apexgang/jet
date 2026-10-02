@@ -273,6 +273,38 @@ remove a running helper's executable. After activation the new daemon
 reconnects to those helpers through the recovery path that already
 survives a daemon restart.
 
+## Bundled Crafts and the Harness PATH
+
+`jetd serve` registers the Bundled Crafts of its own release on every
+channel, with no change to staging or to the Homebrew formula (ADR-0107). It
+canonicalizes its executable, so `~/.jet/core/current/jetd` and Homebrew's
+`opt/jet/bin/jetd` symlink both resolve to the directory holding
+`manifest.json`, and uses that manifest only when it is for its own version.
+It then copies `jet-craft-claude` and `jet-craft-codex` into
+`~/.jet/crafts/artifacts`, verified against the pinned digests, before its
+ready line. The Crafts embed their declarations, so the payload carries no
+`.jet/craft-spec.toml`. Pruning a version or `brew cleanup` therefore never
+removes a Craft a Run is pinned to. The Homebrew channel depends on the
+installed keg keeping the payload's bytes: if Homebrew rewrote a Craft,
+registration on that channel refuses it, and the release's Homebrew check
+compares the keg with `manifest.json` for that reason. The first start after
+an install or upgrade copies and hashes the two Crafts before its ready line;
+later starts only read the two manifests and check the Artifacts' sizes.
+
+A Craft names its Harness by a bare name, `claude` or `codex`, and the helper
+finds it on the PATH `jetd` hands it. A service manager starts `jetd` with a
+minimal PATH, so `jetd` gives the helper and every Craft process the PATH it
+inherited followed by `$HOME/.local/bin`, `$HOME/.claude/local`,
+`$HOME/.npm-global/bin`, `$HOME/.bun/bin`, `$HOME/.volta/bin`,
+`/opt/homebrew/bin`, `/home/linuxbrew/.linuxbrew/bin`, `/usr/local/bin`,
+`/usr/bin`, and `/bin`, whether or not they exist yet. An inherited entry
+always comes first. A Harness installed through a version manager such as nvm,
+asdf, or mise lives in a version-specific directory `jetd` does not guess:
+symlink it into `~/.local/bin`, or add its directory to the service
+definition's PATH with a systemd drop-in or the LaunchAgent's
+`EnvironmentVariables`. Terminals and the external-tool probe keep the PATH
+`jetd` was started with.
+
 ## Tests
 
 `packages/jet-daemon/tests/installation.rs` drives the public surface:

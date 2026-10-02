@@ -89,6 +89,11 @@ destructive maintenance it precedes run behind the ready line
 been measured yet; run the same recipe on the macOS reference host and
 accept its label.
 
+The first start after an install or upgrade also copies and hashes the two
+Bundled Crafts before the ready line (ADR-0107), which the measured starts do
+not include; watch `daemon_ready_ms` for that start when the release is
+measured next.
+
 ## Desktop (Linux)
 
 The Linux desktop app ships around the core payload (Wave 4), so a release
@@ -104,6 +109,9 @@ the DOM, by role and accessible name, and on the machine:
   service up; `~/.jet/core/current` exists; `jetd.service` is enabled and
   active; and `jetd core status` reports the daemon on the `gui` channel at
   the release version;
+- the daemon registered the release's Bundled Crafts:
+  `~/.jet/crafts/claude-code.json` and `codex.json` exist with
+  `"origin": "bundled"` (ADR-0107);
 - Settings › Versions, in its own window, shows "Managed by this app" and
   the release version, with App updates on in a signed build and off in an
   unsigned one;

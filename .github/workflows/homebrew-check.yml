@@ -110,6 +110,19 @@ jobs:
           brew trust --json=v1 || true
           brew test apexgang/tap/jet
           test -x "$HOME/Applications/Jet.AppImage"
+      # jetd registers its Bundled Crafts at the digests manifest.json pins,
+      # so the keg must hold the payload's bytes unchanged (ADR-0107).
+      - name: Require the keg to keep the payload's digests
+        run: |
+          libexec="$(brew --prefix)/opt/jet/libexec"
+          for name in jetd jetfueld jet-craft-claude jet-craft-codex; do
+            expected=$(jq -r --arg name "$name" '.executables[$name]' "$libexec/manifest.json")
+            actual=$(sha256sum "$libexec/$name" | cut -d ' ' -f 1)
+            if [[ "$actual" != "$expected" ]]; then
+              echo "Installing changed $name: $actual, not the pinned $expected." >&2
+              exit 1
+            fi
+          done
       - name: Enable a systemd user session for the runner
         run: |
           sudo loginctl enable-linger "$USER"
@@ -137,6 +150,16 @@ jobs:
           cat "$status"
           jq -e '.owner.state == "held" and .owner.daemon.channel == "homebrew"' "$status"
           systemctl --user is-active jet-homebrew.service
+          # The Bundled Crafts are registered before jetd's ready line, which
+          # follows the socket and the lock.
+          crafts="$HOME/.jet/crafts"
+          for _ in $(seq 30); do
+            [[ -f "$crafts/claude-code.json" && -f "$crafts/codex.json" ]] && break
+            sleep 1
+          done
+          for id in claude-code codex; do
+            jq -e '.origin == "bundled"' "$crafts/$id.json"
+          done
       - name: Stop the daemon with brew services
         run: |
           brew services stop apexgang/tap/jet

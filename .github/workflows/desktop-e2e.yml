@@ -109,13 +109,20 @@ jobs:
           args=(--driver "$RUNNER_TEMP/tauri-driver/bin/tauri-driver" --out "$RUNNER_TEMP/jet-e2e" --version "$JET_VERSION")
           if [[ "$SIGNED" == true ]]; then args+=(--signed); fi
           xvfb-run --auto-servernum --server-args='-screen 0 1440x900x24' bun tests/e2e/main.ts "${args[@]}"
+      # The daemon the app provisioned registered its release's Bundled
+      # Crafts, so the Plane can run a Harness with no manual step (#210).
+      - name: Require the bundled Crafts to be registered
+        run: |
+          for id in claude-code codex; do
+            jq -e '.origin == "bundled"' "$HOME/.jet/crafts/$id.json"
+          done
       - name: Show the service journal, the app log and the Jet home
         if: ${{ failure() }}
         run: |
           sudo journalctl --no-pager --output=short-precise _SYSTEMD_USER_UNIT=jetd.service | tail -n 300 || true
           systemctl --user status jetd.service --no-pager --full || true
           tail -n 300 "$RUNNER_TEMP/jet-e2e/tauri-driver.log" || true
-          ls -la "$HOME/.jet" "$HOME/.jet/core" "$HOME/.config/systemd/user" "$HOME/.local/share/me.heeka.jet-tauri" || true
+          ls -la "$HOME/.jet" "$HOME/.jet/core" "$HOME/.jet/crafts" "$HOME/.config/systemd/user" "$HOME/.local/share/me.heeka.jet-tauri" || true
           sysctl kernel.apparmor_restrict_unprivileged_userns || true
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}

@@ -15,7 +15,7 @@ and both directions are newline-delimited JSON. The process keeps reading its st
 
 `--session-id` pins the native Conversation identity to the Run before any output exists, so a resumable identity is never inferred from a race with the Harness's first event. A recovered execution passes that identity back with `--resume`. Craft 1.10 also passes an explicit `--model` for Auto-continue, using the Model reported by native `system/init`, independently of the consumption breakdown in `modelUsage`.
 
-The Harness is named by the Craft's own accepted declaration, read from `.jet/craft-spec.toml` beside the executable. The host compares the declaration a handshake carries against the document it accepted, so this read chooses which declaration to present and never what it is allowed to do; the helper independently enforces the executable disclosure it was configured with.
+The Harness is named by the Craft's own accepted declaration, compiled into the executable from `packages/jet-craft-claude/.jet/craft-spec.toml`, so the digest a host pins also pins it (ADR-0107). Its first executable disclosure, `claude`, is found on the PATH `jetd` hands the helper. The host compares the declaration a handshake carries against the document it accepted, so the Craft chooses which declaration to present and never what it is allowed to do; the helper independently enforces the executable disclosure it was configured with.
 
 ## What the Craft concludes, and what it forwards
 
