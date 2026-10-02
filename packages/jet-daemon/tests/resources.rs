@@ -47,17 +47,11 @@ async fn reference_idle_resource_budgets() {
 	let mut crafts = Vec::new();
 	for name in ["jet-craft-codex", "jet-craft-claude"] {
 		let binary = Path::new(env!("CARGO_BIN_EXE_jetd")).with_file_name(name);
+		// Each Craft embeds its declaration, so it runs from where it was built.
 		let bundle = dir.path().join(name);
-		std::fs::create_dir_all(bundle.join(".jet")).unwrap();
-		std::fs::copy(binary, bundle.join(name)).unwrap();
-		let declaration = Path::new(env!("CARGO_MANIFEST_DIR"))
-			.join("..")
-			.join(name)
-			.join(".jet/craft-spec.toml");
-		std::fs::copy(declaration, bundle.join(".jet/craft-spec.toml"))
-			.unwrap();
+		std::fs::create_dir_all(&bundle).unwrap();
 		crafts.push(
-			Command::new(bundle.join(name))
+			Command::new(binary)
 				.arg("--socket")
 				.arg(bundle.join("h.sock"))
 				.kill_on_drop(true)

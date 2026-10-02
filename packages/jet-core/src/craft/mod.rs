@@ -1,6 +1,7 @@
 //! Craft implementation.
 
 pub(crate) mod artifact_collection;
+pub(crate) mod bundled;
 pub(crate) mod installation;
 pub(crate) mod lifecycle;
 pub(crate) mod local_source;

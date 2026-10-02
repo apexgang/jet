@@ -1,6 +1,6 @@
 //! Craft admission and process lifetime, independent of individual Harnesses.
 use crate::{Actor, CommandOutcome, Core, CoreError, PinnedCraft, RunId};
-use jet_store::{ReadTransaction, WriteTransaction};
+use jet_store::{ReadTransaction, Store, WriteTransaction};
 
 /// How an interactive disable handles already accepted Runs.
 #[derive(
@@ -12,6 +12,37 @@ pub enum CraftDisableMode {
 	Wait,
 	/// Stop the Craft while leaving its Harnesses under their helpers.
 	Force,
+}
+
+/// The Craft every Run execution still in progress is pinned to, orphans
+/// included: an orphan keeps its Run lifecycle until it is settled.
+///
+/// # Errors
+/// Returns a store error, or an internal error for an undecodable plan.
+pub(crate) async fn active_craft_pins(
+	store: &Store,
+) -> Result<Vec<(RunId, PinnedCraft)>, CoreError> {
+	let mut pins = Vec::new();
+	let mut after = String::new();
+	loop {
+		let page = store
+			.read(async |tx| tx.active_execution_ids(&after).await)
+			.await?;
+		let Some(last) = page.last() else {
+			break;
+		};
+		after = last.to_string();
+		for id in page {
+			let record =
+				store.read(async |tx| tx.run_execution(id).await).await?;
+			if let Some(record) = record {
+				let plan: crate::LaunchPlan =
+					crate::run::state::decode(&record.plan)?;
+				pins.push((RunId(id), plan.craft));
+			}
+		}
+	}
+	Ok(pins)
 }
 
 pub(crate) async fn admit(
@@ -118,36 +149,17 @@ impl Core {
 		let mut active = Vec::new();
 		let mut stopped = revoked.clone();
 		let mut affected = Vec::new();
-		let mut after = String::new();
-		loop {
-			let page = self
-				.store
-				.read(async |tx| tx.active_execution_ids(&after).await)
-				.await?;
-			let Some(last) = page.last() else {
-				break;
-			};
-			after = last.to_string();
-			for id in page {
-				let record = self
-					.store
-					.read(async |tx| tx.run_execution(id).await)
-					.await?;
-				if let Some(record) = record {
-					let plan: crate::LaunchPlan =
-						crate::run::state::decode(&record.plan)?;
-					let craft_id = host.craft_id(&plan.craft)?;
-					if revoked.contains(&plan.craft.sha256)
-						|| disables.iter().any(|(id, mode)| {
-							*mode == jet_store::CraftDisableMode::Force
-								&& *id == craft_id
-						}) {
-						stopped.push(plan.craft.sha256.clone());
-						affected.push(RunId(id));
-					}
-					active.push(plan.craft);
-				}
+		for (run, pin) in active_craft_pins(&self.store).await? {
+			let craft_id = host.craft_id(&pin)?;
+			if revoked.contains(&pin.sha256)
+				|| disables.iter().any(|(id, mode)| {
+					*mode == jet_store::CraftDisableMode::Force
+						&& *id == craft_id
+				}) {
+				stopped.push(pin.sha256.clone());
+				affected.push(run);
 			}
+			active.push(pin);
 		}
 		let force_disabled = disables
 			.into_iter()

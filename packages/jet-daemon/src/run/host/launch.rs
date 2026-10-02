@@ -215,7 +215,9 @@ pub(super) async fn helper(
 	.await?
 	.map_err(failed)?;
 	let executable = config_path.with_file_name("jetfueld");
-	let child = Command::new(executable)
+	let mut command = Command::new(executable);
+	crate::craft::harness_path::apply(&mut command);
+	let child = command
 		.arg("run")
 		.arg("--config")
 		.arg(&config_path)

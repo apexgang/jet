@@ -127,6 +127,7 @@ pub(crate) async fn exchange(
 ) -> Result<Vec<u8>, CoreError> {
 	pin.verify().await?;
 	let mut command = Command::new(&pin.executable);
+	crate::craft::harness_path::apply(&mut command);
 	command
 		.arg(mode)
 		.current_dir("/")

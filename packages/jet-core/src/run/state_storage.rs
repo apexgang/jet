@@ -65,11 +65,14 @@ pub(crate) async fn append(
 	Ok(())
 }
 
+/// The code of a stored Run record this version cannot decode.
+pub(crate) const INVALID_RECORD: &str = "run.invalid_record";
+
 pub(crate) fn decode<T: serde::de::DeserializeOwned>(
 	json: &str,
 ) -> Result<T, CoreError> {
 	serde_json::from_str(json)
-		.map_err(|e| CoreError::internal("run.invalid_record", e.to_string()))
+		.map_err(|e| CoreError::internal(INVALID_RECORD, e.to_string()))
 }
 
 fn missing() -> CoreError {

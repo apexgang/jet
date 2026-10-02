@@ -18,7 +18,8 @@ pub(crate) use retention::{anonymize, sweep_retention};
 
 mod recording;
 pub(crate) use recording::{
-	record, record_as, record_craft_revocation, record_refusal,
+	record, record_as, record_bundled_craft_registration,
+	record_craft_revocation, record_refusal,
 };
 
 mod policy;

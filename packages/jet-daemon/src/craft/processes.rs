@@ -101,7 +101,11 @@ impl CraftProcesses {
 			.clone()
 			.map_or_else(std::env::current_exe, Ok)
 			.map_err(failed)?;
-		let child = Command::new(supervisor)
+		let mut command = Command::new(supervisor);
+		// The Craft inherits it from the supervisor, for the Harness
+		// operations it launches itself.
+		crate::craft::harness_path::apply(&mut command);
+		let child = command
 			.arg("craft-supervisor")
 			.arg("--executable")
 			.arg(&pin.executable)

@@ -5,6 +5,10 @@ Runs. It requires the complete discovery confirmation on updates, including
 broker permissions and declared host access. Concurrent or unresolved
 publications must settle before another update is accepted. Each published
 digest remains content-addressed, and installation plans retain old Artifacts.
+A release upgrade or rollback moves the default of each Bundled Craft to the
+digest that release pins (ADR-0107). Artifact collection also retains every
+digest a Run in progress is pinned to, so an active Run can restart its Craft
+after the default moved.
 
 An active Run keeps its accepted digest and negotiated Craft protocol until
 termination. A subsequent Run selects the current compatible default. If that

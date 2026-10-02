@@ -3,7 +3,7 @@
 use crate::{
 	Core, CoreError,
 	craft::{
-		installation::{InstallationManifest, InstallationPlan},
+		installation::{CraftOrigin, InstallationManifest, InstallationPlan},
 		specification::enabled_features,
 	},
 	effect::{Effect, EffectAdapter, EffectResult},
@@ -229,6 +229,7 @@ fn publish(
 		publisher_claim: plan.publisher_claim.clone(),
 		commit: plan.commit.clone(),
 		trust: plan.trust,
+		origin: CraftOrigin::Installed,
 		executable: executable.canonicalize()?,
 		sha256: plan.artifact_sha256.clone(),
 		artifact_size: plan.artifact_size,
@@ -243,7 +244,7 @@ fn publish(
 	)
 }
 
-fn publish_manifest(
+pub(crate) fn publish_manifest(
 	home: &Path,
 	effect_id: Uuid,
 	craft_id: &str,
@@ -336,6 +337,7 @@ fn installed_matches(
 		publisher_claim: plan.publisher_claim.clone(),
 		commit: plan.commit.clone(),
 		trust: plan.trust,
+		origin: CraftOrigin::Installed,
 		executable: home
 			.join("artifacts")
 			.join(&plan.artifact_sha256)
@@ -412,7 +414,9 @@ fn stage_name(effect_id: Uuid) -> String {
 	format!("{effect_id}.artifact")
 }
 
-fn read_manifest(path: &Path) -> std::io::Result<InstallationManifest> {
+pub(crate) fn read_manifest(
+	path: &Path,
+) -> std::io::Result<InstallationManifest> {
 	if !fs::symlink_metadata(path)?.file_type().is_file() {
 		return Err(std::io::Error::other("invalid Craft manifest"));
 	}

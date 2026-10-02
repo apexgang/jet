@@ -19,7 +19,7 @@ The Event journal includes lifecycle, activity, and process changes. Harness out
 
 ## Accepted Crafts
 
-Until the installation workflow is implemented, the Plane owner provisions `~/.jet/crafts/<id>.json`. The identity contains only ASCII letters, digits, hyphens, or underscores. This is trusted installation metadata, not a client-supplied executable or a grant derived from a peer handshake.
+A Run pins the Craft that `~/.jet/crafts/<id>.json` names. The identity contains only ASCII letters, digits, hyphens, or underscores. This is trusted installation metadata, not a client-supplied executable or a grant derived from a peer handshake. `jetd` registers the Bundled Crafts of its own release there, `claude-code` and `codex`, every time it serves (ADR-0107), and [third-party installation](craft-installation.md) publishes the others; nothing is provisioned by hand. Each manifest carries more than a Run reads, but loading a Craft for a Run needs only the executable, its digest, and the accepted specification:
 
 ```json
 {
@@ -40,6 +40,8 @@ Until the installation workflow is implemented, the Plane owner provisions `~/.j
   }
 }
 ```
+
+A hand-written file in this shape is not an installed Craft: the Capability snapshot does not list it, Artifact collection stops while it is present, and it blocks the Bundled Craft with the same id. Delete it to restore the Bundled Craft.
 
 The `jetd` transport Adapter starts the executable with `--socket <private endpoint>`. It serves execution connections with the Craft SDK; one process multiplexes Runs using the same accepted artifact digest. Each handshake must exactly match the accepted specification and negotiated protocol. The plan persists Craft 1.1 and helper 1.0 pins before dispatch.
 

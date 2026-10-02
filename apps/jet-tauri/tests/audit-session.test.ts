@@ -510,6 +510,11 @@ describe("audit copy", () => {
     expect(decisionLabel("future.decision")).toBe("Security decision (future.decision)");
     expect(decisionLabel("toString")).toBe("Security decision (toString)");
     expect(actorLabel("this_device")).toBe("This computer");
+    // Jet's own release metadata both revokes and registers Harness packages.
+    expect([decisionLabel("craft.bundled_registered"), actorLabel("craft_revocation")]).toEqual([
+      "Built-in Harness package registered",
+      "Jet release",
+    ]);
     expect(entryLine(entry(1))).toMatch(/ · Account connected · This computer · Widens access · Done$/);
   });
 

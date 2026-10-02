@@ -5,6 +5,11 @@ The host gives it a private execution connection, and the Craft asks each
 Run's own `jetfueld` to launch `codex app-server --stdio`. The Craft owns no
 processes, credentials, Project paths, or core state.
 
+Its accepted declaration is compiled into the executable from
+`packages/jet-craft-codex/.jet/craft-spec.toml`, so the digest a host pins also
+pins it (ADR-0107). Its first executable disclosure, `codex`, is found on the
+PATH `jetd` hands the helper.
+
 ## Native protocol authority
 
 The app-server's newline-delimited JSON-RPC protocol is the only semantic
