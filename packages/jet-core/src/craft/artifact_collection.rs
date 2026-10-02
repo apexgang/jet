@@ -42,10 +42,16 @@ pub(crate) async fn collect_unreferenced(
 	}
 	// A Run still in progress may restart its Craft at the digest it pinned
 	// (ADR-0018), after its default moved to another release's Bundled
-	// Craft. A walk this version cannot finish fails closed.
-	let Ok(pins) = crate::craft::lifecycle::active_craft_pins(store).await
-	else {
-		return Ok(());
+	// Craft. A launch plan this version cannot decode fails closed, like an
+	// installation plan above; a store failure is the caller's to see.
+	let pins = match crate::craft::lifecycle::active_craft_pins(store).await {
+		Ok(pins) => pins,
+		Err(error)
+			if error.code == crate::run::state_storage::INVALID_RECORD =>
+		{
+			return Ok(());
+		}
+		Err(error) => return Err(error),
 	};
 	referenced.extend(pins.into_iter().map(|(_, pin)| pin.sha256));
 	crate::filesystem::blocking(move || collect(&home, &mut referenced, now))
