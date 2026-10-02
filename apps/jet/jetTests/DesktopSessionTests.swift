@@ -11,7 +11,7 @@ struct DesktopSessionTests {
         await session.loadFoundationFixture()
         #expect(session.scenario?.state == .active)
         #expect(session.sidebarSelection == .conversation)
-        #expect(session.isWorkPanelPresented)
+        #expect(!session.isWorkPanelPresented)
 
         session.beginNewTask()
         #expect(session.scenario?.state == .active)
@@ -150,7 +150,8 @@ struct DesktopSessionTests {
                 kind: .user,
                 text: "Ship Wave 1.3",
                 sequence: 7,
-                rawCount: 0
+                rawCount: 0,
+                recordedAtUnixMilliseconds: 1
             ),
         ])
         let projected = output.timelineProjections()
@@ -163,7 +164,7 @@ struct DesktopSessionTests {
     }
 
     @Test
-    func selectingAnotherConversationClearsThePreviousTimeline() {
+    func selectingAnotherConversationShowsOnlyItsOwnTimeline() {
         let first = JetConversationSummary(
             id: UUID(), revision: nil, title: "First", createdAtUnixMilliseconds: 1,
             projectID: nil
@@ -185,6 +186,11 @@ struct DesktopSessionTests {
 
         #expect(session.selectedConversationID == second.id)
         #expect(session.timeline.isEmpty)
+
+        session.selectConversation(first.id)
+
+        #expect(session.selectedConversationID == first.id)
+        #expect(session.timeline.map(\.id) == ["old"])
     }
 
     @Test

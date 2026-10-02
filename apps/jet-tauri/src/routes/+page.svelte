@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { watchDesktopCommands } from "$lib/jet/desktop-menu";
   import { onMount } from "svelte";
 
   import AppShell from "$lib/features/shell/AppShell.svelte";
@@ -20,6 +21,20 @@
 
   onMount(() => {
     session.connect();
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    watchDesktopCommands((command) => {
+      if (document.querySelector("dialog[open]")) return;
+      switch (command) {
+        case "settings": void session.openSettings(); break;
+        case "sidebar": session.sidebarPresented = !session.sidebarPresented; break;
+        case "details": session.toggleWorkPanel("shortcut"); break;
+        case "changes": case "files": case "terminal": case "run": case "delivery": session.showPanel(command, "shortcut"); break;
+        case "search": session.perform({ kind: "search" }); break;
+        case "project": session.perform({ kind: "add-project" }); break;
+        case "new-task": case "planes": case "trash": session.select(command); break;
+      }
+    }).then((stop) => { if (disposed) stop(); else unlisten = stop; }).catch(() => undefined);
     const platform = currentPlatform();
     const handleShortcut = (event: KeyboardEvent) =>
       session.handleShortcut(event, {
@@ -31,6 +46,8 @@
     window.addEventListener("keydown", handleShortcut);
     return () => {
       window.removeEventListener("keydown", handleShortcut);
+      disposed = true;
+      unlisten?.();
       session.disconnect();
     };
   });

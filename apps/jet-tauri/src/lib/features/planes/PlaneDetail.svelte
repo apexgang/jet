@@ -244,8 +244,8 @@
       {/if}
     </section>
 
-    <section class="plane-section" aria-labelledby="plane-features-heading">
-      <h3 id="plane-features-heading">Features</h3>
+    <details class="plane-section" aria-labelledby="plane-features-heading">
+      <summary id="plane-features-heading">Capabilities and installed Harnesses</summary>
       <table class="plane-features">
         <thead>
           <tr><th scope="col">Feature</th><th scope="col">Status</th></tr>
@@ -295,14 +295,14 @@
           </ul>
         {/if}
       {/if}
-    </section>
+    </details>
 
     {#key plane.planeId}
       <PairingSection {session} {plane} />
     {/key}
 
-    <section class="plane-section" aria-labelledby="plane-key-heading">
-      <h3 id="plane-key-heading">This computer's pairing key</h3>
+    <details class="plane-section" aria-labelledby="plane-key-heading">
+      <summary id="plane-key-heading">This computer's pairing key</summary>
       <dl class="plane-facts">
         <div><dt>Key</dt><dd>{keyCopy(identity?.key ?? "unknown")}</dd></div>
         {#if identity?.fingerprint}
@@ -312,7 +312,7 @@
           <div><dt>Client</dt><dd><code>{identityPrefix(identity.clientId) ?? identity.clientId}</code></dd></div>
         {/if}
       </dl>
-    </section>
+    </details>
 
     {#if plane.kind === "remote"}
       <section class="plane-section" aria-labelledby="plane-forget-heading">

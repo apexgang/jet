@@ -6,7 +6,7 @@
  * Column ranges mirror the Swift client (`DesktopShellView.swift:17,29`).
  * Narrow windows never compress the conversation: below the overlay
  * breakpoint the work panel leaves the grid and opens only on request
- * (design-language l.50, l.96).
+ * so the selected task keeps its useful working width.
  */
 
 export const MINIMUM_WINDOW = { width: 900, height: 600 } as const;
@@ -52,8 +52,8 @@ export type ColumnRange = { readonly min: number; readonly max: number };
 
 export const INITIAL_PANEL: PanelState = {
   mode: "regular",
-  columnPreference: true,
-  presentation: { kind: "column" },
+  columnPreference: false,
+  presentation: { kind: "hidden" },
 };
 
 export function layoutMode(viewportWidth: number): LayoutMode {
@@ -82,6 +82,7 @@ export function reducePanel(state: PanelState, intent: PanelIntent): PanelState 
   if (state.mode === "regular") {
     switch (intent.kind) {
       case "auto-open":
+        return { ...state, presentation: column(state.columnPreference) };
       case "user-open":
         return { ...state, columnPreference: true, presentation: { kind: "column" } };
       case "user-close":

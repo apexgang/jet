@@ -28,8 +28,42 @@ nonisolated enum JetRecoveryArea: String, Sendable, Hashable {
 @MainActor
 @Observable
 final class JetRecoveryModel {
+    /// One recovery Command, named by what it asks for. Its Command ID is kept
+    /// while the outcome is unknown, so the person's explicit retry replays the
+    /// same Command. Jet never retries on its own.
+    enum RecoveryIntent: Hashable, Sendable {
+        case stage(conversationID: UUID, action: JetRetentionAction)
+        case restore(conversationID: UUID)
+        /// Compiling also keeps the new rule's ID, so a retry names the same rule.
+        case compile(prompt: String)
+        case setDays(ruleID: UUID, days: UInt32)
+        case approve(ruleID: UUID, days: UInt32)
+        case authorize(ruleID: UUID)
+        case deleteRule(ruleID: UUID)
+        case restoreSnapshot(name: String)
+        case purge
+    }
+
+    /// An intent on one computer.
+    struct IntentKey: Hashable, Sendable {
+        let planeRegistryID: UUID?
+        let intent: RecoveryIntent
+    }
+
+    /// Where preparing the clean-up rule ended.
+    enum CleanUpPreparation: Equatable, Sendable {
+        /// The rule has the chosen days and can be reviewed; its candidates are current.
+        case ready(JetAutodeleteRule)
+        /// Jet is still compiling the rule. Nothing was changed.
+        case stillChecking
+        /// See `issues[.autodelete]`.
+        case failed
+    }
+
     private let makeAccess: JetRecoveryAccessProvider
     private let onConversationChange: @MainActor (_ staged: Bool) async -> Void
+    private let onSnapshotRestored: @MainActor () async -> Void
+    private let sleep: @Sendable (Duration) async throws -> Void
     private var generation = 0
     private var planeRegistryID: UUID?
     private var auditAfter: UInt64 = 0
@@ -49,18 +83,35 @@ final class JetRecoveryModel {
     var rulePrompt = ""
     var ruleDays: [UUID: String] = [:]
 
+    /// Command IDs under the rule in `RecoveryIntent`.
+    var commandIDs: [IntentKey: UUID] = [:]
+    /// Rule IDs of compile Commands whose ID is kept.
+    var compileRuleIDs: [IntentKey: UUID] = [:]
+    /// Clean-up rules this model compiled and that aren't turned on yet. Only
+    /// these can be discarded.
+    var createdCleanUpRuleIDs: Set<UUID> = []
+
     init(
         makeAccess: @escaping JetRecoveryAccessProvider,
-        onConversationChange: @escaping @MainActor (_ staged: Bool) async -> Void = { _ in }
+        onConversationChange: @escaping @MainActor (_ staged: Bool) async -> Void = { _ in },
+        onSnapshotRestored: @escaping @MainActor () async -> Void = {},
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) {
         self.makeAccess = makeAccess
         self.onConversationChange = onConversationChange
+        self.onSnapshotRestored = onSnapshotRestored
+        self.sleep = sleep
     }
 
     var hasMoreAudit: Bool {
         guard let auditFence else { return false }
         return auditAfter < auditFence
     }
+
+    /// The store is read-only until a backup is restored.
+    var isReadOnly: Bool { health?.recoveryState == "read_only" }
+
+    // MARK: - Loading
 
     func load(planeRegistryID: UUID, conversationID: UUID?) async {
         generation += 1
@@ -111,6 +162,17 @@ final class JetRecoveryModel {
         await load(planeRegistryID: planeRegistryID, conversationID: selectedConversationID)
     }
 
+    /// Reloads only the clean-up rules.
+    func refreshAutodelete() async {
+        let current = generation
+        do {
+            let access = try await activeAccess()
+            await loadAutodelete(access, generation: current)
+        } catch {
+            if current == generation { issues[.autodelete] = presentationError(error) }
+        }
+    }
+
     func loadMoreAudit() async {
         guard !isLoadingAudit, hasMoreAudit else { return }
         let current = generation
@@ -122,6 +184,8 @@ final class JetRecoveryModel {
             if current == generation { issues[.audit] = presentationError(error) }
         }
     }
+
+    // MARK: - Jet Trash
 
     func stage(_ action: JetRetentionAction) async {
         guard operation == nil, let conversationID = selectedConversationID,
@@ -135,12 +199,14 @@ final class JetRecoveryModel {
         defer { if current == generation { operation = nil } }
         do {
             let access = try await activeAccess()
-            _ = try await access.stageConversation(conversationID, action: action, commandID: UUID())
+            _ = try await withCommandID(.stage(conversationID: conversationID, action: action)) { commandID in
+                try await access.stageConversation(conversationID, action: action, commandID: commandID)
+            }
             guard current == generation else { return }
             await loadTrash(access, generation: current)
             await loadPreview(access, conversationID: conversationID, generation: current)
             guard current == generation else { return }
-            notice = "The task is in Jet Trash until its shown expiry."
+            notice = String(localized: "Moved to Jet Trash.")
             await onConversationChange(true)
         } catch {
             guard current == generation else { return }
@@ -160,14 +226,16 @@ final class JetRecoveryModel {
         defer { if current == generation { operation = nil } }
         do {
             let access = try await activeAccess()
-            try await access.restoreConversation(conversationID, commandID: UUID())
+            try await withCommandID(.restore(conversationID: conversationID)) { commandID in
+                try await access.restoreConversation(conversationID, commandID: commandID)
+            }
             guard current == generation else { return }
             await loadTrash(access, generation: current)
             if selectedConversationID == conversationID {
                 await loadPreview(access, conversationID: conversationID, generation: current)
             }
             guard current == generation else { return }
-            notice = "Restored the task from Jet Trash."
+            notice = String(localized: "Restored from Jet Trash.")
             await onConversationChange(false)
         } catch {
             guard current == generation else { return }
@@ -176,20 +244,160 @@ final class JetRecoveryModel {
         }
     }
 
+    // MARK: - Clean up
+
+    /// The prompt of the clean-up rule Jet manages. Its prefix identifies the
+    /// rule, so the text is never localized.
+    nonisolated static func cleanUpPrompt(days: UInt32) -> String {
+        cleanUpPromptPrefix + "\(days) days."
+    }
+
+    nonisolated static let cleanUpPromptPrefix = "Move tasks to Jet Trash after they have been idle for "
+
+    /// The clean-up rule Settings › Tasks manages: the first rule with Jet's prompt.
+    var managedCleanUpRule: JetAutodeleteRule? {
+        autodelete?.rules.first { $0.prompt.hasPrefix(Self.cleanUpPromptPrefix) }
+    }
+
+    /// Every other rule, shown under Custom Rules.
+    var customCleanUpRules: [JetAutodeleteRule] {
+        let managedID = managedCleanUpRule?.id
+        return (autodelete?.rules ?? []).filter { $0.id != managedID }
+    }
+
+    /// Gets the managed rule ready for review with `days`. Without a rule, it
+    /// compiles one and waits up to 20 checks, a second apart, for the compile to
+    /// finish. It then sets the days unless the rule already has them. A rule that
+    /// is still compiling is never edited.
+    func prepareCleanUp(days: UInt32) async -> CleanUpPreparation {
+        guard operation == nil, (1 ... 36_500).contains(days) else { return .failed }
+        let current = generation
+        operation = "prepare-cleanup"
+        notice = nil
+        defer { if current == generation { operation = nil } }
+        do {
+            let access = try await activeAccess()
+            let rules = try await access.autodeleteRules()
+            guard current == generation else { return .failed }
+            autodelete = rules
+            issues.removeValue(forKey: .autodelete)
+
+            let ruleID: UUID
+            if let managed = managedCleanUpRule {
+                ruleID = managed.id
+            } else {
+                ruleID = try await compileCleanUpRule(days: days, access: access)
+                guard current == generation else { return .failed }
+                await loadAutodelete(access, generation: current)
+            }
+
+            var rule = autodelete?.rules.first { $0.id == ruleID }
+            var checks = 0
+            while rule == nil || rule?.state == .compiling {
+                guard checks < 20 else { return .stillChecking }
+                try await self.sleep(.seconds(1))
+                let snapshot = try await access.autodeleteRules()
+                guard current == generation else { return .failed }
+                autodelete = snapshot
+                rule = snapshot.rules.first { $0.id == ruleID }
+                checks += 1
+            }
+            guard var ready = rule else { return .failed }
+            if case .approved(let approvedDays, _) = ready.state, approvedDays == days {
+                return .ready(ready)
+            }
+            if ready.state != .draft(days: days) {
+                try await withCommandID(.setDays(ruleID: ruleID, days: days)) { commandID in
+                    try await access.setAutodeleteDays(ruleID: ruleID, days: days, commandID: commandID)
+                }
+                guard current == generation else { return .failed }
+                await loadAutodelete(access, generation: current)
+                guard let updated = autodelete?.rules.first(where: { $0.id == ruleID }) else {
+                    return .failed
+                }
+                ready = updated
+            }
+            return .ready(ready)
+        } catch {
+            guard current == generation else { return .failed }
+            issues[.autodelete] = presentationError(error)
+            await refreshAfterUncertain(error)
+            return .failed
+        }
+    }
+
+    /// Turns on the reviewed clean-up rule with its draft days.
+    func turnOnCleanUp(_ rule: JetAutodeleteRule) async {
+        await approveRule(rule)
+    }
+
+    /// Cancel in the clean-up sheet: removes the rule only when this model
+    /// compiled it and it isn't turned on. Rules that existed before stay.
+    func discardCleanUpDraft() async {
+        guard operation == nil,
+              let rule = managedCleanUpRule,
+              createdCleanUpRuleIDs.contains(rule.id)
+        else { return }
+        if case .approved = rule.state { return }
+        let current = generation
+        operation = "discard-cleanup"
+        defer { if current == generation { operation = nil } }
+        do {
+            let access = try await activeAccess()
+            try await withCommandID(.deleteRule(ruleID: rule.id)) { commandID in
+                try await access.deleteAutodeleteRule(ruleID: rule.id, commandID: commandID)
+            }
+            createdCleanUpRuleIDs.remove(rule.id)
+            guard current == generation else { return }
+            await loadAutodelete(access, generation: current)
+        } catch {
+            guard current == generation else { return }
+            issues[.autodelete] = presentationError(error)
+            await refreshAfterUncertain(error)
+        }
+    }
+
+    private func compileCleanUpRule(days: UInt32, access: any JetRecoveryAccess) async throws -> UUID {
+        let prompt = Self.cleanUpPrompt(days: days)
+        let key = IntentKey(planeRegistryID: planeRegistryID, intent: .compile(prompt: prompt))
+        let ruleID = compileRuleIDs[key] ?? UUID()
+        compileRuleIDs[key] = ruleID
+        do {
+            try await withCommandID(.compile(prompt: prompt)) { commandID in
+                try await access.compileAutodeleteRule(ruleID: ruleID, prompt: prompt, commandID: commandID)
+            }
+            compileRuleIDs.removeValue(forKey: key)
+            createdCleanUpRuleIDs.insert(ruleID)
+            return ruleID
+        } catch {
+            if !Self.isUnknownOutcome(error) { compileRuleIDs.removeValue(forKey: key) }
+            throw error
+        }
+    }
+
+    // MARK: - Custom rules
+
     func compileRule() async {
         guard operation == nil, !rulePrompt.isEmpty, rulePrompt.utf8.count <= 4_096 else { return }
         let current = generation
         let prompt = rulePrompt
         operation = "compile-rule"
         defer { if current == generation { operation = nil } }
+        let key = IntentKey(planeRegistryID: planeRegistryID, intent: .compile(prompt: prompt))
+        let ruleID = compileRuleIDs[key] ?? UUID()
+        compileRuleIDs[key] = ruleID
         do {
             let access = try await activeAccess()
-            try await access.compileAutodeleteRule(ruleID: UUID(), prompt: prompt, commandID: UUID())
+            try await withCommandID(.compile(prompt: prompt)) { commandID in
+                try await access.compileAutodeleteRule(ruleID: ruleID, prompt: prompt, commandID: commandID)
+            }
+            compileRuleIDs.removeValue(forKey: key)
             guard current == generation else { return }
             if rulePrompt == prompt { rulePrompt = "" }
             await loadAutodelete(access, generation: current)
-            notice = "Jet is compiling the rule. Review its interpretation before approval."
+            notice = String(localized: "Jet is checking the rule. Review it before turning it on.")
         } catch {
+            if !Self.isUnknownOutcome(error) { compileRuleIDs.removeValue(forKey: key) }
             guard current == generation else { return }
             issues[.autodelete] = presentationError(error)
             await refreshAfterUncertain(error)
@@ -201,7 +409,7 @@ final class JetRecoveryModel {
               let days = UInt32(ruleDays[rule.id] ?? rule.state.days.map(String.init) ?? ""),
               (1 ... 36_500).contains(days)
         else { return }
-        await changeRule("edit-rule") { access, commandID in
+        await changeRule(.setDays(ruleID: rule.id, days: days)) { access, commandID in
             try await access.setAutodeleteDays(ruleID: rule.id, days: days, commandID: commandID)
         }
     }
@@ -210,8 +418,11 @@ final class JetRecoveryModel {
         guard issues[.autodelete] == nil,
               case let .draft(days) = rule.state
         else { return }
-        await changeRule("approve-rule") { access, commandID in
+        await changeRule(.approve(ruleID: rule.id, days: days)) { access, commandID in
             try await access.approveAutodelete(ruleID: rule.id, days: days, commandID: commandID)
+        }
+        if case .approved = autodelete?.rules.first(where: { $0.id == rule.id })?.state {
+            createdCleanUpRuleIDs.remove(rule.id)
         }
     }
 
@@ -219,17 +430,19 @@ final class JetRecoveryModel {
         guard issues[.autodelete] == nil,
               case .approved = rule.state, rule.scope == "forget"
         else { return }
-        await changeRule("authorize-everywhere") { access, commandID in
+        await changeRule(.authorize(ruleID: rule.id)) { access, commandID in
             try await access.authorizeAutodeleteEverywhere(ruleID: rule.id, commandID: commandID)
         }
     }
 
     func deleteRule(_ rule: JetAutodeleteRule) async {
         guard issues[.autodelete] == nil else { return }
-        await changeRule("delete-rule") { access, commandID in
+        await changeRule(.deleteRule(ruleID: rule.id)) { access, commandID in
             try await access.deleteAutodeleteRule(ruleID: rule.id, commandID: commandID)
         }
     }
+
+    // MARK: - Backups
 
     func restoreSnapshot(_ snapshot: JetRecoverySnapshot) async {
         guard operation == nil, health?.recoveryState == "read_only",
@@ -241,10 +454,13 @@ final class JetRecoveryModel {
         defer { if current == generation { operation = nil } }
         do {
             let access = try await activeAccess()
-            try await access.restoreRecoverySnapshot(snapshot.name, commandID: UUID())
+            try await withCommandID(.restoreSnapshot(name: snapshot.name)) { commandID in
+                try await access.restoreRecoverySnapshot(snapshot.name, commandID: commandID)
+            }
             guard current == generation else { return }
             await loadHealth(access, generation: current)
-            notice = "The Plane reopened from the selected snapshot. Review its audit state."
+            notice = String(localized: "Backup restored. Check Security Audit for anything to review.")
+            await onSnapshotRestored()
         } catch {
             guard current == generation else { return }
             issues[.health] = presentationError(error)
@@ -262,10 +478,12 @@ final class JetRecoveryModel {
         defer { if current == generation { operation = nil } }
         do {
             let access = try await activeAccess()
-            let removed = try await access.purgeRecoverySnapshots(commandID: UUID())
+            let removed = try await withCommandID(.purge) { commandID in
+                try await access.purgeRecoverySnapshots(commandID: commandID)
+            }
             guard current == generation else { return }
             await loadHealth(access, generation: current)
-            notice = "Jet created a new snapshot and removed \(removed.count) older snapshots."
+            notice = String(localized: "Removed \(removed.count) older backups.")
         } catch {
             guard current == generation else { return }
             issues[.health] = presentationError(error)
@@ -273,21 +491,25 @@ final class JetRecoveryModel {
         }
     }
 
+    // MARK: - Commands
+
     private func changeRule(
-        _ name: String,
+        _ intent: RecoveryIntent,
         action: (any JetRecoveryAccess, UUID) async throws -> Void
     ) async {
         guard operation == nil else { return }
         let current = generation
-        operation = name
+        operation = "rule"
         notice = nil
         defer { if current == generation { operation = nil } }
         do {
             let access = try await activeAccess()
-            try await action(access, UUID())
+            try await withCommandID(intent) { commandID in
+                try await action(access, commandID)
+            }
             guard current == generation else { return }
             await loadAutodelete(access, generation: current)
-            notice = "The Plane updated the rule."
+            notice = String(localized: "Clean up updated.")
         } catch {
             guard current == generation else { return }
             issues[.autodelete] = presentationError(error)
@@ -295,11 +517,36 @@ final class JetRecoveryModel {
         }
     }
 
+    /// Runs one Command with the ID kept for `intent` on this computer.
+    private func withCommandID<T>(
+        _ intent: RecoveryIntent,
+        _ send: (UUID) async throws -> T
+    ) async throws -> T {
+        let key = IntentKey(planeRegistryID: planeRegistryID, intent: intent)
+        let commandID = commandIDs[key] ?? UUID()
+        commandIDs[key] = commandID
+        do {
+            let value = try await send(commandID)
+            commandIDs.removeValue(forKey: key)
+            return value
+        } catch {
+            if !Self.isUnknownOutcome(error) { commandIDs.removeValue(forKey: key) }
+            throw error
+        }
+    }
+
+    /// After an unknown outcome, reloads the state (queries only) and says so.
+    /// The Command itself is never sent again automatically.
     private func refreshAfterUncertain(_ error: Error) async {
-        guard case JetClientFailure.commandOutcomeUnknown = error else { return }
+        guard Self.isUnknownOutcome(error) else { return }
         operation = nil
         await refresh()
-        notice = "The command outcome is unknown. Check the refreshed Plane state before another action."
+        notice = String(localized: "Jet couldn't confirm this change. Check the current state before trying again.")
+    }
+
+    nonisolated private static func isUnknownOutcome(_ error: Error) -> Bool {
+        if case JetClientFailure.commandOutcomeUnknown = error { return true }
+        return false
     }
 
     private func loadHealth(_ access: any JetRecoveryAccess, generation current: Int) async {
@@ -373,11 +620,12 @@ final class JetRecoveryModel {
     private func presentationError(_ error: Error) -> JetPresentationError {
         switch error {
         case let JetClientFailure.presentation(error): error
-        case let JetClientFailure.commandOutcomeUnknown(commandID):
+        case let error as JetPresentationError: error
+        case JetClientFailure.commandOutcomeUnknown:
             JetPresentationError(
                 category: .outcomeUnknown,
                 code: "command.outcome_unknown",
-                message: "Jet could not confirm the change. Command \(commandID.uuidString.prefix(8)).",
+                message: String(localized: "Jet couldn't confirm this change. Check the current state before trying again."),
                 retryable: false
             )
         default: .invalidResponse

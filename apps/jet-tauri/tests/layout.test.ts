@@ -41,20 +41,21 @@ describe("layoutMode", () => {
 });
 
 describe("reducePanel", () => {
-  it("starts as a regular column", () => {
-    expect(INITIAL_PANEL).toEqual(regular(true));
+  it("starts with work details tucked away", () => {
+    expect(INITIAL_PANEL).toEqual(regular(false));
   });
 
-  it("regular mode: every open and close is the column preference", () => {
-    expect(run(regular(false), { kind: "auto-open" })).toEqual(regular(true));
+  it("regular mode: navigation respects the panel preference", () => {
+    expect(run(regular(false), { kind: "auto-open" })).toEqual(regular(false));
+    expect(run(regular(true), { kind: "auto-open" })).toEqual(regular(true));
     expect(run(regular(false), { kind: "user-open", origin: "toggle" })).toEqual(regular(true));
     expect(run(regular(true), { kind: "user-close" })).toEqual(regular(false));
     expect(run(regular(true), { kind: "auto-close" })).toEqual(regular(false));
     expect(run(regular(true), { kind: "restore", presented: false })).toEqual(regular(false));
   });
 
-  it("regular mode: auto-close then auto-open shows the column again", () => {
-    expect(run(regular(true), { kind: "auto-close" }, { kind: "auto-open" })).toEqual(regular(true));
+  it("regular mode: returning to a task leaves a closed panel closed", () => {
+    expect(run(regular(true), { kind: "auto-close" }, { kind: "auto-open" })).toEqual(regular(false));
   });
 
   it("compact mode: auto-open leaves the panel closed (D12)", () => {

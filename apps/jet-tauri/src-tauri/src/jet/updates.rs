@@ -310,7 +310,10 @@ impl AppUpdateState {
         let source = configured
             .then(|| Arc::new(PluginSource { app: app.clone() }) as Arc<dyn UpdateSource>);
         let restart = app.clone();
+        #[cfg(target_os = "linux")]
         let appimage = app.env().appimage.map(PathBuf::from);
+        #[cfg(not(target_os = "linux"))]
+        let appimage: Option<PathBuf> = None;
         Self::new(
             source,
             install_kind(

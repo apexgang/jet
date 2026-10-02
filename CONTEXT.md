@@ -8,6 +8,10 @@ Jet coordinates coding harnesses across Planes and presents their work through n
 A logical interaction between a user and a harness. It may span multiple runs, and whether Jet retains it after its final run is configurable.
 _Avoid_: Chat, session, agent
 
+**Task**:
+The GUI word for a Conversation in casual interface text. Code, documentation, and Technical Details keep Conversation; a Scheduled task is a different concept that the GUI presents as a daily repeat.
+_Avoid_: Chat, thread, session, job, Run
+
 **Home Plane**:
 The single Plane whose `jetd` owns a Conversation's authoritative state. Visa Runs execute there; No-Visa Runs keep their Harness there while operating on paired destination Planes.
 _Avoid_: Coordinator, fleet leader, current GUI device
@@ -107,6 +111,10 @@ _Avoid_: Run priority, execution order, pin
 **Turn queue**:
 The authoritative sequence of admitted user, schedule, and Auto-continue inputs waiting behind the active turn of one Conversation. User turns are never replaced; schedule and Auto-continue each have one replaceable pending slot.
 _Avoid_: Draft, execution priority, interrupt request
+
+**Reply**:
+The GUI word for the Harness side of one turn: its output, tool steps, and recorded changes. The user side of the turn is a message.
+_Avoid_: Response, answer, completion, Turn
 
 **Actor**:
 The authenticated origin responsible for a Command or Event, such as an interactive user client, Harness through a Craft, Scheduled task, Auto-continue policy, Utility-model job, or internal recovery operation.

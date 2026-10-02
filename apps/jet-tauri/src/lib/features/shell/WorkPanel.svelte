@@ -142,6 +142,7 @@
   aria-label="Work panel"
 >
   <div class="panel-navigation">
+    <div class="panel-title"><strong>Work details</strong><button class="icon-button panel-close" aria-label="Hide work panel" onclick={() => session.hideWorkPanel()}>Close</button></div>
   <div class="panel-tabs" role="tablist" aria-label="Work panel views">
     {#each tabs as tab, index (tab.id)}
       <button
@@ -160,7 +161,6 @@
       </button>
     {/each}
   </div>
-  <button class="icon-button panel-close" aria-label="Hide work panel" onclick={() => session.hideWorkPanel()}>Hide</button>
   </div>
 
   <div class="panel-content" aria-busy={session.workPanelBusy}>
@@ -188,11 +188,11 @@
     {:else if body === "loading"}
       <div class="panel-empty" role="status">
         <h2>Loading work details</h2>
-        <p>Reading the latest bounded snapshot from the Plane.</p>
+        <p>Getting the latest files and activity.</p>
       </div>
     {:else if body === "no-run"}
       <div class="panel-empty">
-        <h2>No Run selected</h2>
+        <h2>Work details will appear here</h2>
         <p>Start a task to inspect its changes, files, terminals, and recovery state.</p>
       </div>
     {:else}
@@ -205,6 +205,7 @@
           <button disabled={session.workPanelBusy} onclick={() => session.refreshWorkPanel()}>Refresh</button>
         </div>
 
+        <details class="checkpoint-picker"><summary>Choose a different checkpoint</summary>
         <div class="checkpoint-controls" role="group" aria-label="Change checkpoint">
           <label>
             Checkpoint
@@ -224,6 +225,7 @@
           <button disabled={!session.canApplyWorkCheckpoint} onclick={() => session.applyWorkCheckpoint()}>Apply</button>
         </div>
 
+        </details>
         {#if !session.workPanel || session.workPanel.files.length === 0}
           <div class="work-empty">
             <strong>No changes recorded</strong>

@@ -87,7 +87,7 @@ impl Default for ShellPresentation {
             version: PRESENTATION_VERSION,
             destination: RestorableDestination::Conversation,
             sidebar_presented: true,
-            work_panel_presented: true,
+            work_panel_presented: false,
             work_panel_tab: WorkPanelTab::Run,
             sidebar_width: SIDEBAR_WIDTH.1,
             work_panel_width: WORK_PANEL_WIDTH.1,
@@ -358,7 +358,7 @@ mod tests {
             RestorableDestination::Conversation
         );
         assert_eq!(presentation.work_panel_tab, WorkPanelTab::Run);
-        assert!(presentation.sidebar_presented && presentation.work_panel_presented);
+        assert!(presentation.sidebar_presented && !presentation.work_panel_presented);
         assert_eq!(SIDEBAR_WIDTH, (210, 244, 300));
         assert_eq!(WORK_PANEL_WIDTH, (280, 340, 440));
     }
@@ -380,7 +380,7 @@ mod tests {
                 version: 1,
                 destination: RestorableDestination::Conversation,
                 sidebar_presented: false,
-                work_panel_presented: true,
+                work_panel_presented: false,
                 work_panel_tab: WorkPanelTab::Changes,
                 sidebar_width: 250,
                 work_panel_width: 300,
@@ -541,7 +541,7 @@ mod tests {
                     "version": 1,
                     "destination": "new-task",
                     "sidebarPresented": true,
-                    "workPanelPresented": true,
+                    "workPanelPresented": false,
                     "workPanelTab": "run",
                     "sidebarWidth": 244,
                     "workPanelWidth": 340

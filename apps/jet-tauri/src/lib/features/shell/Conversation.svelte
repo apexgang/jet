@@ -1,4 +1,9 @@
 <script lang="ts">
+  import { dismissMenu } from "$lib/features/workspace/dismiss-menu";
+  import RenameTask from "$lib/features/workspace/RenameTask.svelte";
+  import Composer from "$lib/features/workspace/Composer.svelte";
+  import NewTask from "$lib/features/workspace/NewTask.svelte";
+  import Message from "$lib/features/workspace/Message.svelte";
   import { landedTarget, paneTitle, settingsTargetForError } from "$lib/features/settings/model";
   import PlanesPanel from "$lib/features/planes/PlanesPanel.svelte";
   import SchedulesDestination from "$lib/features/schedules/SchedulesDestination.svelte";
@@ -13,7 +18,6 @@
   import { TOMBSTONE_TEXT, bannerText, refusalLinkLabel, restoreActionText } from "$lib/features/trash/model";
 
   let { session }: { session: DesktopSession } = $props();
-  let composer = $state<HTMLTextAreaElement>();
   let moveTrigger = $state<HTMLElement | null>(null);
   const platform = currentPlatform();
 
@@ -79,17 +83,6 @@
     else if (liveStatus !== null) session.taskStatus = liveStatus;
   });
 
-  $effect(() => {
-    if (session.composerFocusRequest > 0) queueMicrotask(() => composer?.focus());
-  });
-
-  function handleComposerKey(event: KeyboardEvent) {
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-      event.preventDefault();
-      void session.submitDraft();
-    }
-  }
-
   function approvalStateLabel(state: string) {
     switch (state) {
       case "allowed": return "Action allowed";
@@ -109,58 +102,36 @@
 {:else if session.sidebarSelection === "trash"}
   <TrashView {session} />
 {:else}
-  <section class="conversation" aria-label="Current task">
+  <section class="conversation" class:new-task-screen={!session.selectedConversationId} aria-label="Current task">
     <header class="conversation-header">
       <SidebarToggle {session} />
       <div class="conversation-title">
         <h1>{session.selectedConversationTitle}</h1>
-        <p>
-          {session.selectedProjectName}
-          <span aria-hidden="true">·</span>
-          Runs on {session.runsOnLabel}
-        </p>
-        {#if retention}
-          <p class="retention-line" title={retention}>{retention}</p>
-        {/if}
+        {#if session.selectedConversationId}<p>{session.selectedProjectName} · {session.runsOnLabel}</p>{/if}
       </div>
-      <span
-        class:working={status === "Working"}
-        class:warning={status === "Offline cache" || status === "Reconnecting" || status === "Recovery needed" || status.includes("needed")}
-        class="run-status"
-      >
-        {status}
-      </span>
-      {#if status === "Sign-in needed" || status === "Quota paused"}
-        {@const target = landedTarget("accounts", session.selectedPlaneId)}
-        {#if target}
-          <button class="text-button" onclick={() => void session.openSettings(target)}>Open Agents settings</button>
-        {/if}
-      {/if}
-      <button
-        class="icon-button"
-        disabled={!session.canMoveToTrash}
-        title={session.selectedConversationId && !session.selectedPlaneOnline
-          ? `Reconnect to ${session.selectedPlaneLabel} to move this task to Jet Trash`
-          : undefined}
-        onclick={(event) => {
-          moveTrigger = event.currentTarget;
-          void session.openMoveToTrash();
-        }}
-      >
-        Move to Trash…
-      </button>
-      <button
-        class="icon-button work-panel-toggle"
-        aria-expanded={session.workPanelPresented}
-        aria-label={session.workPanelPresented ? "Hide work panel" : "Show work panel"}
-        aria-keyshortcuts={shortcutAria("toggle-work-panel", platform)}
-        title={session.workPanelPresented ? "Hide work panel" : "Show work panel"}
-        onclick={(event) => session.toggleWorkPanel("toggle", event.currentTarget)}
-      >
-        Work panel
-      </button>
+      {#if session.selectedConversationId}
+        <span class="run-status" class:working={status === "Working"} class:warning={status.includes("needed") || status === "Reconnecting"}>{status}</span>
+        <button class="toolbar-action" disabled={!session.selectedRun} onclick={() => session.showPanel("changes", "tab")}>Changes</button>
+        <button class="toolbar-action work-panel-toggle" aria-expanded={session.workPanelPresented}
+          aria-label={session.workPanelPresented ? "Hide work panel" : "Show work panel"}
+          aria-keyshortcuts={shortcutAria("toggle-work-panel", platform)}
+          onclick={(event) => session.toggleWorkPanel("toggle", event.currentTarget)}>Details</button>
+        <details class="task-menu" use:dismissMenu>
+          <summary aria-label="Task actions" title="Task actions">···</summary>
+          <div class="task-menu-items">
+            <RenameTask {session} />
+            <button onclick={() => session.showPanel("terminal", "tab")}>Open Terminal</button>
+            <button disabled={!session.canInterruptTurn} onclick={(event) => session.requestRunControl("interrupt_turn", event.currentTarget)}>Interrupt Turn…</button>
+            <button disabled={!session.canStopRun} onclick={(event) => session.requestRunControl("stop_run", event.currentTarget)}>Stop Run…</button>
+            <button disabled={!session.canMoveToTrash} onclick={(event) => { moveTrigger = event.currentTarget; void session.openMoveToTrash(); }}>Move to Trash…</button>
+            {#if retention}<p>{retention}</p>{/if}
+          </div>
+        </details>
+      {:else}<span class="window-location">{session.runsOnLabel}</span>{/if}
     </header>
-
+    {#if !session.selectedConversationId}
+      <NewTask {session} />
+    {:else}
     <div class="timeline" aria-busy={session.conversationBusy}>
       <div class="timeline-inner">
         <PlaneHealthNotice
@@ -228,17 +199,17 @@
 
         {#if session.timeline.length === 0}
           <div class="empty-state">
-            <h2>{session.selectedConversationId ? "Live activity starts here" : "What should Jet do?"}</h2>
+            <h2>{session.selectedConversationId ? "Waiting for the first update" : "What should Jet do?"}</h2>
             <p>
               {session.selectedConversationId
-                ? "The current Run state is restored above. New ordered activity will appear here."
+                ? "Your messages and results will appear here as work progresses."
                 : "Describe the outcome. Jet will create an isolated Workspace in the selected Project."}
             </p>
           </div>
         {:else}
           {#each session.timeline as entry (entry.id)}
             {#if entry.kind === "user"}
-              <div class="timeline-user"><p>{entry.text}</p></div>
+              <article class="timeline-user"><span class="message-author">You</span><p>{entry.text}</p></article>
             {:else if entry.kind === "activity"}
               <p class="timeline-activity">{entry.text}</p>
             {:else if entry.kind === "approval" && entry.approval}
@@ -269,7 +240,7 @@
                       onclick={() => session.retryApproval(entry.approval!)}
                     >Authorize one retry</button>
                   {:else if entry.approval.state === "requested" || entry.approval.state === "unavailable"}
-                    <span class="protocol-limit">Approve and Reject need the planned approval-decision protocol command.</span>
+                    <span class="protocol-limit">This version of Jet cannot answer this request. Interrupt the Turn or stop the Run to continue safely.</span>
                   {/if}
                   <span class="approval-spacer"></span>
                   <button
@@ -285,7 +256,8 @@
               </article>
             {:else}
               <article class:result={entry.kind === "result"} class="timeline-agent">
-                <p>{entry.text}</p>
+                <span class="message-author">Jet</span>
+                <Message text={entry.text} />
               </article>
             {/if}
           {/each}
@@ -293,42 +265,8 @@
       </div>
     </div>
 
-    <footer class="composer-region">
-      <div class="composer-inner">
-        {#if session.actionNotice}
-          <p class="action-notice" role="status">{session.actionNotice}</p>
-        {/if}
-        {#if session.queueIsFull}
-          <p class="composer-warning" role="alert">The Turn queue is full. Withdraw a queued Turn or wait for one to finish.</p>
-        {/if}
-        <div class="composer-box">
-          <textarea
-            bind:this={composer}
-            bind:value={session.draft}
-            maxlength="65536"
-            rows="2"
-            aria-label="Task message"
-            placeholder="Describe what you want Jet to do"
-            onkeydown={handleComposerKey}
-          ></textarea>
-          <button
-            class="send-button"
-            disabled={!session.canSubmitDraft || session.conversationBusy || !session.selectedPlaneOnline}
-            onclick={() => session.submitDraft()}
-          >
-            {session.conversationBusy ? "Sending" : "Send"}
-          </button>
-        </div>
-        <div class="context-row" role="group" aria-label="Task context">
-          <span><small>Project</small>{session.selectedProjectName}</span>
-          <span><small>Agent</small>{session.selectedHarnessName}</span>
-          <span><small>Runs on</small>{session.runsOnLabel}</span>
-          <span class:over-limit={session.draftBytes > session.maximumPromptBytes} class="draft-limit">
-            <small>Message</small>{session.draftBytes.toLocaleString()} / {session.maximumPromptBytes.toLocaleString()} bytes
-          </span>
-        </div>
-      </div>
-    </footer>
+    <footer class="composer-region"><Composer {session} /></footer>
+    {/if}
     <MoveToTrashDialog {session} returnFocus={moveTrigger} />
   </section>
 {/if}

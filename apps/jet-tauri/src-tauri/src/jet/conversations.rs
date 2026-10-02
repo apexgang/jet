@@ -344,6 +344,45 @@ pub(crate) async fn load_conversation(
     .map_err(|error| bridge.settle(&binding, error))
 }
 
+/// Naming is revision-checked by jetd; the webview never writes catalogue state.
+pub(crate) async fn rename_conversation(
+    bridge: &JetBridge,
+    conversation_id: String,
+    expected_revision: String,
+    name: String,
+    attempt: String,
+    plane_id: Option<String>,
+) -> Result<ConversationRowView, PublicError> {
+    let id = parse_id(&conversation_id, "conversation.identifier_invalid")?;
+    let command_id = parse_id(&attempt, "conversation.attempt_invalid")?;
+    let revision = expected_revision.parse::<u64>().map_err(|_| {
+        PublicError::invalid_input(
+            "conversation.revision_invalid",
+            "Reload the task before renaming it.",
+        )
+    })?;
+    if name.trim().is_empty() || name.len() > 256 || name.contains('\0') {
+        return Err(PublicError::invalid_input(
+            "conversation.name_invalid",
+            "Use a name between 1 and 256 UTF-8 bytes.",
+        ));
+    }
+    let (binding, plane_client) = bridge.plane(plane_id.as_deref())?;
+    async {
+        let client = plane_client
+            .connect()
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        let conversation = client
+            .set_conversation_name(command_id, id, revision, name)
+            .await
+            .map_err(|error| PublicError::from_client(&error))?;
+        Ok(row_view(binding.plane, &conversation))
+    }
+    .await
+    .map_err(|error| bridge.settle(&binding, error))
+}
+
 pub(crate) async fn create_conversation(
     bridge: &JetBridge,
     project_id: String,

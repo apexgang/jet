@@ -22,6 +22,7 @@ mod live_e2e;
 mod live_system;
 pub(crate) mod local_service;
 pub(crate) mod local_store;
+pub(crate) mod menu;
 pub(crate) mod notifications;
 pub(crate) mod pairing;
 mod pairing_transcript;
@@ -30,6 +31,7 @@ pub(crate) mod preferences;
 pub(crate) mod presentation;
 pub(crate) mod retention;
 mod run_control;
+pub(crate) mod schedules;
 pub(crate) mod settings;
 pub(crate) mod settings_window;
 mod setup;
@@ -297,6 +299,26 @@ pub(crate) async fn load_conversation(
     plane_id: Option<String>,
 ) -> Result<conversations::ConversationDetailView, PublicError> {
     conversations::load_conversation(&bridge, conversation_id, plane_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn rename_conversation(
+    bridge: State<'_, JetBridge>,
+    conversation_id: String,
+    expected_revision: String,
+    name: String,
+    attempt: String,
+    plane_id: Option<String>,
+) -> Result<conversations::ConversationRowView, PublicError> {
+    conversations::rename_conversation(
+        &bridge,
+        conversation_id,
+        expected_revision,
+        name,
+        attempt,
+        plane_id,
+    )
+    .await
 }
 
 #[tauri::command]

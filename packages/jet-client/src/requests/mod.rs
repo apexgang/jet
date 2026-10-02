@@ -4,6 +4,7 @@ mod audit;
 mod autodelete;
 
 mod retention;
+mod schedule;
 mod store_recovery;
 pub use store_recovery::{PurgedSnapshots, RestoredSnapshot};
 

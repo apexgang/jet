@@ -457,6 +457,10 @@ export function loadConversation(
  * same attempt, so a retry is answered with what the Plane already did and a
  * later Send is new work.
  */
+export function renameConversation(conversationId: string, expectedRevision: string, name: string, attempt: string, planeId: PlaneId): Promise<ConversationRow> {
+  return invoke<ConversationRow>("rename_conversation", { conversationId, expectedRevision, name, attempt, planeId });
+}
+
 export function createConversation(projectId: string, attempt: string): Promise<ConversationRow> {
   return invoke<ConversationRow>("create_conversation", { projectId, attempt });
 }

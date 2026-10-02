@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
+  import { chooseProjectFolder as pickProjectFolder } from "$lib/jet/project-folder";
   import { tick } from "svelte";
   import type { DesktopSession } from "$lib/features/shell/session.svelte";
   import SidebarToggle from "$lib/features/shell/SidebarToggle.svelte";
@@ -82,11 +82,7 @@
   }
 
   async function chooseProjectFolder(): Promise<void> {
-    const path = await openFolderDialog({
-      directory: true,
-      multiple: false,
-      title: "Choose a Project folder",
-    });
+    const path = await pickProjectFolder();
     if (typeof path !== "string") return;
     session.projectPath = path;
     await session.previewProjectPath();
@@ -124,8 +120,8 @@
   <header class="setup-header">
     <SidebarToggle {session} />
     <div>
-      <h1 id="setup-title">Set up this workspace</h1>
-      <p>Connect the local Plane, choose a Project, and use a Harness login already available here.</p>
+      <h1 id="setup-title">Set up Jet</h1>
+      <p>Choose where to work and which Harness to use. You can change these for every new task.</p>
     </div>
     <button
       class="secondary-button"
@@ -192,197 +188,85 @@
     {@const accountsIssue = session.setupIssue("accounts")}
     {@const pairingIssue = session.setupIssue("pairing")}
     {@const serviceNeedsAttention = capabilitiesIssue !== null || setup.capabilities.degraded.length > 0}
-    <div class="setup-content">
-      <section class="setup-row service-row" aria-labelledby="service-heading">
-        <div class:warning={serviceNeedsAttention} class="setup-icon online" aria-hidden="true"></div>
-        <div class="setup-copy">
-          <h2 id="service-heading">Local Plane</h2>
-          <p>{setup.plane.platform} · Core {setup.plane.coreVersion}</p>
-          {#if setup.capabilities.degraded.length > 0}
-              <p class="service-warning">{setup.capabilities.degraded.join(" · ")}</p>
-          {/if}
-          {#if capabilitiesIssue}
-            <p class="service-warning">{capabilitiesIssue.error.message} <code>{capabilitiesIssue.error.code}</code></p>
-          {/if}
-          {#if serviceNotice}
-            <p class="service-notice" role="status">{serviceNotice}</p>
-          {/if}
-        </div>
-        <span class:warning={serviceNeedsAttention} class:success={!serviceNeedsAttention} class="status-text">
-          {serviceNeedsAttention ? "Needs attention" : "Connected"}
-        </span>
-      </section>
-
-      <section class="setup-row expanded" aria-labelledby="projects-heading">
-        <div class="setup-icon folder" aria-hidden="true"></div>
-        <div class="setup-copy setup-wide">
-          <div class="setup-row-heading">
-            <div>
-              <h2 id="projects-heading">Projects</h2>
-              <p>Jet registers the Git working tree only after you review its resolved path.</p>
-            </div>
-            <span class="status-text">{projectsIssue ? "Unavailable" : `${setup.projects.length} registered`}</span>
-          </div>
-
-          {#if projectsIssue}
-            <p class="section-error">{projectsIssue.error.message} <code>{projectsIssue.error.code}</code></p>
-          {:else if setup.projects.length > 0}
-            <div class="project-list">
-              {#each setup.projects as project (project.id)}
-                <div class:selected={session.selectedProjectId === project.id} class="project-line">
-                  <button class="project-select" onclick={() => session.selectProject(project.id)}>
-                    <strong>{project.name}</strong>
-                    <small title={project.root}>{project.root}</small>
-                  </button>
-                  <span>{session.selectedProjectId === project.id ? "Selected" : ""}</span>
-                  <button
-                    aria-label={`Remove ${project.name}`}
-                    class="text-button danger"
-                    disabled={session.setupBusy !== null}
-                    onclick={(event) => openRemoval(project.id, event.currentTarget)}
-                  >
-                    Remove
-                  </button>
-                </div>
-              {/each}
-            </div>
-          {:else}
-            <p class="inline-empty">No Projects yet. Add the root folder of a Git working tree.</p>
-          {/if}
-
-          <button
-            bind:this={chooseFolderButton}
-            class="secondary-button choose-folder"
-            disabled={session.setupBusy !== null}
-            onclick={chooseProjectFolder}
-          >
-            Choose Folder…
-          </button>
-
-          <details class="expert-path">
-            <summary>Enter a path instead</summary>
-            <form class="path-form" onsubmit={(event) => { event.preventDefault(); session.previewProjectPath(); }}>
-              <label for="project-path">Absolute Project path</label>
-              <div class="field-action">
-                <input
-                  id="project-path"
-                  bind:value={session.projectPath}
-                  maxlength="4096"
-                  placeholder="/home/you/code/project"
-                  spellcheck="false"
-                />
-                <button
-                  class="secondary-button"
-                  disabled={!session.projectPath.trim() || session.setupBusy !== null}
-                  type="submit"
-                >
-                  Review
+    <div class="setup-content setup-workflow">
+      <section class="onboarding-step" aria-labelledby="projects-heading">
+        <span class="step-number" aria-hidden="true">01</span>
+        <div>
+          <h2 id="projects-heading">Give your work a home</h2>
+          <p class="step-description">A Project is a folder tracked with Git. Jet gives each task a separate working copy, so changes stay out of your way until you review them.</p>
+          {#if projectsIssue}<p class="section-error">{projectsIssue.error.message}</p>{/if}
+          <div class="project-list">
+            {#each setup.projects as project (project.id)}
+              <div class="project-line" class:selected={session.selectedProjectId === project.id}>
+                <button class="project-select" onclick={() => session.selectProject(project.id)}>
+                  <strong>{project.name}</strong><small title={project.root}>{project.root}</small>
                 </button>
+                <span>{session.selectedProjectId === project.id ? "Selected" : ""}</span>
+                <button class="text-button danger" aria-label={`Remove ${project.name}`} disabled={session.setupBusy !== null} onclick={(event) => openRemoval(project.id, event.currentTarget)}>Remove…</button>
               </div>
+            {/each}
+          </div>
+          <button bind:this={chooseFolderButton} class="secondary-button choose-folder" disabled={session.setupBusy !== null} onclick={chooseProjectFolder}>Choose Folder…</button>
+          <details class="expert-path">
+            <summary>Enter a folder path</summary>
+            <form class="path-form" onsubmit={(event) => { event.preventDefault(); session.previewProjectPath(); }}>
+              <label for="project-path">Project folder</label>
+              <div class="field-action"><input id="project-path" bind:value={session.projectPath} maxlength="4096" spellcheck="false" /><button class="secondary-button" disabled={!session.projectPath.trim() || session.setupBusy !== null}>Review folder</button></div>
             </form>
           </details>
-
           {#if session.projectPreview}
-            <div class:warning={session.projectPreview.previewId === null} class="project-preview">
-              <div>
-                <strong>{session.projectPreview.previewId ? "Ready to add" : "Choose another folder"}</strong>
-                <p class="path" title={session.projectPreview.root}>{session.projectPreview.root}</p>
-                <p>{session.projectPreview.detail}</p>
-              </div>
-              {#if session.projectPreview.previewId}
-                <button
-                  class="primary-button"
-                  disabled={session.setupBusy !== null}
-                  onclick={() => session.registerPreviewedProject()}
-                >
-                  Add Project
-                </button>
-              {/if}
+            <div class="project-preview" class:warning={session.projectPreview.previewId === null}>
+              <div><strong>{session.projectPreview.previewId ? "Ready to add" : "Choose another folder"}</strong><p class="path">{session.projectPreview.root}</p><p>{session.projectPreview.detail}</p></div>
+              {#if session.projectPreview.previewId}<button class="primary-button" disabled={session.setupBusy !== null} onclick={() => session.registerPreviewedProject()}>Add Project</button>{/if}
             </div>
           {/if}
         </div>
       </section>
-
-      <section class="setup-row expanded" aria-labelledby="accounts-heading">
-        <div class="setup-icon account" aria-hidden="true"></div>
-        <div class="setup-copy setup-wide">
-          <div class="setup-row-heading">
-            <div>
-              <h2 id="accounts-heading">Harness access</h2>
-              <p>Jet records a non-secret binding. Sign-in stays with the Harness when work starts.</p>
-            </div>
-            <span class:warning={setup.capabilities.credentialStore !== "available"} class="status-text">
-              {setup.capabilities.credentialStoreLabel}
-            </span>
-          </div>
-          {#if accountsTarget && (accountsIssue || setup.capabilities.credentialStore !== "available")}
-            <button class="text-button" onclick={() => void session.openSettings(accountsTarget)}>
-              Open Agents settings
-            </button>
-          {/if}
-
-          {#if setup.accounts.length > 0}
-            <div class="account-list">
-              {#each setup.accounts as account (account.id)}
-                <div class="account-line">
-                  <span><strong>{account.label}</strong><small>{account.provider}</small></span>
-                  <span class="status-text">{account.stateLabel}</span>
-                </div>
-              {/each}
-            </div>
-          {:else if accountsIssue}
-            <p class="section-error">{accountsIssue.error.message} <code>{accountsIssue.error.code}</code></p>
-          {/if}
-
-          <div class="provider-actions">
-            {#if capabilitiesIssue}
-              <p class="inline-empty">Harness choices will return when Plane capabilities are available.</p>
+      <section class="onboarding-step" aria-labelledby="accounts-heading">
+        <span class="step-number" aria-hidden="true">02</span>
+        <div>
+          <h2 id="accounts-heading">Choose who to work with</h2>
+          <p class="step-description">Use Codex or Claude Code with the login on this computer. Your sign-in stays with that Harness.</p>
+          {#if accountsIssue}<p class="section-error">{accountsIssue.error.message}</p>{/if}
+          <div class="harness-options">
+            {#each setup.capabilities.crafts as craft (craft.id)}
+              <label class:chosen={session.selectedCraftId === craft.id}>
+                <input type="radio" name="harness" value={craft.id} checked={session.selectedCraftId === craft.id} onchange={() => session.chooseCraft(craft.id)} />
+                <span><strong>{craft.harnesses[0] === "codex" ? "Codex" : craft.harnesses[0] === "claude-code" ? "Claude Code" : craft.harnesses[0] ?? craft.id}</strong><small>Installed on this computer</small></span>
+              </label>
             {:else}
-              {#each setup.capabilities.authProviders as option (option.provider)}
-                <button
-                  class="secondary-button"
-                  disabled={session.setupBusy !== null}
-                  onclick={() => session.connectHarness(option.provider)}
-                >
-                  Use {option.harness} login
-                </button>
-              {:else}
-                <p class="inline-empty">Install a supported Craft before connecting a Harness.</p>
-              {/each}
-            {/if}
+              <p class="step-description">No Harness is available yet. Open Agents settings to install its Jet Craft adapter.</p>
+            {/each}
+          </div>
+          <div class="provider-actions">
+            {#each setup.capabilities.authProviders as option (option.provider)}
+              {#if !setup.accounts.some((account) => account.provider === option.provider)}
+                <button class="secondary-button" disabled={session.setupBusy !== null} onclick={() => session.connectHarness(option.provider)}>Use {option.harness} login</button>
+              {/if}
+            {/each}
+            {#if accountsTarget}<button class="text-button" onclick={() => void session.openSettings(accountsTarget)}>Manage Harnesses and accounts</button>{/if}
           </div>
         </div>
       </section>
+      {#if session.setupNotice}<p class="setup-notice" role="status">{session.setupNotice}</p>{/if}
+      <div class="setup-continue">
+        <span>{session.canStartTask ? "Ready when you are." : "Choose a Project and an available Harness to continue."}</span>
+        <button class="primary-button" disabled={!session.canStartTask} onclick={() => session.select("new-task")}>Start a task <span aria-hidden="true">→</span></button>
+      </div>
+      <details class="setup-advanced">
+        <summary>Other computers and connection details</summary>
+        <section aria-label="Jet service on this computer">
 
-      <section class="setup-row" aria-labelledby="remote-heading">
-        <div class="setup-icon remote" aria-hidden="true"></div>
-        <div class="setup-copy">
-          <h2 id="remote-heading">Remote Plane</h2>
-          {#if pairingIssue}
-            <p class="section-error">{pairingIssue.error.message} <code>{pairingIssue.error.code}</code></p>
-          {:else}
-            <p>
-              {setup.pairing.pairedClients > 0
-                ? `${setup.pairing.pairedClients} paired client${setup.pairing.pairedClients === 1 ? "" : "s"}`
-                : "Pair another computer later from Connections."}
-            </p>
-          {/if}
-        </div>
-        {#if pairingIssue}
-          <span class="status-text">Unavailable</span>
-        {:else if session.remotePairingSkipped}
-          <span class="status-text">Skipped</span>
-        {:else}
-          <div class="remote-actions">
-            <button class="text-button" onclick={() => session.openAddPlane()}>Add a Plane</button>
-            <button class="text-button" onclick={() => session.skipRemotePairing()}>Skip for now</button>
-          </div>
-        {/if}
-      </section>
-
-      {#if session.setupNotice}
-        <p class="setup-notice" role="status">{session.setupNotice}</p>
-      {/if}
+        <div class="setup-service-line"><span id="service-heading">This computer</span><span class:warning={serviceNeedsAttention} class:success={!serviceNeedsAttention} class="status-text" role="status" aria-label="Connection status">{serviceNeedsAttention ? "Needs attention" : "Connected"}</span></div>
+        <p class="step-description">{setup.plane.platform} · Jet core {setup.plane.coreVersion}</p>
+        {#if capabilitiesIssue}<p class="service-warning">{capabilitiesIssue.error.message}</p>{/if}
+        {#if setup.capabilities.degraded.length}<p class="service-warning">{setup.capabilities.degraded.join(" · ")}</p>{/if}
+        {#if serviceNotice}<p class="service-notice" role="status">{serviceNotice}</p>{/if}
+        {#if pairingIssue}<p class="section-error">{pairingIssue.error.message}</p>{/if}
+        <p class="step-description">A Plane is a computer running Jet. Pair another computer when you want to use it from here.</p>
+        <button class="secondary-button" onclick={() => session.openAddPlane()}>Add a Plane…</button>
+        </section>
+      </details>
     </div>
   {/if}
 </section>

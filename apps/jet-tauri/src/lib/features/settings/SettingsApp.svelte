@@ -122,6 +122,7 @@
 
 <div class="settings-app">
   <nav bind:this={nav} aria-label="Settings">
+    <div class="settings-label">Settings</div>
     {#each panes as entry (entry.id)}
       <button
         aria-current={pane === entry.id ? "page" : undefined}
@@ -174,27 +175,29 @@
 <style>
   .settings-app {
     display: grid;
-    grid-template-columns: 200px minmax(0, 1fr);
+    grid-template-columns: 180px minmax(0, 1fr);
     height: 100vh;
     min-height: 0;
     background: var(--background);
     color: var(--text);
   }
 
+  .settings-label { padding: 0 10px 24px; font-size: 15px; font-weight: 600; }
+
   nav {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 20px 10px;
+    padding: 24px 12px;
     border-right: 1px solid var(--border);
     background: var(--sidebar);
   }
 
   nav button {
-    min-height: 32px;
+    min-height: 36px;
     padding: 6px 10px;
     border: 0;
-    border-radius: 7px;
+    border-radius: 5px;
     background: transparent;
     font-size: 13px;
     text-align: left;
@@ -207,13 +210,14 @@
 
   nav button[aria-current="page"] {
     background: var(--selected);
-    font-weight: 620;
+    color: var(--accent-text);
+    font-weight: 600;
   }
 
   main {
     display: grid;
     align-content: start;
-    gap: 24px;
+    gap: 28px;
     min-width: 0;
     min-height: 0;
     padding: 28px 32px 40px;
@@ -234,7 +238,7 @@
 
   h1 {
     margin: 0;
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 680;
     letter-spacing: -0.02em;
   }
@@ -284,22 +288,4 @@
     accent-color: var(--accent);
   }
 
-  @media (max-width: 760px) {
-    .settings-app {
-      grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: auto minmax(0, 1fr);
-    }
-
-    nav {
-      flex-direction: row;
-      flex-wrap: wrap;
-      padding: 10px 16px;
-      border-right: 0;
-      border-bottom: 1px solid var(--border);
-    }
-
-    main {
-      padding: 20px 20px 32px;
-    }
-  }
 </style>

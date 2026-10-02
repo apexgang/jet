@@ -14,6 +14,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            jet::menu::install(app)?;
             let home_directory = app.path().home_dir()?;
             let app_data_directory = app.path().app_data_dir()?;
             // The bridge creates the app data directory (0700) first.
@@ -121,6 +122,10 @@ pub fn run() {
             jet::search_conversations,
             jet::load_conversation,
             jet::create_conversation,
+            jet::rename_conversation,
+            jet::schedules::load_schedules,
+            jet::schedules::create_schedule,
+            jet::schedules::cancel_schedule,
             jet::start_run,
             jet::submit_turn,
             jet::load_run_supervision,

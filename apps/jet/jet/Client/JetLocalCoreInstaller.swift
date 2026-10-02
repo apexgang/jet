@@ -99,16 +99,35 @@ enum JetLocalCoreInstaller {
         return stdout
     }
 
-    private enum InstallerError: LocalizedError {
+    /// Why the bundled core could not start. `DesktopSession` maps each case to a
+    /// stable `core.*` code; the command detail stays out of casual copy.
+    enum InstallerError: LocalizedError {
         case invalidPayload
         case otherChannel(String)
         case commandFailed(String, String)
 
+        var code: String {
+            switch self {
+            case .invalidPayload: "core.install_incomplete"
+            case .otherChannel: "core.owned_by_other_channel"
+            case .commandFailed: "core.start_failed"
+            }
+        }
+
+        /// A failed launchctl or core command may succeed on a later attempt.
+        var isRetryable: Bool {
+            if case .commandFailed = self { return true }
+            return false
+        }
+
         var errorDescription: String? {
             switch self {
-            case .invalidPayload: "The bundled Jet core is incomplete. Reinstall Jet from its GitHub release."
-            case .otherChannel(let channel): "A \(channel) Jet core already owns this Plane."
-            case .commandFailed(let command, let detail): "Could not start the local Jet core (\(command)): \(detail)"
+            case .invalidPayload:
+                String(localized: "Jet's helper is incomplete. Reinstall Jet from its latest release.")
+            case .otherChannel:
+                String(localized: "Another copy of Jet already runs this Mac's helper.")
+            case .commandFailed:
+                String(localized: "Jet couldn't start its helper on this Mac.")
             }
         }
     }

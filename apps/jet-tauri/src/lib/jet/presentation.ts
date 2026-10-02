@@ -33,7 +33,7 @@ export const DEFAULT_PRESENTATION: ShellPresentation = {
   version: 1,
   destination: "conversation",
   sidebarPresented: true,
-  workPanelPresented: true,
+  workPanelPresented: false,
   workPanelTab: "run",
   sidebarWidth: 244,
   workPanelWidth: 340,

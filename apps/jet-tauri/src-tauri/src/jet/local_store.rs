@@ -32,12 +32,12 @@ pub(crate) fn read_bounded(path: &Path, max: u64) -> io::Result<Option<Vec<u8>>>
 /// Opens `path` for reading only when it is a regular file. A FIFO, socket
 /// or device in its place would block the read (and launch) or never end,
 /// so it is `InvalidData`, as damaged content is; a directory is
-/// `IsADirectory`. The open itself never waits: on Linux it is
+/// `IsADirectory`. The open itself never waits: on Linux and macOS it is
 /// non-blocking, which changes nothing for a regular file.
 pub(crate) fn open_regular(path: &Path) -> io::Result<fs::File> {
     let mut options = OpenOptions::new();
     options.read(true);
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     options.custom_flags(O_NONBLOCK);
     let file = options.open(path)?;
     let kind = file.metadata()?.file_type();
@@ -53,6 +53,10 @@ pub(crate) fn open_regular(path: &Path) -> io::Result<fs::File> {
 /// `O_NONBLOCK` on every Linux architecture this app builds for.
 #[cfg(target_os = "linux")]
 const O_NONBLOCK: i32 = 0o4000;
+
+/// Darwin's `O_NONBLOCK`, from the macOS SDK's sys/fcntl.h.
+#[cfg(target_os = "macos")]
+const O_NONBLOCK: i32 = 0x0004;
 
 fn read_limited(reader: impl Read, max: u64) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
