@@ -25,8 +25,8 @@ type Writer = FrameWriter<OwnedWriteHalf>;
 async fn rejected_commands_report_the_parser_failure_without_conversation_content()
  {
 	tokio::time::timeout(Duration::from_secs(20), async {
-		let (root, run, harness) = workspace();
-		let (socket, mut craft) = start_craft(&root, &harness);
+		let (root, run, _) = workspace();
+		let (socket, mut craft) = start_craft(&root);
 		let (mut reader, mut writer, _) = accept_craft(&socket, run).await;
 		command(
 			&mut writer,
@@ -54,10 +54,10 @@ async fn rejected_commands_report_the_parser_failure_without_conversation_conten
 #[tokio::test]
 async fn rejected_helper_messages_identify_the_expected_type_without_content() {
 	tokio::time::timeout(Duration::from_secs(20), async {
-		let (root, run, harness) = workspace();
+		let (root, run, _) = workspace();
 		let helper_socket = root.join("h.sock");
 		let helper = tokio::net::UnixListener::bind(&helper_socket).unwrap();
-		let (socket, mut craft) = start_craft(&root, &harness);
+		let (socket, mut craft) = start_craft(&root);
 		let (mut reader, mut writer, _) = accept_craft(&socket, run).await;
 		command(
 			&mut writer,
@@ -100,7 +100,7 @@ async fn a_conversation_runs_turns_and_ends_through_the_native_protocol() {
 	tokio::time::timeout(Duration::from_secs(180), async {
 		let (root, run, harness) = workspace();
 		let mut helper = start_helper(&root, run, &harness).await;
-		let (craft_socket, mut craft) = start_craft(&root, &harness);
+		let (craft_socket, mut craft) = start_craft(&root);
 		let (mut reader, mut writer, ready) =
 			accept_craft(&craft_socket, run).await;
 		assert_eq!(
@@ -371,7 +371,7 @@ async fn a_held_permission_request_reaches_the_host_as_the_exact_action() {
 	tokio::time::timeout(Duration::from_secs(120), async {
 		let (root, run, harness) = workspace();
 		let mut helper = start_helper(&root, run, &harness).await;
-		let (craft_socket, mut craft) = start_craft(&root, &harness);
+		let (craft_socket, mut craft) = start_craft(&root);
 		let (mut reader, mut writer, ready) =
 			accept_craft_at_minor(&craft_socket, run, 8).await;
 		assert_eq!(
@@ -547,8 +547,10 @@ fn workspace() -> (PathBuf, Uuid, PathBuf) {
 	std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))
 		.unwrap();
 	// The host launches this Craft with a private endpoint only, so the
-	// Harness the Craft may launch comes from its accepted declaration.
-	let harness = root.join("claude");
+	// Harness the Craft may launch comes from its embedded declaration, found
+	// by that bare name on the helper's PATH as an installed Craft finds it.
+	std::fs::create_dir(root.join("bin")).unwrap();
+	let harness = root.join("bin/claude");
 	let script = format!(
 		"#!/bin/sh\nJET_CLAUDE_ARGUMENTS=\"$*\"\nexport JET_CLAUDE_ARGUMENTS\nexec {} --ignored --exact --nocapture claude_double\n",
 		std::env::current_exe().unwrap().display()
@@ -572,7 +574,7 @@ async fn start_helper(
 		working_directory: root.to_str().unwrap().into(),
 		project_directory: root.to_str().unwrap().into(),
 		craft_digest: "test-craft".into(),
-		executables: vec![harness.to_str().unwrap().into()],
+		executables: declared_executables(),
 	};
 	let path = root.join("config.json");
 	let mut file = std::fs::OpenOptions::new()
@@ -590,6 +592,7 @@ async fn start_helper(
 		)
 		.args(["run", "--config"])
 		.arg(path)
+		.env("PATH", search_path(harness))
 		.kill_on_drop(true),
 	)
 	.unwrap();
@@ -641,15 +644,29 @@ impl Drop for Craft {
 	}
 }
 
-/// Install the Craft the way a Plane owner would: the executable beside the
-/// declaration that names the Harness it is allowed to launch.
-fn start_craft(root: &Path, harness: &Path) -> (PathBuf, Craft) {
-	start_craft_with_resume(root, harness, ResumeMode::Fresh)
+/// The executables the shipped declaration discloses, which the helper allows.
+fn declared_executables() -> Vec<String> {
+	let declaration = jet_craft_sdk::parse_specification(include_str!(
+		"../.jet/craft-spec.toml"
+	))
+	.unwrap();
+	declaration
+		.host_access
+		.into_iter()
+		.filter_map(|access| match access {
+			CraftHostAccess::Executable { name } => Some(name),
+			CraftHostAccess::Filesystem { .. }
+			| CraftHostAccess::Environment { .. }
+			| CraftHostAccess::Network { .. } => None,
+		})
+		.collect()
 }
-enum ResumeMode {
-	Fresh,
-	Pinned,
+
+/// The fake Harness directory first, then only the system tools it needs.
+fn search_path(harness: &Path) -> String {
+	format!("{}:/usr/bin:/bin", harness.parent().unwrap().display())
 }
+
 /// Held while an executable is written and while any child is spawned.
 ///
 /// Tests share this process, and a spawn forks it: until the child has
@@ -672,47 +689,13 @@ fn spawn_serialized(
 	command.spawn()
 }
 
-fn start_craft_with_resume(
-	root: &Path,
-	harness: &Path,
-	mode: ResumeMode,
-) -> (PathBuf, Craft) {
-	let installed = root.join("craft/jet-craft-claude");
-	std::fs::create_dir_all(installed.with_file_name(".jet")).unwrap();
-	{
-		let _guard = process_images();
-		std::fs::copy(env!("CARGO_BIN_EXE_jet-craft-claude"), &installed)
-			.unwrap();
-	}
-	let declaration = format!(
-		"id = \"claude-code\"\nharness = \"claude-code\"\nschema = {{ major = 1, minor = 0 }}\nbroker_permissions = []\nhost_access = [{{ kind = \"executable\", name = {:?} }}]\nfeatures = [{{ name = \"turns\", required = true }}, {{ name = \"actions\", required = true }}]\n\n[protocol]\nfamily = \"craft\"\nversions = [{{ major = 1, minor = 4 }}]\ncapabilities = [\"runs\", \"actions\"]\n",
-		harness.to_str().unwrap()
-	);
-	let declaration = declaration
-		.replace(
-			"broker_permissions = []",
-			"broker_permissions = [\"remote_tools\"]",
-		)
-		.replace("features = [", "features = [{ name = \"remote_tools\" }, ")
-		.replace("minor = 4", "minor = 8");
-	let declaration = if matches!(mode, ResumeMode::Pinned) {
-		declaration
-			.replace("minor = 8", "minor = 10")
-			.replace("features = [", "features = [{ name = \"resume\" }, ")
-			.replace("capabilities = [", "capabilities = [\"resume\", ")
-	} else {
-		declaration
-	};
-	std::fs::write(
-		installed.with_file_name(".jet").join("craft-spec.toml"),
-		declaration,
-	)
-	.unwrap();
+/// Start the built Craft as a host would: its declaration is the one it ships.
+fn start_craft(root: &Path) -> (PathBuf, Craft) {
 	let socket = root.join("craft.sock");
 	let stderr = root.join("craft.stderr");
 	let diagnostics = std::fs::File::create(&stderr).unwrap();
 	let child = spawn_serialized(
-		tokio::process::Command::new(&installed)
+		tokio::process::Command::new(env!("CARGO_BIN_EXE_jet-craft-claude"))
 			.arg("--socket")
 			.arg(&socket)
 			.stderr(diagnostics)
@@ -1005,7 +988,7 @@ async fn native_mcp_call_waits_for_the_jet_remote_result_before_acknowledging_so
 	tokio::time::timeout(Duration::from_secs(20), async {
         let (root, run, harness) = workspace();
         let mut helper = start_helper(&root, run, &harness).await;
-        let (socket, mut craft) = start_craft(&root, &harness);
+        let (socket, mut craft) = start_craft(&root);
         let (mut reader, mut writer, ready) = accept_craft_at_minor(&socket, run, 6).await;
         assert_eq!(ready.protocol.version, ProtocolVersion { major: 1, minor: 6 });
         let plane = Uuid::new_v4(); let workspace = Uuid::new_v4(); let operation = Uuid::new_v4();
@@ -1041,7 +1024,7 @@ async fn native_resume_pins_the_requested_model() {
 	tokio::time::timeout(Duration::from_secs(30), async {
         let (root, run, harness) = workspace();
         let mut helper = start_helper(&root, run, &harness).await;
-        let (socket, mut craft) = start_craft_with_resume(&root, &harness, ResumeMode::Pinned);
+        let (socket, mut craft) = start_craft(&root);
         let native = Uuid::new_v4().to_string();
         let (mut reader, mut writer, ready) = accept_resumable_craft(&socket, run, 10, json!({"native_conversation": native, "version":{"major":1,"minor":10}, "model": "claude-original-model"})).await;
         assert_eq!(ready.protocol.version.minor, 10);

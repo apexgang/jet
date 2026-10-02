@@ -2,38 +2,26 @@
 use jet_craft_sdk::CraftError;
 use jet_protocol::{CraftHostAccess, CraftSpecification};
 
-/// The documented location of a Craft's declaration, read beside this
-/// executable so the Harness path stays an installation decision.
-const DECLARATION: &str = ".jet/craft-spec.toml";
-/// The parser's own bound; refuse an oversized document before reading it.
-const DECLARATION_BYTES: u64 = 64 * 1024;
+/// The declaration compiled into this executable. The digest a host pins for
+/// the executable therefore covers it, wherever the executable is installed:
+/// a declaration beside the executable would be shared by every Craft in one
+/// directory, including the content-addressed Artifacts.
+const DECLARATION: &str = include_str!("../.jet/craft-spec.toml");
 
-/// Read the declaration installed beside this executable.
+/// The declaration this executable ships.
 ///
 /// The host compares what the handshake carries against the document it
-/// accepted, so an edited file here is refused rather than trusted: this read
-/// chooses which declaration to present, never what it is allowed to do.
+/// accepted, so this chooses which declaration to present, never what it is
+/// allowed to do.
 ///
 /// # Errors
-/// Refuses a missing, oversized, or unusable declaration.
+/// Refuses only a declaration a broken build embedded.
 pub(crate) fn declaration() -> Result<CraftSpecification, CraftError> {
-	let path = std::env::current_exe()
-		.map_err(|_| CraftError::Incompatible)?
-		.with_file_name(DECLARATION);
-	// ASVS 2.2.1: bound the document before allocating it.
-	if std::fs::metadata(&path)
-		.map_err(|_| CraftError::Incompatible)?
-		.len() > DECLARATION_BYTES
-	{
-		return Err(CraftError::Incompatible);
-	}
-	let text =
-		std::fs::read_to_string(&path).map_err(|_| CraftError::Incompatible)?;
-	jet_craft_sdk::parse_specification(&text)
+	jet_craft_sdk::parse_specification(DECLARATION)
 }
 
 /// The Harness named by the Craft's own accepted declaration. Reading it here
-/// rather than hard-coding a path keeps this launch and the helper's accepted
+/// rather than hard-coding a name keeps this launch and the helper's accepted
 /// executable disclosures from ever disagreeing.
 pub(crate) fn harness_program(
 	specification: &CraftSpecification,
@@ -48,4 +36,24 @@ pub(crate) fn harness_program(
 			| CraftHostAccess::Network { .. } => None,
 		})
 		.ok_or(CraftError::Incompatible)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use pretty_assertions::assert_eq;
+
+	#[test]
+	fn the_shipped_declaration_names_the_claude_code_harness() {
+		let declaration = declaration().unwrap();
+
+		assert_eq!(
+			(
+				declaration.id.as_str(),
+				declaration.harness.as_str(),
+				harness_program(&declaration).unwrap()
+			),
+			("claude-code", "claude-code", "claude".to_owned())
+		);
+	}
 }

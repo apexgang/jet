@@ -26,7 +26,7 @@ async fn a_conversation_uses_codex_native_events_through_the_craft_contract() {
 	tokio::time::timeout(Duration::from_secs(180), async {
 		let (root, run, harness) = workspace();
 		let mut helper = start_helper(&root, run, &harness).await;
-		let (socket, mut craft) = start_craft(&root, &harness);
+		let (socket, mut craft) = start_craft(&root);
 		let (mut reader, mut writer) = accept_craft(&socket, run).await;
 		command(
 			&mut writer,
@@ -250,7 +250,7 @@ async fn an_imported_thread_resumes_with_its_pinned_model() {
 	tokio::time::timeout(Duration::from_secs(20), async {
         let (root, run, harness) = workspace();
         let mut helper = start_helper(&root, run, &harness).await;
-        let (socket, mut craft) = start_craft(&root, &harness);
+        let (socket, mut craft) = start_craft(&root);
         let (mut reader, mut writer) = connect_craft(&socket, run, json!({
             "native_conversation": "imported-thread", "model": "pinned-model",
             "version": {"major": 1, "minor": 10},
@@ -275,7 +275,7 @@ async fn a_resumed_thread_cannot_silently_change_the_model() {
         let (root, run, harness) = workspace();
         std::fs::write(root.join("wrong-model"), "").unwrap();
         let _helper = start_helper(&root, run, &harness).await;
-        let (socket, _craft) = start_craft(&root, &harness);
+        let (socket, _craft) = start_craft(&root);
         let (mut reader, mut writer) = connect_craft(&socket, run, json!({
             "native_conversation":"imported-thread","model":"pinned-model","version":{"major":1,"minor":10}
         })).await;
@@ -365,7 +365,7 @@ async fn craft_and_host_restarts_keep_the_live_thread_and_turn_sequence() {
         let (root, run, harness) = workspace();
         std::fs::write(root.join("recovery"), "").unwrap();
         let mut helper = start_helper(&root, run, &harness).await;
-        let (socket, mut craft) = start_craft(&root, &harness);
+        let (socket, mut craft) = start_craft(&root);
         let (mut reader, mut writer) = accept_craft(&socket, run).await;
         command(&mut writer, &json!({"kind":"start","id":run,"text":"first",
             "helper_socket":root.join("h.sock")})).await;
@@ -383,7 +383,7 @@ async fn craft_and_host_restarts_keep_the_live_thread_and_turn_sequence() {
             if restart == 0 {
                 craft.kill().await.unwrap();
                 std::fs::remove_file(&socket).unwrap();
-                craft = spawn_serialized(tokio::process::Command::new(root.join("craft/jet-craft-codex"))
+                craft = spawn_serialized(tokio::process::Command::new(env!("CARGO_BIN_EXE_jet-craft-codex"))
                     .arg("--socket").arg(&socket).kill_on_drop(true)).unwrap();
             }
             (reader, writer) = accept_craft(&socket, run).await;
@@ -411,7 +411,7 @@ async fn recovery_refuses_an_uncheckpointed_native_turn_instead_of_replaying_it(
         let (root, run, harness) = workspace();
         std::fs::write(root.join("recovery"), "").unwrap();
         let _helper = start_helper(&root, run, &harness).await;
-        let (socket, mut craft) = start_craft(&root, &harness);
+        let (socket, mut craft) = start_craft(&root);
         let (mut reader, mut writer) = accept_craft(&socket, run).await;
         command(&mut writer, &json!({"kind":"start","id":run,"text":"first","helper_socket":root.join("h.sock")})).await;
         let (offset, checkpoint) = loop {
@@ -428,7 +428,7 @@ async fn recovery_refuses_an_uncheckpointed_native_turn_instead_of_replaying_it(
         craft.kill().await.unwrap();
         drop(reader); drop(writer);
         std::fs::remove_file(&socket).unwrap();
-        let _craft = spawn_serialized(tokio::process::Command::new(root.join("craft/jet-craft-codex"))
+        let _craft = spawn_serialized(tokio::process::Command::new(env!("CARGO_BIN_EXE_jet-craft-codex"))
             .arg("--socket").arg(&socket).kill_on_drop(true)).unwrap();
         let (mut reader, mut writer) = accept_craft(&socket, run).await;
         command(&mut writer, &json!({"kind":"recover","id":run,"helper_socket":root.join("h.sock"),"source_offset":offset,"checkpoint":checkpoint})).await;
@@ -456,7 +456,7 @@ async fn recover_startup(boundary: StartupCheckpoint) {
 	tokio::time::timeout(Duration::from_secs(20), async {
         let (root, run, harness) = workspace();
         let _helper = start_helper(&root, run, &harness).await;
-        let (socket, mut craft) = start_craft(&root, &harness);
+        let (socket, mut craft) = start_craft(&root);
         let (mut reader, mut writer) = connect_craft(&socket, run, json!({
             "native_conversation":"imported-thread","model":"pinned-model","version":{"major":1,"minor":10}
         })).await;
@@ -481,7 +481,7 @@ async fn recover_startup(boundary: StartupCheckpoint) {
         craft.kill().await.unwrap();
         drop(reader); drop(writer);
         std::fs::remove_file(&socket).unwrap();
-        let _craft = spawn_serialized(tokio::process::Command::new(root.join("craft/jet-craft-codex"))
+        let _craft = spawn_serialized(tokio::process::Command::new(env!("CARGO_BIN_EXE_jet-craft-codex"))
             .arg("--socket").arg(&socket).kill_on_drop(true)).unwrap();
         let (mut reader, mut writer) = accept_craft(&socket, run).await;
         let (offset, checkpoint) = match boundary { StartupCheckpoint::Previous => previous, StartupCheckpoint::Committed => committed };
@@ -507,7 +507,7 @@ async fn no_visa_mcp_calls_reach_the_host_and_return_its_outcome() {
         let (root, run, harness) = workspace();
         std::fs::write(root.join("remote"), "").unwrap();
         let mut helper = start_helper(&root, run, &harness).await;
-        let (socket, mut craft) = start_craft(&root, &harness);
+        let (socket, mut craft) = start_craft(&root);
         let (mut reader, mut writer) = accept_craft(&socket, run).await;
         command(&mut writer, &json!({"kind":"configure_remote_tools", "selection": {
             "origin_plane_id":Uuid::nil(),"account_binding_id":Uuid::nil(),"conversation_id":run,
@@ -638,7 +638,10 @@ fn workspace() -> (PathBuf, Uuid, PathBuf) {
 		.unwrap();
 	std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))
 		.unwrap();
-	let harness = root.join("codex");
+	// The Harness is found by its bare declared name on the helper's PATH,
+	// exactly as an installed Craft finds it.
+	std::fs::create_dir(root.join("bin")).unwrap();
+	let harness = root.join("bin/codex");
 	let script = format!(
 		"#!/bin/sh\nexec {} --ignored --exact --nocapture codex_double\n",
 		std::env::current_exe().unwrap().display(),
@@ -662,7 +665,7 @@ async fn start_helper(
 		working_directory: root.to_str().unwrap().into(),
 		project_directory: root.to_str().unwrap().into(),
 		craft_digest: "test-craft".into(),
-		executables: vec![harness.to_str().unwrap().into()],
+		executables: declared_executables(),
 	};
 	let path = root.join("config.json");
 	let mut file = std::fs::OpenOptions::new()
@@ -679,6 +682,7 @@ async fn start_helper(
 		)
 		.args(["run", "--config"])
 		.arg(path)
+		.env("PATH", search_path(harness))
 		.kill_on_drop(true),
 	)
 	.unwrap();
@@ -696,29 +700,33 @@ async fn start_helper(
 	child
 }
 
-fn start_craft(
-	root: &Path,
-	harness: &Path,
-) -> (PathBuf, tokio::process::Child) {
-	let installed = root.join("craft/jet-craft-codex");
-	std::fs::create_dir_all(installed.with_file_name(".jet")).unwrap();
-	{
-		let _guard = process_images();
-		std::fs::copy(env!("CARGO_BIN_EXE_jet-craft-codex"), &installed)
-			.unwrap();
-	}
-	let declaration = include_str!("../.jet/craft-spec.toml").replace(
-		"name = \"codex\"",
-		&format!("name = {:?}", harness.to_str().unwrap()),
-	);
-	std::fs::write(
-		installed.with_file_name(".jet").join("craft-spec.toml"),
-		declaration,
-	)
+/// The executables the shipped declaration discloses, which the helper allows.
+fn declared_executables() -> Vec<String> {
+	let declaration = jet_craft_sdk::parse_specification(include_str!(
+		"../.jet/craft-spec.toml"
+	))
 	.unwrap();
+	declaration
+		.host_access
+		.into_iter()
+		.filter_map(|access| match access {
+			CraftHostAccess::Executable { name } => Some(name),
+			CraftHostAccess::Filesystem { .. }
+			| CraftHostAccess::Environment { .. }
+			| CraftHostAccess::Network { .. } => None,
+		})
+		.collect()
+}
+
+/// The fake Harness directory first, then only the system tools it needs.
+fn search_path(harness: &Path) -> String {
+	format!("{}:/usr/bin:/bin", harness.parent().unwrap().display())
+}
+
+fn start_craft(root: &Path) -> (PathBuf, tokio::process::Child) {
 	let socket = root.join("craft.sock");
 	let child = spawn_serialized(
-		tokio::process::Command::new(&installed)
+		tokio::process::Command::new(env!("CARGO_BIN_EXE_jet-craft-codex"))
 			.arg("--socket")
 			.arg(&socket)
 			.kill_on_drop(true),
