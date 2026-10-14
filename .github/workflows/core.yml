@@ -83,7 +83,7 @@ jobs:
         run: rustup component add clippy
       - name: Lint
         run: just clippy -- -D warnings
-      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-nextest@0.9.144
       - name: Run the suite
@@ -144,7 +144,7 @@ jobs:
           done | sort -u | while read -r toolchain; do
             rustup toolchain install "$toolchain" --profile minimal --component rustfmt --component clippy
           done
-      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-deny@0.20.2
       - name: Install the locked frontend dependencies
