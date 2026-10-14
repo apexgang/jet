@@ -92,7 +92,7 @@ jobs:
           cp "$bundle"/deb/*.deb "$bundle"/rpm/*.rpm "$bundle"/appimage/*.AppImage "$out"/
           ls -l "$out"
       # A release build still needs its signatures; a test build is final.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.sign && 'unsigned-' || '' }}jet-desktop-linux-${{ matrix.label }}
           path: ${{ runner.temp }}/jet-desktop/*
@@ -144,7 +144,7 @@ jobs:
         run: just release-sign "$RUNNER_TEMP/jet-desktop"
       - name: Check the signatures
         run: just release-check-signatures "$RUNNER_TEMP/jet-desktop"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: jet-desktop-linux-${{ matrix.label }}
           path: ${{ runner.temp }}/jet-desktop/*
